@@ -1,0 +1,40 @@
+[project]
+name = "concept-benchmark"
+version = "0.0.1"
+description = "Concept Benchmark"
+authors = [
+    { name = "Berk Ustun"},
+    { name =  "Ryan Hammonds" },
+    { name = "Harry Cheon"}
+]
+
+requires-python = ">=3.10"
+
+dependencies = [
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "scipy",
+    "tqdm",
+    "dill",
+    "matplotlib",
+    "psutil",
+    "mlcroissant>=1.0.17",
+    "torch>=2.7.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+    "jupyter",
+    "ipykernel",
+    "rich"
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
