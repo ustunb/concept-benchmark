@@ -21,6 +21,7 @@ dependencies = [
     "psutil",
     "mlcroissant>=1.0.17",
     "torch>=2.7.1",
+    "tochvision"
 ]
 
 [dependency-groups]
