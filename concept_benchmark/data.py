@@ -1,10 +1,14 @@
 import numpy as np
-import pandas as pd
-from mlcroissant import Dataset
+import torch
 
-from torch.utils.data import DataLoader, Dataset
-from pathlib import Path
+from PIL import Image
 from dataclasses import dataclass, field
+from mlcroissant import Dataset as CroissantDataset
+from tqdm import tqdm
+from torch.utils.data import DataLoader
+from torch.utils.data import Dataset as TorchDataset
+from pathlib import Path
+
 from .cv import validate_cvindices, generate_cvindices
 
 class ConceptDataset(object):
@@ -20,15 +24,35 @@ class ConceptDataset(object):
         **kwargs
     ) -> None:
 
-        # example meta dict
+        # example meta dict --> NOTE: or change to explicit keyword arguments?
         # ex_meta = {
         #    "classes": ["label_a", "label_b", "label_c"],
         #    "concepts": ["concept_a", "concept_b", "concept_c"]
         # }
         # map one/multi-hot encoded to string values
 
+        if meta["data_type"] == "image":
+            SampleClass = ConceptImageDatasetSample
+        else:
+            SampleClass = ConceptDatasetSample
 
-        self._full = ConceptDatasetSample(parent=self, X=X, C=C, y=y, meta=meta)
+        # convert dtypes
+        X = X.astype(np.float64)
+        C = C.astype(np.int32)
+        y = y.astype(np.int32)
+
+        self._full = SampleClass(
+            parent=self, 
+            X=X, 
+            C=C, 
+            y=y, 
+            meta=meta, 
+            **kwargs
+        )
+
+        # # self._full = ConceptDatasetSample(parent=self, X=X, C=C, y=y, meta=meta)
+        # self._full = ConceptImageDatasetSample(parent=self, X=X, C=C, y=y, meta=meta, base_dir=kwargs.get("base_dir", Path('.')), preprocess=kwargs.get("preprocess", None))
+
         self._cvindices = kwargs.get("cvindices")
 
 
@@ -96,7 +120,7 @@ class ConceptDataset(object):
         return cpy
 
     @staticmethod
-    def from_croissant(croissant_dataset):
+    def from_croissant(croissant_dataset: CroissantDataset):
         """
         Initialize the dataset from a Croissant dataset.
         
@@ -118,11 +142,11 @@ class ConceptDataset(object):
     #### INSTANCE VARIABLES
     @property
     def classes(self):
-        return self._classes
+        return self._full.classes
     
     @property
     def concepts(self):
-        return self._concepts
+        return self._full.concepts
 
     @property
     def n(self):
@@ -131,11 +155,11 @@ class ConceptDataset(object):
 
     @property
     def n_concepts(self):
-        return len(self.concepts)
+        return self._full.n_concepts
     
     @property
     def n_classes(self):
-        return len(self.classes)
+        return self._full.n_classes
 
     @property
     def X(self):
@@ -265,8 +289,35 @@ class ConceptDataset(object):
         )
         self.cvindices = indices
 
+    # TODO: test
+    def embed(self, model, batch_size=32, shuffle=False, device='cpu', **kwargs):
+        """
+        Embed the dataset using a given model.
+        
+        Parameters:
+        - model: A model that can embed the dataset.
+        
+        Returns:
+        - An embedded version of the dataset.
+        """
+        self._full = self._full.embed(
+            model, 
+            batch_size=batch_size, 
+            shuffle=shuffle, 
+            device=device, 
+            **kwargs
+        )
+
+        # apply cv indices to the embedded dataset
+        if self.fold_id is not None:
+            self.split(
+                fold_id=self.fold_id, 
+                fold_num_validation=self.fold_num_validation, 
+                fold_num_test=self.fold_num_test
+            )
+
 @dataclass
-class ConceptDatasetSample(Dataset):
+class ConceptDatasetSample(TorchDataset):
     parent: ConceptDataset
     X: np.ndarray
     C: np.ndarray
@@ -276,29 +327,29 @@ class ConceptDatasetSample(Dataset):
 
     def __post_init__(self):
 
-        assert ("classes", "concepts", "data_type") in self.meta.keys(), \
+        assert {"classes", "concepts", "data_type"}.issubset(self.meta.keys()), \
             "metedata dict must contain keys 'classes', 'concepts', and 'data_type'"
 
         self.classes, self.concepts = self.meta["classes"], self.meta["concepts"]
         self.task = self.meta["data_type"]   # image, tabular, etc...
 
-        assert len(self.X.shape) >= 2, \
-            "X must have at least 2 dimensions"
+        # assert len(self.X.shape) >= 2, \
+        #     "X must have at least 2 dimensions"
 
-        assert self.C.shape[0] == self.X.shape[0], \
-            "number of concepts does not match number of samples in X"
+        # assert self.C.shape[0] == self.X.shape[0], \
+        #     "number of concepts does not match number of samples in X"
 
-        assert self.y.max() <= self.classes, \
-            "number of classes in y exceeds number of classes in metadata"
+        # assert self.y.max() <= self.classes, \
+        #     "number of classes in y exceeds number of classes in metadata"
 
-        self.n = self.X.shape[0]
+        self.n = len(self.X)
 
         if self.indices is None:
             self.indices = np.ones(self.n, dtype=np.bool_)
         else:
             self.indices = self.indices.flatten().astype(np.bool_)
 
-        self.loader = None
+        self._loader = None
 
         assert self.__check_rep__()
 
@@ -315,14 +366,14 @@ class ConceptDatasetSample(Dataset):
 
     def __check_rep__(self):
         """returns True is object satisfies representation invariants"""
-        assert isinstance(self.X, np.ndarray)
-        assert isinstance(self.y, np.ndarray)
-        assert self.n == len(self.y)
-        assert np.sum(self.indices) == self.n
-        assert np.isfinite(self.X).all()
-        assert np.isin(
-            self.y, self.classes
-        ).all(), "y values must be stored as {}".format(self.classes)
+        # assert isinstance(self.X, np.ndarray)
+        # assert isinstance(self.y, np.ndarray)
+        # assert self.n == len(self.y)
+        # assert np.sum(self.indices) == self.n
+        # assert np.isfinite(self.X).all()
+        # assert np.isin(
+        #     self.y, self.classes
+        # ).all(), "y values must be stored as {}".format(self.classes)
         return True
 
     def __getitem__(self, idx):
@@ -347,20 +398,20 @@ class ConceptDatasetSample(Dataset):
     def n_classes(self):
         return len(self.classes)
 
-    @property
-    def loader(self, batch_size=32, shuffle=False):
-        """returns a DataLoader for this sample"""
-        if self._loader is None or \
-            self._loader.batch_size != batch_size or \
-                self._loader.shuffle != shuffle:
-            self._loader = DataLoader(
-                self, 
-                batch_size=batch_size, 
-                shuffle=shuffle, 
-                num_workers=0
-            )
+    # @property
+    # def loader(self, batch_size=32, shuffle=False):
+    #     """returns a DataLoader for this sample"""
+    #     if self._loader is None or \
+    #         self._loader.batch_size != batch_size or \
+    #             self._loader.shuffle != shuffle:
+    #         self._loader = DataLoader(
+    #             self, 
+    #             batch_size=batch_size, 
+    #             shuffle=shuffle, 
+    #             num_workers=0
+    #         )
 
-        return self._loader
+    #     return self._loader
 
     #### methods #####
     def filter(self, indices):
@@ -368,6 +419,84 @@ class ConceptDatasetSample(Dataset):
         assert isinstance(indices, np.ndarray)
         assert indices.ndim == 1 and indices.shape[0] == self.n
         assert np.isin(indices, (0, 1)).all()
-        return ConceptDatasetSample(
-            parent=self.parent, X=self.X[indices], y=self.y[indices], indices=indices
+        return self.__class__(
+            parent=self.parent,
+            X=self.X[indices],
+            C=self.C[indices],
+            y=self.y[indices],
+            meta=self.meta,
+            indices=indices
         )
+
+    def embed(self, model, batch_size=32, shuffle=False, device='cpu', **kwargs):
+        """
+        Embed the dataset using a given model.
+        
+        Parameters:
+        - model: A model that can embed the dataset.
+        
+        Returns:
+        - An embedded version of the dataset.
+        """
+        model = model.to(device)
+        loader = DataLoader(
+            self, 
+            batch_size=batch_size, 
+            shuffle=shuffle, 
+            **kwargs
+        )
+
+        embedded_X = []
+        for x_batch, c_batch, y_batch in tqdm(loader):
+            x_batch = x_batch.to(device)
+            with torch.no_grad():
+                embedded_x = model(x_batch)
+            embedded_X.append(embedded_x.cpu().numpy())
+
+        embedded_X = np.concatenate(embedded_X, axis=0)
+
+        embed_meta = self.meta.copy()
+
+        # data will be numeric after embedding (not image)
+        return ConceptDatasetSample(
+            X=embedded_X,
+            C=self._full.C,
+            y=self._full.y,
+            meta=embed_meta,
+            **kwargs
+        )
+
+
+@dataclass
+class ConceptImageDatasetSample(ConceptDatasetSample):
+    """
+    A sample of a ConceptDataset that contains image data.
+    Inherits from ConceptDatasetSample.
+    """
+    base_dir: Path = field(default_factory=lambda: Path('.'))
+    preprocess: callable = None
+
+    def __post_init__(self):
+        super().__post_init__()
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+
+        img_path, c, y = super().__getitem__(idx)
+
+        if self.base_dir is not None:
+            img_path = self.base_dir / img_path
+        try:
+            image = Image.open(img_path).convert('RGB')
+            if self.preprocess:
+                image = self.preprocess(image)
+        except AttributeError as e:
+            print(f'WARNING: {e}')
+            print('cannot open multiple images, returning paths')
+            image = img_path
+
+        C_idx = torch.from_numpy(np.array(c, dtype=np.int32))
+        y_idx = torch.from_numpy(np.array(y, dtype=np.int32))
+
+        return image, C_idx, y_idx
