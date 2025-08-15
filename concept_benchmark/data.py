@@ -14,11 +14,11 @@ from .cv import validate_cvindices, generate_cvindices
 class ConceptDataset(object):
 
     SAMPLE_TYPES = ("training", "validation", "test")
-    
+
     def __init__(
-        self, 
-        X: np.ndarray, 
-        C: np.ndarray, 
+        self,
+        X: np.ndarray,
+        C: np.ndarray,
         y: np.ndarray,
         meta: dict,
         **kwargs
@@ -42,11 +42,11 @@ class ConceptDataset(object):
         y = y.astype(np.int32)
 
         self._full = SampleClass(
-            parent=self, 
-            X=X, 
-            C=C, 
-            y=y, 
-            meta=meta, 
+            parent=self,
+            X=X,
+            C=C,
+            y=y,
+            meta=meta,
             **kwargs
         )
 
@@ -123,17 +123,17 @@ class ConceptDataset(object):
     def from_croissant(croissant_dataset: CroissantDataset):
         """
         Initialize the dataset from a Croissant dataset.
-        
+
         Parameters:
         - croissant_dataset: An instance of a Croissant dataset.
         """
         pass
-    
+
     @staticmethod
     def to_croissant():
         """
         Convert the dataset to a Croissant dataset.
-        
+
         Returns:
         - An instance of a Croissant dataset.
         """
@@ -143,7 +143,7 @@ class ConceptDataset(object):
     @property
     def classes(self):
         return self._full.classes
-    
+
     @property
     def concepts(self):
         return self._full.concepts
@@ -156,7 +156,7 @@ class ConceptDataset(object):
     @property
     def n_concepts(self):
         return self._full.n_concepts
-    
+
     @property
     def n_classes(self):
         return self._full.n_classes
@@ -281,6 +281,7 @@ class ConceptDataset(object):
         :return:
         """
         indices = generate_cvindices(
+            n_samples=self.n if strata is None else None,
             strata=strata,
             total_folds_for_cv=total_folds_for_cv,
             total_folds_for_inner_cv=total_folds_for_inner_cv,
@@ -293,26 +294,26 @@ class ConceptDataset(object):
     def embed(self, model, batch_size=32, shuffle=False, device='cpu', **kwargs):
         """
         Embed the dataset using a given model.
-        
+
         Parameters:
         - model: A model that can embed the dataset.
-        
+
         Returns:
         - An embedded version of the dataset.
         """
         self._full = self._full.embed(
-            model, 
-            batch_size=batch_size, 
-            shuffle=shuffle, 
-            device=device, 
+            model,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            device=device,
             **kwargs
         )
 
         # apply cv indices to the embedded dataset
         if self.fold_id is not None:
             self.split(
-                fold_id=self.fold_id, 
-                fold_num_validation=self.fold_num_validation, 
+                fold_id=self.fold_id,
+                fold_num_validation=self.fold_num_validation,
                 fold_num_test=self.fold_num_test
             )
 
@@ -380,20 +381,20 @@ class ConceptDatasetSample(TorchDataset):
         x = self.X[idx]
         c = self.C[idx]
         y = self.y[idx]
-        
+
         if isinstance(x, np.ndarray):
             x = x.astype(np.float32)
         if isinstance(c, np.ndarray):
             c = c.astype(np.float32)
         if isinstance(y, np.ndarray):
             y = y.astype(np.int64)
-        
+
         return x, c, y
 
     @property
     def n_concepts(self):
         return len(self.concepts)
-    
+
     @property
     def n_classes(self):
         return len(self.classes)
@@ -405,9 +406,9 @@ class ConceptDatasetSample(TorchDataset):
     #         self._loader.batch_size != batch_size or \
     #             self._loader.shuffle != shuffle:
     #         self._loader = DataLoader(
-    #             self, 
-    #             batch_size=batch_size, 
-    #             shuffle=shuffle, 
+    #             self,
+    #             batch_size=batch_size,
+    #             shuffle=shuffle,
     #             num_workers=0
     #         )
 
@@ -431,18 +432,18 @@ class ConceptDatasetSample(TorchDataset):
     def embed(self, model, batch_size=32, shuffle=False, device='cpu', **kwargs):
         """
         Embed the dataset using a given model.
-        
+
         Parameters:
         - model: A model that can embed the dataset.
-        
+
         Returns:
         - An embedded version of the dataset.
         """
         model = model.to(device)
         loader = DataLoader(
-            self, 
-            batch_size=batch_size, 
-            shuffle=shuffle, 
+            self,
+            batch_size=batch_size,
+            shuffle=shuffle,
             **kwargs
         )
 
