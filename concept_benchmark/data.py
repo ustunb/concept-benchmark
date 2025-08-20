@@ -23,6 +23,9 @@ class ConceptDataset(object):
         y: np.ndarray,
         meta: dict,
         cvindices: dict | None = None,
+        transform: Callable | None = None,
+        concept_transform: Callable | None = None,
+        target_transform: Callable | None = None,
         **kwargs,
     ) -> None:
         """ConceptDataset
@@ -45,7 +48,7 @@ class ConceptDataset(object):
                  - 'preprocess': Preprocessing function for image data.
         """
         self._init_kwargs = dict(kwargs)
-
+    
         if meta.get("data_type") == "image":
             SampleClass = ConceptImageDatasetSample
             # do not cast X
@@ -57,7 +60,17 @@ class ConceptDataset(object):
             C = C.astype(np.int8)
             y = y.astype(np.int32)
 
-        self._full = SampleClass(parent=self, X=X, C=C, y=y, meta=meta, **kwargs)
+        self._full = SampleClass(
+            parent=self,
+            X=X,
+            C=C,
+            y=y,
+            meta=meta,
+            transform=transform,
+            concept_transform=concept_transform,
+            target_transform=target_transform,
+            **kwargs,
+        )
 
         self._cvindices = cvindices
         self.reset()
