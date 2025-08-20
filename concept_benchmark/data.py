@@ -37,9 +37,9 @@ class ConceptDataset(object):
             SampleClass = ConceptDatasetSample
 
         # convert dtypes
-        X = X.astype(np.float64)
-        C = C.astype(np.int32)
-        y = y.astype(np.int32)
+        # X = X.astype(np.float64)
+        # C = C.astype(np.int32)
+        # y = y.astype(np.int32)
 
         self._full = SampleClass(
             parent=self,
