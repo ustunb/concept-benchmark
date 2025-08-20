@@ -4,7 +4,8 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import warnings
+from collections.abc import Callable
+
 from PIL import Image
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
@@ -25,29 +26,14 @@ class ConceptDataset(object):
         cvindices: dict | None = None,
         **kwargs,
     ) -> None:
-        """ConceptDataset
 
-        Args:
-            X (np.ndarray): Feature matrix. \
-                For image data, this should be an array of image file paths.
-            C (np.ndarray): Concept matrix. \
-                Should be of shape (n_samples, n_concepts) with binary values (0 or 1).
-            y (np.ndarray): Label vector. \
-                Should be of shape (n_samples,) with integer class labels.
-            meta (dict): Metadata dictionary containing:
-                - 'classes': List of class names (in order of labels in y).
-                - 'concepts': List of concept names (in order of columns in C).
-                - 'data_type': Type of data ('image', 'tabular', etc.).
-            **kwargs: Additional keyword arguments. \
-                 - 'transform_x': Transformation function for features.
-                 - 'transform_c': Transformation function for concepts.
-                 - 'transform_y': Transformation function for labels.
-                 - 'preprocess': Preprocessing function for image data.
-        """
         self._init_kwargs = dict(kwargs)
 
         if meta.get("data_type") == "image":
             SampleClass = ConceptImageDatasetSample
+            # do not cast X
+            C = C.astype(np.int8)
+            y = y.astype(np.int32)
             # do not cast X
             C = C.astype(np.int8)
             y = y.astype(np.int32)
@@ -56,11 +42,22 @@ class ConceptDataset(object):
             X = X.astype(np.float32)
             C = C.astype(np.int8)
             y = y.astype(np.int32)
+            X = X.astype(np.float32)
+            C = C.astype(np.int8)
+            y = y.astype(np.int32)
 
-        self._full = SampleClass(parent=self, X=X, C=C, y=y, meta=meta, **kwargs)
+        self._full = SampleClass(
+            parent=self,
+            X=X,
+            C=C,
+            y=y,
+            meta=meta,
+            **kwargs
+        )
 
-        self._cvindices = cvindices
+        self._cvindices = kwargs.get("cvindices")
         self.reset()
+
 
     def reset(self):
         """
@@ -102,34 +99,16 @@ class ConceptDataset(object):
         return True
 
     def __eq__(self, other):
-        def _cv_equal(a, b):
-            if (a is None) != (b is None):
-                return False
-            if a is None and b is None:
-                return True
-            if set(a.keys()) != set(b.keys()):
-                return False
-            for k in a.keys():
-                if not np.array_equal(a[k], b[k]):
-                    return False
-            return True
-
-        chk = (
-            (self._full == other._full)
-            and _cv_equal(self.cvindices, other.cvindices)
-            and (self._full.meta == other._full.meta)
-            and (self._fold_id == other._fold_id)
-            and (self._fold_num_validation == other._fold_num_validation)
-            and (self._fold_num_test == other._fold_num_test)
-        )
-
-        return chk
+        return (self._full == other._full) and all(
+            np.array_equal(self.cvindices[k], other.cvindices[k])
+            for k in self.cvindices.keys()
+        ) and (self._full.meta == other._full.meta)
 
     def __len__(self):
         return self.n
 
     def __repr__(self):
-        return f"ConceptDataset<n={self.n}, n_concepts={self.n_concepts}, n_classes={self.n_classes}, data_type={self._full.meta.get('data_type')}, splits={{train:{getattr(self, 'training', None).n if hasattr(self, 'training') else 0}, val:{getattr(self, 'validation', None).n if hasattr(self, 'validation') else 0}, test:{getattr(self, 'test', None).n if hasattr(self, 'test') else 0}}}>"
+        return f"ConceptDataset<n={self.n}, n_concepts={self.n_concepts}, n_classes={self.n_classes}, data_type={self._full.meta.get('data_type')}, splits={{train:{getattr(self,'training',None).n if hasattr(self,'training') else 0}, val:{getattr(self,'validation',None).n if hasattr(self,'validation') else 0}, test:{getattr(self,'test',None).n if hasattr(self,'test') else 0}}}>"
 
     def __copy__(self):
         cpy = ConceptDataset(
@@ -138,7 +117,7 @@ class ConceptDataset(object):
             y=self.y,
             meta=self._full.meta,
             cvindices=self._cvindices,
-            **self._init_kwargs,
+            **self._init_kwargs
         )
 
         return cpy
@@ -319,13 +298,17 @@ class ConceptDataset(object):
 
 
 @dataclass
-class ConceptDatasetSample(Dataset):
+class ConceptDatasetSample(TorchDataset):
     X: np.ndarray
     C: np.ndarray
     y: np.ndarray
     meta: dict
     parent: "ConceptDataset" = None
+    parent: "ConceptDataset" = None
     indices: np.ndarray = None
+    transform_x: Callable | None = None
+    transform_c: Callable | None = None
+    transform_y: Callable | None = None
     transform_x: Callable | None = None
     transform_c: Callable | None = None
     transform_y: Callable | None = None
@@ -336,7 +319,7 @@ class ConceptDatasetSample(Dataset):
         )
 
         self.classes, self.concepts = self.meta["classes"], self.meta["concepts"]
-        self.task = self.meta["data_type"]  # image, tabular, etc...
+        self.task = self.meta["data_type"]   # image, tabular, etc...
 
         self.n = len(self.X)
 
@@ -379,6 +362,13 @@ class ConceptDatasetSample(Dataset):
         if self.transform_y is not None:
             y = self.transform_y(y)
 
+        if self.transform_x is not None:
+            x = self.transform_x(x)
+        if self.transform_c is not None:
+            c = self.transform_c(c)
+        if self.transform_y is not None:
+            y = self.transform_y(y)
+
         if isinstance(x, np.ndarray):
             x = x.astype(np.float32)
         if isinstance(c, np.ndarray):
@@ -387,6 +377,9 @@ class ConceptDatasetSample(Dataset):
             y = y.astype(np.int64)
 
         return x, c, y
+
+    def __repr__(self):
+        return f"ConceptDatasetSample<n={self.n}, n_concepts={self.n_concepts}, n_classes={self.n_classes}, data_type={self.meta.get('data_type')}>"
 
     def __repr__(self):
         return f"ConceptDatasetSample<n={self.n}, n_concepts={self.n_concepts}, n_classes={self.n_classes}, data_type={self.meta.get('data_type')}>"
@@ -414,23 +407,38 @@ class ConceptDatasetSample(Dataset):
             indices=indices,
             transform_x=self.transform_x,
             transform_c=self.transform_c,
-            transform_y=self.transform_y,
+            transform_y=self.transform_y
         )
 
-    def loader(self, batch_size=32, shuffle=False, **kwargs) -> DataLoader:
+    def loader(
+        self, 
+        batch_size=32, 
+        shuffle=False, 
+        **kwargs
+    ) -> DataLoader:
         """
         Returns a DataLoader for the dataset.
-
+        
         Parameters:
         - batch_size (int): Size of each batch.
         - shuffle (bool): Whether to shuffle the data.
         - **kwargs: Additional keyword arguments for DataLoader.
         """
-        loader = DataLoader(self, batch_size=batch_size, shuffle=shuffle, **kwargs)
+        loader = DataLoader(
+            self,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            **kwargs
+        )
         return loader
 
     def embed(
-        self, model, batch_size=32, shuffle=False, device="cpu", **kwargs
+        self, 
+        model, 
+        batch_size=32, 
+        shuffle=False, 
+        device='cpu', 
+        **kwargs
     ) -> "ConceptDatasetSample":
         """
         Embed the dataset using a given model.
@@ -444,20 +452,19 @@ class ConceptDatasetSample(Dataset):
         model = model.to(device)
         model.eval()
         loader = self.loader(
+        model.eval()
+        loader = self.loader(
             batch_size=batch_size,
             shuffle=shuffle,
             num_workers=kwargs.get("num_workers", 0),
-            pin_memory=kwargs.get("pin_memory", False),
+            pin_memory=kwargs.get("pin_memory", False)
         )
 
         embedded_X = []
         for x_batch, c_batch, y_batch in tqdm(loader):
             # Normalize x_batch to a tensor batch if possible
             if isinstance(x_batch, (list, tuple)):
-                x_batch = [
-                    torch.as_tensor(x) if not isinstance(x, torch.Tensor) else x
-                    for x in x_batch
-                ]
+                x_batch = [torch.as_tensor(x) if not isinstance(x, torch.Tensor) else x for x in x_batch]
                 try:
                     x_batch = torch.stack(x_batch, dim=0)
                 except Exception:
@@ -470,18 +477,28 @@ class ConceptDatasetSample(Dataset):
                 embedded_X.append(embedded_x.detach().cpu().numpy())
             else:
                 embedded_X.append(np.asarray(embedded_x))
+            if isinstance(embedded_x, torch.Tensor):
+                embedded_X.append(embedded_x.detach().cpu().numpy())
+            else:
+                embedded_X.append(np.asarray(embedded_x))
 
         embedded_X = np.concatenate(embedded_X, axis=0)
 
         embed_meta = dict(self.meta)
         embed_meta["data_type"] = "tabular"
+        embed_meta = dict(self.meta)
+        embed_meta["data_type"] = "tabular"
 
         return ConceptDatasetSample(
+            parent=self.parent,
             parent=self.parent,
             X=embedded_X,
             C=self.C,
             y=self.y,
+            C=self.C,
+            y=self.y,
             meta=embed_meta,
+            indices=self.indices,
             indices=self.indices,
         )
 
@@ -492,8 +509,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
     A sample of a ConceptDataset that contains image data.
     Inherits from ConceptDatasetSample.
     """
-
-    base_dir: Path = field(default_factory=lambda: Path("."))
+    base_dir: Path = field(default_factory=lambda: Path('.'))
     preprocess: Callable | None = None
 
     def __post_init__(self):
@@ -503,6 +519,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
+        img_path, c, y = self.X[idx], self.C[idx], self.y[idx]
         img_path, c, y = self.X[idx], self.C[idx], self.y[idx]
 
         if self.base_dir is not None:
@@ -514,11 +531,12 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             if self.transform_x is not None:
                 image = self.transform_x(image)
         except (AttributeError, FileNotFoundError, OSError) as e:
-            warnings.warn(f"{e}; cannot open image, returning path", RuntimeWarning)
+            print(f'WARNING: {e}')
+            print('cannot open image, returning path')
             image = img_path
 
-        c = torch.from_numpy(np.array(c, dtype=np.int64))
-        y = torch.from_numpy(np.array(y, dtype=np.int64))
+        c = torch.from_numpy(np.array(c, dtype=np.int32))
+        y = torch.from_numpy(np.array(y, dtype=np.int32))
 
         if self.transform_c is not None:
             c = self.transform_c(c)
@@ -526,14 +544,3 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             y = self.transform_y(y)
 
         return image, c, y
-
-    def __eq__(self, other):
-        chk = (
-            super().__eq__(other)
-            and (self.base_dir == other.base_dir)
-            and (self.preprocess == other.preprocess)
-        )
-        return chk
-
-    def __repr__(self):
-        return f"ConceptImageDatasetSample<n={self.n}, n_concepts={self.n_concepts}, n_classes={self.n_classes}, data_type={self.meta.get('data_type')}, base_dir={self.base_dir}>"
