@@ -2,6 +2,7 @@ from pathlib import Path
 import dill
 import pandas as pd
 
+
 def save(obj, path, msg=True, overwrite=False, check_save=False, mkdir=True):
     """
     saves data as a pickle file on disk
@@ -11,13 +12,13 @@ def save(obj, path, msg=True, overwrite=False, check_save=False, mkdir=True):
     """
     f = Path(path)
     if f.is_file() and overwrite is False:
-        raise IOError(f'file: {f} exists')
+        raise IOError(f"file: {f} exists")
 
     if not f.parent.exists() and mkdir:
-        f.parent.mkdir(parents = True, exist_ok = True)
+        f.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(f, 'wb') as outfile:
-        dill.dump({'data': obj}, outfile, protocol=dill.HIGHEST_PROTOCOL)
+    with open(f, "wb") as outfile:
+        dill.dump({"data": obj}, outfile, protocol=dill.HIGHEST_PROTOCOL)
 
     if check_save:
         loaded_obj = load(f)
@@ -27,9 +28,10 @@ def save(obj, path, msg=True, overwrite=False, check_save=False, mkdir=True):
             assert obj == loaded_obj
 
     if msg:
-        print(f'saved to: {f}')
+        print(f"saved to: {f}")
 
     return f
+
 
 def load(path):
     """
@@ -39,12 +41,12 @@ def load(path):
     """
     f = Path(path)
     if not f.is_file():
-        raise IOError(f'file: {f} not found')
+        raise IOError(f"file: {f} not found")
 
-    with open(f, 'rb') as infile:
+    with open(f, "rb") as infile:
         file_contents = dill.load(infile)
 
-    assert 'data' in file_contents, f'contents of {f} is missing a field called `data`'
-    obj = file_contents['data']
+    assert "data" in file_contents, f"contents of {f} is missing a field called `data`"
+    obj = file_contents["data"]
 
     return obj
