@@ -102,13 +102,3 @@ def test_split_requires_known_fold_id(tab_small):
     ds = tab_small
     with pytest.raises(AssertionError):
         ds.split(fold_id=None, fold_num_validation=1, fold_num_test=2)
-
-
-# ---------- Croissant placeholders ----------
-@pytest.mark.skip(reason="croissant I/O not implemented yet")
-def test_from_croissant_placeholder():
-    ConceptDataset.from_croissant(None)
-
-@pytest.mark.skip(reason="croissant I/O not implemented yet")
-def test_to_croissant_placeholder():
-    ConceptDataset.to_croissant()

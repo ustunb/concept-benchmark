@@ -5,10 +5,9 @@ from pathlib import Path
 import numpy as np
 import torch
 import warnings
-from mlcroissant import Dataset as CroissantDataset
 from PIL import Image
 from torch.utils.data import DataLoader
-from torch.utils.data import Dataset as TorchDataset
+from torch.utils.data import Dataset
 from tqdm import tqdm
 
 from .cv import generate_cvindices, validate_cvindices
@@ -143,26 +142,6 @@ class ConceptDataset(object):
         )
 
         return cpy
-
-    @staticmethod
-    def from_croissant(croissant_dataset: CroissantDataset):
-        """
-        Initialize the dataset from a Croissant dataset.
-
-        Parameters:
-        - croissant_dataset: An instance of a Croissant dataset.
-        """
-        pass
-
-    @staticmethod
-    def to_croissant():
-        """
-        Convert the dataset to a Croissant dataset.
-
-        Returns:
-        - An instance of a Croissant dataset.
-        """
-        pass
 
     #### INSTANCE VARIABLES
     @property
@@ -340,7 +319,7 @@ class ConceptDataset(object):
 
 
 @dataclass
-class ConceptDatasetSample(TorchDataset):
+class ConceptDatasetSample(Dataset):
     X: np.ndarray
     C: np.ndarray
     y: np.ndarray
