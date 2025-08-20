@@ -9,14 +9,15 @@ from sklearn.model_selection import StratifiedKFold, KFold
 #### fold id parsing / validation ####
 
 TRIVIAL_FOLD_ID = "K01N01"
-FOLD_ID_FORMAT = 'K%02dN%02d'
-INNER_ID_FORMAT = 'F%02dK%02d'
+FOLD_ID_FORMAT = "K%02dN%02d"
+INNER_ID_FORMAT = "F%02dK%02d"
 INNER_CV_SEPARATOR = "_"
-INNER_FOLD_ID_FORMAT = '%s%s%s' % (FOLD_ID_FORMAT, INNER_CV_SEPARATOR, INNER_ID_FORMAT)
+INNER_FOLD_ID_FORMAT = "%s%s%s" % (FOLD_ID_FORMAT, INNER_CV_SEPARATOR, INNER_ID_FORMAT)
 OUTER_CV_PATTERN = "^K[0-9]{2}N[0-9]{2}$"
 INNER_CV_PATTERN = "^K[0-9]{2}N[0-9]{2}_F[0-9]{2}K[0-9]{2}$"
 OUTER_CV_PARSER = re.compile(OUTER_CV_PATTERN)
 INNER_CV_PARSER = re.compile(INNER_CV_PATTERN)
+
 
 def parse_fold_id(fold_id):
     """
@@ -38,9 +39,12 @@ def parse_fold_id(fold_id):
         inner_fold_id = fold_id_elements[1]
         fold_idx_inner_cv = int(inner_fold_id[1:3])
         total_folds_inner_cv = int(inner_fold_id[4:6])
-        assert fold_idx_inner_cv <= total_folds, f'inner_fold_id {fold_id} is for fold #{fold_idx_inner_cv}, which does not exist for outer fold_id {outer_fold_id}'
+        assert fold_idx_inner_cv <= total_folds, (
+            f"inner_fold_id {fold_id} is for fold #{fold_idx_inner_cv}, which does not exist for outer fold_id {outer_fold_id}"
+        )
 
     return total_folds, replicate_idx, fold_idx_inner_cv, total_folds_inner_cv
+
 
 def validate_fold_id(fold_id):
     """
@@ -57,10 +61,10 @@ def validate_fold_id(fold_id):
 
     # must be outer-cv
     parsed = OUTER_CV_PARSER.match(fold_id)
-    assert parsed is not None, \
-        'invalid fold_id: %s' % fold_id
+    assert parsed is not None, "invalid fold_id: %s" % fold_id
 
     return parsed.string
+
 
 def is_inner_fold_id(fold_id):
     """
@@ -71,8 +75,10 @@ def is_inner_fold_id(fold_id):
     parsed = INNER_CV_PARSER.match(fold_id)
     return parsed is not None
 
-def to_fold_id(total_folds, replicate_idx = 1, fold_idx_inner_cv = None, total_folds_inner_cv = None):
 
+def to_fold_id(
+    total_folds, replicate_idx=1, fold_idx_inner_cv=None, total_folds_inner_cv=None
+):
     total_folds = int(total_folds)
     replicate_idx = int(replicate_idx)
 
@@ -87,14 +93,21 @@ def to_fold_id(total_folds, replicate_idx = 1, fold_idx_inner_cv = None, total_f
         assert total_folds_inner_cv >= 1
         assert fold_idx_inner_cv >= 1
         assert total_folds >= fold_idx_inner_cv
-        fold_id = INNER_FOLD_ID_FORMAT % (total_folds, replicate_idx, fold_idx_inner_cv, total_folds_inner_cv)
+        fold_id = INNER_FOLD_ID_FORMAT % (
+            total_folds,
+            replicate_idx,
+            fold_idx_inner_cv,
+            total_folds_inner_cv,
+        )
 
     fold_id = validate_fold_id(fold_id)
     return fold_id
 
+
 #### fold generation ####
 
-def generate_folds(n_folds = 5, n_samples = None, strata = None):
+
+def generate_folds(n_folds=5, n_samples=None, strata=None):
     """
     generate fold indices for standard or stratified K-fold CV
 
@@ -116,22 +129,30 @@ def generate_folds(n_folds = 5, n_samples = None, strata = None):
     if stratified:
         assert check_strata(strata)
         n_samples = len(strata)
-        fold_generator = StratifiedKFold(n_splits = n_folds, shuffle = True)
+        fold_generator = StratifiedKFold(n_splits=n_folds, shuffle=True)
     else:
         assert isinstance(n_samples, int) and n_samples >= 2
         strata = np.empty(n_samples)
-        fold_generator = KFold(n_splits = n_folds, shuffle = True)
+        fold_generator = KFold(n_splits=n_folds, shuffle=True)
 
     folds = np.zeros(n_samples, dtype=int)
-    for k, (train_idx, test_idx) in enumerate(fold_generator.split(X = strata, y = strata)):
+    for k, (train_idx, test_idx) in enumerate(fold_generator.split(X=strata, y=strata)):
         folds[test_idx] = k + 1
 
     # check folds
-    folds = validate_folds(folds = folds, n_samples = n_samples, stratified = stratified)
+    folds = validate_folds(folds=folds, n_samples=n_samples, stratified=stratified)
 
     return folds
 
-def generate_cvindices(n_samples = None, strata = None, total_folds_for_cv = [1, 2, 3, 5, 10], total_folds_for_inner_cv = [2, 3, 5], replicates = 3, seed = None):
+
+def generate_cvindices(
+    n_samples=None,
+    strata=None,
+    total_folds_for_cv=[1, 2, 3, 5, 10],
+    total_folds_for_inner_cv=[2, 3, 5],
+    replicates=3,
+    seed=None,
+):
     """
     :param n_samples:
     :param strata:
@@ -143,9 +164,18 @@ def generate_cvindices(n_samples = None, strata = None, total_folds_for_cv = [1,
     """
 
     # type checks
-    assert isinstance(total_folds_for_cv, list) and len(total_folds_for_cv) > 0 and (len(total_folds_for_cv) == len(set(total_folds_for_cv)))
-    assert (total_folds_for_inner_cv is None) or (isinstance(total_folds_for_inner_cv, list) and len(total_folds_for_inner_cv) == len(set(total_folds_for_inner_cv)))
-    assert isinstance(replicates, int) and replicates >= 1, 'replicates should be a positive integer'
+    assert (
+        isinstance(total_folds_for_cv, list)
+        and len(total_folds_for_cv) > 0
+        and (len(total_folds_for_cv) == len(set(total_folds_for_cv)))
+    )
+    assert (total_folds_for_inner_cv is None) or (
+        isinstance(total_folds_for_inner_cv, list)
+        and len(total_folds_for_inner_cv) == len(set(total_folds_for_inner_cv))
+    )
+    assert isinstance(replicates, int) and replicates >= 1, (
+        "replicates should be a positive integer"
+    )
 
     # determine type of CV generation
     stratified = strata is not None
@@ -166,34 +196,40 @@ def generate_cvindices(n_samples = None, strata = None, total_folds_for_cv = [1,
 
     for k in total_folds_for_cv:
         for n in range(1, replicates + 1):
-            fold_id = to_fold_id(total_folds = k, replicate_idx = n)
+            fold_id = to_fold_id(total_folds=k, replicate_idx=n)
             if stratified:
-                cvindices[fold_id] = generate_folds(n_folds = k, strata = strata)
+                cvindices[fold_id] = generate_folds(n_folds=k, strata=strata)
             else:
-                cvindices[fold_id] = generate_folds(n_folds = k, n_samples = n_samples)
+                cvindices[fold_id] = generate_folds(n_folds=k, n_samples=n_samples)
 
             # generate inner folds for k-fold cv
             for f in range(1, k + 1):
                 fold_idx = np.not_equal(cvindices[fold_id], f)
                 n_samples_fold = np.sum(fold_idx)
-                for l in total_folds_for_inner_cv:
+                for num_inner_folds in total_folds_for_inner_cv:
                     inner_fold_id = to_fold_id(
-                            total_folds = k,
-                            replicate_idx = n,
-                            fold_idx_inner_cv = f,
-                            total_folds_inner_cv = l
-                            )
+                        total_folds=k,
+                        replicate_idx=n,
+                        fold_idx_inner_cv=f,
+                        total_folds_inner_cv=num_inner_folds,
+                    )
                     if stratified:
-                        cvindices[inner_fold_id] = generate_folds(n_folds = l, strata = strata[fold_idx])
+                        cvindices[inner_fold_id] = generate_folds(
+                            n_folds=num_inner_folds, strata=strata[fold_idx]
+                        )
                     else:
-                        cvindices[inner_fold_id] = generate_folds(n_folds = l, n_samples = n_samples_fold)
+                        cvindices[inner_fold_id] = generate_folds(
+                            n_folds=num_inner_folds, n_samples=n_samples_fold
+                        )
 
-    cvindices = validate_cvindices(cvindices, stratified = stratified)
+    cvindices = validate_cvindices(cvindices, stratified=stratified)
     return cvindices
+
 
 #### checks and validation ####
 
-def validate_folds(folds, fold_id = None, n_samples = None, stratified = True):
+
+def validate_folds(folds, fold_id=None, n_samples=None, stratified=True):
     """
     check folds used for cross-validation
     :param folds:
@@ -204,7 +240,7 @@ def validate_folds(folds, fold_id = None, n_samples = None, stratified = True):
     """
 
     # reshape folds
-    assert isinstance(folds, np.ndarray), 'folds should be array-like'
+    assert isinstance(folds, np.ndarray), "folds should be array-like"
     assert folds.ndim == 1 and len(folds) >= 1
 
     # check length
@@ -212,20 +248,26 @@ def validate_folds(folds, fold_id = None, n_samples = None, stratified = True):
         assert len(folds) == n_samples
 
     # check fold values
-    fold_values, fold_counts = np.unique(folds, return_counts = True)
+    fold_values, fold_counts = np.unique(folds, return_counts=True)
     fold_values_min = np.min(fold_values)
     fold_values_max = np.max(fold_values)
     assert fold_values_min == 1
     assert fold_values_max <= len(folds)
 
-    assert np.array_equal(fold_values, np.arange(1, fold_values_max + 1)), f'fold indices {fold_values} are not consecutive'
+    assert np.array_equal(fold_values, np.arange(1, fold_values_max + 1)), (
+        f"fold indices {fold_values} are not consecutive"
+    )
 
     if not stratified:
-        assert np.min(fold_counts) >= np.max(fold_counts) - 1, 'imbalanced folds: max (points/fold) must be within min (points/fold)'
+        assert np.min(fold_counts) >= np.max(fold_counts) - 1, (
+            "imbalanced folds: max (points/fold) must be within min (points/fold)"
+        )
 
     # check that fold id matches fold content
     if fold_id is not None:
-        (total_folds, replicate_idx, fold_idx_inner_cv, total_folds_inner_cv) = parse_fold_id(fold_id)
+        (total_folds, replicate_idx, fold_idx_inner_cv, total_folds_inner_cv) = (
+            parse_fold_id(fold_id)
+        )
         if is_inner_fold_id(fold_id):
             assert total_folds >= 1
             assert total_folds >= fold_idx_inner_cv
@@ -239,14 +281,15 @@ def validate_folds(folds, fold_id = None, n_samples = None, stratified = True):
 
     return folds
 
-def validate_cvindices(cvindices, stratified = True):
+
+def validate_cvindices(cvindices, stratified=True):
     """
     will drop fold_ids for inner cv if the corresponding outer_cv fold_id does not exist
     :param cvindices:
     :return:
     """
 
-    #check that fold_ids are valid
+    # check that fold_ids are valid
     all_fold_ids = list(cvindices.keys())
     for fold_id in all_fold_ids:
         try:
@@ -264,28 +307,31 @@ def validate_cvindices(cvindices, stratified = True):
         assert len(inner_ids) == 0
         return cvindices
 
-    #at this point cvindices must have at least one outer id
+    # at this point cvindices must have at least one outer id
     validated_indices = dict()
     n_samples = len(cvindices[outer_ids[0]])
     for fold_id in outer_ids:
         try:
-            validated_indices[fold_id] = validate_folds(cvindices[fold_id], fold_id, n_samples, stratified)
+            validated_indices[fold_id] = validate_folds(
+                cvindices[fold_id], fold_id, n_samples, stratified
+            )
         except AssertionError:
-            print('could not validate fold: %s' % fold_id)
+            print("could not validate fold: %s" % fold_id)
             pass
-
 
     for fold_id in inner_ids:
         outer_id, _ = fold_id.split(INNER_CV_SEPARATOR)
         if outer_id in outer_ids:
             try:
-                validated_indices[fold_id] = validate_folds(cvindices[fold_id], fold_id, stratified = stratified)
+                validated_indices[fold_id] = validate_folds(
+                    cvindices[fold_id], fold_id, stratified=stratified
+                )
             except AssertionError:
-                print('could not validate fold: %s' % fold_id)
+                print("could not validate fold: %s" % fold_id)
                 pass
 
-
     return validated_indices
+
 
 def check_strata(strata):
     """
@@ -293,9 +339,11 @@ def check_strata(strata):
     :param strata:
     :return:
     """
-    assert isinstance(strata, np.ndarray), 'strata should be array-like'
-    assert strata.ndim == 1, 'strata should be 1 dimensional'
+    assert isinstance(strata, np.ndarray), "strata should be array-like"
+    assert strata.ndim == 1, "strata should be 1 dimensional"
     if np.issubdtype(strata.dtype, np.number):
-        assert np.isfinite(strata).all(), 'strata should be finite'
-    assert len(np.unique(strata)) >= 2, 'strata should contain at least 2 distinct classes'
+        assert np.isfinite(strata).all(), "strata should be finite"
+    assert len(np.unique(strata)) >= 2, (
+        "strata should contain at least 2 distinct classes"
+    )
     return True

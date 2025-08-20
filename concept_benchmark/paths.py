@@ -24,12 +24,8 @@ tests_dir = repo_dir / "tests/"
 results_dir = repo_dir / "results/"
 
 
-def get_dataset_dir(
-        data_name: str, 
-        **kwargs
-    ) -> Path:
-    """
-    """
+def get_dataset_dir(data_name: str, **kwargs) -> Path:
+    """ """
     p = data_dir / data_name
 
     if "data_type" in kwargs:
@@ -37,15 +33,16 @@ def get_dataset_dir(
 
     return p
 
+
 def get_noisyconcept_data(
-        concept_noise_probs: list,
-        parity_inds: list,
-        coefficients: list,
-        intercept: float,
+    concept_noise_probs: list,
+    parity_inds: list,
+    coefficients: list,
+    intercept: float,
 ) -> str:
     """
     Generate a name for the noisy concept dataset based on its parameters.
-    
+
     Args:
         concept_noise_probs (list): List of noise probabilities for each concept.
         parity_inds (list): List of parity indices for the concepts.
@@ -59,6 +56,6 @@ def get_noisyconcept_data(
     parity_str = "-".join([",".join([str(v) for v in par]) for par in parity_inds])
     coefs_str = ",".join([str(c) for c in coefficients])
 
-    f = f'p{concept_noise_prob_str}_p{parity_str}_c{coefs_str}_i{intercept}.data'
+    f = f"p{concept_noise_prob_str}_p{parity_str}_c{coefs_str}_i{intercept}.data"
 
     return get_dataset_dir("noisyconcepts") / f
