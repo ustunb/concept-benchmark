@@ -22,11 +22,12 @@ else:
 class RobotConceptDataset(ConceptDataset):
     """Custom ConceptDataset for robot classification with concept detection"""
 
-    def __init__(self, X, C, y, meta, robot_ids, trained_concept_detector=None):
+    def __init__(self, X, C, y, meta, robot_ids, catalog_df, trained_concept_detector=None):
         super().__init__(X, C, y, meta, base_dir=Path(meta.get('image_dir', '.')))
 
         self.concept_detector = trained_concept_detector
         self.robot_ids = robot_ids
+        self.catalog_df = catalog_df
 
         self.resolution = meta.get('resolution', 224)
         self.color_mode = meta.get('color_mode', 'color')
@@ -75,8 +76,10 @@ def create_synthetic_dataset(**kwargs):
     Returns:
         RobotConceptDataset object
     """
-
-    kwargs['num_robots'] = kwargs.get('num_robots', 48) * kwargs.get('samples_per_instance', 1)
+    num_combinations = int(np.prod([len(v) for v in kwargs['concepts'].values()])) * 2
+    kwargs['num_robots'] = kwargs.get('num_robots', num_combinations) * kwargs.get('samples_per_instance', 1)
+    kwargs['resolution'] = 600 if kwargs.get('size', 'large') == 'large' else 32
+    kwargs['irrelevant_features'] = kwargs.get('spurious_features', [])
 
     catalog_df = generate_robot_catalog(kwargs)
     rdist = RobotDistribution(df=catalog_df)
@@ -135,7 +138,7 @@ def create_synthetic_dataset(**kwargs):
         "num_robots": kwargs.get('num_robots', 48)
     }
 
-    robot_dataset = RobotConceptDataset(X, C, y, meta, robot_ids=catalog_df['id'],
+    robot_dataset = RobotConceptDataset(X, C, y, meta, robot_ids=catalog_df['id'], catalog_df=catalog_df,
                                         trained_concept_detector=None)
 
     # Train concept detector if requested
@@ -189,7 +192,6 @@ def train_robot_concept_model(dataset, resolution, epochs, batch_size):
 
 if __name__ == '__main__':
     params = {
-        'num_robots': 48, # max is as many combinations of concepts there are
         'samples_per_instance': 2, # how many times to repeat each robot with changed colors (irrelavant feature); max 108
         'draw': True,
         'output_directory': './robot_images',
@@ -197,12 +199,14 @@ if __name__ == '__main__':
             'head_shape': ['square', 'round'],
             'body_shape': ['square', 'round'],
             'has_knees': ['false', 'true'],
+            'has_elbows': ['false', 'true'],
             'foot_shape': ['flat_4sided', 'flat_5sided', 'flat_lshaped',
                            'pointy_3sided', 'pointy_4sided', 'pointy_6sided'],
         },
+        'spurious_features': ['has_elbows'],
         'model': "'glorp' if (int(row['body_shape']=='square') + int(row['foot_shape']=='pointy') - 2 >= 0) else 'drent'",
         'model_type': 'stochastic',  # 'deterministic', 'stochastic'
-        'resolution': 600,
+        'size': 'large', # 'small', 'large'
         'color_mode': 'color',  # 'greyscale', 'color'
         'train_concept_detector': False,
         'epochs': 50,

@@ -1,6 +1,8 @@
 """
 This file contains classes to represent and manipulate a set of all possible robots
 """
+import copy
+
 import numpy as np
 import pandas as pd
 from robots import ALL_ROBOT_FEATURES, COLOR_SCHEMES, ROBOT_TYPES
@@ -17,7 +19,7 @@ OUTCOME_MISSING = '?'
 drop_constant_cols = lambda df: df.loc[:, (df != df.iloc[0]).any()]
 
 
-def get_robot_catalog_df(repetitions=1):
+def get_robot_catalog_df(concepts, repetitions=1):
     """
     create a dataframe containing all possible combinations of robot features
     this dataframe defines a unique ID for each robot that is used to call files - therefore it must contain all possible robots
@@ -26,9 +28,9 @@ def get_robot_catalog_df(repetitions=1):
     :return: pandas DataFrame
     """
     #todo: generate multiple catalogs given a parameter i that defines the number of repetitions
-    index = pd.MultiIndex.from_product(ALL_ROBOT_FEATURES.values(), names=ALL_ROBOT_FEATURES.keys())
+    index = pd.MultiIndex.from_product(concepts.values(), names=concepts.keys())
     for i in range(1, repetitions):
-        new_index = pd.MultiIndex.from_product(ALL_ROBOT_FEATURES.values(), names=ALL_ROBOT_FEATURES.keys())
+        new_index = pd.MultiIndex.from_product(concepts.values(), names=concepts.keys())
         index = index.append(new_index)
 
     df = pd.DataFrame(index = index).reset_index()
@@ -42,7 +44,7 @@ def collapse_robot_subtypes(df, robot_features = ALL_ROBOT_FEATURES, subtype_sep
     """
     collapses feature values with subtypes into feature_types
     """
-    df_feature_names = [k for k in df.columns if k in robot_features.keys()]
+    df_feature_names = [k for k in df.columns if k in robot_features]
     separate = lambda x: pd.Series(str(x).split(subtype_separator))
     for name in df_feature_names:
         sf = df[name].apply(separate)
@@ -172,9 +174,11 @@ def generate_robot_catalog(params, drop_irrelevant=True):
     """
     # get the number of generated robot images to determine the number of repetitions for the robot catalog
     print("Starting robot generation...")
+    print(params)
     num_robots = params['num_robots'] if 'num_robots' in params else 96
     num_unique_robots = np.prod([len(v) for v in params['concepts'].values()])
-    catalog_df = get_robot_catalog_df(repetitions=int(np.ceil(float(num_robots) / num_unique_robots)))
+    catalog_df = get_robot_catalog_df(concepts=params['concepts'],
+                                      repetitions=int(np.ceil(float(num_robots) / num_unique_robots)))
 
     # filter robot catalog so that you only see differences in selected features
     for name, values in params['concepts'].items():
@@ -182,13 +186,15 @@ def generate_robot_catalog(params, drop_irrelevant=True):
             query_cmd = "{}=='{}'".format(name, values[0])
             catalog_df = catalog_df.query(query_cmd)
 
+    init_catalog_df = copy.deepcopy(catalog_df)
+
     if 'irrelevant_features' in params and len(params['irrelevant_features']) > 0 and drop_irrelevant:
         # check if irrelevant featuers are in the catalog
         existing_irrelevant_features = [f for f in params['irrelevant_features'] if f in catalog_df.columns]
         if existing_irrelevant_features:
             catalog_df.drop(columns = existing_irrelevant_features, inplace = True)
 
-    catalog_df = collapse_robot_subtypes(catalog_df)
+    catalog_df = collapse_robot_subtypes(df=catalog_df, robot_features=list(params['concepts'].keys()))
     catalog_df = drop_constant_cols(catalog_df)
 
     # create local directories
@@ -203,7 +209,7 @@ def generate_robot_catalog(params, drop_irrelevant=True):
         print(f"Generating {len(catalog_df)} robot images...")
     png_filenames = []
 
-    for k, features in catalog_df.iterrows():
+    for k, features in init_catalog_df.iterrows():
         png_filename = f'robot_{k:03d}.png'
 
         png_file = output_path / png_filename
