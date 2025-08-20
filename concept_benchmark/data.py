@@ -1,15 +1,18 @@
-import numpy as np
-import torch
-
-from PIL import Image
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from mlcroissant import Dataset as CroissantDataset
-from tqdm import tqdm
-from torch.utils.data import DataLoader
-from torch.utils.data import Dataset as TorchDataset
 from pathlib import Path
 
-from .cv import validate_cvindices, generate_cvindices
+import numpy as np
+import torch
+import warnings
+from mlcroissant import Dataset as CroissantDataset
+from PIL import Image
+from torch.utils.data import DataLoader
+from torch.utils.data import Dataset as TorchDataset
+from tqdm import tqdm
+
+from .cv import generate_cvindices, validate_cvindices
+
 
 class ConceptDataset(object):
 
@@ -21,15 +24,29 @@ class ConceptDataset(object):
         C: np.ndarray,
         y: np.ndarray,
         meta: dict,
+        cvindices: dict | None = None,
         **kwargs
     ) -> None:
+        """ConceptDataset
 
-        # example meta dict --> NOTE: or change to explicit keyword arguments?
-        # ex_meta = {
-        #    "classes": ["label_a", "label_b", "label_c"],
-        #    "concepts": ["concept_a", "concept_b", "concept_c"]
-        # }
-        # map one/multi-hot encoded to string values
+        Args:
+            X (np.ndarray): Feature matrix. \
+                For image data, this should be an array of image file paths.
+            C (np.ndarray): Concept matrix. \
+                Should be of shape (n_samples, n_concepts) with binary values (0 or 1).
+            y (np.ndarray): Label vector. \
+                Should be of shape (n_samples,) with integer class labels.
+            meta (dict): Metadata dictionary containing:
+                - 'classes': List of class names (in order of labels in y).
+                - 'concepts': List of concept names (in order of columns in C).
+                - 'data_type': Type of data ('image', 'tabular', etc.).
+            **kwargs: Additional keyword arguments. \
+                 - 'transform_x': Transformation function for features.
+                 - 'transform_c': Transformation function for concepts.
+                 - 'transform_y': Transformation function for labels.
+                 - 'preprocess': Preprocessing function for image data.
+        """
+        self._init_kwargs = dict(kwargs)
 
         if meta["data_type"] == "image":
             SampleClass = ConceptImageDatasetSample
@@ -53,7 +70,8 @@ class ConceptDataset(object):
         # # self._full = ConceptDatasetSample(parent=self, X=X, C=C, y=y, meta=meta)
         # self._full = ConceptImageDatasetSample(parent=self, X=X, C=C, y=y, meta=meta, base_dir=kwargs.get("base_dir", Path('.')), preprocess=kwargs.get("preprocess", None))
 
-        self._cvindices = kwargs.get("cvindices")
+        self._cvindices = cvindices
+        self.reset()
 
 
     def reset(self):
@@ -97,10 +115,28 @@ class ConceptDataset(object):
         return True
 
     def __eq__(self, other):
-        return (self._full == other._full) and all(
-            np.array_equal(self.cvindices[k], other.cvindices[k])
-            for k in self.cvindices.keys()
+        def _cv_equal(a, b):
+            if (a is None) != (b is None):
+                return False
+            if a is None and b is None:
+                return True
+            if set(a.keys()) != set(b.keys()):
+                return False
+            for k in a.keys():
+                if not np.array_equal(a[k], b[k]):
+                    return False
+            return True
+
+        chk = (
+            (self._full == other._full)
+            and _cv_equal(self.cvindices, other.cvindices)
+            and (self._full.meta == other._full.meta)
+            and (self._fold_id == other._fold_id)
+            and (self._fold_num_validation == other._fold_num_validation)
+            and (self._fold_num_test == other._fold_num_test)    
         )
+
+        return chk
 
     def __len__(self):
         return self.n
@@ -362,6 +398,11 @@ class ConceptDatasetSample(TorchDataset):
             isinstance(other, ConceptDatasetSample)
             and np.array_equal(self.y, other.y)
             and np.array_equal(self.X, other.X)
+            and np.array_equal(self.C, other.C)
+            and (self.meta == other.meta)
+            and (self.transform_x == other.transform_x)
+            and (self.transform_c == other.transform_c)
+            and (self.transform_y == other.transform_y)
         )
         return chk
 
@@ -385,9 +426,12 @@ class ConceptDatasetSample(TorchDataset):
         if isinstance(x, np.ndarray):
             x = x.astype(np.float32)
         if isinstance(c, np.ndarray):
-            c = c.astype(np.float32)
+            c = c.astype(np.int64)
+
         if isinstance(y, np.ndarray):
             y = y.astype(np.int64)
+        else:  # numpy scalar or Python int
+            y = np.int64(y)
 
         return x, c, y
 
@@ -492,12 +536,29 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             image = Image.open(img_path).convert('RGB')
             if self.preprocess:
                 image = self.preprocess(image)
-        except AttributeError as e:
-            print(f'WARNING: {e}')
-            print('cannot open multiple images, returning paths')
+            if self.transform_x is not None:
+                image = self.transform_x(image)
+        except (AttributeError, FileNotFoundError, OSError) as e:
+            warnings.warn(f"{e}; cannot open image, returning path", RuntimeWarning)
             image = img_path
 
-        C_idx = torch.from_numpy(np.array(c, dtype=np.int32))
-        y_idx = torch.from_numpy(np.array(y, dtype=np.int32))
+        c = torch.from_numpy(np.array(c, dtype=np.int64))
+        y = torch.from_numpy(np.array(y, dtype=np.int64))
 
-        return image, C_idx, y_idx
+        if self.transform_c is not None:
+            c = self.transform_c(c)
+        if self.transform_y is not None:
+            y = self.transform_y(y)
+
+        return image, c, y
+
+    def __eq__(self, other):
+        chk = (
+            super().__eq__(other) and
+            (self.base_dir == other.base_dir) and
+            (self.preprocess == other.preprocess)
+        )
+        return chk
+
+    def __repr__(self):
+        return f"ConceptImageDatasetSample<n={self.n}, n_concepts={self.n_concepts}, n_classes={self.n_classes}, data_type={self.meta.get('data_type')}, base_dir={self.base_dir}>"
