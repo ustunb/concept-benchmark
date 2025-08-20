@@ -29,6 +29,12 @@ dependencies = [
     "pillow>=11.3.0",
     "skorch>=1.2.0",
     "torcheval>=0.0.7",
+    "albumentations",
+    "colorir>=2.0.0",
+    "pero>=0.18.0",
+    "Pillow>=9.5.0",
+    "pycairo>=1.24.0",
+    "transformers>=4.55.2"
 ]
 
 [dependency-groups]
