@@ -159,14 +159,13 @@ def _write_synthetic_images(
     w, h = size
     for i in range(n):
         # Deterministic pixel pattern per index
-        # arr = (np.arange(w * h, dtype=np.uint8).reshape(h, w) + (i * 7)) % 256
         arr = (np.arange(w * h).reshape(h, w) + (i * 7)) % 256
         if mode == "RGB":
             # Stack into 3 channels
-            img_arr = np.stack([arr, np.roll(arr, 1, axis=0), np.roll(arr, 1, axis=1)], axis=-1)
+            img_arr = np.stack([arr, np.roll(arr, 1, axis=0), np.roll(arr, 1, axis=1)], axis=-1).astype(np.uint8)
         else:
-            img_arr = arr
-        img = Image.fromarray(img_arr, mode=mode)
+            img_arr = arr.astype(np.uint8)
+        img = Image.fromarray(img_arr)
         p = root / f"img_{i:03d}.png"
         img.save(p)
         paths.append(str(p))
