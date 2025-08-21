@@ -162,10 +162,88 @@ def draw_robot(filetype= 'svg', col_scheme_add = 0, width = 600, height = 600, *
                    fill_color = color_right)
 
     # hands
-    ray.draw(canvas, x = x_left - arm_length, y = y_arm, length = hand_length,
-             angle = pero.rads(270))
-    ray.draw(canvas, x = x_right + arm_length, y = y_arm, length = hand_length,
-             angle = pero.rads(270))
+    hand_shape = features.get('hand_shape', 'round_circle')
+    hand_type, hand_subtype = hand_shape.split("_")[0], hand_shape.split("_")[1]
+    hand_x_left = x_left - arm_length
+    hand_x_right = x_right + arm_length
+    hand_y = y_arm
+    hand_size = 0.6 * r
+
+    if hand_type == 'round':
+        if hand_subtype == 'circle':
+            # Round circle hands - centered at arm end
+            hand = pero.Ellipse(width=hand_size, height=hand_size)
+            hand.draw(canvas, x=hand_x_left, y=hand_y,
+                      fill_color=color_left)
+            hand.draw(canvas, x=hand_x_right, y=hand_y,
+                      fill_color=color_right)
+
+        elif hand_subtype == 'oval':
+            # Round oval hands (widened horizontally) - centered at arm end
+            hand = pero.Ellipse(width=hand_size * 1.5, height=hand_size)
+            hand.draw(canvas, x=hand_x_left, y=hand_y,
+                      fill_color=color_left)
+            hand.draw(canvas, x=hand_x_right, y=hand_y,
+                      fill_color=color_right)
+
+        elif hand_subtype == 'oval2':
+            # Round oval2 hands (widened vertically) - centered at arm end
+            hand = pero.Ellipse(width=hand_size, height=hand_size * 1.5)
+            hand.draw(canvas, x=hand_x_left, y=hand_y,
+                      fill_color=color_left)
+            hand.draw(canvas, x=hand_x_right, y=hand_y,
+                      fill_color=color_right)
+
+    elif hand_type == 'edgy':
+        if hand_subtype == 'triangle':
+            # Edgy triangle hands - tip facing outward away from body
+            hand = pero.Polygon(line_color=pero.colors.Black)
+
+            # Left triangle hand (base at arm, tip pointing left)
+            p_left = (
+                (hand_x_left, hand_y - hand_size / 2),  # top of base
+                (hand_x_left, hand_y + hand_size / 2),  # bottom of base
+                (hand_x_left - hand_size, hand_y)  # tip pointing left
+            )
+            hand.draw(canvas, points=p_left, fill_color=color_left)
+
+            # Right triangle hand (base at arm, tip pointing right)
+            p_right = (
+                (hand_x_right, hand_y - hand_size / 2),  # top of base
+                (hand_x_right, hand_y + hand_size / 2),  # bottom of base
+                (hand_x_right + hand_size, hand_y)  # tip pointing right
+            )
+            hand.draw(canvas, points=p_right, fill_color=color_right)
+
+        elif hand_subtype == 'square':
+            # Edgy square hands - centered at arm end
+            hand = pero.Rect(width=hand_size, height=hand_size)
+            hand.draw(canvas, x=hand_x_left - hand_size / 2, y=hand_y - hand_size / 2,
+                      fill_color=color_left)
+            hand.draw(canvas, x=hand_x_right - hand_size / 2, y=hand_y - hand_size / 2,
+                      fill_color=color_right)
+
+        elif hand_subtype == 'trapezoid':
+            # Edgy trapezoid hands - shorter base at arm end, wider base pointing outward
+            hand = pero.Polygon(line_color=pero.colors.Black)
+
+            # Left trapezoid hand (wider base pointing left)
+            p_left = (
+                (hand_x_left, hand_y - hand_size / 4),  # top of shorter base
+                (hand_x_left, hand_y + hand_size / 4),  # bottom of shorter base
+                (hand_x_left - hand_size, hand_y + hand_size / 2),  # bottom of wider base
+                (hand_x_left - hand_size, hand_y - hand_size / 2)  # top of wider base
+            )
+            hand.draw(canvas, points=p_left, fill_color=color_left)
+
+            # Right trapezoid hand (wider base pointing right)
+            p_right = (
+                (hand_x_right, hand_y - hand_size / 4),  # top of shorter base
+                (hand_x_right, hand_y + hand_size / 4),  # bottom of shorter base
+                (hand_x_right + hand_size, hand_y + hand_size / 2),  # bottom of wider base
+                (hand_x_right + hand_size, hand_y - hand_size / 2)  # top of wider base
+            )
+            hand.draw(canvas, points=p_right, fill_color=color_right)
 
 
     # body
@@ -343,13 +421,16 @@ def draw_robot(filetype= 'svg', col_scheme_add = 0, width = 600, height = 600, *
     ############################################################################
 
     # antennae
-    antenna_length = 1.5 * r if head_shape == 'round' else 1.75 * r
-    ray.draw(canvas, x = x_mid, y = y_top_face + head_height / 2,
-             angle = pero.rads(180 + 60), length = antenna_length)
+    if features.get('has_antennae', True):  # default to True if not specified
+        antenna_length = 1.5 * r if head_shape == 'round' else 1.75 * r
+        antenna_width = 4
 
-    ray.draw(canvas, x = x_mid, y = y_top_face + head_height / 2,
-             angle = pero.rads(-60), length = antenna_length)
+        antenna_ray = pero.Ray(line_color=pero.colors.Black, line_width=antenna_width)
+        antenna_ray.draw(canvas, x=x_mid, y=y_top_face + head_height / 2,
+                         angle=pero.rads(180 + 60), length=antenna_length)
 
+        antenna_ray.draw(canvas, x=x_mid, y=y_top_face + head_height / 2,
+                         angle=pero.rads(-60), length=antenna_length)
 
     if head_shape == 'round':
         face = pero.Arc(x = x_mid, y = y_top_face + 0.9*r, radius = 0.5 * head_width)
@@ -375,5 +456,75 @@ def draw_robot(filetype= 'svg', col_scheme_add = 0, width = 600, height = 600, *
                        width = 0.2 * r)
     eye.draw(canvas, x = x_mid - 0.3 * r)
     eye.draw(canvas, x = x_mid + 0.3 * r)
+
+    # ears
+    if 'ears_shape' in features:
+        ear_shape = features['ears_shape']
+        ear_size = 0.4 * r
+        ear_x_left = x_mid - 0.5 * head_width
+        ear_x_right = x_mid + 0.5 * head_width
+        ear_y = y_top_face + head_height / 2  # middle of head
+
+        if ear_shape == 'square':
+            ear = pero.Rect(width=ear_size, height=ear_size)
+            # Left ear (extending left from head)
+            ear.draw(canvas, x=ear_x_left - ear_size, y=ear_y - ear_size / 2,
+                     fill_color=color_left)
+            # Right ear (extending right from head)
+            ear.draw(canvas, x=ear_x_right, y=ear_y - ear_size / 2,
+                     fill_color=color_right)
+
+        elif ear_shape == 'triangle':
+            ear = pero.Polygon(line_color=pero.colors.Black)
+
+            # Left triangle ear (base at head, tip pointing left)
+            p_left = (
+                (ear_x_left, ear_y - ear_size / 2),  # top of base
+                (ear_x_left, ear_y + ear_size / 2),  # bottom of base
+                (ear_x_left - ear_size, ear_y)  # tip pointing left
+            )
+            ear.draw(canvas, points=p_left, fill_color=color_left)
+
+            # Right triangle ear (base at head, tip pointing right)
+            p_right = (
+                (ear_x_right, ear_y - ear_size / 2),  # top of base
+                (ear_x_right, ear_y + ear_size / 2),  # bottom of base
+                (ear_x_right + ear_size, ear_y)  # tip pointing right
+            )
+            ear.draw(canvas, points=p_right, fill_color=color_right)
+
+    if 'mouth_type' in features:
+        mouth_type = features['mouth_type']
+        mouth_width = 0.4 * head_width
+        mouth_x = x_mid - mouth_width / 2
+        mouth_y = y_top_face + (5.0 / 8.0) * head_height  # below the eyes
+
+        if mouth_type == 'closed':
+            # Closed mouth - thinner filled rectangle
+            mouth_height = 0.05 * r
+            mouth = pero.Rect(x=mouth_x, y=mouth_y,
+                              width=mouth_width, height=mouth_height,
+                              fill_color=pero.colors.Black)
+            mouth.draw(canvas)
+
+        elif mouth_type == 'open':
+            # Open mouth - taller rectangle outline with vertical grills inside
+            mouth_height = 0.2 * r
+            mouth_outline = pero.Rect(x=mouth_x, y=mouth_y,
+                                      width=mouth_width, height=mouth_height,
+                                      fill_color=pero.colors.White,
+                                      line_color=pero.colors.Black)
+            mouth_outline.draw(canvas)
+
+            # Add vertical grills inside the mouth
+            grill_line = pero.Line(line_color=pero.colors.Black, line_width=1)
+            num_grills = 4
+            grill_spacing = mouth_width / (num_grills + 1)
+
+            for i in range(1, num_grills + 1):
+                grill_x = mouth_x + i * grill_spacing
+                grill_line.draw(canvas,
+                                x1=grill_x, y1=mouth_y,
+                                x2=grill_x, y2=mouth_y + mouth_height)
 
     return canvas
