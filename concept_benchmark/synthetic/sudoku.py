@@ -4,6 +4,7 @@ Generate Sudoku ConceptDataset
 
 import random
 from collections.abc import Callable
+import math
 
 import torch
 import numpy as np
@@ -24,6 +25,7 @@ SUDOKU_DIR = data_dir / "sudoku"
 # TODO: label noise, concept noise, concept masking toggles
 def create_sudoku_dataset(
     *,
+    n: int = 3,
     n_samples: int = 1000,
     valid_ratio: float = 0.5,
     max_corrupt: int = 3,
@@ -35,6 +37,7 @@ def create_sudoku_dataset(
     """Create a synthetic dataset of Sudoku boards with concepts.
 
     Args:
+        n (int, optional): block size of Sudoku (default 3 for 9x9 board).
         n_samples (int, optional): Number of samples to generate.
             Defaults to 1000.
         valid_ratio (float, optional): Ratio of valid to invalid boards.
@@ -46,7 +49,7 @@ def create_sudoku_dataset(
         seed (int, optional): Random seed for reproducibility. 
             Defaults to 42.
         transform (Callable[[np.ndarray], np.ndarray], optional): 
-            Should take a board (9 x 9 numpy array) and 
+            Should take a board (N x N numpy array) and 
             return a transformed representation as a np.ndarray. 
             Default is None, which uses a simple flattening transform.
         ds_name (str, optional): name of the dataset, used as folder name
@@ -65,18 +68,19 @@ def create_sudoku_dataset(
     random.seed(seed)
     np.random.seed(seed)
 
+    N = n * n
     transform = transform or default_transform
 
     n_valid = int(round(n_samples * float(valid_ratio)))
     n_invalid = n_samples - n_valid
 
     X_list = []  # features
-    C_list = []  # concept vectors (27,)
+    C_list = []  # concept vectors (3*N,)
     y_list = []  # labels: board_valid (0/1)
 
     # Generate valid boards
     for _ in range(n_valid):
-        b = generate_valid_board()
+        b = generate_valid_board(n=n)
 
         if data_type == "image":
             img_path = ds_path / f"valid_{_}.png"
@@ -85,14 +89,13 @@ def create_sudoku_dataset(
         else:
             X_list.append(transform(b))
 
-        C_list.append(np.ones(27, dtype=np.int32))  # all concepts valid
+        C_list.append(np.ones(3 * N, dtype=np.int32))  # all row/col/block concepts valid
         y_list.append(1)
 
     # Generate invalid boards by corrupting valid ones
     for _ in range(n_invalid):
-        # one change = turns off at most 3 concepts
-        num_changes = random.randint(1, max_corrupt // 3)
-        b = generate_invalid_board(num_changes=num_changes)
+        num_actions = max(1, int(random.randint(1, max_corrupt)))
+        b = generate_invalid_board(base_board=generate_valid_board(n=n), num_actions=num_actions)
         concepts = get_concepts(b, return_label=False)
         c_arr = np.array(list(concepts.values()), dtype=np.int32).flatten()
 
@@ -116,9 +119,9 @@ def create_sudoku_dataset(
         np.savetxt(ds_path / "labels.csv", y, delimiter=",")
 
     concept_names = (
-        [f"row_valid_{i + 1}" for i in range(9)]
-        + [f"col_valid_{i + 1}" for i in range(9)]
-        + [f"block_valid_{i + 1}" for i in range(9)]
+        [f"row_valid_{i + 1}" for i in range(N)]
+        + [f"col_valid_{i + 1}" for i in range(N)]
+        + [f"block_valid_{i + 1}" for i in range(N)]
     )
 
     # TODO: decide whether to store original boards in metadata
@@ -129,6 +132,8 @@ def create_sudoku_dataset(
         "transform": transform.__name__ if transform else "default",
         "max_corrupt": max_corrupt,
         "seed": seed,
+        "n": n,
+        "N": N,
     }
     
     if data_type == "image":
@@ -140,55 +145,38 @@ def create_sudoku_dataset(
 
 
 def default_transform(board: np.ndarray) -> np.ndarray:
-    """Flattens the 9x9 board to 81-dim vector.
-
-    Args:
-        board (np.ndarray): 9x9 Sudoku board with values in {0, 1..9}.
-
-    Returns:
-        np.ndarray: Flattened vector.
-        Output dimensions = (81,).
-    """
+    """Flattens an N×N board to a vector of length N*N."""
     return board.astype(np.float32).reshape(-1)
 
 
 def onehot_transform(board: np.ndarray) -> np.ndarray:
-    """Convert a 9x9 board to a one-hot encoded representation.
-    
-    Args:
-        board (np.ndarray): 9x9 Sudoku board with values in {0, 1..9}.
-        
-    Returns:
-        np.ndarray: One-hot encoded representation of the board.
-        Output dimensions = (9, 9, 9).
-    """
-    x = board.astype(np.int64) - 1  # zero indexing
-    return np.eye(9, dtype=np.float32)[x]  # (9,9,9)
+    """Convert an N×N board (values 1..N or 0 for blanks) to one-hot (N,N,N)."""
+    N = board.shape[0]
+    x = board.astype(np.int64) - 1
+    eye = np.eye(N, dtype=np.float32)
+    # For blanks (0→-1), map to all-zeros row by masking negatives
+    oh = eye[x.clip(0, N-1)]  # (N,N,N)
+    oh[(board <= 0)] = 0.0
+    return oh
 
 
 def histogram_transform(board: np.ndarray) -> np.ndarray:
-    """Convert a 9x9 board to a histogram representation.
-    
-    Each row, column, and block is represented as a histogram of digit counts.
-    
-    Args:
-        board (np.ndarray): 9x9 Sudoku board with values in {0, 1..9}.
-        
-    Returns:
-        np.ndarray: Histogram representation of the board.
-        Output dimensions = (27, 9).
+    """Convert an N×N board to per-unit digit histograms.
+    Output shape: (3N, N) for rows, cols, and blocks.
     """
-    # One-hot encode the board
-    oh = onehot_transform(board)  # (9,9,9)
-    row_h = oh.sum(axis=1)  # (9,9)
-    col_h = oh.sum(axis=0)  # (9,9)
+    N = board.shape[0]
+    n = int(math.isqrt(N))
+    assert n * n == N, "Board size must be a perfect square"
+    oh = onehot_transform(board)  # (N,N,N)
+    row_h = oh.sum(axis=1)        # (N,N)
+    col_h = oh.sum(axis=0)        # (N,N)
     blocks = []
-    for br in range(3):
-        for bc in range(3):
-            blk = oh[br * 3 : (br + 1) * 3, bc * 3 : (bc + 1) * 3, :].sum(axis=(0, 1))
+    for br in range(n):
+        for bc in range(n):
+            blk = oh[br * n : (br + 1) * n, bc * n : (bc + 1) * n, :].sum(axis=(0, 1))
             blocks.append(blk)
-    blk_h = np.stack(blocks, axis=0)  # (9,9)
-    feats = np.concatenate([row_h, col_h, blk_h], axis=0)  # (27,9)
+    blk_h = np.stack(blocks, axis=0)  # (N,N)
+    feats = np.concatenate([row_h, col_h, blk_h], axis=0)  # (3N,N)
     return feats.astype(np.float32)
 
 def image_transform(
@@ -203,16 +191,16 @@ def image_transform(
     font_path: str | None = None,
     outfile: str | None = None,
 ) -> np.ndarray:
-    """Render a 9x9 Sudoku board to a grayscale image.
+    """Render an N×N Sudoku board to a grayscale image.
 
     Args:
-        board (np.ndarray): 9x9 array with values in {0, 1..9}. Use 0 for blank
+        board (np.ndarray): N×N array with values in {0, 1..N}. Use 0 for blank
             cells.
         cell_px (int, optional): Pixel size of each cell. Defaults to 16.
         margin_px (int, optional): Outer padding around the grid. Defaults
             to 3.
         line_px (int, optional): Width of thin lines. Defaults to 1.
-        bold_px (int, optional): Width of 3x3 divider lines. Defaults to 1.
+        bold_px (int, optional): Width of n×n divider lines. Defaults to 1.
         font_size (int, optional): Digit font size. Defaults to 10.
         standardize (bool, optional): If True, standardize pixel values to
             [0, 1]. Defaults to True.
@@ -223,10 +211,12 @@ def image_transform(
 
     Returns:
         np.ndarray: Grayscale image array of the Sudoku board.
-        Output dimensions = (1, H, W) where H = W = margin_px * 2 + cell_px * 9.
+        Output dimensions = (1, H, W) where H = W = margin_px * 2 + cell_px * N.
     """
-    assert board.shape == (9, 9), "board must be 9x9"
-    W = H = margin_px * 2 + cell_px * 9
+    assert board.ndim == 2 and board.shape[0] == board.shape[1], "board must be square"
+    N = board.shape[0]
+    n = int(math.isqrt(N)); assert n*n == N, "board size must be n*n"
+    W = H = margin_px * 2 + cell_px * N
     img = Image.new("RGB", (W, H), "white")
     draw = ImageDraw.Draw(img)
 
@@ -234,10 +224,10 @@ def image_transform(
         font = (
             ImageFont.truetype(font_path, font_size)
             if font_path
-            else ImageFont.load_default()
+            else ImageFont.load_default(size=font_size)
         )
     except Exception:
-        font = ImageFont.load_default()
+        font = ImageFont.load_default(size=font_size)
 
     # Helpers
     def cell_rect(r, c):
@@ -249,23 +239,35 @@ def image_transform(
 
     # Grid lines
     # Thin lines
-    for i in range(10):
+    for i in range(N + 1):
         x = margin_px + i * cell_px
         y = margin_px + i * cell_px
-        width_v = bold_px if i % 3 == 0 else line_px
-        width_h = bold_px if i % 3 == 0 else line_px
+        width_v = bold_px if i % n == 0 else line_px
+        width_h = bold_px if i % n == 0 else line_px
         # Vertical
         draw.line([(x, margin_px), (x, H - margin_px)], fill="black", width=width_v)
         # Horizontal
         draw.line([(margin_px, y), (W - margin_px, y)], fill="black", width=width_h)
 
     # Numbers (centered in each cell)
-    for r in range(9):
-        for c in range(9):
+    for r in range(N):
+        for c in range(N):
             val = board[r, c]
             if val is None or int(val) == 0:
                 continue
-            text = str(int(val))
+            v = int(val)
+            if v <= 0:
+                continue
+            # Map 1..N to glyphs: 1-9->'1'-'9', 10->'A', 11->'B', ... up to 35->'Z', then 'a'..
+            if v <= 9:
+                text = str(v)
+            else:
+                idx = v - 10
+                alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+                if idx < len(alphabet):
+                    text = alphabet[idx]
+                else:
+                    text = str(v)
             x0, y0, x1, y1 = cell_rect(r, c)
             # Centering
             tw, th = draw.textbbox((0, 0), text, font=font)[2:]

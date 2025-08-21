@@ -4,71 +4,88 @@ from typing import Optional
 import numpy as np
 
 # --------------------------
-# Base valid board
+# Parametric base board & valid board generation (supports N = n*n)
 # --------------------------
-BASE_BOARD = np.array(
-    [
-        [1, 2, 3, 4, 5, 6, 7, 8, 9],
-        [4, 5, 6, 7, 8, 9, 1, 2, 3],
-        [7, 8, 9, 1, 2, 3, 4, 5, 6],
-        [2, 3, 4, 5, 6, 7, 8, 9, 1],
-        [5, 6, 7, 8, 9, 1, 2, 3, 4],
-        [8, 9, 1, 2, 3, 4, 5, 6, 7],
-        [3, 4, 5, 6, 7, 8, 9, 1, 2],
-        [6, 7, 8, 9, 1, 2, 3, 4, 5],
-        [9, 1, 2, 3, 4, 5, 6, 7, 8],
-    ]
-)
+
+def _assert_board_size(board: np.ndarray) -> tuple[int, int]:
+    assert board.ndim == 2 and board.shape[0] == board.shape[1], "board must be square"
+    N = board.shape[0]
+    n = int(np.sqrt(N))
+    assert n * n == N, f"board size {N} is not a perfect square (needed for n×n blocks)"
+    return N, n
 
 
-# --------------------------
-# Transformations to shuffle valid boards
-# Used to generate valid Sudoku boards
-# --------------------------
-def shuffle_rows(board):
-    for band in range(0, 9, 3):
-        rows = list(range(band, band + 3))
+def build_base_board(n: int) -> np.ndarray:
+    """Construct a canonical valid Sudoku of size N=n*n using the standard pattern.
+
+    pattern(r,c) = (n*(r % n) + r//n + c) % N
+    digits are 1..N
+    """
+    N = n * n
+    board = np.fromfunction(lambda r, c: (n * (r % n) + r // n + c) % N + 1, (N, N), dtype=int)
+    return board.astype(int)
+
+
+def shuffle_rows(board: np.ndarray, n: int | None = None) -> np.ndarray:
+    N, n0 = _assert_board_size(board)
+    n = n0 if n is None else n
+    for band in range(0, N, n):
+        rows = list(range(band, band + n))
         np.random.shuffle(rows)
-        board[band : band + 3] = board[rows]
+        board[band : band + n] = board[rows]
     return board
 
 
-def shuffle_columns(board):
-    for stack in range(0, 9, 3):
-        cols = list(range(stack, stack + 3))
+def shuffle_columns(board: np.ndarray, n: int | None = None) -> np.ndarray:
+    N, n0 = _assert_board_size(board)
+    n = n0 if n is None else n
+    for stack in range(0, N, n):
+        cols = list(range(stack, stack + n))
         np.random.shuffle(cols)
-        board[:, stack : stack + 3] = board[:, cols]
+        board[:, stack : stack + n] = board[:, cols]
     return board
 
 
-def shuffle_row_bands(board):
-    bands = [0, 1, 2]
+def shuffle_row_bands(board: np.ndarray, n: int | None = None) -> np.ndarray:
+    N, n0 = _assert_board_size(board)
+    n = n0 if n is None else n
+    bands = list(range(n))
     np.random.shuffle(bands)
-    return np.vstack([board[i * 3 : (i + 1) * 3] for i in bands])
+    return np.vstack([board[i * n : (i + 1) * n] for i in bands])
 
 
-def shuffle_col_stacks(board):
-    stacks = [0, 1, 2]
+def shuffle_col_stacks(board: np.ndarray, n: int | None = None) -> np.ndarray:
+    N, n0 = _assert_board_size(board)
+    n = n0 if n is None else n
+    stacks = list(range(n))
     np.random.shuffle(stacks)
-    return np.hstack([board[:, i * 3 : (i + 1) * 3] for i in stacks])
+    return np.hstack([board[:, i * n : (i + 1) * n] for i in stacks])
 
 
-def relabel_digits(board):
-    digits = list(range(1, 10))
+def relabel_digits(board: np.ndarray, N: int | None = None) -> np.ndarray:
+    N0, _ = _assert_board_size(board)
+    N = N0 if N is None else N
+    digits = list(range(1, N + 1))
     perm = digits[:]
     random.shuffle(perm)
     mapping = {d: perm[i] for i, d in enumerate(digits)}
-    return np.vectorize(lambda x: mapping[x])(board)
+    vfunc = np.vectorize(lambda x: mapping[int(x)])
+    return vfunc(board).astype(int)
 
 
-def generate_valid_board():
-    board = BASE_BOARD.copy()
-    board = shuffle_rows(board)
-    board = shuffle_columns(board)
-    board = shuffle_row_bands(board)
-    board = shuffle_col_stacks(board)
-    board = relabel_digits(board)
+def generate_valid_board(n: int = 3) -> np.ndarray:
+    """Generate a valid N=n*n Sudoku board using isotopy-safe shuffles and relabeling."""
+    N = n * n
+    board = build_base_board(n)
+    board = shuffle_rows(board, n)
+    board = shuffle_columns(board, n)
+    board = shuffle_row_bands(board, n)
+    board = shuffle_col_stacks(board, n)
+    board = relabel_digits(board, N)
     return board
+
+# Backward-compatibility constant for 9x9 (n=3)
+BASE_BOARD = build_base_board(3)
 
 
 # --------------------------
@@ -86,15 +103,15 @@ def generate_valid_board():
 
 def invalid_rows_only_by_within_column_swap(board: np.ndarray, seed: Optional[int] = None) -> np.ndarray:
     """
-    Swap two cells that share the same column and the same 3x3 block-band (i.e., same column, different
+    Swap two cells that share the same column and the same n x n block-band (i.e., same column, different
     rows within one band). Effect: exactly TWO row violations; columns and blocks remain valid.
     """
-    assert board.shape == (9, 9)
+    N, n = _assert_board_size(board)
     rng = random.Random(seed)
     b = board.copy()
-    c = rng.randrange(9)
-    br = rng.randrange(3)  # band index 0..2
-    rows = [br * 3 + i for i in range(3)]
+    c = rng.randrange(N)
+    br = rng.randrange(n)  # band index 0..n-1
+    rows = [br * n + i for i in range(n)]
     r1, r2 = rng.sample(rows, 2)
     b[r1, c], b[r2, c] = b[r2, c], b[r1, c]
     return b
@@ -102,15 +119,15 @@ def invalid_rows_only_by_within_column_swap(board: np.ndarray, seed: Optional[in
 
 def invalid_cols_only_by_within_row_swap(board: np.ndarray, seed: Optional[int] = None) -> np.ndarray:
     """
-    Swap two cells that share the same row and the same 3x3 stack (i.e., same row, different columns within
+    Swap two cells that share the same row and the same n x n stack (i.e., same row, different columns within
     one stack). Effect: exactly TWO column violations; rows and blocks remain valid.
     """
-    assert board.shape == (9, 9)
+    N, n = _assert_board_size(board)
     rng = random.Random(seed)
     b = board.copy()
-    r = rng.randrange(9)
-    sc = rng.randrange(3)  # stack index 0..2
-    cols = [sc * 3 + i for i in range(3)]
+    r = rng.randrange(N)
+    sc = rng.randrange(n)  # stack index 0..n-1
+    cols = [sc * n + i for i in range(n)]
     c1, c2 = rng.sample(cols, 2)
     b[r, c1], b[r, c2] = b[r, c2], b[r, c1]
     return b
@@ -119,15 +136,14 @@ def invalid_cols_only_by_within_row_swap(board: np.ndarray, seed: Optional[int] 
 def invalid_blocks_only_by_row_swap_across_bands(board: np.ndarray, seed: Optional[int] = None) -> np.ndarray:
     """
     Swap two ENTIRE rows from different bands. Rows/columns remain valid (they are permutations and column
-    multisets unchanged), but affected 3x3 blocks become invalid (composition within blocks changes).
+    multisets unchanged), but affected n x n blocks become invalid (composition within blocks changes).
     """
-    assert board.shape == (9, 9)
+    N, n = _assert_board_size(board)
     rng = random.Random(seed)
     b = board.copy()
-    # choose two rows from different bands
-    br1, br2 = rng.sample([0, 1, 2], 2)
-    r1 = br1 * 3 + rng.randrange(3)
-    r2 = br2 * 3 + rng.randrange(3)
+    br1, br2 = rng.sample(list(range(n)), 2)
+    r1 = br1 * n + rng.randrange(n)
+    r2 = br2 * n + rng.randrange(n)
     b[[r1, r2]] = b[[r2, r1]]
     return b
 
@@ -137,12 +153,12 @@ def invalid_blocks_only_by_col_swap_across_stacks(board: np.ndarray, seed: Optio
     Swap two ENTIRE columns from different stacks. Rows/columns remain valid (still permutations), while
     the composition of blocks is disturbed, invalidating blocks.
     """
-    assert board.shape == (9, 9)
+    N, n = _assert_board_size(board)
     rng = random.Random(seed)
     b = board.copy()
-    sc1, sc2 = rng.sample([0, 1, 2], 2)
-    c1 = sc1 * 3 + rng.randrange(3)
-    c2 = sc2 * 3 + rng.randrange(3)
+    sc1, sc2 = rng.sample(list(range(n)), 2)
+    c1 = sc1 * n + rng.randrange(n)
+    c2 = sc2 * n + rng.randrange(n)
     b[:, [c1, c2]] = b[:, [c2, c1]]
     return b
 
@@ -150,26 +166,26 @@ def invalid_blocks_only_by_col_swap_across_stacks(board: np.ndarray, seed: Optio
 def duplicate_in_row(board: np.ndarray, r: int, seed: Optional[int] = None) -> np.ndarray:
     """
     Duplicate one value within row r by copying a value from column c1 into column c2 (c2!=c1).
-    Effect of ONE action: invalidates that row, the target column, and the target 3x3 block (<= 3 concepts).
+    Effect of ONE action: invalidates that row, the target column, and the target block (<= 3 concepts).
     """
-    assert board.shape == (9, 9)
+    N, n = _assert_board_size(board)
     rng = random.Random(seed)
     b = board.copy()
-    c1, c2 = rng.sample(range(9), 2)
-    b[r, c2] = b[r, c1]
+    c1, c2 = rng.sample(range(N), 2)
+    b[r % N, c2] = b[r % N, c1]
     return b
 
 
 def duplicate_in_col(board: np.ndarray, c: int, seed: Optional[int] = None) -> np.ndarray:
     """
     Duplicate one value within column c by copying a value from row r1 into row r2 (r2!=r1).
-    Effect of ONE action: invalidates that column, the target row, and the target 3x3 block (<= 3 concepts).
+    Effect of ONE action: invalidates that column, the target row, and the target block (<= 3 concepts).
     """
-    assert board.shape == (9, 9)
+    N, n = _assert_board_size(board)
     rng = random.Random(seed)
     b = board.copy()
-    r1, r2 = rng.sample(range(9), 2)
-    b[r2, c] = b[r1, c]
+    r1, r2 = rng.sample(range(N), 2)
+    b[r2, c % N] = b[r1, c % N]
     return b
 
 
@@ -208,6 +224,7 @@ def generate_invalid_board(
         base_board = generate_valid_board()
     rng = random.Random(seed)
     b = base_board.copy()
+    N, n = _assert_board_size(b)
 
     for t in range(num_actions):
         cur_seed = rng.randrange(1 << 30)
@@ -220,10 +237,10 @@ def generate_invalid_board(
         if mode_choice in INVALID_MODES:
             b = INVALID_MODES[mode_choice](b, seed=cur_seed)
         elif mode_choice == "duplicate_row":
-            r = rng.randrange(9)
+            r = rng.randrange(N)
             b = duplicate_in_row(b, r=r, seed=cur_seed)
         elif mode_choice == "duplicate_col":
-            c = rng.randrange(9)
+            c = rng.randrange(N)
             b = duplicate_in_col(b, c=c, seed=cur_seed)
         else:
             raise ValueError(f"Unknown invalid mode: {mode_choice}")
@@ -248,64 +265,61 @@ def make_incomplete_board(
     Return an incomplete Sudoku board by masking cells from a complete solution.
 
     Args:
-        board: (9,9) numpy array with digits 1..9 (complete/valid solution assumed).
+        board: (N,N) numpy array with digits 1..N (complete/valid solution assumed).
         num_clues: target number of visible cells to keep (defaults to 30). If None,
-            a random number in [17, 60] is sampled (17 is a classic minimal clue bound).
+            a random number in [n*n+1, int(0.75*N*N)] is sampled.
         ensure_one_per_row: if True, ensures at least one clue remains in every row.
         ensure_one_per_col: if True, ensures at least one clue remains in every column.
-        ensure_one_per_block: if True, ensures at least one clue remains in every 3x3 block.
+        ensure_one_per_block: if True, ensures at least one clue remains in every n x n block.
         seed: optional RNG seed for reproducibility.
         blank_value: value to place in removed cells (0 by default).
 
     Returns:
-        puzzle: (9,9) numpy array with some cells set to `blank_value`.
+        puzzle: (N,N) numpy array with some cells set to `blank_value`.
 
     Notes:
         - This function does *not* check extendability/uniqueness; it only masks cells.
         - The "ensure_*" options may force keeping more clues than requested if necessary.
     """
-    assert board.shape == (9, 9), "board must be 9x9"
+    N, n = _assert_board_size(board)
     rng = np.random.default_rng(seed)
 
-    # Determine target number of clues
     if num_clues is None:
-        num_clues = int(rng.integers(low=17, high=61))  # inclusive low, exclusive high
-    num_clues = int(np.clip(num_clues, 0, 81))
+        low = n * n + 1  # just above a typical minimal-feasible region
+        high = max(low + 1, int(0.75 * N * N))
+        num_clues = int(rng.integers(low=low, high=high))
+    num_clues = int(np.clip(num_clues, 0, N * N))
 
-    # Build a set of indices we must keep to satisfy constraints
     keep: set[tuple[int, int]] = set()
 
     if ensure_one_per_row:
-        for r in range(9):
-            c = int(rng.integers(0, 9))
+        for r in range(N):
+            c = int(rng.integers(0, N))
             keep.add((r, c))
 
     if ensure_one_per_col:
-        for c in range(9):
-            r = int(rng.integers(0, 9))
+        for c in range(N):
+            r = int(rng.integers(0, N))
             keep.add((r, c))
 
     if ensure_one_per_block:
-        for br in range(3):
-            for bc in range(3):
-                r = int(rng.integers(br * 3, br * 3 + 3))
-                c = int(rng.integers(bc * 3, bc * 3 + 3))
+        for br in range(n):
+            for bc in range(n):
+                r = int(rng.integers(br * n, br * n + n))
+                c = int(rng.integers(bc * n, bc * n + n))
                 keep.add((r, c))
 
-    # Ensure we do not request fewer clues than already forced by constraints
     min_required = len(keep)
     if num_clues < min_required:
         num_clues = min_required
 
-    # Sample the remaining cells to keep uniformly without replacement
-    all_idx = [(r, c) for r in range(9) for c in range(9) if (r, c) not in keep]
+    all_idx = [(r, c) for r in range(N) for c in range(N) if (r, c) not in keep]
     remaining_to_keep = num_clues - len(keep)
-    if remaining_to_keep > 0:
-        chosen = rng.choice(len(all_idx), size=remaining_to_keep, replace=False)
+    if remaining_to_keep > 0 and len(all_idx) > 0:
+        chosen = rng.choice(len(all_idx), size=min(remaining_to_keep, len(all_idx)), replace=False)
         for i in np.atleast_1d(chosen):
             keep.add(all_idx[int(i)])
 
-    # Construct the puzzle
     puzzle = np.full_like(board, fill_value=blank_value)
     for (r, c) in keep:
         puzzle[r, c] = board[r, c]
@@ -318,25 +332,26 @@ def make_incomplete_board(
 # --------------------------
 def get_concepts(board, return_label=False):
     concepts = {}
+    N, n = _assert_board_size(board)
 
     row_valid = []
-    for i in range(9):
+    for i in range(N):
         unique = np.unique(board[i, :])
-        row_valid.append(int(len(unique) == 9))
+        row_valid.append(int(len(unique) == N))
     concepts["row_valid"] = row_valid
 
     col_valid = []
-    for j in range(9):
+    for j in range(N):
         unique = np.unique(board[:, j])
-        col_valid.append(int(len(unique) == 9))
+        col_valid.append(int(len(unique) == N))
     concepts["col_valid"] = col_valid
 
     block_valid = []
-    for bi in range(3):
-        for bj in range(3):
-            block = board[bi * 3 : (bi + 1) * 3, bj * 3 : (bj + 1) * 3].flatten()
+    for bi in range(n):
+        for bj in range(n):
+            block = board[bi * n : (bi + 1) * n, bj * n : (bj + 1) * n].reshape(-1)
             unique = np.unique(block)
-            block_valid.append(int(len(unique) == 9))
+            block_valid.append(int(len(unique) == N))
     concepts["block_valid"] = block_valid
 
     if return_label:
@@ -358,47 +373,43 @@ def get_partial_concepts(
     """
     Compute binary concepts for *incomplete* boards.
 
-    Concepts returned (all lists of length 9):
+    Concepts returned (all lists of length N):
       - row_consistent / col_consistent / block_consistent: 1 if the unit has
         no duplicate non-blank digits (ignores blanks), else 0.
       - row_complete / col_complete / block_complete: 1 if the unit has no blanks
-        (i.e., 9 filled cells), else 0.
+        (i.e., N filled cells), else 0.
 
     If `return_board_flags` is True, also returns:
-      - board_consistent: AND of all unit-consistent flags (27 units)
-      - board_complete: AND of all unit-complete flags (27 units)
+      - board_consistent: AND of all unit-consistent flags (3N units)
+      - board_complete: AND of all unit-complete flags (3N units)
 
     Notes:
       - This does not check global Sudoku validity for completed units; it
         focuses on duplicate-free (consistency) and filled-ness (completeness).
     """
-    assert board.shape == (9, 9), "board must be 9x9"
+    N, n = _assert_board_size(board)
 
     def unit_consistent(vals):
         vals = np.asarray(vals)
         mask = vals != blank_value
         nz = vals[mask]
-        # no duplicates among non-blanks
         return int(len(nz) == len(np.unique(nz)))
 
     def unit_complete(vals):
         vals = np.asarray(vals)
-        return int(np.count_nonzero(vals != blank_value) == 9)
+        return int(np.count_nonzero(vals != blank_value) == N)
 
-    # Row concepts
-    row_consistent = [unit_consistent(board[r, :]) for r in range(9)]
-    row_complete = [unit_complete(board[r, :]) for r in range(9)]
+    row_consistent = [unit_consistent(board[r, :]) for r in range(N)]
+    row_complete = [unit_complete(board[r, :]) for r in range(N)]
 
-    # Column concepts
-    col_consistent = [unit_consistent(board[:, c]) for c in range(9)]
-    col_complete = [unit_complete(board[:, c]) for c in range(9)]
+    col_consistent = [unit_consistent(board[:, c]) for c in range(N)]
+    col_complete = [unit_complete(board[:, c]) for c in range(N)]
 
-    # Block concepts
     block_consistent = []
     block_complete = []
-    for br in range(3):
-        for bc in range(3):
-            blk = board[br * 3 : (br + 1) * 3, bc * 3 : (bc + 1) * 3].reshape(-1)
+    for br in range(n):
+        for bc in range(n):
+            blk = board[br * n : (br + 1) * n, bc * n : (bc + 1) * n].reshape(-1)
             block_consistent.append(unit_consistent(blk))
             block_complete.append(unit_complete(blk))
 
