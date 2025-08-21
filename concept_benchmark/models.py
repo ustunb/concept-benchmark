@@ -135,7 +135,7 @@ class ClassicalConceptDetector(ConceptDetector):
             )
 
         embedded_dataset = (
-            dataset.embed(self.embedding_model, **(emebed_params or {}))
+            dataset.embed(self.embedding_model, **(embed_params or {}))
             if self.embedding_model
             else dataset
         )
