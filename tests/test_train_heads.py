@@ -6,8 +6,6 @@ import torch.nn as nn
 from concept_benchmark.data import ConceptDatasetSample
 from concept_benchmark.train import (
     train_concept_heads,
-    calibrate_trained_heads,
-    TorchSKLearnWrapper,
 )
 
 
@@ -91,32 +89,4 @@ def test_train_heads_with_encoder_finetunes_encoder_changes():
     assert _any_state_diff(before, after), "Encoder should update when not frozen"
 
 
-def test_calibrate_trained_heads_returns_calibrators():
-    train, valid, d, k = _make_tabular_samples()
-    heads = train_concept_heads(
-        train_dataset=train,
-        valid_dataset=valid,
-        embedding_model=None,
-        input_dim=None,
-        l1_size=8,
-        freeze=True,
-        fit_params={"epochs": 1, "device": "cpu", "batch_size": 16},
-    )
-    calibs = calibrate_trained_heads(train, valid, heads)
-    assert len(calibs) == k
-    pr = calibs[0].predict_proba(valid.X)
-    assert pr.shape == (len(valid), 2)
-    assert np.all(pr >= 0) and np.all(pr <= 1)
-    assert np.allclose(pr.sum(axis=1), 1, atol=1e-6)
-
-
-def test_torch_sklearn_wrapper_predict_proba_shape():
-    rng = np.random.default_rng(1)
-    X = rng.normal(size=(5, 4)).astype(np.float32)
-    head = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 1))
-    wrapper = TorchSKLearnWrapper(head)
-    wrapper.fit(X, (rng.random(5) > 0.5).astype(int))
-    pr = wrapper.predict_proba(X)
-    assert pr.shape == (5, 2)
-    assert np.allclose(pr.sum(axis=1), 1.0, atol=1e-6)
-
+## Calibration is handled in ConceptDetector; no wrapper-based calibrators here.
