@@ -8,7 +8,6 @@ authors = [
     { name = "Harry Cheon"}
 ]
 
-# use python 3.12
 requires-python = ">=3.10"
 
 dependencies = [
@@ -24,15 +23,14 @@ dependencies = [
     "gitpython>=3.1.45",
     "pyarrow>=21.0.0",
     "fastparquet>=2024.11.0",
-    "mlcroissant[parquet]>=1.0.21",
     "datasets>=4.0.0",
     "pillow>=11.3.0",
     "skorch>=1.2.0",
     "torcheval>=0.0.7",
+    "torchvision>=0.23.0",
     "albumentations",
     "colorir>=2.0.0",
     "pero>=0.18.0",
-    "Pillow>=9.5.0",
     "pycairo>=1.24.0",
     "transformers>=4.55.2"
 ]
@@ -48,22 +46,6 @@ dev = [
 
 [tool.uv]
 default-groups = ["dev"]
-
-[tool.uv.sources]
-torch = [
-  { index = "pytorch-metal" },
-]
-torchvision = [
-  { index = "pytorch-metal" },
-]
-torchaudio = [
-  { index = "pytorch-metal" }
-]
-
-[[tool.uv.index]]
-name = "pytorch-metal"
-url = "https://download.pytorch.org/whl/nightly/cpu"
-explicit = true
 
 [build-system]
 requires = ["hatchling"]

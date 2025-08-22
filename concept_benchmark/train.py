@@ -16,6 +16,7 @@ class TorchSKLearnWrapper(BaseEstimator, ClassifierMixin):
     """
     A wrapper to make a PyTorch model compatible with sklearn API
     """
+
     def __init__(self, model: nn.Module):
         self.model = model
         super().__init__()
@@ -23,7 +24,7 @@ class TorchSKLearnWrapper(BaseEstimator, ClassifierMixin):
     # Required to make compatible with CalibratedClassifierCV
     def __sklearn_tags__(self):
         tags = super(TorchSKLearnWrapper, self).__sklearn_tags__()
-        tags.estimator_type = 'classifier'
+        tags.estimator_type = "classifier"
 
         return tags
 
@@ -57,7 +58,7 @@ def train_concept_layer(
 ) -> nn.Module:
     """
     A helper function to train a single concept layer.
-    
+
     Args:
         train_dataset (ConceptDatasetSample): training dataset.
         valid_dataset (ConceptDatasetSample): validation dataset.
@@ -70,40 +71,34 @@ def train_concept_layer(
         nn.Module: The trained model.
     """
     model = nn.Sequential(
-        nn.Linear(input_dim, l1_size),
-        nn.ReLU(),
-        nn.Linear(l1_size, 1)
+        nn.Linear(input_dim, l1_size), nn.ReLU(), nn.Linear(l1_size, 1)
     )
     params = {
-        'lr': 1e-3,
-        'batch_size': 64,
-        'epochs': 10,
-        'min_delta': 0.01,
-        'patience': 5,
+        "lr": 1e-3,
+        "batch_size": 64,
+        "epochs": 10,
+        "min_delta": 0.01,
+        "patience": 5,
     }
     if fit_params:
         params.update(fit_params)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
+    optimizer = torch.optim.Adam(model.parameters(), lr=params["lr"])
     loss_fn = nn.BCEWithLogitsLoss()
 
     train_loader = DataLoader(
-        train_dataset,
-        batch_size=params['batch_size'],
-        shuffle=True
+        train_dataset, batch_size=params["batch_size"], shuffle=True
     )
 
     valid_loader = DataLoader(
-        valid_dataset,
-        batch_size=params['batch_size'],
-        shuffle=False
+        valid_dataset, batch_size=params["batch_size"], shuffle=False
     )
 
     best_val_f1 = -1
     patience_counter = 0
 
     model.train()
-    for _ in tqdm(range(params['epochs'])):
+    for _ in tqdm(range(params["epochs"])):
         train_losses, train_f1s = [], []
         for batch_X, batch_C, batch_y in train_loader:
             batch_C_i = batch_C[:, concept_idx]  # Get the specific concept column
@@ -114,8 +109,7 @@ def train_concept_layer(
             optimizer.step()
 
             f1 = f1_score(
-                batch_C_i.cpu().numpy(), 
-                (torch.sigmoid(outputs) > 0.5).cpu().numpy()
+                batch_C_i.cpu().numpy(), (torch.sigmoid(outputs) > 0.5).cpu().numpy()
             )
             train_f1s.append(f1)
             train_losses.append(loss.item())
@@ -127,14 +121,14 @@ def train_concept_layer(
         val_losses, val_f1s = [], []
         with torch.no_grad():
             for batch_X, batch_C, batch_y in valid_loader:
-                batch_C_i = batch_C[:, concept_idx] 
+                batch_C_i = batch_C[:, concept_idx]
                 val_outputs = model(batch_X).squeeze()
                 val_loss = loss_fn(val_outputs, batch_C_i)
                 val_losses.append(val_loss.item())
 
                 val_f1 = f1_score(
-                    batch_C_i.cpu().numpy(), 
-                    (torch.sigmoid(val_outputs) > 0.5).cpu().numpy()
+                    batch_C_i.cpu().numpy(),
+                    (torch.sigmoid(val_outputs) > 0.5).cpu().numpy(),
                 )
                 val_f1s.append(val_f1)
 
@@ -142,21 +136,24 @@ def train_concept_layer(
         avg_val_f1 = np.mean(val_f1s)
 
         # Early stopping
-        if avg_val_f1 > best_val_f1 + params['min_delta']:
+        if avg_val_f1 > best_val_f1 + params["min_delta"]:
             best_val_f1 = avg_val_f1
             patience_counter = 0
             # Optionally save best model
             # torch.save(self.state_dict(), 'best_model.pt')
         else:
             patience_counter += 1
-        
-        if patience_counter >= params['patience']:
-            print(f'Early stopping at epoch { _ + 1 }')
-            print(f'Epoch {_+1}/{params["epochs"]} - Train Loss: {avg_train_loss:.4f}, '
-                f'Train F1: {avg_train_f1:.4f}, Val Loss: {avg_val_loss:.4f}, Val F1: {avg_val_f1:.4f}')
+
+        if patience_counter >= params["patience"]:
+            print(f"Early stopping at epoch {_ + 1}")
+            print(
+                f"Epoch {_ + 1}/{params['epochs']} - Train Loss: {avg_train_loss:.4f}, "
+                f"Train F1: {avg_train_f1:.4f}, Val Loss: {avg_val_loss:.4f}, Val F1: {avg_val_f1:.4f}"
+            )
             break
 
     return model
+
 
 def train_calib_concept_layer(
     train_dataset: ConceptDatasetSample,
@@ -177,14 +174,17 @@ def train_calib_concept_layer(
         input_dim=input_dim,
         l1_size=l1_size,
     )
-    
+
     sklearn_model = TorchSKLearnWrapper(model)
     sklearn_model.fit(train_dataset.X, train_dataset.C[:, concept_idx])
-    
-    calibrated_model = CalibratedClassifierCV(sklearn_model, method='sigmoid', cv='prefit')
+
+    calibrated_model = CalibratedClassifierCV(
+        sklearn_model, method="sigmoid", cv="prefit"
+    )
     calibrated_model.fit(valid_dataset.X, valid_dataset.C[:, concept_idx])
-    
+
     return calibrated_model
+
 
 # def train_classical_worker(
 #     train_dataset: ConceptDatasetSample,
