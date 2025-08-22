@@ -2,10 +2,10 @@ from dataclasses import dataclass
 from torch.utils.data import Dataset
 import numpy as np
 import pandas as pd
-from utils import add_unobserved_rows_to_df
-from robots import Robot
+from .utils import add_unobserved_rows_to_df
+from .robots import Robot
 from PIL import Image
-from paths import image_dir
+from .paths import image_dir
 import albumentations as A
 import torch
 
