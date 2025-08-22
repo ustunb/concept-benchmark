@@ -2,50 +2,11 @@ from typing import Optional
 
 import numpy as np
 import torch
-from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.frozen import FrozenEstimator
-from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import f1_score
 from torch import nn
 from tqdm import tqdm
 
 from concept_benchmark.data import ConceptDatasetSample
-
-
-class TorchSKLearnWrapper(BaseEstimator, ClassifierMixin):
-    """
-    A wrapper to make a PyTorch model compatible with sklearn API
-    """
-
-    def __init__(self, model: nn.Module):
-        self.model = model
-        super().__init__()
-
-    # Required to make compatible with CalibratedClassifierCV
-    def __sklearn_tags__(self):
-        tags = super(TorchSKLearnWrapper, self).__sklearn_tags__()
-        tags.estimator_type = "classifier"
-
-        return tags
-
-    def fit(self, X, y):
-        # The model is assumed to be pre-trained.
-        # ConceptDetectors are binary classifiers
-        self.classes_ = np.array([0, 1])  # Required for CalibratedClassifierCV
-        return self
-
-    def predict_proba(self, X):
-        self.model.eval()
-        with torch.no_grad():
-            X_tensor = torch.from_numpy(X).float()
-            probs = torch.sigmoid(self.model(X_tensor)).numpy()
-            # Ensure the output is 2D
-            if len(probs.shape) == 1:
-                probs = probs.reshape(-1, 1)
-            return np.hstack([1 - probs, probs])
-
-    def predict(self, X):
-        return (self.predict_proba(X)[:, 1] > 0.5).astype(int)
 
 
 def train_concept_heads(
@@ -253,31 +214,3 @@ def train_concept_heads(
         embedding_model.cpu()
 
     return heads
-
-
-def calibrate_trained_heads(
-    train_dataset_emb: ConceptDatasetSample,
-    valid_dataset_emb: ConceptDatasetSample,
-    heads: nn.ModuleList,
-) -> list[CalibratedClassifierCV]:
-    """
-    Calibrate a list of trained heads using `CalibratedClassifierCV` on embedded data.
-    Each head is wrapped in `TorchSKLearnWrapper` (prefit) and calibrated on validation X.
-    """
-    calibrated_layers = []
-    for i, head in enumerate(heads):
-        wrapper = TorchSKLearnWrapper(head)
-        wrapper.fit(train_dataset_emb.X, train_dataset_emb.C[:, i])
-        # Choose cv based on class balance in validation labels to avoid warnings
-        y_valid = valid_dataset_emb.C[:, i]
-        n_pos = int(np.sum(y_valid))
-        n_neg = int(y_valid.shape[0] - n_pos)
-        min_class = max(0, min(n_pos, n_neg))
-        cv_splits = max(2, min(5, min_class))  # ensure at least 2, at most 5
-
-        calibrated = CalibratedClassifierCV(
-            FrozenEstimator(wrapper), method="sigmoid", cv=cv_splits
-        )
-        calibrated.fit(valid_dataset_emb.X, valid_dataset_emb.C[:, i])
-        calibrated_layers.append(calibrated)
-    return calibrated_layers
