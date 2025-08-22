@@ -4,6 +4,9 @@
 # devcontainers
 .devcontainer/
 
+# Local contributor guide (not versioned)
+AGENTS.md
+
 # PyCharm
 .idea/
 .RData
