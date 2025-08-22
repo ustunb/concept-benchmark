@@ -10,7 +10,7 @@ from sklearn.linear_model import LogisticRegression
 from concept_benchmark.data import ConceptDatasetSample
 from concept_benchmark.train import (
     calibrate_trained_heads,
-    train_joint_concept_layers,
+    train_concept_heads,
 )
 
 
@@ -61,7 +61,7 @@ class ConceptDetector(ABC):
             n_jobs (Optional[int]): Number of parallel jobs to run. -1 for all available cores (default).
         """
         # Jointly train per-concept heads with optional encoder finetuning
-        heads = train_joint_concept_layers(
+        heads = train_concept_heads(
             train_dataset=train_dataset,
             valid_dataset=valid_dataset,
             embedding_model=self.embedding_model,
