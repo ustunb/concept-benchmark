@@ -1,15 +1,17 @@
+import itertools
 from abc import ABC, abstractmethod
+from typing import List, Optional
+
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
-import itertools
-
-from joblib import Parallel, delayed
-from typing import Optional, List
 from sklearn.linear_model import LogisticRegression
 
 from concept_benchmark.data import ConceptDatasetSample
-from concept_benchmark.train import train_concept_layer, train_calib_concept_layer
+from concept_benchmark.train import (
+    calibrate_trained_heads,
+    train_joint_concept_layers,
+)
 
 
 class ConceptDetector(ABC):
@@ -30,11 +32,9 @@ class ConceptDetector(ABC):
         """
         self.embedding_model = embedding_model
         self.concept_layers = concept_layers
-        self.train_fn = (
-            train_concept_layer
-            if isinstance(self, ClassicalConceptDetector)
-            else train_calib_concept_layer
-        )
+
+    # Whether to calibrate heads after training (used by subclasses)
+    DO_CALIBRATE = False
 
     def fit(
         self,
@@ -60,35 +60,34 @@ class ConceptDetector(ABC):
                 The other dimension is determined by the size of the embedded dataset.
             n_jobs (Optional[int]): Number of parallel jobs to run. -1 for all available cores (default).
         """
-        if self.embedding_model and freeze:
-            for param in self.embedding_model.parameters():
-                param.requires_grad = False
+        # Jointly train per-concept heads with optional encoder finetuning
+        heads = train_joint_concept_layers(
+            train_dataset=train_dataset,
+            valid_dataset=valid_dataset,
+            embedding_model=self.embedding_model,
+            input_dim=None,
+            l1_size=l1_size or 100,
+            freeze=freeze,
+            fit_params=fit_params,
+        )
 
-        if self.embedding_model:
-            embed_train = train_dataset.embed(
-                self.embedding_model, **(embed_params or {})
+        # Optionally calibrate on embedded datasets
+        if self.DO_CALIBRATE:
+            embed_train = (
+                train_dataset.embed(self.embedding_model, **(embed_params or {}))
+                if self.embedding_model
+                else train_dataset
             )
-            embed_valid = valid_dataset.embed(
-                self.embedding_model, **(embed_params or {})
+            embed_valid = (
+                valid_dataset.embed(self.embedding_model, **(embed_params or {}))
+                if self.embedding_model
+                else valid_dataset
+            )
+            self.concept_layers = calibrate_trained_heads(
+                embed_train, embed_valid, heads
             )
         else:
-            embed_train = train_dataset
-            embed_valid = valid_dataset
-
-        input_dim = embed_train.X.shape[1]
-        num_concepts = embed_train.n_concepts
-
-        self.concept_layers = Parallel(n_jobs=n_jobs)(
-            delayed(self.train_fn)(
-                train_dataset=embed_train,
-                valid_dataset=embed_valid,
-                concept_idx=i,
-                fit_params=fit_params,
-                input_dim=input_dim,
-                l1_size=l1_size,
-            )
-            for i in range(num_concepts)
-        )
+            self.concept_layers = nn.ModuleList(heads)
 
     @abstractmethod
     def predict(self, dataset: ConceptDatasetSample) -> np.ndarray:
@@ -112,17 +111,6 @@ class ClassicalConceptDetector(ConceptDetector):
     """
     A concept detector with uncalibrated concept layers.
     """
-
-    def fit(
-        self,
-        train_dataset: ConceptDatasetSample,
-        valid_dataset: ConceptDatasetSample,
-        freeze: bool = True,
-        embed_params: Optional[dict] = None,
-        fit_params: Optional[dict] = None,
-    ) -> None:
-        super().fit(train_dataset, valid_dataset, freeze, embed_params, fit_params)
-        self.concept_layers = nn.ModuleList(self.concept_layers)
 
     def predict(
         self,
@@ -154,16 +142,18 @@ class CalibratedConceptDetector(ConceptDetector):
     A concept detector with calibrated concept layers.
     """
 
+    DO_CALIBRATE = True
+
     def predict(
         self,
         dataset: ConceptDatasetSample,
-        emebed_params: Optional[dict] = None,
+        embed_params: Optional[dict] = None,
     ) -> np.ndarray:
         if self.concept_layers is None:
             raise RuntimeError("Model has not been fitted yet. Call fit() first.")
 
         embedded_dataset = (
-            dataset.embed(self.embedding_model, **(emebed_params or {}))
+            dataset.embed(self.embedding_model, **(embed_params or {}))
             if self.embedding_model
             else dataset
         )
