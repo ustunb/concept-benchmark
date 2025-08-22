@@ -382,9 +382,9 @@ class ConceptDatasetSample(Dataset):
         if isinstance(x, np.ndarray):
             x = x.astype(np.float32)
         if isinstance(c, np.ndarray):
-            c = c.astype(np.int64)
+            c = c.astype(np.float32)
         if isinstance(y, (np.ndarray, np.integer)):
-            y = y.astype(np.int64)
+            y = y.astype(np.float32)
 
         return x, c, y
 
@@ -537,3 +537,23 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
 
     def __repr__(self):
         return f"ConceptImageDatasetSample<n={self.n}, n_concepts={self.n_concepts}, n_classes={self.n_classes}, data_type={self.meta.get('data_type')}, base_dir={self.base_dir}>"
+
+    def filter(self, indices):
+        assert isinstance(indices, np.ndarray)
+        assert indices.ndim == 1 and indices.shape[0] == self.n
+        assert np.isin(indices, (0, 1)).all()
+        return self.__class__(
+            parent=self.parent,
+            X=self.X[indices],
+            C=self.C[indices],
+            y=self.y[indices],
+            meta=self.meta,
+            indices=indices,
+            transform_x=self.transform_x,
+            transform_c=self.transform_c,
+            transform_y=self.transform_y,
+            base_dir=self.base_dir,
+            preprocess=self.preprocess,
+        )
+
+        

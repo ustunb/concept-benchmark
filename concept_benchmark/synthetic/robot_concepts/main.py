@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import torch
 import numpy as np
-from catalog import generate_robot_catalog, RobotDistribution
-from concept_detector import RobotConceptViT, RobotConceptTrainer
+from PIL import Image
+
+from .catalog import generate_robot_catalog, RobotDistribution
+from .concept_detector import RobotConceptViT, RobotConceptTrainer
 from concept_benchmark.data import ConceptDataset
-from utils import unlist0, model_to_logistic
-from transformers import ViTImageProcessor
+from .utils import unlist0, model_to_logistic
+from transformers import ViTImageProcessor, AutoImageProcessor
 from pathlib import Path
 from scipy.special import expit
 

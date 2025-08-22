@@ -118,16 +118,16 @@ class ClassicalConceptDetector(ConceptDetector):
         train_dataset: ConceptDatasetSample,
         valid_dataset: ConceptDatasetSample,
         freeze: bool = True,
-        emebed_params: Optional[dict] = None,
+        embed_params: Optional[dict] = None,
         fit_params: Optional[dict] = None,
     ) -> None:
-        super().fit(train_dataset, valid_dataset, freeze, emebed_params, fit_params)
+        super().fit(train_dataset, valid_dataset, freeze, embed_params, fit_params)
         self.concept_layers = nn.ModuleList(self.concept_layers)
 
     def predict(
         self,
         dataset: ConceptDatasetSample,
-        emebed_params: Optional[dict] = None,
+        embed_params: Optional[dict] = None,
     ) -> np.ndarray:
         if self.concept_layers is None:
             raise RuntimeError(

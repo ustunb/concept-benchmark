@@ -3,11 +3,12 @@ This file contains classes to characterize a Robot and its distinct features
 """
 import numpy as np
 import pero
-import paths
 from dataclasses import dataclass, field
 from typing import List, Dict
 from itertools import product
-from utils import generate_color_schemes
+
+from .utils import generate_color_schemes
+from . import paths
 
 #from itertools import combinations_with_replacement as cwr
 #COLOR_LIST = [c.name for c in pero.colors]

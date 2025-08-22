@@ -4,7 +4,6 @@ This file contains helper functions that we use throughout the project
 import os
 import dill
 import re
-import paths
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -12,6 +11,7 @@ from itertools import product, combinations
 from itertools import chain, repeat, islice
 from colorir import StackPalette, simplified_dist as colordist
 from pero import Color
+from . import paths
 
 # general helper functions
 def split_into_chunks(iterable, n, pad_value = None):
