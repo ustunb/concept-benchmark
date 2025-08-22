@@ -3,6 +3,7 @@ from typing import Optional
 import numpy as np
 import torch
 from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.frozen import FrozenEstimator
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import f1_score
 from torch import nn
@@ -47,7 +48,7 @@ class TorchSKLearnWrapper(BaseEstimator, ClassifierMixin):
         return (self.predict_proba(X)[:, 1] > 0.5).astype(int)
 
 
-def train_joint_concept_layers(
+def train_concept_heads(
     train_dataset: ConceptDatasetSample,
     valid_dataset: ConceptDatasetSample,
     embedding_model: Optional[nn.Module],
@@ -58,10 +59,10 @@ def train_joint_concept_layers(
     fit_params: Optional[dict] = None,
 ) -> nn.ModuleList:
     """
-    Jointly train per-concept heads with optional finetuning of the embedding model.
+    Train per-concept heads with optional finetuning of the embedding model.
 
     - If `freeze=True`, only head parameters are updated; the embedding model runs in eval mode.
-    - If `freeze=False`, both embedding model and heads are optimized with separate LRs.
+    - If `freeze=False` and an embedding model is provided, both embedding model and heads are optimized with separate LRs (joint training).
     - Loss: mean BCEWithLogits across concepts.
     - Early stopping based on mean validation F1.
 
@@ -267,7 +268,7 @@ def calibrate_trained_heads(
     for i, head in enumerate(heads):
         wrapper = TorchSKLearnWrapper(head)
         wrapper.fit(train_dataset_emb.X, train_dataset_emb.C[:, i])
-        calibrated = CalibratedClassifierCV(wrapper, method="sigmoid", cv="prefit")
+        calibrated = CalibratedClassifierCV(FrozenEstimator(wrapper), method="sigmoid")
         calibrated.fit(valid_dataset_emb.X, valid_dataset_emb.C[:, i])
         calibrated_layers.append(calibrated)
     return calibrated_layers
