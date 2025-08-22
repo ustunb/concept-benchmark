@@ -14,14 +14,14 @@ def test_len_repr_getitem_dtypes(tab_small):
     x, c, y = sample[0]
 
     assert isinstance(x, np.ndarray) and x.dtype == np.float32
-    assert isinstance(c, np.ndarray) and c.dtype == np.int64
-    assert isinstance(y, np.integer) and y.dtype == np.int64
+    assert isinstance(c, np.ndarray) and c.dtype == np.float32
+    assert isinstance(y, np.float32)
 
     idx = [0, 2, 4]
     x, c, y = sample[idx]
     assert isinstance(x, np.ndarray) and x.dtype == np.float32
-    assert isinstance(c, np.ndarray) and c.dtype == np.int64
-    assert isinstance(y, np.ndarray) and y.dtype == np.int64
+    assert isinstance(c, np.ndarray) and c.dtype == np.float32
+    assert isinstance(y, np.ndarray) and y.dtype == np.float32
     assert x.shape[0] == c.shape[0] == y.shape[0] == len(idx)
 
 
@@ -57,8 +57,8 @@ def test_loader_shapes_and_dtypes(tab_small):
     x, c, y = next(iter(loader))
     # Collate converts numpy arrays to tensors
     assert isinstance(x, torch.Tensor) and x.dtype == torch.float32
-    assert isinstance(c, torch.Tensor) and c.dtype == torch.int64
-    assert isinstance(y, torch.Tensor) and y.dtype == torch.int64
+    assert isinstance(c, torch.Tensor) and c.dtype == torch.float32
+    assert isinstance(y, torch.Tensor) and y.dtype == torch.float32
     assert x.shape[0] == c.shape[0] == y.shape[0] == 4
     assert x.ndim == 2 and c.ndim == 2 and y.ndim == 1
 
