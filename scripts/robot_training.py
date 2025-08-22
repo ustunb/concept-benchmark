@@ -66,10 +66,13 @@ tf = transforms.Compose(
     ]
 )
 
+n = robot_data.X.shape[0]
+sample_indices = torch.randperm(n)[:100]
+
 data = ConceptDataset(
-    X=robot_data.X,
-    C=robot_data.C,
-    y=robot_data.y,
+    X=robot_data.X[sample_indices],
+    C=robot_data.C[sample_indices],
+    y=robot_data.y[sample_indices],
     meta={
         "data_type": "image",
         "concepts": robot_data.meta["concepts"],
@@ -95,7 +98,19 @@ class ViTWrapper(torch.nn.Module):
         return outputs.last_hidden_state[:, 0, :]  # Use the CLS token representation
 
 
-embeded_data = data.embed(model=ViTWrapper(vit), device="mps")
+# embeded_data = data.embed(model=ViTWrapper(vit), device="mps")
 
-model = ClassicalConceptDetector()
-model.fit(data.training, data.validation)
+model = ClassicalConceptDetector(
+    embedding_model=ViTWrapper(vit),
+)
+model.fit(
+    data.training,
+    data.validation, 
+    freeze=True, 
+    embed_params={"device": "mps"},
+    fit_params={"epochs": 10, "device": "cpu"}
+)
+
+c_pred = model.predict(data.test, embed_params={"device": "mps"}) > 0.5
+accuracy = (c_pred == data.test.C)
+accuracy_per_concept = accuracy.sum(axis=0) / accuracy.shape[0]
