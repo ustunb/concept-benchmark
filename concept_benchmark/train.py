@@ -268,7 +268,16 @@ def calibrate_trained_heads(
     for i, head in enumerate(heads):
         wrapper = TorchSKLearnWrapper(head)
         wrapper.fit(train_dataset_emb.X, train_dataset_emb.C[:, i])
-        calibrated = CalibratedClassifierCV(FrozenEstimator(wrapper), method="sigmoid")
+        # Choose cv based on class balance in validation labels to avoid warnings
+        y_valid = valid_dataset_emb.C[:, i]
+        n_pos = int(np.sum(y_valid))
+        n_neg = int(y_valid.shape[0] - n_pos)
+        min_class = max(0, min(n_pos, n_neg))
+        cv_splits = max(2, min(5, min_class))  # ensure at least 2, at most 5
+
+        calibrated = CalibratedClassifierCV(
+            FrozenEstimator(wrapper), method="sigmoid", cv=cv_splits
+        )
         calibrated.fit(valid_dataset_emb.X, valid_dataset_emb.C[:, i])
         calibrated_layers.append(calibrated)
     return calibrated_layers
