@@ -528,21 +528,36 @@ requires-dist = [
     { name = "dill", specifier = ">=0.3.8" },
     { name = "fastparquet", specifier = ">=2024.11.0" },
     { name = "gitpython", specifier = ">=3.1.45" },
+<<<<<<< HEAD
     { name = "matplotlib", specifier = ">=3.10.3" },
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "pandas", specifier = ">=2.3.1" },
+=======
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "pandas" },
+>>>>>>> 57e1fd0 (fix: generated uv lockfile)
     { name = "pero", specifier = ">=0.18.0" },
     { name = "pillow", specifier = ">=11.3.0" },
     { name = "psutil", specifier = ">=7.0.0" },
     { name = "pyarrow", specifier = ">=21.0.0" },
     { name = "pycairo", specifier = ">=1.28.0" },
+<<<<<<< HEAD
     { name = "scikit-learn", specifier = ">=1.7.0" },
     { name = "scipy", specifier = ">=1.15.3" },
+=======
+    { name = "scikit-learn" },
+    { name = "scipy" },
+>>>>>>> 57e1fd0 (fix: generated uv lockfile)
     { name = "skorch", specifier = ">=1.2.0" },
     { name = "torch", specifier = ">=2.7.1" },
     { name = "torcheval", specifier = ">=0.0.7" },
     { name = "torchvision", specifier = ">=0.23.0" },
+<<<<<<< HEAD
     { name = "tqdm", specifier = ">=4.67.1" },
+=======
+    { name = "tqdm" },
+>>>>>>> 57e1fd0 (fix: generated uv lockfile)
     { name = "transformers", specifier = ">=4.55.2" },
 ]
 
