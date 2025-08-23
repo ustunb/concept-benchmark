@@ -54,4 +54,5 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 filterwarnings = [
     "ignore::DeprecationWarning",
+    "ignore::sklearn.exceptions.UndefinedMetricWarning",
 ]

@@ -3,25 +3,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from concept_benchmark.data import ConceptDatasetSample
 from concept_benchmark.train import (
     train_concept_heads,
 )
-
-
-def _make_tabular_samples(n=32, d=8, k=2):
-    rng = np.random.default_rng(0)
-    X = rng.normal(size=(n, d)).astype(np.float32)
-    W = rng.normal(size=(d, k)).astype(np.float32)
-    logits = X @ W
-    C = (1 / (1 + np.exp(-logits)) > 0.5).astype(np.int8)
-    y = rng.integers(0, 2, size=n).astype(np.int32)
-    meta = {"classes": ["a", "b"], "concepts": [f"c{i}" for i in range(k)], "data_type": "tabular"}
-    ds = ConceptDatasetSample(X=X, C=C, y=y, meta=meta)
-    # simple split
-    train = ConceptDatasetSample(X=X[:24], C=C[:24], y=y[:24], meta=meta)
-    valid = ConceptDatasetSample(X=X[24:], C=C[24:], y=y[24:], meta=meta)
-    return train, valid, d, k
 
 
 def _any_state_diff(state_a, state_b):
@@ -34,8 +18,8 @@ def _any_state_diff(state_a, state_b):
     return False
 
 
-def test_train_heads_no_encoder_builds_heads_architecture():
-    train, valid, d, k = _make_tabular_samples()
+def test_train_heads_no_encoder_builds_heads_architecture(tabular_train_valid):
+    train, valid, d, k = tabular_train_valid
     heads = train_concept_heads(
         train_dataset=train,
         valid_dataset=valid,
@@ -54,8 +38,8 @@ def test_train_heads_no_encoder_builds_heads_architecture():
     assert first[-1].out_features == 1
 
 
-def test_train_heads_with_encoder_freeze_true_keeps_encoder_constant():
-    train, valid, d, k = _make_tabular_samples()
+def test_train_heads_with_encoder_freeze_true_keeps_encoder_constant(tabular_train_valid):
+    train, valid, d, k = tabular_train_valid
     enc = nn.Linear(d, 6)
     before = copy.deepcopy(enc.state_dict())
     heads = train_concept_heads(
@@ -72,8 +56,8 @@ def test_train_heads_with_encoder_freeze_true_keeps_encoder_constant():
     assert heads[0][0].in_features == 6
 
 
-def test_train_heads_with_encoder_finetunes_encoder_changes():
-    train, valid, d, k = _make_tabular_samples()
+def test_train_heads_with_encoder_finetunes_encoder_changes(tabular_train_valid):
+    train, valid, d, k = tabular_train_valid
     enc = nn.Linear(d, 6)
     before = copy.deepcopy(enc.state_dict())
     _ = train_concept_heads(
