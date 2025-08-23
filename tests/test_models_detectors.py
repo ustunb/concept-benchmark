@@ -3,23 +3,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from concept_benchmark.data import ConceptDatasetSample
 from concept_benchmark.models import ConceptDetector
 
 
-def _make_tabular_samples(n=32, d=8, k=2):
-    rng = np.random.default_rng(0)
-    X = rng.normal(size=(n, d)).astype(np.float32)
-    W = rng.normal(size=(d, k)).astype(np.float32)
-    logits = X @ W
-    C = (1 / (1 + np.exp(-logits)) > 0.5).astype(np.int8)
-    y = rng.integers(0, 2, size=n).astype(np.int32)
-    meta = {"classes": ["a", "b"], "concepts": [f"c{i}" for i in range(k)], "data_type": "tabular"}
-    ds = ConceptDatasetSample(X=X, C=C, y=y, meta=meta)
-    # split
-    train = ConceptDatasetSample(X=X[:24], C=C[:24], y=y[:24], meta=meta)
-    valid = ConceptDatasetSample(X=X[24:], C=C[24:], y=y[24:], meta=meta)
-    return train, valid, d, k
+import pytest
 
 
 def _proba_checks(arr: np.ndarray, n: int, k: int):
@@ -38,8 +25,8 @@ def _any_state_diff(state_a, state_b):
     return False
 
 
-def test_detector_fit_predict_no_encoder():
-    train, valid, d, k = _make_tabular_samples()
+def test_detector_fit_predict_no_encoder(tabular_train_valid):
+    train, valid, d, k = tabular_train_valid
     det = ConceptDetector(embedding_model=None)
     det.fit(train, valid, freeze=True, fit_params={"epochs": 1, "device": "cpu", "batch_size": 16})
     assert isinstance(det.concept_layers, nn.ModuleList)
@@ -48,8 +35,8 @@ def test_detector_fit_predict_no_encoder():
     _proba_checks(pr, len(valid), k)
 
 
-def test_detector_fit_predict_with_encoder_freeze_variants():
-    train, valid, d, k = _make_tabular_samples()
+def test_detector_fit_predict_with_encoder_freeze_variants(tabular_train_valid):
+    train, valid, d, k = tabular_train_valid
     enc = nn.Linear(d, 6)
     # freeze=True keeps encoder unchanged
     det_frozen = ConceptDetector(embedding_model=copy.deepcopy(enc))
@@ -75,8 +62,8 @@ def test_detector_fit_predict_with_encoder_freeze_variants():
     _proba_checks(pr, len(valid), k)
 
 
-def test_detector_calibration_with_encoder_finetune():
-    train, valid, d, k = _make_tabular_samples()
+def test_detector_calibration_with_encoder_finetune(tabular_train_valid):
+    train, valid, d, k = tabular_train_valid
     det = ConceptDetector(embedding_model=nn.Linear(d, 6))
     det.fit(
         train,
@@ -96,18 +83,17 @@ def test_detector_calibration_with_encoder_finetune():
     assert not np.allclose(pr, pr_uncal)
 
 
-def test_detector_predict_raises_when_calibrate_requested_but_not_fitted():
-    train, valid, d, k = _make_tabular_samples()
+def test_detector_predict_raises_when_calibrate_requested_but_not_fitted(tabular_train_valid):
+    train, valid, d, k = tabular_train_valid
     det = ConceptDetector(embedding_model=None)
     det.fit(train, valid, freeze=True, fit_params={"epochs": 1, "device": "cpu"})
     # Calibration requested but not fitted should raise
-    import pytest
     with pytest.raises(RuntimeError):
         det.predict(valid, calibrate=True)
 
 
-def test_detector_calibrate_after_fit_changes_predictions():
-    train, valid, d, k = _make_tabular_samples()
+def test_detector_calibrate_after_fit_changes_predictions(tabular_train_valid):
+    train, valid, d, k = tabular_train_valid
     det = ConceptDetector(embedding_model=nn.Linear(d, 6))
     # Fit without calibration
     det.fit(
