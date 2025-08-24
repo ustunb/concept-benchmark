@@ -209,6 +209,7 @@ def generate_robot_catalog(params, drop_irrelevant=True):
 
     for k, features in init_catalog_df.iterrows():
         png_filename = f"robot_{k:03d}.png"
+        color_lefts, color_rights = [], []
 
         png_file = output_path / png_filename
 
@@ -228,8 +229,19 @@ def generate_robot_catalog(params, drop_irrelevant=True):
                 convert_to_grayscale(str(png_file))
 
         png_filenames.append(png_filename)
+        color_scheme_id = np.mod(
+            features["color_scheme"], len(COLOR_SCHEMES)
+        )
+        color_left, color_right = COLOR_SCHEMES[color_scheme_id]
+        color_lefts.append(color_left)
+        color_rights.append(color_right)
 
     # Add filename columns
     catalog_df["png_filename"] = png_filenames
+
+    # Add color columns
+    catalog_df["color_left"] = color_lefts
+    catalog_df["color_right"] = color_rights
+
 
     return catalog_df
