@@ -24,7 +24,7 @@ ALL_ROBOT_FEATURES = {
     "body_shape": ("square", "round"),  # no subtypes (could add)
     "head_shape": ("square", "round"),  # no subtypes (could add)
     #
-    #'has_elbows': ('true', 'false'),  # all round
+    'has_elbows': ('true', 'false'),  # all round
     "has_knees": ("true", "false"),
     "has_antennae": ["false", "true"],
     "ears_shape": ("square", "triangle"),
