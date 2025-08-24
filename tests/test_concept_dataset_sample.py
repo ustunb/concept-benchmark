@@ -81,9 +81,9 @@ def test_transforms_applied_and_types_respected(tab_small):
         C=tab_small.C,
         y=tab_small.y,
         meta=tab_small._full.meta,
-        transform_x=tx,
-        transform_c=tc,
-        transform_y=ty,
+        transform=tx,
+        concept_transform=tc,
+        target_transform=ty,
     )
 
     x, c, y = s[0]

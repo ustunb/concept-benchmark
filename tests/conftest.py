@@ -90,9 +90,9 @@ def make_tabular_dataset(
     k: int,
     n_classes: int,
     *,
-    transform_x: Callable | None = None,
-    transform_c: Callable | None = None,
-    transform_y: Callable | None = None,
+    transform: Callable | None = None,
+    concept_transform: Callable | None = None,
+    target_transform: Callable | None = None,
     with_cv: bool = False,
     K: int = 5,
 ) -> Tuple[ConceptDataset, Dict[str, np.ndarray]]:
@@ -103,9 +103,9 @@ def make_tabular_dataset(
       d: Feature dim.
       k: Concept dim.
       n_classes: Number of classes.
-      transform_x: Optional feature transform.
-      transform_c: Optional concept transform.
-      transform_y: Optional label transform.
+      transform: Optional feature transform.
+      concept_transform: Optional concept transform.
+      target_transform: Optional label transform.
       with_cv: Whether to attach cvindices.
       K: Number of folds if with_cv.
 
@@ -124,9 +124,9 @@ def make_tabular_dataset(
         C=C,
         y=y,
         meta=meta,
-        transform_x=transform_x,
-        transform_c=transform_c,
-        transform_y=transform_y,
+        transform=transform,
+        concept_transform=concept_transform,
+        target_transform=target_transform,
         cvindices=cv or None,
     )
     return ds, cv
