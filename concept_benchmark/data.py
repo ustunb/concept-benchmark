@@ -23,6 +23,9 @@ class ConceptDataset(object):
         y: np.ndarray,
         meta: dict,
         cvindices: dict | None = None,
+        transform: Callable | None = None,
+        concept_transform: Callable | None = None,
+        target_transform: Callable | None = None,
         **kwargs,
     ) -> None:
         """ConceptDataset
@@ -38,11 +41,15 @@ class ConceptDataset(object):
                 - 'classes': List of class names (in order of labels in y).
                 - 'concepts': List of concept names (in order of columns in C).
                 - 'data_type': Type of data ('image', 'tabular', etc.).
-            **kwargs: Additional keyword arguments. \
-                 - 'transform_x': Transformation function for features.
-                 - 'transform_c': Transformation function for concepts.
-                 - 'transform_y': Transformation function for labels.
-                 - 'preprocess': Preprocessing function for image data.
+            cvindices (dict, optional): Cross-validation indices. \
+                Defaults to None.
+            transform (Callable, optional): Transformation function for features. \
+                Defaults to None.
+            concept_transform (Callable, optional): Transformation function for concepts. \
+                Defaults to None.
+            target_transform (Callable, optional): Transformation function for labels. \
+                Defaults to None.
+            **kwargs: Additional keyword arguments.
         """
         self._init_kwargs = dict(kwargs)
 
@@ -57,7 +64,16 @@ class ConceptDataset(object):
             C = C.astype(np.int8)
             y = y.astype(np.int32)
 
-        self._full = SampleClass(parent=self, X=X, C=C, y=y, meta=meta, **kwargs)
+        self._full = SampleClass(
+            parent=self, 
+            X=X, 
+            C=C, 
+            y=y, 
+            meta=meta, 
+            transform=transform,
+            concept_transform=concept_transform,
+            target_transform=target_transform,
+            **kwargs)
 
         self._cvindices = cvindices
         self.reset()
@@ -178,6 +194,34 @@ class ConceptDataset(object):
     def y(self):
         """label vector"""
         return self._full.y
+
+    @property
+    def meta(self):
+        return self._full.meta
+    
+    @property
+    def transform(self):
+        return self._full.transform
+
+    @property
+    def concept_transform(self):
+        return self._full.concept_transform
+    
+    @property
+    def target_transform(self):
+        return self._full.target_transform
+    
+    @transform.setter
+    def transform(self, transform):
+        self._full.transform = transform
+
+    @concept_transform.setter
+    def concept_transform(self, concept_transform):
+        self._full.concept_transform = concept_transform
+        
+    @target_transform.setter
+    def target_transform(self, target_transform):
+        self._full.target_transform = target_transform
 
     #### cross validation ####
     @property
@@ -326,9 +370,9 @@ class ConceptDatasetSample(Dataset):
     meta: dict
     parent: "ConceptDataset" = None
     indices: np.ndarray = None
-    transform_x: Callable | None = None
-    transform_c: Callable | None = None
-    transform_y: Callable | None = None
+    transform: Callable | None = None
+    concept_transform: Callable | None = None
+    target_transform: Callable | None = None
 
     def __post_init__(self):
         assert {"classes", "concepts", "data_type"}.issubset(self.meta.keys()), (
@@ -357,9 +401,9 @@ class ConceptDatasetSample(Dataset):
             and np.array_equal(self.X, other.X)
             and np.array_equal(self.C, other.C)
             and (self.meta == other.meta)
-            and (self.transform_x == other.transform_x)
-            and (self.transform_c == other.transform_c)
-            and (self.transform_y == other.transform_y)
+            and (self.transform == other.transform)
+            and (self.concept_transform == other.concept_transform)
+            and (self.target_transform == other.target_transform)
         )
         return chk
 
@@ -372,12 +416,12 @@ class ConceptDatasetSample(Dataset):
         c = self.C[idx]
         y = self.y[idx]
 
-        if self.transform_x is not None:
-            x = self.transform_x(x)
-        if self.transform_c is not None:
-            c = self.transform_c(c)
-        if self.transform_y is not None:
-            y = self.transform_y(y)
+        if self.transform is not None:
+            x = self.transform(x)
+        if self.concept_transform is not None:
+            c = self.concept_transform(c)
+        if self.target_transform is not None:
+            y = self.target_transform(y)
 
         if isinstance(x, np.ndarray):
             x = x.astype(np.float32)
@@ -412,9 +456,9 @@ class ConceptDatasetSample(Dataset):
             y=self.y[indices],
             meta=self.meta,
             indices=indices,
-            transform_x=self.transform_x,
-            transform_c=self.transform_c,
-            transform_y=self.transform_y,
+            transform=self.transform,
+            concept_transform=self.concept_transform,
+            target_transform=self.target_transform,
         )
 
     def loader(self, batch_size=32, shuffle=False, **kwargs) -> DataLoader:
@@ -494,7 +538,6 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
     """
 
     base_dir: Path = field(default_factory=lambda: Path("."))
-    preprocess: Callable | None = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -509,10 +552,8 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             img_path = self.base_dir / img_path
         try:
             image = Image.open(img_path).convert("RGB")
-            if self.preprocess:
-                image = self.preprocess(image)
-            if self.transform_x is not None:
-                image = self.transform_x(image)
+            if self.transform is not None:
+                image = self.transform(image)
         except (AttributeError, FileNotFoundError, OSError) as e:
             warnings.warn(f"{e}; cannot open image, returning path", RuntimeWarning)
             image = img_path
@@ -520,10 +561,10 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         c = torch.from_numpy(np.array(c, dtype=np.int64))
         y = torch.from_numpy(np.array(y, dtype=np.int64))
 
-        if self.transform_c is not None:
-            c = self.transform_c(c)
-        if self.transform_y is not None:
-            y = self.transform_y(y)
+        if self.concept_transform is not None:
+            c = self.concept_transform(c)
+        if self.target_transform is not None:
+            y = self.target_transform(y)
 
         return image, c, y
 
@@ -531,7 +572,6 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         chk = (
             super().__eq__(other)
             and (self.base_dir == other.base_dir)
-            and (self.preprocess == other.preprocess)
         )
         return chk
 
@@ -549,11 +589,10 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             y=self.y[indices],
             meta=self.meta,
             indices=indices,
-            transform_x=self.transform_x,
-            transform_c=self.transform_c,
-            transform_y=self.transform_y,
+            transform=self.transform,
+            concept_transform=self.concept_transform,
+            target_transform=self.target_transform,
             base_dir=self.base_dir,
-            preprocess=self.preprocess,
         )
 
         

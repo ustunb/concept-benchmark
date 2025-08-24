@@ -96,7 +96,6 @@ def create_synthetic_dataset(**kwargs):
         y=y,
         meta=meta,
         base_dir=results_dir / "robots",
-        transform_x=None,
     )
 
     return robot_dataset

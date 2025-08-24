@@ -2,10 +2,15 @@ import torch
 from torchvision import transforms
 from transformers import ViTModel
 
-from concept_benchmark.data import ConceptDataset
-from concept_benchmark.models import ClassicalConceptDetector
+from concept_benchmark.models import ConceptDetector
 from concept_benchmark.paths import results_dir
-from concept_benchmark.synthetic.robot_concepts.main import create_synthetic_dataset
+from concept_benchmark.synthetic.robot import create_synthetic_dataset
+
+device = torch.device(
+    "cuda" if torch.cuda.is_available() \
+        else ("mps" if torch.backends.mps.is_available() 
+              else "cpu")
+)
 
 params = {
     "samples_per_instance": 1,  # how many times to repeat each robot with changed colors (irrelavant feature); max 108
@@ -49,10 +54,6 @@ params = {
     "verbose": True,
 }
 
-
-robot_data = create_synthetic_dataset(**params)
-
-
 IMG_SIZE = 224  # use 384 if you switch to a 384 ViT
 
 tf = transforms.Compose(
@@ -66,51 +67,35 @@ tf = transforms.Compose(
     ]
 )
 
-n = robot_data.X.shape[0]
-sample_indices = torch.randperm(n)[:100]
-
-data = ConceptDataset(
-    X=robot_data.X[sample_indices],
-    C=robot_data.C[sample_indices],
-    y=robot_data.y[sample_indices],
-    meta={
-        "data_type": "image",
-        "concepts": robot_data.meta["concepts"],
-        "classes": robot_data.meta["classes"],
-    },
-    base_dir=results_dir / "robots",
-    transform_x=tf,
-)
+data = create_synthetic_dataset(**params)
+data.transform = tf
 
 data.generate_cvindices(seed=42)
 data.split("K05N01", fold_num_validation=4, fold_num_test=5)
 
-vit = ViTModel.from_pretrained("google/vit-base-patch16-224")
-
-
 class ViTWrapper(torch.nn.Module):
-    def __init__(self, vit_model):
+    def __init__(self, model=None):
         super(__class__, self).__init__()
-        self.vit = vit_model
+        self.vit = model if model else \
+            ViTModel.from_pretrained("google/vit-base-patch16-224")
 
     def forward(self, x):
         outputs = self.vit(pixel_values=x)
         return outputs.last_hidden_state[:, 0, :]  # Use the CLS token representation
 
 
-# embeded_data = data.embed(model=ViTWrapper(vit), device="mps")
-
-model = ClassicalConceptDetector(
-    embedding_model=ViTWrapper(vit),
+model = ConceptDetector(
+    embedding_model=ViTWrapper(),
 )
 model.fit(
     data.training,
     data.validation, 
     freeze=True, 
-    embed_params={"device": "mps"},
+    embed_params={"device": device},
     fit_params={"epochs": 10, "device": "cpu"}
 )
 
-c_pred = model.predict(data.test, embed_params={"device": "mps"}) > 0.5
+c_pred = model.predict(data.test, embed_params={"device": device}) > 0.5
 accuracy = (c_pred == data.test.C)
 accuracy_per_concept = accuracy.sum(axis=0) / accuracy.shape[0]
+print("Concept-wise accuracy:", accuracy_per_concept)
