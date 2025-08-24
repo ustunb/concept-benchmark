@@ -1,16 +1,78 @@
-from collections.abc import Callable
+import warnings
+from collections.abc import Callable, Mapping, Set
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
-import warnings
 from PIL import Image
-from torch.utils.data import DataLoader
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from .cv import generate_cvindices, validate_cvindices
+
+
+def _deep_equal(a, b) -> bool:
+    """Type-aware deep equality for nested structures and array-like values.
+
+    Handles dicts/lists/tuples/sets, numpy arrays/scalars, pandas objects,
+    torch tensors, Paths, and falls back to safe equality (including
+    array-like results via .all()).
+    """
+    if a is b:
+        return True
+    if isinstance(a, Mapping) and isinstance(b, Mapping):
+        if set(a.keys()) != set(b.keys()):
+            return False
+        return all(_deep_equal(a[k], b[k]) for k in a.keys())
+
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        if len(a) != len(b):
+            return False
+        return all(_deep_equal(x, y) for x, y in zip(a, b))
+
+    if isinstance(a, Set) and isinstance(b, Set):
+        try:
+            return a == b
+        except Exception:
+            return sorted(map(repr, a)) == sorted(map(repr, b))
+
+    if isinstance(a, np.ndarray) and isinstance(b, np.ndarray):
+        return np.array_equal(a, b)
+    if isinstance(a, np.generic) and isinstance(b, np.generic):
+        return bool(a == b)
+
+    if isinstance(a, (pd.DataFrame, pd.Series, pd.Index)) and isinstance(
+        b, (pd.DataFrame, pd.Series, pd.Index)
+    ):
+        return a.equals(b)
+
+    if isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor):
+        return torch.equal(a, b)
+
+    if isinstance(a, Path) and isinstance(b, Path):
+        try:
+            return a.resolve() == b.resolve()
+        except Exception:
+            return str(a) == str(b)
+
+    if callable(a) or callable(b):
+        return a is b
+
+    try:
+        eq = a == b
+    except Exception:
+        return repr(a) == repr(b)
+    else:
+        if isinstance(eq, (bool, np.bool_)):
+            return bool(eq)
+        if hasattr(eq, "all"):
+            try:
+                return bool(eq.all())
+            except Exception:
+                pass
+        return repr(a) == repr(b)
 
 
 class ConceptDataset(object):
@@ -65,15 +127,16 @@ class ConceptDataset(object):
             y = y.astype(np.int32)
 
         self._full = SampleClass(
-            parent=self, 
-            X=X, 
-            C=C, 
-            y=y, 
-            meta=meta, 
+            parent=self,
+            X=X,
+            C=C,
+            y=y,
+            meta=meta,
             transform=transform,
             concept_transform=concept_transform,
             target_transform=target_transform,
-            **kwargs)
+            **kwargs,
+        )
 
         self._cvindices = cvindices
         self.reset()
@@ -94,6 +157,7 @@ class ConceptDataset(object):
         assert self.__check_rep__()
 
     #### built-ins ####
+
     def __check_rep__(self):
         # check complete dataset
         assert self._full.__check_rep__()
@@ -133,7 +197,6 @@ class ConceptDataset(object):
         chk = (
             (self._full == other._full)
             and _cv_equal(self.cvindices, other.cvindices)
-            and (self._full.meta == other._full.meta)
             and (self._fold_id == other._fold_id)
             and (self._fold_num_validation == other._fold_num_validation)
             and (self._fold_num_test == other._fold_num_test)
@@ -198,7 +261,7 @@ class ConceptDataset(object):
     @property
     def meta(self):
         return self._full.meta
-    
+
     @property
     def transform(self):
         return self._full.transform
@@ -206,11 +269,11 @@ class ConceptDataset(object):
     @property
     def concept_transform(self):
         return self._full.concept_transform
-    
+
     @property
     def target_transform(self):
         return self._full.target_transform
-    
+
     @transform.setter
     def transform(self, transform):
         self._full.transform = transform
@@ -218,7 +281,7 @@ class ConceptDataset(object):
     @concept_transform.setter
     def concept_transform(self, concept_transform):
         self._full.concept_transform = concept_transform
-        
+
     @target_transform.setter
     def target_transform(self, target_transform):
         self._full.target_transform = target_transform
@@ -338,7 +401,6 @@ class ConceptDataset(object):
         )
         self.cvindices = indices
 
-    # TODO: test
     def embed(self, model, batch_size=32, shuffle=False, device="cpu", **kwargs):
         """
         Embed the dataset using a given model.
@@ -395,17 +457,25 @@ class ConceptDatasetSample(Dataset):
         return self.n
 
     def __eq__(self, other):
-        chk = (
-            isinstance(other, ConceptDatasetSample)
-            and np.array_equal(self.y, other.y)
-            and np.array_equal(self.X, other.X)
-            and np.array_equal(self.C, other.C)
-            and (self.meta == other.meta)
-            and (self.transform == other.transform)
-            and (self.concept_transform == other.concept_transform)
-            and (self.target_transform == other.target_transform)
-        )
-        return chk
+        if not isinstance(other, ConceptDatasetSample):
+            return False
+        if not np.array_equal(self.y, other.y):
+            return False
+        if not np.array_equal(self.X, other.X):
+            return False
+        if not np.array_equal(self.C, other.C):
+            return False
+        # Use parent's deep comparator for meta
+        if not _deep_equal(self.meta, other.meta):
+            return False
+        # Compare transforms by identity to avoid ambiguous equality
+        if self.transform is not other.transform:
+            return False
+        if self.concept_transform is not other.concept_transform:
+            return False
+        if self.target_transform is not other.target_transform:
+            return False
+        return True
 
     def __check_rep__(self):
         """returns True is object satisfies representation invariants"""
@@ -569,10 +639,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         return image, c, y
 
     def __eq__(self, other):
-        chk = (
-            super().__eq__(other)
-            and (self.base_dir == other.base_dir)
-        )
+        chk = super().__eq__(other) and (self.base_dir == other.base_dir)
         return chk
 
     def __repr__(self):
@@ -594,5 +661,3 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             target_transform=self.target_transform,
             base_dir=self.base_dir,
         )
-
-        
