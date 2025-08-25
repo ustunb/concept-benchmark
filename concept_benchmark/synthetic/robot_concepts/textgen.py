@@ -103,7 +103,6 @@ DEFAULT_TEMPLATES = [
     "Robot ({color_mode}): head={head_shape}, body={body_shape}, elbows={has_elbows_bool}, knees={has_knees_bool}, feet={foot_shape}.",
 ]
 
-
 def create_robot_text_dataset(source, templates: Sequence[str] | None = None, variants_per_row: int = 3, include_color: bool = True, rng_seed: int = 0, head_col: str = "head_shape", body_col: str = "body_shape", knees_col: str = "has_knees", elbows_col: str = "has_elbows", foot_col: str = "foot_shape", color_mode_col: str = "color_mode", concept_cols: Iterable[str] | None = None, label_col: str | None = None, label_map: dict | None = None, drop_unknown: bool = True, text_mode: str | None = None, use_llm: bool = False, llm_provider: str = "gemini", llm_model: str = "gemini-1.5-flash", llm_api_key: str | None = None, llm_system: str | None = None, llm_user_prompt: str | None = None) -> ConceptDataset:
     if templates is None or text_mode == "structured":
         templates = DEFAULT_TEMPLATES
