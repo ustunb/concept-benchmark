@@ -1,6 +1,10 @@
+# concept_benchmark/data.py
+
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from typing import Optional
 
 import numpy as np
 import torch
@@ -22,7 +26,7 @@ class ConceptDataset(object):
         C: np.ndarray,
         y: np.ndarray,
         meta: dict,
-        cvindices: dict | None = None,
+        cvindices: Optional[dict] = None,
         **kwargs,
     ) -> None:
         """ConceptDataset
@@ -46,19 +50,26 @@ class ConceptDataset(object):
         """
         self._init_kwargs = dict(kwargs)
 
-        if meta.get("data_type") == "image":
+        data_type = meta.get("data_type")
+
+        if data_type == "image":
             SampleClass = ConceptImageDatasetSample
-            # do not cast X
             C = C.astype(np.int8)
             y = y.astype(np.int32)
+
+        elif data_type == "text":
+            SampleClass = ConceptDatasetSample
+            X = np.asarray(X, dtype=object)
+            C = C.astype(np.int8)
+            y = y.astype(np.int32)
+
         else:
             SampleClass = ConceptDatasetSample
-            X = X.astype(np.float32)
+            X = np.asarray(X).astype(np.float32)
             C = C.astype(np.int8)
             y = y.astype(np.int32)
 
         self._full = SampleClass(parent=self, X=X, C=C, y=y, meta=meta, **kwargs)
-
 
         self._cvindices = cvindices
         self.reset()
@@ -160,11 +171,11 @@ class ConceptDataset(object):
 
     @property
     def n_concepts(self):
-        return self._full.n_concepts
+        return len(self._full.concepts)
 
     @property
     def n_classes(self):
-        return self._full.n_classes
+        return len(self._full.classes)
 
     @property
     def X(self):
@@ -327,9 +338,9 @@ class ConceptDatasetSample(Dataset):
     meta: dict
     parent: "ConceptDataset" = None
     indices: np.ndarray = None
-    transform_x: Callable | None = None
-    transform_c: Callable | None = None
-    transform_y: Callable | None = None
+    transform_x: Optional[Callable] = None
+    transform_c: Optional[Callable] = None
+    transform_y: Optional[Callable] = None
 
     def __post_init__(self):
         assert {"classes", "concepts", "data_type"}.issubset(self.meta.keys()), (
@@ -495,7 +506,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
     """
 
     base_dir: Path = field(default_factory=lambda: Path("."))
-    preprocess: Callable | None = None
+    preprocess: Optional[Callable] = None
 
     def __post_init__(self):
         super().__post_init__()

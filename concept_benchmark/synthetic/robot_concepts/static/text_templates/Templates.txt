@@ -36,7 +36,7 @@ Head {head_shape}, knees {has_knees}, and mouth {mouth_type}.
 Antennae {has_antennae}, but it does have {has_knees} knees.
 It’s {color} overall, and the ears are {ears_shape} with a {mouth_type} mouth.
 Pretty sure the head is {head_shape} and the feet are {foot_shape}.
-It has {has_elbows} elbows but knees {has_knees}.
+It has {has_elbows} elbows but {has_knees}.
 Hands are {hand_shape}, ears {ears_shape}, and the body seems {body_shape}.
 Kinda {head_shape~syn} up top and {body_shape~syn} through the body. Hands are {hand_shape~syn}, feet {foot_shape~syn}, color {color}.
 Looks {color} overall, with a {head_shape} head; the body’s more {body_shape} and the ears are {ears_shape}.

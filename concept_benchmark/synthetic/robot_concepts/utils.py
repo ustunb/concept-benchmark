@@ -4,7 +4,8 @@ This file contains helper functions that we use throughout the project
 import os
 import dill
 import re
-import paths
+# import paths
+from . import paths
 import numpy as np
 import pandas as pd
 from pathlib import Path

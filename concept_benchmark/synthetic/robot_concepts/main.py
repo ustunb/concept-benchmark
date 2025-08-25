@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import torch
 import numpy as np
-from catalog import generate_robot_catalog, RobotDistribution
-from concept_detector import RobotConceptViT, RobotConceptTrainer
+from .catalog import generate_robot_catalog, RobotDistribution
+from .concept_detector import RobotConceptViT, RobotConceptTrainer
 from concept_benchmark.data import ConceptDataset
-from utils import unlist0, model_to_logistic
+from .utils import unlist0, model_to_logistic
 from transformers import ViTImageProcessor
 from pathlib import Path
 from scipy.special import expit
@@ -14,6 +14,9 @@ from scipy.special import expit
 if torch.backends.mps.is_available():
     device = torch.device("mps")
     print("Using MPS (Apple Silicon GPU)")
+elif torch.cuda.is_available():
+    device = torch.device("cuda")
+    print("Using CUDA (NVIDIA GPU)")
 else:
     device = torch.device("cpu")
     print("Using CPU")
@@ -204,7 +207,7 @@ if __name__ == '__main__':
                            'pointy_3sided', 'pointy_4sided', 'pointy_6sided'],
         },
         'spurious_features': ['has_elbows'],
-        'model': "'glorp' if (int(row['body_shape']=='square') + int(row['foot_shape']=='pointy') - 2 >= 0) else 'drent'",
+        'model': "'glorp' if (int(row['body_shape']=='square') + int(row['foot_shape'].startswith('pointy_')) - 2 >= 0) else 'drent'",
         'model_type': 'stochastic',  # 'deterministic', 'stochastic'
         'size': 'large', # 'small', 'large'
         'color_mode': 'color',  # 'greyscale', 'color'

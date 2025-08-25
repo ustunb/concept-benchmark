@@ -5,9 +5,9 @@ import copy
 
 import numpy as np
 import pandas as pd
-from robots import ALL_ROBOT_FEATURES, COLOR_SCHEMES, ROBOT_TYPES
-from dataset import ClassificationDataset, DatasetBinarizer
-from robots import draw_robot
+from .robots import ALL_ROBOT_FEATURES, COLOR_SCHEMES, ROBOT_TYPES
+from .dataset import ClassificationDataset, DatasetBinarizer
+from .robots import draw_robot
 from PIL import Image
 from pathlib import Path
 
