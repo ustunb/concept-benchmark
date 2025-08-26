@@ -66,3 +66,31 @@ def create_synthetic_dataset(*args, **kwargs): # name your args and kwargs
 
 Once you have a valid function in concept_benchmark/synthetic/{dataset_name}.py,
 make an pull request on github and @ryanhammonds for review.
+
+
+## Axes of Variation
+
+- Robot
+    - concepts: 4 visual features defining robot appearance
+    - Binary: head_shape, body_shape, has_knees, foot_shape
+    - num_robots: Unique robot designs using concepts (where max is: 16 concept-unique * 3 subtypes of foot_shape * 108 color color schemes)
+    - samples_per_instance: 2: Color variations per robot
+    - model: Labeling function mapping concepts to glorp/drent classification
+    - model_type: 'deterministic' or 'stochastic' concept-to-label mapping
+    - resolution: Generated image size resolution x resolution (images are square)
+    - color_mode: 'color' or 'greyscale' for whether the image is colored or... in greyscale
+
+- Sudoku
+    - Size of board
+    - Label/concept noise
+    - Invalid board
+    - Complete
+    - Consistent
+    - Valid
+
+- Robot Text
+    - Shapes
+    - Sizes
+    - Curvature
+    - Subjective
+    - Color
