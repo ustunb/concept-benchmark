@@ -22,7 +22,7 @@ params = {
         "has_antennae": ["false", "true"],
         "ears_shape": ["square", "triangle"],
         "mouth_type": ["closed", "open"],
-        "hand_shape": ["edgy_square", "edgy_triangle", "round_circle", "round_oval"],
+        "hand_shape": ["round_circle","wide_oval", "tall oval", "edgy_square","edgy_triangle","edgy_trapezoid"], #round oval is oval1 and wide oval is oval2
     },
     "model": "'glorp' if (int(row['body_shape']=='square') + int(str(row['foot_shape']).startswith('pointy_')) - 2 >= 0) else 'drent'",
 }

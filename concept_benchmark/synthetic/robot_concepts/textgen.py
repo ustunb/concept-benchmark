@@ -70,15 +70,21 @@ def _polish_text(s: str) -> str:
 
 def _synonym(name: str, val: str) -> str:
     v = str(val).replace("_", " ").lower()
-    syn_maps = {
-        "head_shape": {"square": "blocky", "round": "rounded"},
-        "body_shape": {"square": "boxy", "round": "rounded"},
-        "hand_shape": {"edgy square": "angular square", "edgy triangle": "triangular"},
-        "foot_shape": {"pointy 4sided": "pointed four-sided"},
-        "mouth_type": {"open": "opened", "closed": "shut"},
-        "ears_shape": {"triangle": "triangular", "square": "squared"},
-    }
-    return syn_maps.get(name, {}).get(v, v)
+    if name == "hand_shape":
+        v = re.sub(r"\bround\s+", "", v)
+        v = re.sub(r"\bedgy\s+", "", v)
+        if v in {"oval2", "oval 2"}:
+            return "tall oval"
+        if v == "wide oval":
+            return "wide oval"
+        return v
+    if name == "foot_shape":
+        num = {"3": "three", "4": "four", "5": "five", "6": "six"}
+        v = v.replace("pointy", "pointed")
+        v = v.replace("lshaped", "l-shaped").replace("l shaped", "l-shaped")
+        v = re.sub(r"(\d)\s*sided", lambda m: f"{num.get(m.group(1), m.group(1))}-sided", v)
+        return v
+    return v
 
 def _negate(name: str, val):
     if name in ("head_shape", "body_shape"):
@@ -105,6 +111,7 @@ DEFAULT_TEMPLATES = [
 
 def create_synthetic_dataset(source, templates: Sequence[str] | None = None, variants_per_row: int = 3, include_color: bool = True, rng_seed: int = 0, head_col: str = "head_shape", body_col: str = "body_shape", knees_col: str = "has_knees", elbows_col: str = "has_elbows", foot_col: str = "foot_shape", color_mode_col: str = "color_mode", concept_cols: Iterable[str] | None = None, label_col: str | None = None, label_map: dict | None = None, drop_unknown: bool = True, text_mode: str | None = None, use_llm: bool = False, llm_provider: str = "gemini", llm_model: str = "gemini-1.5-flash", llm_api_key: str | None = None, llm_system: str | None = None, llm_user_prompt: str | None = None) -> ConceptDataset:
     return create_robot_text_dataset(source=source, templates=templates, variants_per_row=variants_per_row, include_color=include_color, rng_seed=rng_seed, head_col=head_col, body_col=body_col, knees_col=knees_col, elbows_col=elbows_col, foot_col=foot_col, color_mode_col=color_mode_col, concept_cols=concept_cols, label_col=label_col, label_map=label_map, drop_unknown=drop_unknown, text_mode=text_mode, use_llm=use_llm, llm_provider=llm_provider, llm_model=llm_model, llm_api_key=llm_api_key, llm_system=llm_system, llm_user_prompt=llm_user_prompt)
+
 def create_robot_text_dataset(source, templates: Sequence[str] | None = None, variants_per_row: int = 3, include_color: bool = True, rng_seed: int = 0, head_col: str = "head_shape", body_col: str = "body_shape", knees_col: str = "has_knees", elbows_col: str = "has_elbows", foot_col: str = "foot_shape", color_mode_col: str = "color_mode", concept_cols: Iterable[str] | None = None, label_col: str | None = None, label_map: dict | None = None, drop_unknown: bool = True, text_mode: str | None = None, use_llm: bool = False, llm_provider: str = "gemini", llm_model: str = "gemini-1.5-flash", llm_api_key: str | None = None, llm_system: str | None = None, llm_user_prompt: str | None = None) -> ConceptDataset:
     if templates is None or text_mode == "structured":
         templates = DEFAULT_TEMPLATES
@@ -187,6 +194,8 @@ def create_robot_text_dataset(source, templates: Sequence[str] | None = None, va
             "color_right": c2 if c2 else "unknown",
             "color_mode": "greyscale" if not include_color else str(cms),
         }
+        fill["hand_shape"] = _synonym("hand_shape", fill["hand_shape"])
+        fill["foot_shape"] = _synonym("foot_shape", fill["foot_shape"])
         for name in ("head_shape","body_shape","ears_shape","mouth_type","hand_shape","foot_shape"):
             val = fill.get(name, "")
             fill[name + "_syn"] = _synonym(name, val)
