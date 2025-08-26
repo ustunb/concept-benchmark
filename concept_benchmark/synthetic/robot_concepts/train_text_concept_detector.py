@@ -1,207 +1,211 @@
-# concept_benchmark/synthetic/robot_concepts/text_multi_nn.py
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
-import math, re
-from collections import Counter
-
+import re
+from typing import Iterable, List, Dict, Optional, Tuple
 import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
-from sklearn.metrics import average_precision_score, roc_auc_score
-
-_word_re = re.compile(r"[A-Za-z0-9_]+")
+from concept_benchmark.data import ConceptDatasetSample
+from concept_benchmark.models import ConceptDetector
 
 def _tok(s: str) -> List[str]:
-    return [t.lower() for t in _word_re.findall(s or "")]
+    s = s.lower()
+    s = re.sub(r"[^a-z0-9\s]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s.split()
 
-def _tok_bi(s: str) -> List[str]:
-    t = _tok(s)
-    if not t: return t
-    return t + [f"{t[i]}__{t[i+1]}" for i in range(len(t)-1)]
+def _make_bigrams(tokens: List[str]) -> List[str]:
+    return [f"{tokens[i]}_{tokens[i+1]}" for i in range(len(tokens) - 1)]
 
-def build_vocab(texts: List[str], max_size: int = 40000, min_freq: int = 1, use_bigrams: bool = True) -> Dict[str,int]:
-    ctr = Counter()
-    for s in texts:
-        ctr.update(_tok_bi(s) if use_bigrams else _tok(s))
-    items = [w for w,c in ctr.items() if c >= min_freq]
-    items.sort(key=lambda w: (-ctr[w], w))
-    items = items[:max_size-2]
-    vocab = {"<pad>":0, "<unk>":1}
-    for i,w in enumerate(items, start=2):
-        vocab[w] = i
-    return vocab
+class Vocab:
+    def __init__(self, min_freq: int = 1, max_size: Optional[int] = None):
+        self.itos: List[str] = ["<pad>", "<unk>"]
+        self.stoi: Dict[str, int] = {w: i for i, w in enumerate(self.itos)}
+        self.min_freq = min_freq
+        self.max_size = max_size
 
-def numericalize(s: str, vocab: Dict[str,int], use_bigrams: bool = True) -> List[int]:
-    toks = _tok_bi(s) if use_bigrams else _tok(s)
-    return [vocab.get(t, 1) for t in toks] or [1]
+    def build(self, corpus: Iterable[List[str]]):
+        from collections import Counter
+        cnt = Counter()
+        for toks in corpus:
+            cnt.update(toks)
+        words = [w for w, f in cnt.items() if f >= self.min_freq]
+        words.sort(key=lambda w: (-cnt[w], w))
+        if self.max_size is not None:
+            words = words[: max(0, self.max_size - len(self.itos))]
+        for w in words:
+            if w not in self.stoi:
+                self.stoi[w] = len(self.itos)
+                self.itos.append(w)
 
-class _MultiConceptDS(Dataset):
-    def __init__(self, texts: List[str], C: np.ndarray, vocab: Dict[str,int], use_bigrams: bool = True):
+    def encode(self, toks: List[str]) -> List[int]:
+        unk = self.stoi["<unk>"]
+        return [self.stoi.get(t, unk) for t in toks]
+
+class TextMultiLabelDataset(Dataset):
+    def __init__(self, texts: List[str], labels: np.ndarray, vocab: Optional[Vocab] = None, use_bigrams: bool = True, max_len: int = 128, min_freq: int = 1, max_size: Optional[int] = 40000):
         self.texts = texts
-        self.C = C.astype(np.float32)
-        self.vocab = vocab
+        self.labels = labels.astype(np.float32)
         self.use_bigrams = use_bigrams
-    def __len__(self): return len(self.texts)
-    def __getitem__(self, i):
-        ids = numericalize(self.texts[i], self.vocab, self.use_bigrams)
-        return ids, self.C[i]
+        self.max_len = max_len
+        tokenized = []
+        for s in texts:
+            toks = _tok(str(s))
+            if use_bigrams:
+                toks = toks + _make_bigrams(toks)
+            tokenized.append(toks)
+        if vocab is None:
+            vocab = Vocab(min_freq=min_freq, max_size=max_size)
+            vocab.build(tokenized)
+        self.vocab = vocab
+        self.seqs = [self.vocab.encode(t)[:max_len] for t in tokenized]
 
-def _collate(batch):
-    ids_all: List[int] = []
-    offsets = [0]
-    labels = []
-    acc = 0
-    for ids, y in batch:
-        ids_all.extend(ids)
-        acc += len(ids)
-        offsets.append(acc)
-        labels.append(y)
-    x = torch.tensor(ids_all, dtype=torch.long)
-    o = torch.tensor(offsets[:-1], dtype=torch.long)
-    y = torch.tensor(np.stack(labels), dtype=torch.float32)
-    return x, o, y
+    def __len__(self):
+        return len(self.texts)
 
-class MultiConceptTextNN(nn.Module):
-    def __init__(self, vocab_size: int, n_outputs: int, embed_dim: int = 128, hidden_dim: int = 192, dropout: float = 0.1):
+    def __getitem__(self, idx):
+        x = self.seqs[idx]
+        y = self.labels[idx]
+        return torch.tensor(x, dtype=torch.long), torch.tensor(y, dtype=torch.float32)
+
+    @staticmethod
+    def collate(batch):
+        xs, ys = zip(*batch)
+        lengths = [len(x) for x in xs]
+        maxlen = max(lengths) if lengths else 1
+        padded = torch.full((len(xs), maxlen), 0, dtype=torch.long)
+        for i, x in enumerate(xs):
+            padded[i, : len(x)] = x
+        y = torch.stack(ys, dim=0)
+        return padded, torch.tensor(lengths, dtype=torch.long), y
+
+class MeanPoolEncoder(nn.Module):
+    def __init__(self, vocab_size: int, embed_dim: int):
         super().__init__()
-        self.emb = nn.EmbeddingBag(vocab_size, embed_dim, mode="mean", padding_idx=0)
-        self.ff = nn.Sequential(
+        self.emb = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
+
+    def forward(self, x: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
+        e = self.emb(x)
+        mask = (x != 0).unsqueeze(-1).float()
+        summed = (e * mask).sum(dim=1)
+        denom = mask.sum(dim=1).clamp_min(1.)
+        return summed / denom
+
+class TextConceptHead(nn.Module):
+    def __init__(self, embed_dim: int, hidden_dim: int, n_out: int, dropout: float = 0.1):
+        super().__init__()
+        self.net = nn.Sequential(
             nn.Linear(embed_dim, hidden_dim),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, n_outputs),
+            nn.Linear(hidden_dim, n_out),
         )
-    def forward(self, ids: torch.Tensor, offsets: torch.Tensor) -> torch.Tensor:
-        x = self.emb(ids, offsets)
-        return self.ff(x)  # logits [B, n_outputs]
 
-@dataclass
-class TrainResult:
-    model: nn.Module
-    vocab: Dict[str,int]
-    metrics_macro: Dict[str,float]
-    metrics_per_concept: Dict[str,Dict[str,float]]
-    concepts: List[str]
-    device: str
-    proba_eval: Optional[np.ndarray] = None
-    C_eval: Optional[np.ndarray] = None
-    split_used: str = "validation"
+    def forward(self, z):
+        return self.net(z)
 
-@torch.no_grad()
-def _evaluate(model: nn.Module, loader: DataLoader, device: str, concept_names: List[str]) -> Tuple[Dict[str,float], Dict[str,Dict[str,float]], np.ndarray, np.ndarray]:
-    model.eval()
-    ps, ys = [], []
-    for ids, offs, y in loader:
-        ids, offs = ids.to(device), offs.to(device)
-        logit = model(ids, offs)
-        prob = torch.sigmoid(logit).cpu().numpy()
-        ps.append(prob)
-        ys.append(y.numpy())
-    P = np.concatenate(ps, axis=0)
-    Y = np.concatenate(ys, axis=0)
-    per = {}
-    ap_list, ra_list = [], []
-    for j, name in enumerate(concept_names):
-        yj, pj = Y[:, j], P[:, j]
-        m = {}
-        try: m["auprc"] = float(average_precision_score(yj, pj)); ap_list.append(m["auprc"])
-        except Exception: m["auprc"] = float("nan")
-        try: m["roc_auc"] = float(roc_auc_score(yj, pj)) if len(np.unique(yj)) > 1 else float("nan"); ra_list.append(m["roc_auc"])
-        except Exception: m["roc_auc"] = float("nan")
-        per[name] = m
-    macro = {
-        "auprc_macro": float(np.nanmean(ap_list)) if ap_list else float("nan"),
-        "roc_auc_macro": float(np.nanmean(ra_list)) if ra_list else float("nan"),
-    }
-    return macro, per, P, Y
+class TextConceptModel(nn.Module):
+    def __init__(self, vocab_size: int, embed_dim: int, hidden_dim: int, n_out: int, dropout: float = 0.1):
+        super().__init__()
+        self.encoder = MeanPoolEncoder(vocab_size, embed_dim)
+        self.head = TextConceptHead(embed_dim, hidden_dim, n_out, dropout)
 
-def _pos_weight(C: np.ndarray) -> torch.Tensor:
-    pw = []
-    for j in range(C.shape[1]):
-        p = C[:, j].sum()
-        n = C.shape[0] - p
-        if p <= 0: pw.append(1.0)
-        elif n <= 0: pw.append(1.0)
-        else: pw.append(float(n / max(p, 1e-6)))
-    return torch.tensor(pw, dtype=torch.float32)
+    def forward(self, x: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
+        z = self.encoder(x, lengths)
+        logits = self.head(z)
+        return logits
 
-def train_concept_detector_text_multi(dataset, *, eval_split: str = "validation", embed_dim: int = 128, hidden_dim: int = 192, dropout: float = 0.1, max_vocab_size: int = 40000, min_freq: int = 1, use_bigrams: bool = True, epochs: int = 6, batch_size: int = 64, lr: float = 2e-3, weight_decay: float = 0.0, device: str | None = None, seed: int = 0) -> TrainResult:
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+class TextConceptDetector(ConceptDetector):
+    def __init__(self, embed_dim: int = 128, hidden_dim: int = 192, epochs: int = 6, batch_size: int = 64, lr: float = 2e-3, weight_decay: float = 1e-2, dropout: float = 0.1, use_bigrams: bool = True, max_len: int = 128, min_freq: int = 1, max_vocab: Optional[int] = 40000, device: Optional[str] = None, **kwargs) -> None:
+        super().__init__(embedding_model=None, concept_layers=None)
+        self.embed_dim = embed_dim
+        self.hidden_dim = hidden_dim
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.lr = lr
+        self.weight_decay = weight_decay
+        self.dropout = dropout
+        self.use_bigrams = use_bigrams
+        self.max_len = max_len
+        self.min_freq = min_freq
+        self.max_vocab = max_vocab
+        self.device = device or ("cuda" if torch.cuda.is_available() else ("mps" if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available() else "cpu"))
+        self.vocab: Optional[Vocab] = None
+        self.model: Optional[TextConceptModel] = None
+        self._n_concepts: Optional[int] = None
 
-    if eval_split == "validation" and hasattr(dataset, "validation") and dataset.validation.n > 0:
-        eval_sample = dataset.validation; split_used = "validation"
-    elif eval_split == "test" and hasattr(dataset, "test") and dataset.test.n > 0:
-        eval_sample = dataset.test; split_used = "test"
-    elif eval_split == "training" and hasattr(dataset, "training"):
-        eval_sample = dataset.training; split_used = "training"
-    else:
-        eval_sample = dataset._full; split_used = "full"
+    def _to_text_list(self, X) -> List[str]:
+        if isinstance(X, list) and (len(X) == 0 or isinstance(X[0], str)):
+            return [str(x) for x in X]
+        try:
+            X_list = X.tolist() if hasattr(X, "tolist") else list(X)
+        except Exception as e:
+            raise AssertionError(f"TextConceptDetector expected an iterable of texts; got type={type(X)} with error: {e}")
+        return [str(x) for x in X_list]
 
-    train_sample = dataset.training if hasattr(dataset, "training") and dataset.training.n > 0 else dataset._full
+    def _build_datasets(self, train: ConceptDatasetSample, valid: ConceptDatasetSample):
+        train_texts = self._to_text_list(train.X)
+        valid_texts = self._to_text_list(valid.X)
+        ds_train = TextMultiLabelDataset(texts=train_texts, labels=train.C.astype(np.float32), vocab=None, use_bigrams=self.use_bigrams, max_len=self.max_len, min_freq=self.min_freq, max_size=self.max_vocab)
+        self.vocab = ds_train.vocab
+        ds_valid = TextMultiLabelDataset(texts=valid_texts, labels=valid.C.astype(np.float32), vocab=self.vocab, use_bigrams=self.use_bigrams, max_len=self.max_len)
+        return ds_train, ds_valid
 
-    X_tr = [str(x) for x in train_sample.X]
-    C_tr = np.asarray(train_sample.C).astype(np.float32)
-    X_ev = [str(x) for x in eval_sample.X]
-    C_ev = np.asarray(eval_sample.C).astype(np.float32)
+    def _make_loaders(self, ds_train: Dataset, ds_valid: Dataset):
+        train_loader = DataLoader(ds_train, batch_size=self.batch_size, shuffle=True, num_workers=0, collate_fn=TextMultiLabelDataset.collate)
+        valid_loader = DataLoader(ds_valid, batch_size=self.batch_size, shuffle=False, num_workers=0, collate_fn=TextMultiLabelDataset.collate)
+        return train_loader, valid_loader
 
-    vocab = build_vocab(X_tr, max_size=max_vocab_size, min_freq=min_freq, use_bigrams=use_bigrams)
+    def fit(self, train_dataset: ConceptDatasetSample, valid_dataset: ConceptDatasetSample, freeze: bool = True, embed_params: Optional[dict] = None, fit_params: Optional[dict] = None, l1_size: Optional[int] = None, n_jobs: Optional[int] = None, **kwargs) -> None:
+        ds_train, ds_valid = self._build_datasets(train_dataset, valid_dataset)
+        n_out = ds_train.labels.shape[1]
+        self._n_concepts = int(n_out)
+        self.model = TextConceptModel(vocab_size=len(self.vocab.itos), embed_dim=self.embed_dim, hidden_dim=self.hidden_dim, n_out=n_out, dropout=self.dropout).to(self.device)
+        opt = torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        crit = nn.BCEWithLogitsLoss()
+        train_loader, valid_loader = self._make_loaders(ds_train, ds_valid)
 
-    ds_tr = _MultiConceptDS(X_tr, C_tr, vocab, use_bigrams)
-    ds_ev = _MultiConceptDS(X_ev, C_ev, vocab, use_bigrams)
-    dl_tr = DataLoader(ds_tr, batch_size=batch_size, shuffle=True, collate_fn=_collate, num_workers=0)
-    dl_ev = DataLoader(ds_ev, batch_size=batch_size, shuffle=False, collate_fn=_collate, num_workers=0)
+        def _epoch(loader, train: bool):
+            self.model.train() if train else self.model.eval()
+            total = 0.0
+            with torch.set_grad_enabled(train):
+                for x, lengths, y in loader:
+                    x, lengths, y = x.to(self.device), lengths.to(self.device), y.to(self.device)
+                    logits = self.model(x, lengths)
+                    loss = crit(logits, y)
+                    if train:
+                        opt.zero_grad(set_to_none=True)
+                        loss.backward()
+                        opt.step()
+                    total += float(loss.item()) * y.size(0)
+            return total / max(1, len(loader.dataset))
 
-    torch.manual_seed(seed)
-    model = MultiConceptTextNN(vocab_size=len(vocab), n_outputs=C_tr.shape[1], embed_dim=embed_dim, hidden_dim=hidden_dim, dropout=dropout).to(device)
-    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    pos_w = _pos_weight(C_tr).to(device)
-    crit = nn.BCEWithLogitsLoss(pos_weight=pos_w)
+        for _ in range(self.epochs):
+            _epoch(train_loader, True)
+            _ = _epoch(valid_loader, False)
+        self.embedding_model = self.model.encoder
 
-    best_state, best_ap = None, -math.inf
-    for _ in range(epochs):
-        model.train()
-        for ids, offs, y in dl_tr:
-            ids, offs, y = ids.to(device), offs.to(device), y.to(device)
-            logits = model(ids, offs)
-            loss = crit(logits, y)
-            opt.zero_grad(set_to_none=True)
-            loss.backward()
-            opt.step()
-        macro, _, _, _ = _evaluate(model, dl_ev, device, dataset.concepts)
-        if macro["auprc_macro"] > best_ap:
-            best_ap = macro["auprc_macro"]
-            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+    def predict(self, dataset: ConceptDatasetSample, emebed_params: Optional[dict] = None) -> np.ndarray:
+        if self.model is None or self.vocab is None:
+            raise RuntimeError("Model has not been fitted yet. Call fit() first.")
+        n = len(dataset.X)
+        k = self._n_concepts if self._n_concepts is not None else dataset.n_concepts
+        dummy = np.zeros((n, k), dtype=np.float32)
+        texts = self._to_text_list(dataset.X)
+        tmp = TextMultiLabelDataset(texts=texts, labels=dummy, vocab=self.vocab, use_bigrams=self.use_bigrams, max_len=self.max_len)
+        loader = DataLoader(tmp, batch_size=self.batch_size, shuffle=False, num_workers=0, collate_fn=TextMultiLabelDataset.collate)
+        self.model.eval()
+        outs = []
+        with torch.no_grad():
+            for x, lengths, _ in loader:
+                x, lengths = x.to(self.device), lengths.to(self.device)
+                logits = self.model(x, lengths)
+                prob = torch.sigmoid(logits).cpu().numpy()
+                outs.append(prob)
+        return np.vstack(outs)
 
-    if best_state is not None:
-        model.load_state_dict(best_state)
-
-    macro, per, P, Y = _evaluate(model, dl_ev, device, dataset.concepts)
-
-    return TrainResult(
-        model=model,
-        vocab=vocab,
-        metrics_macro=macro,
-        metrics_per_concept=per,
-        concepts=list(dataset.concepts),
-        device=device,
-        proba_eval=P,
-        C_eval=Y,
-        split_used=split_used,
-    )
-
-@torch.no_grad()
-def predict_proba_text_multi(model: nn.Module, vocab: Dict[str,int], texts: List[str], *, use_bigrams: bool = True, batch_size: int = 256, device: str | None = None) -> np.ndarray:
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    ds = _MultiConceptDS(texts, np.zeros((len(texts), model.ff[-1].out_features), dtype=np.float32), vocab, use_bigrams)
-    dl = DataLoader(ds, batch_size=batch_size, shuffle=False, collate_fn=_collate, num_workers=0)
-    model.eval().to(device)
-    outs = []
-    for ids, offs, _ in dl:
-        ids, offs = ids.to(device), offs.to(device)
-        prob = torch.sigmoid(model(ids, offs)).cpu().numpy()
-        outs.append(prob)
-    return np.concatenate(outs, axis=0)
+    @property
+    def n_concepts(self) -> int:
+        if self._n_concepts is None:
+            raise RuntimeError("Model has not been fitted yet. Call fit() first.")
+        return self._n_concepts
