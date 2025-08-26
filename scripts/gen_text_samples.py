@@ -5,7 +5,7 @@ import numpy as np
 from sklearn.metrics import accuracy_score, roc_auc_score, average_precision_score
 from concept_benchmark.synthetic.robot_concepts.textgen import create_synthetic_dataset
 from concept_benchmark.paths import pkg_dir
-from concept_benchmark.synthetic.robot_concepts.train_text_concept_detector import TextConceptDetector
+from concept_benchmark.synthetic.robot_concepts.text_concept_detector import TextConceptDetector
 from concept_benchmark.models import ConceptBasedModel, FrontEndModel
 
 tpl_path = pkg_dir / "synthetic" / "robot_concepts" / "static" / "text_templates" / "Templates.txt"

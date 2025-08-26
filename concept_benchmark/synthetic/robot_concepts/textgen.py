@@ -290,12 +290,14 @@ def unstructured_caption_via_llm(concepts: dict, *, provider: str = "gemini", mo
     system = system or "You are concise and concrete. Use everyday language. Do not invent locations or scenarios."
     user_message = f"{uprompt}\n\nAttributes (JSON): {attr_json}"
     out = []
+
     if prov == "openai":
         client = openai.OpenAI(api_key=api_key)
         resp = client.chat.completions.create(model=model, messages=[{"role": "system", "content": system}, {"role": "user", "content": user_message}], n=n, temperature=temperature)
         for c in resp.choices:
             out.append((c.message.content or "").strip())
         return out
+
     elif prov in ("anthropic", "claude"):
         client = anthropic.Anthropic(api_key=api_key)
         msg = client.messages.create(model=model, max_tokens=160, temperature=temperature, system=system, messages=[{"role": "user", "content": user_message}])
@@ -306,6 +308,7 @@ def unstructured_caption_via_llm(concepts: dict, *, provider: str = "gemini", mo
             text = "".join([b.text for b in msg.content if hasattr(b, "text")]) if getattr(msg, "content", None) else ""
             out.append((text or "").strip())
         return out
+
     elif prov in ("gemini", "google", "googleai", "google-genai"):
         genai.configure(api_key=api_key)
         gm = genai.GenerativeModel(model or "gemini-1.5-flash")
