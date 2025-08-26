@@ -185,15 +185,19 @@ class TextConceptDetector(ConceptDetector):
             _ = _epoch(valid_loader, False)
         self.embedding_model = self.model.encoder
 
-    def predict(self, dataset: ConceptDatasetSample, emebed_params: Optional[dict] = None) -> np.ndarray:
+    def predict(self, dataset: ConceptDatasetSample, emebed_params: Optional[dict] = None, **kwargs) -> np.ndarray:
+        if emebed_params is None:
+            emebed_params = kwargs.get("embed_params")
         if self.model is None or self.vocab is None:
             raise RuntimeError("Model has not been fitted yet. Call fit() first.")
         n = len(dataset.X)
         k = self._n_concepts if self._n_concepts is not None else dataset.n_concepts
         dummy = np.zeros((n, k), dtype=np.float32)
         texts = self._to_text_list(dataset.X)
-        tmp = TextMultiLabelDataset(texts=texts, labels=dummy, vocab=self.vocab, use_bigrams=self.use_bigrams, max_len=self.max_len)
-        loader = DataLoader(tmp, batch_size=self.batch_size, shuffle=False, num_workers=0, collate_fn=TextMultiLabelDataset.collate)
+        tmp = TextMultiLabelDataset(texts=texts, labels=dummy, vocab=self.vocab, use_bigrams=self.use_bigrams,
+                                    max_len=self.max_len)
+        loader = DataLoader(tmp, batch_size=self.batch_size, shuffle=False, num_workers=0,
+                            collate_fn=TextMultiLabelDataset.collate)
         self.model.eval()
         outs = []
         with torch.no_grad():
