@@ -238,7 +238,7 @@ def create_robot_text_dataset(source, templates: Sequence[str] | None = None, va
         "classes": classes,
         "row_index": idxs,
     }
-    return ConceptDataset(X=X, C=C_out, y=y_out, meta=meta)
+    return ConceptDataset(X=X, C=C_out.astype(np.float32), y=y_out.astype(int), meta=meta)
 
 def _binarize_concepts(df: pd.DataFrame, cols: Iterable[str]):
     mats, names = [], []
