@@ -191,16 +191,16 @@ def image_transform(
     font_path: str | None = None,
     outfile: str | None = None,
 ) -> np.ndarray:
-    """Render an N×N Sudoku board to a grayscale image.
+    """Render an NxN Sudoku board to a grayscale image.
 
     Args:
-        board (np.ndarray): N×N array with values in {0, 1..N}. Use 0 for blank
+        board (np.ndarray): NxN array with values in {0, 1..N}. Use 0 for blank
             cells.
         cell_px (int, optional): Pixel size of each cell. Defaults to 16.
         margin_px (int, optional): Outer padding around the grid. Defaults
             to 3.
         line_px (int, optional): Width of thin lines. Defaults to 1.
-        bold_px (int, optional): Width of n×n divider lines. Defaults to 1.
+        bold_px (int, optional): Width of nxn divider lines. Defaults to 1.
         font_size (int, optional): Digit font size. Defaults to 10.
         standardize (bool, optional): If True, standardize pixel values to
             [0, 1]. Defaults to True.
