@@ -207,9 +207,9 @@ def generate_robot_catalog(params, drop_irrelevant=True):
         print(f"Generating {len(catalog_df)} robot images...")
     png_filenames = []
 
+    color_lefts, color_rights = [], []
     for k, features in init_catalog_df.iterrows():
         png_filename = f"robot_{k:03d}.png"
-        color_lefts, color_rights = [], []
 
         png_file = output_path / png_filename
 
