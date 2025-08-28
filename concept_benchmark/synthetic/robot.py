@@ -3,8 +3,8 @@ import numpy as np
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.paths import results_dir
 
-from .helper.robot_catalog import RobotDistribution, generate_robot_catalog
-from .helper.utils import model_to_logistic, unlist0
+from helper.robot_catalog import RobotDistribution, generate_robot_catalog
+from helper.utils import model_to_logistic, unlist0
 
 
 def create_synthetic_dataset(**kwargs):
@@ -20,7 +20,7 @@ def create_synthetic_dataset(**kwargs):
     num_combinations = int(np.prod([len(v) for v in kwargs["concepts"].values()]))
     kwargs["num_robots"] = kwargs.get("num_robots", num_combinations) * \
         kwargs.get("samples_per_instance", 1)
-    kwargs["resolution"] = 600 if kwargs.get("size", "large") == "large" else 32
+    kwargs["resolution"] = 600 if kwargs.get("size", "large") == "large" else 36
     kwargs["irrelevant_features"] = kwargs.get("spurious_features", [])
 
     catalog_df = generate_robot_catalog(kwargs)
@@ -99,3 +99,35 @@ def create_synthetic_dataset(**kwargs):
     )
 
     return robot_dataset
+
+# Sample kwargs:
+
+# if __name__ == "__main__":
+#     params = {
+#         'samples_per_instance': 1,
+#         # how many times to repeat each robot with changed colors (irrelavant feature); max 108
+#         'draw': True,
+#         'output_directory': './robot_images',
+#         'concepts': {
+#             'head_shape': ['square', 'round'],
+#             'body_shape': ['square', 'round'],
+#             'has_knees': ['false', 'true'],
+#             'has_elbows': ['false', 'true'],
+#             'has_antennae': ['false', 'true'],
+#             'ears_shape': ['square', 'triangle'],
+#             'mouth_type': ['closed', 'open'],
+#             'hand_shape': ['round_circle', 'round_oval', 'round_oval2',
+#                            'edgy_triangle', 'edgy_square', 'edgy_trapezoid'],
+#             'foot_shape': ['flat_4sided', 'flat_5sided', 'flat_lshaped',
+#                            'pointy_3sided', 'pointy_4sided', 'pointy_6sided'],
+#         },
+#         'spurious_features': ['has_elbows', 'hand_shape'],  # features that do not appear in the catalog + color
+#         'model': "'glorp' if (int(row['body_shape']=='square') + int(row['foot_shape']=='pointy') - 2 >= 0) else 'drent'",
+#         'model_type': 'deterministic',  # 'deterministic', 'stochastic'
+#         'size': 'large',  # 'small', 'large'
+#         'color_mode': 'color',  # 'greyscale', 'color'
+#         'train_concept_detector': False,
+#     }
+#
+#     dataset = create_synthetic_dataset(**params)
+#     print(dataset)
