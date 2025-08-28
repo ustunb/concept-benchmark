@@ -2,15 +2,28 @@ import csv
 from pathlib import Path
 import pandas as pd
 import numpy as np
+import os, json, datetime
 from sklearn.metrics import accuracy_score, roc_auc_score, average_precision_score
 from concept_benchmark.synthetic.robot_concepts.textgen import create_synthetic_dataset
-from concept_benchmark.paths import pkg_dir
+from concept_benchmark.paths import pkg_dir, results_dir, data_dir
 from concept_benchmark.synthetic.robot_concepts.text_concept_detector import TextConceptDetector
 from concept_benchmark.models import ConceptBasedModel, FrontEndModel
+from concept_benchmark.ext.fileutils import save as save_obj
+from concept_benchmark.metrics import calc_metric
 
 tpl_path = pkg_dir / "synthetic" / "robot_concepts" / "static" / "text_templates" / "Templates.txt"
 with open(tpl_path, "r", encoding="utf-8-sig") as f:
     templates = [ln.strip() for ln in f if ln.strip()]
+
+ROBOT_RUN_DIR = results_dir / "robot_text"
+ROBOT_DATA_DIR = data_dir / "robot_text"
+ROBOT_RUN_DIR.mkdir(parents=True, exist_ok=True)
+ROBOT_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+CONCEPT_MODE = os.environ.get("CONCEPT_MODE", "hard").strip().lower()
+if CONCEPT_MODE not in {"hard", "soft"}:
+    CONCEPT_MODE = "hard"
+
 
 params = {
     "concepts": {
@@ -22,7 +35,7 @@ params = {
         "has_antennae": ["false", "true"],
         "ears_shape": ["square", "triangle"],
         "mouth_type": ["closed", "open"],
-        "hand_shape": ["round_circle","wide_oval", "tall oval", "edgy_square","edgy_triangle","edgy_trapezoid"], #round oval is oval1 and wide oval is oval2
+        "hand_shape": ["round_circle","wide_oval", "tall_oval", "edgy_square","edgy_triangle","edgy_trapezoid"], #round oval is oval1 and wide oval is oval2
     },
     "model": "'glorp' if (int(row['body_shape']=='square') + int(str(row['foot_shape']).startswith('pointy_')) - 2 >= 0) else 'drent'",
 }
@@ -45,13 +58,16 @@ def compute_label(df: pd.DataFrame, model_expr: str) -> pd.Series:
         return eval(model_expr, SAFE_GLOBALS, {"row": row})
     return df.apply(eval_one, axis=1)
 
-catalog_df = sample_concepts(params, n=500, seed=0)
+catalog_df = sample_concepts(params, n=10000, seed=0)
 catalog_df["label"] = compute_label(catalog_df, params["model"])
 
 concept_cols = list(params["concepts"].keys())
 llm_user_prompt = "Using the provided attributes, write a natural spoken description (1–3 sentences) that sounds like a person describing an image they saw. Do not invent locations or scenarios; focus only on what the attributes imply."
 
 ds = create_synthetic_dataset(source=catalog_df, templates=templates, variants_per_row=1, include_color=False, rng_seed=0, concept_cols=concept_cols, label_col="label", label_map={"drent": 0, "glorp": 1}, text_mode="semi", llm_provider="gemini", llm_model="gemini-1.5-flash", llm_user_prompt=llm_user_prompt)
+
+ds_path = ROBOT_DATA_DIR / "robot_text_dataset.pkl"
+save_obj(ds, ds_path, overwrite=True)
 
 print("SAMPLE CAPTIONS:")
 for x in ds.X[:6]:
@@ -80,7 +96,11 @@ if ds.cvindices is None or getattr(ds.validation, "n", 0) == 0:
     ds.generate_cvindices(total_folds_for_cv=[5], replicates=1, seed=0)
     ds.split(fold_id=list(ds.cvindices.keys())[0], fold_num_validation=1, fold_num_test=None)
 
-detector = TextConceptDetector(embed_dim=128, hidden_dim=192, epochs=6, batch_size=64, use_bigrams=True, lr=2e-3, dropout=0.1)
+detector = TextConceptDetector(
+    embed_dim=128, hidden_dim=192, epochs=6, batch_size=64,
+    use_bigrams=True, lr=2e-3, dropout=0.1, pos_weight="auto",
+    output_mode=CONCEPT_MODE
+)
 
 cbm = ConceptBasedModel(concept_detector=detector, front_end_model=FrontEndModel(), propagate=False)
 
@@ -88,19 +108,23 @@ cbm.fit(ds.training, ds.validation)
 
 with np.errstate(invalid="ignore"):
     C_val_true = ds.validation.C.astype(np.float32)
-    C_val_prob = detector.predict(ds.validation)
+
+_old = detector.output_mode
+detector.output_mode = "soft"
+C_val_scores = detector.predict(ds.validation)
+detector.output_mode = _old
 
 concept_names = list(ds.concepts)
 per = {}
 for j, name in enumerate(concept_names):
     yt = C_val_true[:, j]
-    yp = C_val_prob[:, j]
+    ys = C_val_scores[:, j]
     try:
-        auprc = average_precision_score(yt, yp)
+        auprc = average_precision_score(yt, ys)
     except Exception:
         auprc = float("nan")
     try:
-        rocauc = roc_auc_score(yt, yp) if len(np.unique(yt)) == 2 else 0.5
+        rocauc = roc_auc_score(yt, ys) if len(np.unique(yt)) == 2 else float("nan")
     except Exception:
         rocauc = float("nan")
     per[name] = {"auprc": float(auprc), "roc_auc": float(rocauc)}
@@ -108,9 +132,9 @@ for j, name in enumerate(concept_names):
 auprc_macro = float(np.nanmean([d["auprc"] for d in per.values()])) if per else float("nan")
 roc_macro = float(np.nanmean([d["roc_auc"] for d in per.values()])) if per else float("nan")
 
-print("Macro metrics:", {"auprc_macro": auprc_macro, "roc_auc_macro": roc_macro})
-first5_keys = list(per.keys())[:5]
-print("Sample per-concept metric (first 5):", {k: per[k] for k in first5_keys})
+print("Macro concept metrics:", {"auprc_macro": auprc_macro, "roc_auc_macro": roc_macro})
+print("Sample per-concept metrics (first 5):", {k: per[k] for k in list(per.keys())[:5]})
+
 
 texts_demo = [str(x) for x in ds.X[:3]]
 from concept_benchmark.data import ConceptDatasetSample
@@ -120,8 +144,8 @@ demo_ds = ConceptDatasetSample(X=texts_demo, C=dummy_C, y=dummy_y, meta={"concep
 
 proba = detector.predict(demo_ds)
 print("Concept order:", concept_names)
-print("Proba shape:", proba.shape)
-print("First row probs:", proba[0])
+print(f"Concept outputs (mode={CONCEPT_MODE}) shape:", proba.shape)
+print("First row outputs:", proba[0])
 
 y_val = ds.validation.y.astype(int)
 y_val_proba = cbm.predict_proba(ds.validation)
@@ -144,3 +168,66 @@ pred_labels = [label_names[i] for i in all_preds]
 print("Pred labels:", pred_labels)
 print("Class order in probs:", label_names)
 print("First row class probs:", all_probs[0])
+
+metrics_out = {}
+
+try:
+    if len(np.unique(y_val)) == 2:
+        cls_index_1 = int(np.where(cbm.front_end_model.model.classes_ == 1)[0][0])
+        lbl_sel = calc_metric(y_val_proba[:, cls_index_1], y_val, tau=0.5)
+    else:
+        lbl_sel = {"coverage": float("nan"), "selective_accuracy": float("nan"), "tau": 0.5}
+except Exception:
+    lbl_sel = {"coverage": float("nan"), "selective_accuracy": float("nan"), "tau": 0.5}
+
+metrics_out["label"] = {
+    "accuracy": float(acc),
+    "roc_auc": float(roc),
+    "selective": lbl_sel
+}
+
+
+n_concepts = C_val_true.shape[1]
+
+sel_covs, sel_accs = [], []
+aucs, auprcs = [], []
+for j in range(n_concepts):
+    m = calc_metric(C_val_scores[:, j], C_val_true[:, j], tau=0.5)
+    sel_covs.append(m["coverage"])
+    sel_accs.append(m["selective_accuracy"])
+    try:
+        if len(np.unique(C_val_true[:, j])) == 2:
+            aucs.append(roc_auc_score(C_val_true[:, j], C_val_scores[:, j]))
+            auprcs.append(average_precision_score(C_val_true[:, j], C_val_scores[:, j]))
+    except Exception:
+        pass
+
+concept_metrics = {
+    "selective_cov_mean": float(np.nanmean(sel_covs)) if sel_covs else float("nan"),
+    "selective_acc_mean": float(np.nanmean(sel_accs)) if sel_accs else float("nan"),
+    "auroc_macro": float(np.nanmean(aucs)) if aucs else float("nan"),
+    "auprc_macro": float(np.nanmean(auprcs)) if auprcs else float("nan"),
+    "tau": 0.5
+}
+
+metrics_out["concepts"] = concept_metrics
+
+# dump metrics + run info
+run_info = {
+    "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+    "concept_mode": CONCEPT_MODE,
+    "pos_weight": "auto",
+    "n_samples": int(len(ds.X)),
+    "n_concepts": int(n_concepts),
+    "classes": list(ds.classes),
+    "concept_names": list(ds.concepts)
+}
+payload = {"run": run_info, "metrics": metrics_out}
+
+with open(ROBOT_RUN_DIR / "metrics.json", "w", encoding="utf-8") as f:
+    json.dump(payload, f, indent=2)
+
+save_obj({"cbm": cbm, "detector": detector}, ROBOT_RUN_DIR / "model.pkl", overwrite=True)
+print("Saved dataset:", ds_path)
+print("Saved model:", ROBOT_RUN_DIR / "model.pkl")
+print("Saved metrics:", ROBOT_RUN_DIR / "metrics.json")
