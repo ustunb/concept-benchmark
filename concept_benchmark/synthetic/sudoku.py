@@ -10,6 +10,8 @@ import torch
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
+from tqdm.auto import tqdm
+from wand.image import Image as WandImage
 
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.paths import data_dir
@@ -29,7 +31,7 @@ def create_sudoku_dataset(
     n_samples: int = 1000,
     valid_ratio: float = 0.5,
     max_corrupt: int = 3,
-    data_type: str = "tabular",
+    data_type: str = "image",
     seed: int = 42,
     transform: Callable[[np.ndarray], np.ndarray] | None = None,
     ds_name: str | None = None,
@@ -78,36 +80,38 @@ def create_sudoku_dataset(
     C_list = []  # concept vectors (3*N,)
     y_list = []  # labels: board_valid (0/1)
 
-    # Generate valid boards
-    for _ in range(n_valid):
+    pbar = tqdm(total=n_valid + n_invalid, desc="Generating Sudoku dataset") if tqdm else None
+     # valid boards
+    for i in range(n_valid):
         b = generate_valid_board(n=n)
-
         if data_type == "image":
-            img_path = ds_path / f"valid_{_}.png"
+            img_path = ds_path / f"valid_{i}.png"
             transform(b, outfile=img_path)
-            X_list.append(img_path)
+            X_list.append(str(img_path))
         else:
             X_list.append(transform(b))
-
-        C_list.append(np.ones(3 * N, dtype=np.int32))  # all row/col/block concepts valid
+        C_list.append(np.ones(3 * N, dtype=np.int32))
         y_list.append(1)
+        if pbar: pbar.update(1)
 
-    # Generate invalid boards by corrupting valid ones
-    for _ in range(n_invalid):
+    # invalid boards
+    for i in range(n_invalid):
         num_actions = max(1, int(random.randint(1, max_corrupt)))
         b = generate_invalid_board(base_board=generate_valid_board(n=n), num_actions=num_actions)
         concepts = get_concepts(b, return_label=False)
         c_arr = np.array(list(concepts.values()), dtype=np.int32).flatten()
 
         if data_type == "image":
-            img_path = ds_path / f"invalid_{_}.png"
+            img_path = ds_path / f"invalid_{i}.png"
             transform(b, outfile=img_path)
-            X_list.append(img_path)
+            X_list.append(str(img_path))
         else:
             X_list.append(transform(b))
-
         C_list.append(c_arr)
         y_list.append(0)
+        if pbar: pbar.update(1)
+
+    if pbar: pbar.close()
 
     X = np.stack(X_list, axis=0)
     C = np.stack(C_list, axis=0, dtype=np.int32)
@@ -182,17 +186,20 @@ def histogram_transform(board: np.ndarray) -> np.ndarray:
 def image_transform(
     board: np.ndarray,
     *,
-    cell_px: int = 16,
+    cell_px: int = 40,
     margin_px: int = 3,
     line_px: int = 1,
     bold_px: int = 1,
     font_size: int = 10,
     standardize: bool = True,
     font_path: str | None = None,
+    handwriting: bool = True,
+    radius: float = 0.5,
+    sigma: float = 0.0,
+    angle: float = 98,
     outfile: str | None = None,
 ) -> np.ndarray:
     """Render an NxN Sudoku board to a grayscale image.
-
     Args:
         board (np.ndarray): NxN array with values in {0, 1..N}. Use 0 for blank
             cells.
@@ -208,6 +215,14 @@ def image_transform(
             use default font. Defaults to None.
         outfile (str | None, optional): Path to save the image (e.g.,
             "board.png"). If None, do not write to disk. Defaults to None.
+        handwriting (bool, optional): Makes the numbers look handwritten if True. 
+            Defaults to False.
+        radius (float, optional): size of Gaussian aperture. Defaults to 0.
+            Only used if using handwriting=True
+        sigma (float, optional): Standard deviation of Gaussian operator. Defaults to 12.
+            Only used if using handwriting=True
+        angle (float, optional): Direction of blur. Defults to 140.
+            Only used if using handwriting=True
 
     Returns:
         np.ndarray: Grayscale image array of the Sudoku board.
@@ -275,6 +290,7 @@ def image_transform(
             ty = y0 + (cell_px - th) / 2
             draw.text((tx, ty), text, fill="black", font=font)
 
+
     # Outer bold border (to ensure corners look crisp)
     draw.rectangle(
         [margin_px, margin_px, W - margin_px, H - margin_px],
@@ -282,13 +298,24 @@ def image_transform(
         width=bold_px,
     )
 
+    final_img = img
+    if handwriting:
+        import io
+        from wand.image import Image as WandImage
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        with WandImage(blob=buf.getvalue()) as wimg:
+            # Sketch modifies in-place
+            wimg.sketch(radius=radius, sigma=sigma, angle=angle)
+            blob = wimg.make_blob(format="PNG")
+        final_img = Image.open(io.BytesIO(blob)).convert("RGB")
+
     if outfile:
-        img.save(outfile)
-        return outfile
+        final_img.save(outfile)
+        return str(outfile)
 
-    img_arr = sudoku_image_preprocess(img, standardize=standardize, to_tensor=False)
-
-    return img_arr
+    # Return array if not saving
+    return sudoku_image_preprocess(final_img, standardize=standardize, to_tensor=False)
 
 def sudoku_image_preprocess(
     image: Image.Image,
@@ -297,6 +324,8 @@ def sudoku_image_preprocess(
 ) -> np.ndarray:
     image = image.convert("L")  # Convert to grayscale
     img_arr = np.array(image)
+    """
+    """
 
     if standardize:
         # Standardize pixel values to [0, 1]
