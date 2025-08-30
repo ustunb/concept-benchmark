@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from typing import Sequence, Iterable
 from concept_benchmark.data import ConceptDataset
+from concept_benchmark.synthetic.robot_text import TextConceptDataset
 
 _MOD_RE = re.compile(r"\{([a-zA-Z0-9_]+)~(not|syn)\}")
 
@@ -247,7 +248,7 @@ def create_robot_text_dataset(source, templates: Sequence[str] | None = None, va
         "classes": classes,
         "row_index": idxs,
     }
-    return ConceptDataset(X=np.asarray(X, dtype=np.float32), C=C_out.astype(np.float32), y=y_out.astype(int), meta=meta)
+    return TextConceptDataset(X=list(X), C=np.asarray(C_out, dtype=np.int8), y=np.asarray(y_out, dtype=np.int32), meta=meta)
 
 def _binarize_concepts(df: pd.DataFrame, cols: Iterable[str]):
     mats, names = [], []
