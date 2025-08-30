@@ -1,39 +1,40 @@
-from abc import ABC, abstractmethod
+import itertools
+from typing import List, Optional
+
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
-import itertools
-
-from joblib import Parallel, delayed
-from typing import Optional, List
 from sklearn.linear_model import LogisticRegression
 
 from concept_benchmark.data import ConceptDatasetSample
-from concept_benchmark.train import train_concept_layer, train_calib_concept_layer
+from concept_benchmark.train import (
+    train_concept_heads,
+)
 
 
-class ConceptDetector(ABC):
+class ConceptDetector(object):
     """
-    Abstract base class for concept detectors.
+    Concept detector with optional calibration.
+    Trains per-concept heads and can apply Platt scaling at inference.
     """
+
     def __init__(
         self,
         embedding_model: Optional[nn.Module] = None,
-        concept_layers: Optional[List] = None
+        concept_layers: Optional[List] = None,
     ) -> None:
         """
         Initialize the concept detector with an optional embedding model and concept layers.
-        
+
         :param embedding_model: Optional PyTorch model for embedding.
         :param concept_layers: Optional list of concept layers (PyTorch models).
         """
         self.embedding_model = embedding_model
         self.concept_layers = concept_layers
-        self.train_fn = train_concept_layer if isinstance(self, ClassicalConceptDetector) \
-            else train_calib_concept_layer
+        self.calibration_params: Optional[List[Optional[dict]]] = None
 
     def fit(
-        self, 
+        self,
         train_dataset: ConceptDatasetSample,
         valid_dataset: ConceptDatasetSample,
         freeze: bool = True,
@@ -41,10 +42,11 @@ class ConceptDetector(ABC):
         fit_params: Optional[dict] = None,
         l1_size: Optional[int] = 100,
         n_jobs: Optional[int] = -1,
-        **kwargs
+        calibrate: bool = False,
+        **kwargs,
     ) -> None:
         """
-        Fit the concept detector for each concept in the dataset.
+        Fit the concept detector, and optionally fit per-concept calibration.
 
         Args:
             train_dataset (ConceptDatasetSample): Training dataset.
@@ -54,42 +56,64 @@ class ConceptDetector(ABC):
             fit_params (Optional[dict]): Parameters for fitting the concept layers.
             l1_size (Optional[int]): Size of the first linear layer in the model.
                 The other dimension is determined by the size of the embedded dataset.
-            n_jobs (Optional[int]): Number of parallel jobs to run. -1 for all available cores (default).
+            n_jobs (Optional[int]): Kept for API compatibility (unused).
+            calibrate (bool): If True, fit Platt scaling (w, b) per concept on validation logits.
         """
-        if self.embedding_model and freeze:
-            for param in self.embedding_model.parameters():
-                param.requires_grad = False
-        
-        if self.embedding_model:
-            embed_train = train_dataset.embed(self.embedding_model, **(embed_params or {}))
-            embed_valid = valid_dataset.embed(self.embedding_model, **(embed_params or {}))
-        else:
-            embed_train = train_dataset
-            embed_valid = valid_dataset
-
-        input_dim = embed_train.X.shape[1]
-        num_concepts = embed_train.n_concepts
-        
-        self.concept_layers = Parallel(n_jobs=n_jobs)(
-            delayed(self.train_fn)(
-                train_dataset=embed_train,
-                valid_dataset=embed_valid,
-                concept_idx=i,
-                fit_params=fit_params,
-                input_dim=input_dim,
-                l1_size=l1_size,
-            ) for i in range(num_concepts)
+        # Train per-concept heads with optional encoder finetuning
+        heads = train_concept_heads(
+            train_dataset=train_dataset,
+            valid_dataset=valid_dataset,
+            embedding_model=self.embedding_model,
+            input_dim=None,
+            l1_size=l1_size or 100,
+            freeze=freeze,
+            fit_params=fit_params,
         )
+        self.concept_layers = nn.ModuleList(heads)
 
-    @abstractmethod
-    def predict(
-        self, 
-        dataset: ConceptDatasetSample
-    ) -> np.ndarray:
+        # Optionally fit calibration using validation logits
+        if calibrate:
+            self.calibrate(valid_dataset, embed_params=embed_params)
+        else:
+            self.calibration_params = None
+
+    def calibrate(
+        self,
+        valid_dataset: ConceptDatasetSample,
+        embed_params: Optional[dict] = None,
+    ) -> None:
         """
-        Predict concepts for the dataset.
+        Fit Platt scaling parameters (w, b) per concept on validation logits.
+
+        Args:
+            valid_dataset: Validation split used to fit calibration.
+            embed_params: Optional kwargs passed to dataset.embed when using an embedding model.
         """
-        raise NotImplementedError
+        if self.concept_layers is None:
+            raise RuntimeError("Must call fit(...) before calibrating.")
+
+        embedded_valid = (
+            valid_dataset.embed(self.embedding_model, **(embed_params or {}))
+            if self.embedding_model
+            else valid_dataset
+        )
+        with torch.no_grad():
+            X_t = torch.from_numpy(embedded_valid.X).float()
+            logits_list = [m(X_t).squeeze(1) for m in self.concept_layers]
+            logits = torch.stack(logits_list, dim=1).numpy()
+
+        params = []
+        for i in range(embedded_valid.n_concepts):
+            z = logits[:, i:i+1]
+            y = embedded_valid.C[:, i].astype(int)
+            if np.unique(y).size < 2:
+                params.append({"w": 1.0, "b": 0.0})
+                continue
+            lr = LogisticRegression(random_state=42, solver="lbfgs", max_iter=1000)
+            lr.fit(z, y)
+            params.append({"w": float(lr.coef_[0, 0]), "b": float(lr.intercept_[0])})
+
+        self.calibration_params = params
 
     @property
     def n_concepts(self) -> int:
@@ -101,76 +125,60 @@ class ConceptDetector(ABC):
 
         return len(self.concept_layers)
 
-class ClassicalConceptDetector(ConceptDetector):
-    """
-    A concept detector with uncalibrated concept layers.
-    """
-    def fit(
-        self, 
-        train_dataset: ConceptDatasetSample,
-        valid_dataset: ConceptDatasetSample,
-        freeze: bool = True, 
-        emebed_params: Optional[dict] = None,
-        fit_params: Optional[dict] = None
-    ) -> None:
-        super().fit(train_dataset, valid_dataset, freeze, emebed_params, fit_params)
-        self.concept_layers = nn.ModuleList(self.concept_layers)
-
     def predict(
-        self, 
+        self,
         dataset: ConceptDatasetSample,
-        emebed_params: Optional[dict] = None,
+        embed_params: Optional[dict] = None,
+        calibrate: Optional[bool] = None,
     ) -> np.ndarray:
         if self.concept_layers is None:
-            raise RuntimeError("Model has not been fitted yet. Please call fit() first.")
+            raise RuntimeError(
+                "Model has not been fitted yet. Please call fit() first."
+            )
 
-        embedded_dataset = dataset.embed(self.embedding_model, **(emebed_params or {})) \
-            if self.embedding_model else dataset
-        
+        embedded_dataset = (
+            dataset.embed(self.embedding_model, **(embed_params or {}))
+            if self.embedding_model
+            else dataset
+        )
+
         with torch.no_grad():
-            X_tensor = torch.from_numpy(embedded_dataset.X).float()
-            predictions = [torch.sigmoid(model(X_tensor)) for model in self.concept_layers]
-        
-        return torch.cat(predictions, dim=1).numpy()
+            X_t = torch.from_numpy(embedded_dataset.X).float()
+            logits_list = [m(X_t).squeeze(1) for m in self.concept_layers]
+            logits = torch.stack(logits_list, dim=1).numpy()
 
+        # Determine whether to apply calibration
+        if calibrate is None:
+            apply_cal = self.calibration_params is not None
+        else:
+            apply_cal = calibrate
+            if apply_cal and self.calibration_params is None:
+                raise RuntimeError(
+                    "Calibration requested but not fitted. Call fit(..., calibrate=True)."
+                )
 
-class CalibratedConceptDetector(ConceptDetector):
-    """
-    A concept detector with calibrated concept layers.
-    """
-    def predict(
-        self, 
-        dataset: ConceptDatasetSample,
-        emebed_params: Optional[dict] = None,
-    ) -> np.ndarray:
-        if self.concept_layers is None:
-            raise RuntimeError("Model has not been fitted yet. Call fit() first.")
+        if apply_cal and self.calibration_params is not None:
+            w = np.array([
+                (p.get("w", 1.0) if p is not None else 1.0) for p in self.calibration_params
+            ], dtype=np.float32)
+            b = np.array([
+                (p.get("b", 0.0) if p is not None else 0.0) for p in self.calibration_params
+            ], dtype=np.float32)
+            z_scaled = logits * w.reshape(1, -1) + b.reshape(1, -1)
+            return 1.0 / (1.0 + np.exp(-z_scaled))
 
-        embedded_dataset = dataset.embed(self.embedding_model, **(emebed_params or {})) \
-            if self.embedding_model else dataset
-
-        predictions = [
-            model.predict_proba(embedded_dataset.X)[:, 1] for model in self.concept_layers
-        ]
-        
-        return np.array(predictions).T
+        return 1.0 / (1.0 + np.exp(-logits))
 
 
 class FrontEndModel(object):
-    def __init__(
-        self, 
-        **kwargs
-    ) -> None:
+    def __init__(self, **kwargs) -> None:
         """
         Initialize the front-end model.
         """
         self.model = None
 
     def fit(
-        self, 
-        C: np.ndarray,
-        y: np.ndarray,
-        fit_params: Optional[dict] = None
+        self, C: np.ndarray, y: np.ndarray, fit_params: Optional[dict] = None
     ) -> None:
         """
         Fit the front-end model to the dataset.
@@ -181,39 +189,35 @@ class FrontEndModel(object):
             "solver": "lbfgs",
             "penalty": "l2",
             "C": 1.0,
-            "n_jobs": -1
+            "n_jobs": -1,
         }
 
         if fit_params:
             lr_params.update(fit_params)
 
-        self.model = LogisticRegression(
-            **lr_params
-        )
+        self.model = LogisticRegression(**lr_params)
 
         self.model.fit(C, y)
 
-    def predict(
-        self, 
-        C: np.ndarray
-    ) -> np.ndarray:
+    def predict(self, C: np.ndarray) -> np.ndarray:
         """
         Predict label given concepts.
         """
         if self.model is None:
-            raise RuntimeError("Model has not been fitted yet. Please call fit() first.")
+            raise RuntimeError(
+                "Model has not been fitted yet. Please call fit() first."
+            )
 
         return self.model.predict(C)
 
-    def predict_proba(
-        self, 
-        C: np.ndarray
-    ) -> np.ndarray:
+    def predict_proba(self, C: np.ndarray) -> np.ndarray:
         """
         Predict label probabilities given concepts.
         """
         if self.model is None:
-            raise RuntimeError("Model has not been fitted yet. Please call fit() first.")
+            raise RuntimeError(
+                "Model has not been fitted yet. Please call fit() first."
+            )
 
         return self.model.predict_proba(C)
 
@@ -224,22 +228,27 @@ class ConceptBasedModel(object):
     """
     A model that uses concept-based predictions.
     """
+
     def __init__(
-        self, 
-        concept_detector: Optional[ConceptDetector] = None, 
+        self,
+        concept_detector: Optional[ConceptDetector] = None,
         front_end_model: Optional[FrontEndModel] = None,
         propagate: bool = False,
-        **kwargs
+        **kwargs,
     ) -> None:
         if concept_detector:
-            assert isinstance(concept_detector, ConceptDetector), \
+            assert isinstance(concept_detector, ConceptDetector), (
                 "concept_detector must be an instance of ConceptDetector or its subclass."
-        
-        if front_end_model:
-            assert isinstance(front_end_model, FrontEndModel), \
-                "front_end_model must be an instance of FrontEndModel."
+            )
 
-        self.concept_detector = concept_detector if concept_detector else CalibratedConceptDetector(**kwargs)
+        if front_end_model:
+            assert isinstance(front_end_model, FrontEndModel), (
+                "front_end_model must be an instance of FrontEndModel."
+            )
+
+        self.concept_detector = (
+            concept_detector if concept_detector else ConceptDetector(**kwargs)
+        )
         self.front_end_model = front_end_model if front_end_model else FrontEndModel()
 
         self._propagate = propagate
@@ -266,10 +275,10 @@ class ConceptBasedModel(object):
 
     # TODO: separate out fit params for concept detector and front-end model
     def fit(
-        self, 
-        train_dataset: ConceptDatasetSample, 
+        self,
+        train_dataset: ConceptDatasetSample,
         valid_dataset: ConceptDatasetSample,
-        **kwargs
+        **kwargs,
     ) -> None:
         """
         Fit the concept detector and front-end model.
@@ -285,7 +294,7 @@ class ConceptBasedModel(object):
             self._prep_propagation()
 
     def predict(
-        self, 
+        self,
         dataset: ConceptDatasetSample,
         propagate: Optional[bool] = None,
     ) -> np.ndarray:
@@ -293,30 +302,30 @@ class ConceptBasedModel(object):
         Predict label for the dataset.
         """
         probas = self.predict_proba(
-            dataset, 
-            propagate=propagate, 
+            dataset,
+            propagate=propagate,
         )
         preds = np.argmax(probas, axis=1)
 
         return preds
 
     def predict_proba(
-        self, 
+        self,
         dataset: ConceptDatasetSample,
         propagate: Optional[bool] = None,
-        return_concepts: bool = False
+        return_concepts: bool = False,
     ) -> np.ndarray:
         """
         Predict probabilities for the dataset.
         """
         concept_preds = self.concept_detector.predict(dataset)
-        
+
         # Override object's propagate if specified
         propagate = self.propagate if propagate is None else propagate
 
         if propagate:
             return self._propagate_predict_proba(concept_preds)
-            
+
         pred_y_prob = self.front_end_model.predict_proba(concept_preds)
 
         out = pred_y_prob if not return_concepts else (pred_y_prob, concept_preds)
@@ -339,34 +348,33 @@ class ConceptBasedModel(object):
         for c in concept_preds:
             concept_probas = self._calc_concept_probas(c)
             y_probas_concepts = [
-                self.y_proba_all_concepts[tuple(k)] * v \
-                    for k, v in concept_probas.items()
+                self.y_proba_all_concepts[tuple(k)] * v
+                for k, v in concept_probas.items()
             ]
             proba = np.sum(y_probas_concepts, axis=0)
             proba_lst.append(proba)
 
         out = np.array(proba_lst)
-        
+
         return out
-        
-    def _calc_concept_probas(
-        self,
-        concept_probas: np.ndarray
-    ) -> dict:
+
+    def _calc_concept_probas(self, concept_probas: np.ndarray) -> dict:
         """
-        Calculate probabilities for each concept combination 
+        Calculate probabilities for each concept combination
         given concept probabilities (from ConceptDetector).
 
         Args:
             concept_probas (np.ndarray): Probabilities for each concept (single instance).
 
         Returns:
-            dict: A dictionary where keys are tuples of concept combinations 
+            dict: A dictionary where keys are tuples of concept combinations
                   and values are their corresponding probabilities.
         """
         probas = {}
         for c in self.concept_poss:
-            probas[tuple(c)] = np.prod((concept_probas**c) * (1 - concept_probas)**(1 - c))
+            probas[tuple(c)] = np.prod(
+                (concept_probas**c) * (1 - concept_probas) ** (1 - c)
+            )
 
         return probas
 
@@ -386,8 +394,7 @@ class ConceptBasedModel(object):
         all_y_probas = {
             tuple(c): pr
             for c, pr in zip(
-                self.concept_poss,
-                self.front_end_model.predict_proba(self.concept_poss)
+                self.concept_poss, self.front_end_model.predict_proba(self.concept_poss)
             )
         }
 
@@ -395,7 +402,7 @@ class ConceptBasedModel(object):
 
     def _prep_propagation(self):
         """
-        Prepare for propagation by generating concept possibilities and 
+        Prepare for propagation by generating concept possibilities and
         predicting probabilities for all concept combinations.
         """
         self._concept_poss = self._gen_concept_possibilities()

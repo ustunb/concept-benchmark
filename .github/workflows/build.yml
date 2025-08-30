@@ -1,0 +1,66 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      MODULE_NAME: concept_benchmark
+      PYTHONWARNINGS: error
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]            
+        # python-version: ["3.10", "3.11", "3.12", "3.13"]
+        # 3.11 has bugs: meson
+        python-version: ["3.10", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pycairo dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcairo2-dev pkg-config
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          cache-local-path: "~/.local"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install the project (dev deps)
+        run: uv sync --locked --all-extras --dev
+
+      - name: Run tests
+        run: >
+          uv run pytest -q -ra
+          --maxfail=1
+          --durations=20
+          --junitxml=./test-results/pytest.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: test-results/pytest.xml
