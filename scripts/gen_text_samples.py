@@ -4,14 +4,14 @@ import pandas as pd
 import numpy as np
 import os, json, datetime
 from sklearn.metrics import accuracy_score, roc_auc_score, average_precision_score
-from concept_benchmark.synthetic.robot_concepts.textgen import create_synthetic_dataset
+from concept_benchmark.synthetic.helper.textgen import create_synthetic_dataset
 from concept_benchmark.paths import pkg_dir, results_dir, data_dir
-from concept_benchmark.synthetic.robot_concepts.text_concept_detector import TextConceptDetector
+from concept_benchmark.synthetic.helper.text_concept_detector import TextConceptDetector
 from concept_benchmark.models import ConceptBasedModel, FrontEndModel
 from concept_benchmark.ext.fileutils import save as save_obj
 from concept_benchmark.metrics import calc_metric
 
-tpl_path = pkg_dir / "synthetic" / "robot_concepts" / "static" / "text_templates" / "Templates.txt"
+tpl_path = pkg_dir / "synthetic" / "helper" / "static" / "text_templates" / "Templates.txt"
 with open(tpl_path, "r", encoding="utf-8-sig") as f:
     templates = [ln.strip() for ln in f if ln.strip()]
 
