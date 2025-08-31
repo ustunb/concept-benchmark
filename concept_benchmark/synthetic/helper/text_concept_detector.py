@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
+from sklearn.metrics import roc_auc_score, roc_curve
 from concept_benchmark.data import ConceptDatasetSample
 from concept_benchmark.models import ConceptDetector
 
@@ -27,13 +28,16 @@ class Vocab:
     def build(self, corpus: Iterable[List[str]]):
         from collections import Counter
         cnt = Counter()
+
         for toks in corpus:
             cnt.update(toks)
         words = [w for w, f in cnt.items() if f >= self.min_freq]
         words.sort(key=lambda w: (-cnt[w], w))
         limit = (max(0, int(self.max_size) - len(self.itos))) if self.max_size is not None else None
+
         if limit is not None:
             words = words[:limit]
+
         for w in words:
             if w not in self.stoi:
                 self.stoi[w] = len(self.itos)
@@ -62,8 +66,10 @@ class TextMultiLabelDataset(Dataset):
         tokenized: List[List[str]] = []
         for s in self.texts:
             toks = _tok(str(s))
+
             if self.use_bigrams:
                 toks = toks + _make_bigrams(toks)
+
             tokenized.append(toks)
 
         if vocab is None:
@@ -74,6 +80,7 @@ class TextMultiLabelDataset(Dataset):
         seqs: List[List[int]] = []
         for toks in tokenized:
             ids = self.vocab.encode(toks)
+
             if len(ids) > self.max_len:
                 ids = ids[: self.max_len]
             seqs.append(ids if ids else [0])
@@ -89,14 +96,17 @@ class TextMultiLabelDataset(Dataset):
 
     @staticmethod
     def collate(batch):
-        xs, ys = zip(*batch) if batch else ([], [])
-        if not xs:
-            return torch.zeros((0,1), dtype=torch.long), torch.zeros((0,), dtype=torch.long), torch.zeros((0,0), dtype=torch.float32)
+        if not batch:
+            return torch.zeros((0, 1), dtype=torch.long), torch.zeros((0,), dtype=torch.long), torch.zeros((0, 0), dtype=torch.float32)
+
+        xs, ys = zip(*batch)
         lengths = [len(x) for x in xs]
-        maxlen = max(lengths) if lengths else 1
+        maxlen = max(lengths)
         padded = torch.full((len(xs), maxlen), 0, dtype=torch.long)
+
         for i, x in enumerate(xs):
             padded[i, : len(x)] = x
+
         y = torch.stack(ys, dim=0)
         return padded, torch.tensor(lengths, dtype=torch.long), y
 
@@ -135,6 +145,43 @@ class TextConceptModel(nn.Module):
         h = self.encoder(x, lengths)
         return self.head(h)
 
+def _cross_auroc(scores: np.ndarray, truth: np.ndarray) -> np.ndarray:
+    n = scores.shape[1]
+    A = np.full((n, n), np.nan, dtype=np.float32)
+
+    for j in range(n):
+        s = scores[:, j]
+
+        for k in range(n):
+            y = truth[:, k]
+
+            if y.ndim == 1 and len(np.unique(y)) == 2 and y.sum() > 0 and (1 - y).sum() > 0:
+                try:
+                    A[j, k] = roc_auc_score(y, s)
+                except Exception:
+                    A[j, k] = np.nan
+    return A
+
+def _ece(scores: np.ndarray, y: np.ndarray, n_bins: int = 10) -> float:
+    bins = np.linspace(0.0, 1.0, n_bins + 1)
+    m = float(len(scores))
+    out = 0.0
+    for i in range(n_bins):
+        left = bins[i]
+        right = bins[i + 1]
+
+        if i < n_bins - 1:
+            mask = (scores >= left) & (scores < right)
+        else:
+            mask = (scores >= left) & (scores <= right)
+
+        if mask.any():
+            acc = float((scores[mask] >= 0.5).astype(int).mean())
+            conf = float(scores[mask].mean())
+            out += abs(acc - conf) * (mask.sum() / m)
+
+    return float(out)
+
 class TextConceptDetector(ConceptDetector):
     def __init__(
         self,
@@ -150,7 +197,9 @@ class TextConceptDetector(ConceptDetector):
         min_freq: int = 1,
         max_vocab: Optional[int] = 40000,
         pos_weight: Union[None, str, np.ndarray] = "auto",
-        output_mode: str = "hard",  # "hard" or "soft"
+        output_mode: str = "hard",
+        threshold_mode: str = "auto",
+        validate: bool = True,
         device: Optional[str] = None,
         **kwargs,
     ) -> None:
@@ -180,9 +229,16 @@ class TextConceptDetector(ConceptDetector):
         self.pos_weight_cfg: Union[None, str, np.ndarray] = pos_weight
         om = (output_mode or "hard").strip().lower()
         self.output_mode = "soft" if om == "soft" else "hard"
+        tm = (threshold_mode or "auto").strip().lower()
+        self.threshold_mode = "auto" if tm == "auto" else "fixed"
+        self.validate_after_fit = bool(validate)
+        self.cross_auroc_: Optional[np.ndarray] = None
+        self.alignment_: Optional[Dict[str, float]] = None
+        self.thresholds_: Optional[np.ndarray] = None
 
     def _to_text_list(self, dataset: ConceptDatasetSample) -> List[str]:
         X = getattr(dataset, "X", None)
+
         if X is None:
             raise ValueError("Dataset missing X")
         return [str(v) for v in list(X)]
@@ -201,6 +257,7 @@ class TextConceptDetector(ConceptDetector):
             max_size=self.max_vocab,
         )
         self.vocab = ds_train.vocab
+
         if valid_dataset is not None:
             X_valid = self._to_text_list(valid_dataset)
             y_valid = np.asarray(valid_dataset.C, dtype=np.float32)
@@ -213,6 +270,7 @@ class TextConceptDetector(ConceptDetector):
             )
         else:
             ds_valid = TextMultiLabelDataset(texts=[], labels=np.zeros((0, y_train.shape[1]), dtype=np.float32), vocab=self.vocab)
+
         return ds_train, ds_valid
 
     def _make_loaders(self, ds_train: Dataset, ds_valid: Dataset):
@@ -277,7 +335,80 @@ class TextConceptDetector(ConceptDetector):
 
         self.embedding_model = self.model.encoder
 
-    def predict(self, dataset: ConceptDatasetSample, emebed_params: Optional[dict] = None, **kwargs) -> np.ndarray:
+        if valid_dataset is not None and self.validate_after_fit:
+            old = self.output_mode
+            self.output_mode = "soft"
+            scores = self.predict(valid_dataset)
+            self.output_mode = old
+            truth = np.asarray(valid_dataset.C, dtype=np.float32)
+            A = _cross_auroc(scores, truth.astype(int))
+            self.cross_auroc_ = A
+            diag = np.diag(A) if A.size else np.array([])
+            off = A[~np.eye(A.shape[0], dtype=bool)] if A.size else np.array([])
+            diag_mean = float(np.nanmean(diag)) if diag.size else float("nan")
+            off_mean = float(np.nanmean(off)) if off.size else float("nan")
+
+            if A.shape[0] > 1:
+                row_max = np.nanmax(A, axis=1)
+                row_second = []
+                for r in range(A.shape[0]):
+                    row = A[r].copy()
+                    row[r] = np.nan
+                    row_second.append(np.nanmax(row))
+                sap_margin = float(np.nanmean(row_max - np.array(row_second, dtype=np.float32)))
+            else:
+                sap_margin = float("nan")
+
+            if A.size:
+                argmax = np.nanargmax(A, axis=1)
+                diag_top_fraction = float(np.mean(argmax == np.arange(A.shape[0])))
+                diag_top90_fraction = float(np.mean(((argmax == np.arange(A.shape[0])) & (diag >= 0.90))))
+            else:
+                diag_top_fraction = float("nan")
+                diag_top90_fraction = float("nan")
+
+            eces = []
+            for j in range(scores.shape[1]):
+                try:
+                    eces.append(_ece(scores[:, j], truth[:, j], n_bins=10))
+                except Exception:
+                    pass
+            ece_macro = float(np.nanmean(eces)) if eces else float("nan")
+            self.alignment_ = {
+                "diag_mean": diag_mean,
+                "off_mean": off_mean,
+                "sap_margin": sap_margin,
+                "diag_top_fraction": diag_top_fraction,
+                "diag_top90_fraction": diag_top90_fraction,
+                "ece_macro": ece_macro,
+            }
+
+            if self.threshold_mode == "auto":
+                th = []
+                for j in range(scores.shape[1]):
+                    yj = truth[:, j].astype(int)
+                    if len(np.unique(yj)) < 2:
+                        th.append(0.5)
+                        continue
+                    try:
+                        fpr, tpr, thr = roc_curve(yj, scores[:, j])
+                        jstat = tpr - fpr
+                        idx = int(np.nanargmax(jstat))
+                        t = float(thr[idx])
+                        if not np.isfinite(t):
+                            t = 0.5
+                        th.append(t)
+                    except Exception:
+                        th.append(0.5)
+                self.thresholds_ = np.asarray(th, dtype=np.float32)
+        else:
+            if self.threshold_mode == "auto":
+                self.thresholds_ = np.full((self._n_concepts,), 0.5, dtype=np.float32)
+
+    def predict(self, dataset: ConceptDatasetSample, embed_params: Optional[dict] = None, **kwargs) -> np.ndarray:
+        if embed_params is None and "emebed_params" in kwargs:
+            embed_params = kwargs.pop("emebed_params")
+
         if self.model is None or self.vocab is None:
             raise RuntimeError("Model has not been fitted yet. Call fit() first.")
         texts = self._to_text_list(dataset)
@@ -295,7 +426,9 @@ class TextConceptDetector(ConceptDetector):
                 outs.append(prob)
         prob_all = np.vstack(outs) if outs else np.zeros((0, self._n_concepts), dtype=np.float32)
         if self.output_mode == "hard":
-            return (prob_all >= 0.5).astype(np.float32)
+            if self.thresholds_ is None or self.thresholds_.shape[0] != self._n_concepts:
+                return (prob_all >= 0.5).astype(np.float32)
+            return (prob_all >= self.thresholds_[None, :]).astype(np.float32)
         return prob_all
 
     @property
