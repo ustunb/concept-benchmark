@@ -283,15 +283,18 @@ def _binarize_concepts(df: pd.DataFrame, cols: Iterable[str]):
     return C, names
 
 def _to_label(arr, label_map: dict | None):
+    s = pd.Series(arr)
     if arr.dtype.kind in "iu":
         return arr.astype(int)
     if label_map is None:
-        uniq = {str(v).lower() for v in pd.Series(arr).unique()}
-        if {"glorp","drent"} <= uniq:
-            m = {"glorp":1,"drent":0}
-            return np.array([m[str(v).lower()] for v in arr], dtype=int)
-        return np.array([(str(v).lower() in {"1","true","t","yes","y"}) for v in arr], dtype=int)
-    return np.array([label_map.get(v, v) for v in arr], dtype=int)
+        s_lower = s.astype(str).str.lower()
+        uniq = set(s_lower.unique())
+        if {"glorp", "drent"} <= uniq:
+            m = {"glorp": 1, "drent": 0}
+            return s_lower.map(m).astype(int).to_numpy()
+        return s_lower.isin({"1", "true", "t", "yes", "y"}).astype(int).to_numpy()
+    # label_map is provided
+    return s.map(lambda v: label_map.get(v, v)).astype(int).to_numpy()
 
 def unstructured_caption_via_llm(concepts: dict, *, provider: str = "gemini", model: str = "", api_key: str | None = None, system: str | None = None, user_prompt: str | None = None, n: int = 1, temperature: float = 0.7):
     import os

@@ -15,7 +15,7 @@ from colorir import StackPalette, simplified_dist as colordist
 from pero import Color
 
 # general helper functions
-def split_into_chunks(iterable, n, pad_value = None):
+def split_into_chunks(iterable, n, pad_value=None):
     """
     splits iterable into n evenly sized 'chunks', filling the remainder
     :param iterable: iterable
@@ -357,7 +357,7 @@ def add_unobserved_rows_to_df(df):
     n_names = df.columns[d:d+2].tolist()
 
     # fill out data frame with missing values
-    X_full = ordered_feature_matrix(d, add_intercept = False)
+    X_full = ordered_feature_matrix(d, add_intercept=False)
     df_full = pd.DataFrame(np.hstack((X_full, np.zeros((2 ** d, 2)))))
     df_full.columns = df.columns
     df = pd.concat([df, df_full])
