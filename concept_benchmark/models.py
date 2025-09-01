@@ -43,6 +43,8 @@ class ConceptDetector(object):
         l1_size: Optional[int] = 100,
         n_jobs: Optional[int] = -1,
         calibrate: bool = False,
+        log_training: bool = False,
+        log_interval: Optional[int] = None,
         **kwargs,
     ) -> None:
         """
@@ -60,6 +62,14 @@ class ConceptDetector(object):
             calibrate (bool): If True, fit Platt scaling (w, b) per concept on validation logits.
         """
         # Train per-concept heads with optional encoder finetuning
+        # Propagate logging toggles into fit_params
+        if fit_params is None:
+            fit_params = {}
+        if "verbose" not in fit_params:
+            fit_params["verbose"] = bool(log_training)
+        if log_interval is not None and "log_interval" not in fit_params:
+            fit_params["log_interval"] = int(log_interval)
+
         heads = train_concept_heads(
             train_dataset=train_dataset,
             valid_dataset=valid_dataset,
@@ -278,17 +288,63 @@ class ConceptBasedModel(object):
         self,
         train_dataset: ConceptDatasetSample,
         valid_dataset: ConceptDatasetSample,
+        freeze: bool = True,
+        *,
+        concept_fit_params: Optional[dict] = None,
+        concept_embed_params: Optional[dict] = None,
+        front_fit_params: Optional[dict] = None,
+        calibrate: bool = False,
+        log_training: bool = False,
+        log_interval: Optional[int] = None,
         **kwargs,
     ) -> None:
         """
         Fit the concept detector and front-end model.
+
+        Args:
+            train_dataset: Training split.
+            valid_dataset: Validation split (used for concept detector early stopping/calibration).
+            freeze: If True, skip (re)training the concept detector and only fit the front-end model.
+            concept_fit_params: Dict forwarded to ConceptDetector.fit(..., fit_params=...).
+            concept_embed_params: Dict forwarded to dataset.embed(...); passed via ConceptDetector.fit(..., embed_params=...).
+            front_fit_params: Dict forwarded to FrontEndModel.fit(..., fit_params=...).
+            calibrate: If True, perform per-concept calibration after training detector.
+
+        Backward compatibility:
+            - If kwargs contains 'fit_params', it is treated as concept_fit_params.
+            - If kwargs contains 'embed_params', it is treated as concept_embed_params.
+            - If kwargs contains 'calibrate', it overrides the calibrate flag.
         """
-        self.concept_detector.fit(train_dataset, valid_dataset, **kwargs)
+        # Backward-compat: map legacy kwargs
+        if concept_fit_params is None and "fit_params" in kwargs:
+            concept_fit_params = kwargs.pop("fit_params")
+        if concept_embed_params is None and "embed_params" in kwargs:
+            concept_embed_params = kwargs.pop("embed_params")
+        if "calibrate" in kwargs:
+            calibrate = kwargs.pop("calibrate")
+
+        # Ensure concept_fit_params dict exists and inject logging toggles if set
+        if concept_fit_params is None:
+            concept_fit_params = {}
+        concept_fit_params.setdefault("verbose", bool(log_training))
+        if log_interval is not None:
+            concept_fit_params.setdefault("log_interval", int(log_interval))
+
+        if not freeze:
+            self.concept_detector.fit(
+                train_dataset=train_dataset,
+                valid_dataset=valid_dataset,
+                freeze=freeze,
+                embed_params=concept_embed_params,
+                fit_params=concept_fit_params,
+                calibrate=calibrate,
+                log_training=log_training,
+                log_interval=log_interval,
+            )
 
         C_train = train_dataset.C  # independent training
         y_train = train_dataset.y
-        # self.front_end_model.fit(C_train, y_train, **kwargs)
-        self.front_end_model.fit(C_train, y_train)
+        self.front_end_model.fit(C_train, y_train, fit_params=front_fit_params)
 
         if self.propagate:
             self._prep_propagation()
