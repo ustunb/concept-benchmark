@@ -15,7 +15,7 @@ from colorir import StackPalette, simplified_dist as colordist
 from pero import Color
 
 # general helper functions
-def split_into_chunks(iterable, n, pad_value = None):
+def split_into_chunks(iterable, n, pad_value=None):
     """
     splits iterable into n evenly sized 'chunks', filling the remainder
     :param iterable: iterable
