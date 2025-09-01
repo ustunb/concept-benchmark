@@ -3,6 +3,7 @@ import pytest
 import torch
 
 from concept_benchmark.data import ConceptDatasetSample
+import pandas as pd
 
 
 # ---------- Basic behavior ----------
@@ -14,14 +15,14 @@ def test_len_repr_getitem_dtypes(tab_small):
     x, c, y = sample[0]
 
     assert isinstance(x, np.ndarray) and x.dtype == np.float32
-    assert isinstance(c, np.ndarray) and c.dtype == np.int64
-    assert isinstance(y, np.integer) and y.dtype == np.int64
+    assert isinstance(c, np.ndarray) and c.dtype == np.float32
+    assert isinstance(y, np.float32)
 
     idx = [0, 2, 4]
     x, c, y = sample[idx]
     assert isinstance(x, np.ndarray) and x.dtype == np.float32
-    assert isinstance(c, np.ndarray) and c.dtype == np.int64
-    assert isinstance(y, np.ndarray) and y.dtype == np.int64
+    assert isinstance(c, np.ndarray) and c.dtype == np.float32
+    assert isinstance(y, np.ndarray) and y.dtype == np.float32
     assert x.shape[0] == c.shape[0] == y.shape[0] == len(idx)
 
 
@@ -57,8 +58,8 @@ def test_loader_shapes_and_dtypes(tab_small):
     x, c, y = next(iter(loader))
     # Collate converts numpy arrays to tensors
     assert isinstance(x, torch.Tensor) and x.dtype == torch.float32
-    assert isinstance(c, torch.Tensor) and c.dtype == torch.int64
-    assert isinstance(y, torch.Tensor) and y.dtype == torch.int64
+    assert isinstance(c, torch.Tensor) and c.dtype == torch.float32
+    assert isinstance(y, torch.Tensor) and y.dtype == torch.float32
     assert x.shape[0] == c.shape[0] == y.shape[0] == 4
     assert x.ndim == 2 and c.ndim == 2 and y.ndim == 1
 
@@ -81,9 +82,9 @@ def test_transforms_applied_and_types_respected(tab_small):
         C=tab_small.C,
         y=tab_small.y,
         meta=tab_small._full.meta,
-        transform_x=tx,
-        transform_c=tc,
-        transform_y=ty,
+        transform=tx,
+        concept_transform=tc,
+        target_transform=ty,
     )
 
     x, c, y = s[0]
@@ -115,3 +116,46 @@ def test_embed_returns_tabular_and_preserves_indices(tab_small):
     np.testing.assert_array_equal(emb.C, s.C)
     np.testing.assert_array_equal(emb.y, s.y)
     np.testing.assert_array_equal(emb.indices, s.indices)
+
+
+# ---------- Meta deep-equality (arrays/DataFrames) ----------
+def test_sample_meta_deep_equal_numpy_and_dataframe(tab_small):
+    s = tab_small.training
+    # Extend meta with numpy array and DataFrame
+    meta = {
+        **s.meta,
+        "arr": np.array([1, 2, 3], dtype=np.int32),
+        "df": pd.DataFrame({"u": [1, 2], "v": [3, 4]}),
+    }
+    s1 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=meta)
+    s2 = ConceptDatasetSample(X=s.X.copy(), C=s.C.copy(), y=s.y.copy(), meta={**meta})
+    assert s1 == s2
+
+    # Change DataFrame content -> inequality
+    meta2 = {**meta}
+    meta2["df"] = pd.DataFrame({"u": [1, 2], "v": [3, 5]})
+    s3 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=meta2)
+    assert s1 != s3
+
+    # Change numpy array content -> inequality
+    meta3 = {**meta}
+    meta3["arr"] = np.array([1, 2, 9], dtype=np.int32)
+    s4 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=meta3)
+    assert s1 != s4
+
+
+def test_sample_transform_identity_matters(tab_small):
+    s = tab_small.training
+
+    def f(z):
+        return z
+
+    def g(z):
+        return z
+
+    s1 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=s.meta, transform=f)
+    s2 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=s.meta, transform=f)
+    assert s1 == s2  # same function object
+
+    s3 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=s.meta, transform=g)
+    assert s1 != s3  # different function object

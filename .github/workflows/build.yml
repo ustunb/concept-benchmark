@@ -24,10 +24,17 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]            
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        # python-version: ["3.10", "3.11", "3.12", "3.13"]
+        # 3.11 has bugs: meson
+        python-version: ["3.10", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install pycairo dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcairo2-dev pkg-config
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5

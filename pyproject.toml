@@ -11,14 +11,14 @@ authors = [
 requires-python = ">=3.10"
 
 dependencies = [
-    "numpy",
-    "pandas",
-    "scikit-learn",
-    "scipy",
-    "tqdm",
-    "dill",
-    "matplotlib",
-    "psutil",
+    "numpy>=2.2.6",
+    "pandas>=2.3.1",
+    "scikit-learn>=1.7.0",
+    "scipy>=1.15.3",
+    "tqdm>=4.67.1",
+    "dill>=0.3.8",
+    "matplotlib>=3.10.3",
+    "psutil>=7.0.0",
     "torch>=2.7.1",
     "gitpython>=3.1.45",
     "pyarrow>=21.0.0",
@@ -28,6 +28,11 @@ dependencies = [
     "skorch>=1.2.0",
     "torcheval>=0.0.7",
     "torchvision>=0.23.0",
+    "albumentations",
+    "colorir>=2.0.0",
+    "pero>=0.18.0",
+    "transformers>=4.55.2",
+    "pycairo>=1.28.0",
 ]
 
 [dependency-groups]
@@ -45,3 +50,9 @@ default-groups = ["dev"]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::sklearn.exceptions.UndefinedMetricWarning",
+]

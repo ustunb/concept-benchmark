@@ -1,229 +1,216 @@
-import torch
-import numpy as np
-
-from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.calibration import CalibratedClassifierCV
-from sklearn.metrics import f1_score
-from tqdm import tqdm
-from torch import nn
-from torch.utils.data import DataLoader
 from typing import Optional
+
+import numpy as np
+import torch
+from sklearn.metrics import f1_score
+from torch import nn
+from tqdm import tqdm
 
 from concept_benchmark.data import ConceptDatasetSample
 
 
-class TorchSKLearnWrapper(BaseEstimator, ClassifierMixin):
-    """
-    A wrapper to make a PyTorch model compatible with sklearn API
-    """
-
-    def __init__(self, model: nn.Module):
-        self.model = model
-        super().__init__()
-
-    # Required to make compatible with CalibratedClassifierCV
-    def __sklearn_tags__(self):
-        tags = super(TorchSKLearnWrapper, self).__sklearn_tags__()
-        tags.estimator_type = "classifier"
-
-        return tags
-
-    def fit(self, X, y):
-        # The model is assumed to be pre-trained.
-        # ConceptDetectors are binary classifiers
-        self.classes_ = np.array([0, 1])  # Required for CalibratedClassifierCV
-        return self
-
-    def predict_proba(self, X):
-        self.model.eval()
-        with torch.no_grad():
-            X_tensor = torch.from_numpy(X).float()
-            probs = torch.sigmoid(self.model(X_tensor)).numpy()
-            # Ensure the output is 2D
-            if len(probs.shape) == 1:
-                probs = probs.reshape(-1, 1)
-            return np.hstack([1 - probs, probs])
-
-    def predict(self, X):
-        return (self.predict_proba(X)[:, 1] > 0.5).astype(int)
-
-
-def train_concept_layer(
+def train_concept_heads(
     train_dataset: ConceptDatasetSample,
     valid_dataset: ConceptDatasetSample,
-    concept_idx: int,
-    fit_params: Optional[dict] = None,
+    embedding_model: Optional[nn.Module],
+    *,
     input_dim: Optional[int] = None,
-    l1_size: Optional[int] = 100,
-) -> nn.Module:
+    l1_size: int = 100,
+    freeze: bool = False,
+    fit_params: Optional[dict] = None,
+) -> nn.ModuleList:
     """
-    A helper function to train a single concept layer.
+    Train per-concept heads with optional finetuning of the embedding model.
 
-    Args:
-        train_dataset (ConceptDatasetSample): training dataset.
-        valid_dataset (ConceptDatasetSample): validation dataset.
-        concept_idx (int): index of the concept to train.
-        fit_params (Optional[dict]): Additional parameters for training.
-        input_dim (Optional[int]): Input dimension for the model.
-        l1_size (Optional[int]): Size of the first linear layer.
+    - If `freeze=True`, only head parameters are updated; the embedding model runs in eval mode.
+    - If `freeze=False` and an embedding model is provided, both embedding model and heads are optimized with separate LRs (joint training).
+    - Loss: mean BCEWithLogits across concepts.
+    - Early stopping based on mean validation F1.
 
     Returns:
-        nn.Module: The trained model.
+        nn.ModuleList: trained list of per-concept heads (each maps embedding -> 1 logit).
     """
-    model = nn.Sequential(
-        nn.Linear(input_dim, l1_size), nn.ReLU(), nn.Linear(l1_size, 1)
-    )
     params = {
-        "lr": 1e-3,
-        "batch_size": 64,
         "epochs": 10,
-        "min_delta": 0.01,
+        "batch_size": 64,
+        "lr_encoder": 1e-5,
+        "lr_heads": 1e-3,
+        "min_delta": 0.001,
         "patience": 5,
+        "device": "cpu",
+        "num_workers": 0,
+        "pin_memory": False,
     }
     if fit_params:
         params.update(fit_params)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=params["lr"])
+    device = params["device"]
+
+    # Infer number of concepts and embedding dimension
+    num_concepts = train_dataset.n_concepts
+
+    # If input_dim unknown, infer from a small forward pass
+    if input_dim is None:
+        samp_bs = min(8, max(1, getattr(train_dataset, "n", 8)))
+        samp_loader = train_dataset.loader(
+            batch_size=samp_bs,
+            shuffle=False,
+            num_workers=params["num_workers"],
+            pin_memory=params["pin_memory"],
+        )
+        with torch.no_grad():
+            bx, _, _ = next(iter(samp_loader))
+            if isinstance(bx, torch.Tensor):
+                bx = bx.to(device)
+            if embedding_model is None:
+                emb = bx
+            else:
+                embedding_model = embedding_model.to(device)
+                embedding_model.eval()
+                emb = embedding_model(bx)
+            if isinstance(emb, (list, tuple)):
+                emb = emb[0]
+            if not isinstance(emb, torch.Tensor):
+                emb = torch.as_tensor(emb, device=device, dtype=torch.float32)
+            input_dim = int(emb.shape[1])
+
+    # Heads: independent per-concept MLPs
+    heads = nn.ModuleList(
+        [
+            nn.Sequential(
+                nn.Linear(input_dim, l1_size), nn.ReLU(), nn.Linear(l1_size, 1)
+            )
+            for _ in range(num_concepts)
+        ]
+    )
+
+    # Move modules to device
+    if embedding_model is not None:
+        embedding_model.to(device)
+        if freeze:
+            for p in embedding_model.parameters():
+                p.requires_grad = False
+        embedding_model.eval() if freeze else embedding_model.train()
+    heads.to(device)
+
+    # Optimizer parameter groups
+    optim_params = []
+    if embedding_model is not None and not freeze:
+        optim_params.append(
+            {"params": embedding_model.parameters(), "lr": params["lr_encoder"]}
+        )
+    optim_params.append({"params": heads.parameters(), "lr": params["lr_heads"]})
+    optimizer = torch.optim.Adam(optim_params)
+
     loss_fn = nn.BCEWithLogitsLoss()
 
-    train_loader = DataLoader(
-        train_dataset, batch_size=params["batch_size"], shuffle=True
+    train_loader = train_dataset.loader(
+        batch_size=params["batch_size"],
+        shuffle=True,
+        num_workers=params["num_workers"],
+        pin_memory=params["pin_memory"],
+    )
+    valid_loader = valid_dataset.loader(
+        batch_size=params["batch_size"],
+        shuffle=False,
+        num_workers=params["num_workers"],
+        pin_memory=params["pin_memory"],
     )
 
-    valid_loader = DataLoader(
-        valid_dataset, batch_size=params["batch_size"], shuffle=False
-    )
-
-    best_val_f1 = -1
+    best_val_f1 = -1.0
     patience_counter = 0
+    best_heads_state = None
+    best_encoder_state = None
 
-    model.train()
     for _ in tqdm(range(params["epochs"])):
-        train_losses, train_f1s = [], []
-        for batch_X, batch_C, batch_y in train_loader:
-            batch_C_i = batch_C[:, concept_idx]  # Get the specific concept column
+        # Train epoch
+        if embedding_model is not None and not freeze:
+            embedding_model.train()
+        heads.train()
+        for batch_X, batch_C, _ in train_loader:
+            # Move data
+            if isinstance(batch_X, torch.Tensor):
+                batch_X = batch_X.to(device)
+            if isinstance(batch_C, torch.Tensor):
+                batch_C = batch_C.to(device)
+            batch_C = batch_C.float()
+
+            # Forward
+            with torch.set_grad_enabled(True):
+                if embedding_model is None:
+                    emb = batch_X
+                else:
+                    emb = embedding_model(batch_X)
+                if isinstance(emb, (list, tuple)):
+                    emb = emb[0]
+                if not isinstance(emb, torch.Tensor):
+                    emb = torch.as_tensor(emb, device=device, dtype=torch.float32)
+
+                logits = [head(emb).squeeze(1) for head in heads]
+                logits = torch.stack(logits, dim=1)
+                loss = loss_fn(logits, batch_C)
+
             optimizer.zero_grad()
-            outputs = model(batch_X).squeeze()
-            loss = loss_fn(outputs, batch_C_i)
             loss.backward()
             optimizer.step()
 
-            f1 = f1_score(
-                batch_C_i.cpu().numpy(), (torch.sigmoid(outputs) > 0.5).cpu().numpy()
-            )
-            train_f1s.append(f1)
-            train_losses.append(loss.item())
-
-        avg_train_loss = np.mean(train_losses)
-        avg_train_f1 = np.mean(train_f1s)
-
-        model.eval()
-        val_losses, val_f1s = [], []
+        # Validate
+        if embedding_model is not None:
+            embedding_model.eval()
+        heads.eval()
+        val_f1s = []
         with torch.no_grad():
-            for batch_X, batch_C, batch_y in valid_loader:
-                batch_C_i = batch_C[:, concept_idx]
-                val_outputs = model(batch_X).squeeze()
-                val_loss = loss_fn(val_outputs, batch_C_i)
-                val_losses.append(val_loss.item())
+            for batch_X, batch_C, _ in valid_loader:
+                if isinstance(batch_X, torch.Tensor):
+                    batch_X = batch_X.to(device)
+                if isinstance(batch_C, torch.Tensor):
+                    batch_C = batch_C.to(device)
+                batch_C = batch_C.float()
 
-                val_f1 = f1_score(
-                    batch_C_i.cpu().numpy(),
-                    (torch.sigmoid(val_outputs) > 0.5).cpu().numpy(),
-                )
-                val_f1s.append(val_f1)
+                emb = batch_X if embedding_model is None else embedding_model(batch_X)
+                if isinstance(emb, (list, tuple)):
+                    emb = emb[0]
+                if not isinstance(emb, torch.Tensor):
+                    emb = torch.as_tensor(emb, device=device, dtype=torch.float32)
 
-        avg_val_loss = np.mean(val_losses)
-        avg_val_f1 = np.mean(val_f1s)
+                logits = [head(emb).squeeze(1) for head in heads]
+                logits = torch.stack(logits, dim=1)
+                preds = (torch.sigmoid(logits) > 0.5).int().cpu().numpy()
+                target = batch_C.cpu().numpy().astype(int)
 
-        # Early stopping
+                # F1 per concept then mean
+                concept_f1s = [
+                    f1_score(target[:, i], preds[:, i]) for i in range(num_concepts)
+                ]
+                val_f1s.append(np.mean(concept_f1s))
+
+        avg_val_f1 = float(np.mean(val_f1s)) if len(val_f1s) else -1.0
+
         if avg_val_f1 > best_val_f1 + params["min_delta"]:
             best_val_f1 = avg_val_f1
             patience_counter = 0
-            # Optionally save best model
-            # torch.save(self.state_dict(), 'best_model.pt')
+            best_heads_state = {
+                k: v.cpu().clone() for k, v in heads.state_dict().items()
+            }
+            if embedding_model is not None and not freeze:
+                best_encoder_state = {
+                    k: v.cpu().clone() for k, v in embedding_model.state_dict().items()
+                }
         else:
             patience_counter += 1
+            if patience_counter >= params["patience"]:
+                print(f"Early stopping at val F1={avg_val_f1:.4f}")
+                break
 
-        if patience_counter >= params["patience"]:
-            print(f"Early stopping at epoch {_ + 1}")
-            print(
-                f"Epoch {_ + 1}/{params['epochs']} - Train Loss: {avg_train_loss:.4f}, "
-                f"Train F1: {avg_train_f1:.4f}, Val Loss: {avg_val_loss:.4f}, Val F1: {avg_val_f1:.4f}"
-            )
-            break
+    # Load best states
+    if best_heads_state is not None:
+        heads.load_state_dict(best_heads_state)
+    if embedding_model is not None and not freeze and best_encoder_state is not None:
+        embedding_model.load_state_dict(best_encoder_state)
 
-    return model
+    # Ensure on CPU for downstream wrapping/embedding
+    heads.cpu()
+    if embedding_model is not None:
+        embedding_model.cpu()
 
-
-def train_calib_concept_layer(
-    train_dataset: ConceptDatasetSample,
-    valid_dataset: ConceptDatasetSample,
-    concept_idx: int,
-    fit_params: Optional[dict] = None,
-    input_dim: Optional[int] = None,
-    l1_size: Optional[int] = 100,
-) -> CalibratedClassifierCV:
-    """
-    A helper function to train and then calibrate a single concept layer.
-    """
-    model = train_concept_layer(
-        train_dataset=train_dataset,
-        valid_dataset=valid_dataset,
-        concept_idx=concept_idx,
-        fit_params=fit_params,
-        input_dim=input_dim,
-        l1_size=l1_size,
-    )
-
-    sklearn_model = TorchSKLearnWrapper(model)
-    sklearn_model.fit(train_dataset.X, train_dataset.C[:, concept_idx])
-
-    calibrated_model = CalibratedClassifierCV(
-        sklearn_model, method="sigmoid", cv="prefit"
-    )
-    calibrated_model.fit(valid_dataset.X, valid_dataset.C[:, concept_idx])
-
-    return calibrated_model
-
-
-# def train_classical_worker(
-#     train_dataset: ConceptDatasetSample,
-#     valid_dataset: ConceptDatasetSample,
-#     concept_idx: int,
-#     fit_params: Optional[dict] = None,
-#     input_dim: Optional[int] = None,
-#     l1_size: Optional[int] = 100,
-# ):
-#     """
-#     A worker function to train a classical concept layer.
-#     Used in parallel processing.
-#     """
-#     return train_concept_layer(
-#         train_dataset=train_dataset,
-#         valid_dataset=valid_dataset,
-#         concept_idx=concept_idx,
-#         fit_params=fit_params,
-#         input_dim=input_dim,
-#         l1_size=l1_size,
-#     )
-
-# def train_calibrated_worker(
-#     train_dataset: ConceptDatasetSample,
-#     valid_dataset: ConceptDatasetSample,
-#     concept_idx: int,
-#     fit_params: Optional[dict] = None,
-#     input_dim: Optional[int] = None,
-#     l1_size: Optional[int] = 100,
-# ):
-#     """
-#     A worker function to train and calibrate a concept layer.
-#     Used in parallel processing.
-#     """
-#     return train_calib_concept_layer(
-#         train_dataset=train_dataset,
-#         valid_dataset=valid_dataset,
-#         concept_idx=concept_idx,
-#         fit_params=fit_params,
-#         input_dim=input_dim,
-#         l1_size=l1_size,
-#     )
+    return heads
