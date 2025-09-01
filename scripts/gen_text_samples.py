@@ -16,6 +16,7 @@ from concept_benchmark.metrics import calc_metric
 from concept_benchmark.data import ConceptDatasetSample
 from types import SimpleNamespace
 import argparse, psutil
+from itertools import product
 import builtins, functools
 print = functools.partial(builtins.print, end="\n\n")
 
@@ -110,6 +111,15 @@ params = {
     },
     "model": "'glorp' if (int(row['body_shape']=='square') + int(str(row['foot_shape']).startswith('pointy_')) - 2 >= 0) else 'drent'",
 }
+def enumerate_concepts(params, shuffle=True, seed=0):
+    cols = list(params["concepts"].keys())
+    grids = [params["concepts"][c] for c in cols]
+    combos = list(product(*grids))
+    df = pd.DataFrame(combos, columns=cols)
+    if shuffle:
+        rng = np.random.default_rng(seed)
+        df = df.iloc[rng.permutation(len(df))].reset_index(drop=True)
+    return df
 
 def sample_concepts(params, n=50, seed=0):
     rng = np.random.default_rng(seed)
@@ -210,8 +220,13 @@ def _apply_label_prior_shift(val_sample: ConceptDatasetSample, prior: dict, seed
     rng.shuffle(keep_idx)
     return _subset_sample(val_sample, keep_idx, val_sample.meta.get("concepts", []), val_sample.meta.get("classes", []))
 
-catalog_df = sample_concepts(params, n=10000, seed=0)
+cols = list(params["concepts"].keys())
+catalog_df = pd.DataFrame(
+    [dict(zip(cols, vals)) for vals in product(*[params["concepts"][c] for c in cols])],
+    columns=cols,
+)
 catalog_df["label"] = compute_label(catalog_df, params["model"])
+
 
 concept_cols = list(params["concepts"].keys())
 llm_user_prompt = (
@@ -223,7 +238,7 @@ llm_user_prompt = (
 ds = create_synthetic_dataset(
     source=catalog_df,
     templates=templates,
-    variants_per_row=1,
+    variants_per_row=3,
     include_color=False,
     rng_seed=0,
     concept_cols=concept_cols,
@@ -262,12 +277,19 @@ with out_csv.open("w", newline="", encoding="utf-8") as f:
 print(f"\nWrote {len(ds)} rows to {out_csv}")
 
 if ds.cvindices is None or getattr(ds.validation, "n", 0) == 0 or getattr(ds, "test", None) is None:
-    ds.generate_cvindices(total_folds_for_cv=[5], replicates=1, seed=0)
-    fold_id = list(ds.cvindices.keys())[0]
-    folds = sorted(set(ds.cvindices[fold_id]))
-    val_fold, test_fold = folds[0], folds[1]
-    ds.split(fold_id=fold_id, fold_num_validation=val_fold, fold_num_test=test_fold)
+    n_folds = 5
+    rng = np.random.default_rng(0)
+    base_ids = np.unique(row_index)
+    rng.shuffle(base_ids)
+    assign = {int(rid): i % n_folds for i, rid in enumerate(base_ids)}
+    fold_arr = np.array([assign[int(r)] for r in row_index], dtype=int)
 
+    if ds.cvindices is None:
+        ds.cvindices = {}
+    if "by_robot" not in ds.cvindices:
+        ds.cvindices["by_robot"] = fold_arr
+
+    ds.split(fold_id="by_robot", fold_num_validation=0, fold_num_test=1)
     print(f"Split sizes → train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
 
 print(f"Variant: {VARIANT} | Strategy: {IMPERFECT_STRATEGY}")
