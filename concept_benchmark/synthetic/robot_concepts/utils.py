@@ -357,7 +357,7 @@ def add_unobserved_rows_to_df(df):
     n_names = df.columns[d:d+2].tolist()
 
     # fill out data frame with missing values
-    X_full = ordered_feature_matrix(d, add_intercept = False)
+    X_full = ordered_feature_matrix(d, add_intercept=False)
     df_full = pd.DataFrame(np.hstack((X_full, np.zeros((2 ** d, 2)))))
     df_full.columns = df.columns
     df = pd.concat([df, df_full])
