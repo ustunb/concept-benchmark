@@ -16,6 +16,8 @@ from concept_benchmark.metrics import calc_metric
 from concept_benchmark.data import ConceptDatasetSample
 from types import SimpleNamespace
 import argparse, psutil
+import builtins, functools
+print = functools.partial(builtins.print, end="\n\n")
 
 tpl_path = pkg_dir / "synthetic" / "helper" / "static" / "text_templates" / "Templates.txt"
 with open(tpl_path, "r", encoding="utf-8-sig") as f:
@@ -27,13 +29,13 @@ ROBOT_RUN_DIR.mkdir(parents=True, exist_ok=True)
 ROBOT_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 settings = {
-    "variant": "imperfect",                                   # "perfect" | "imperfect"
-    "imperfect_strategy": "missing_concepts",                 # "missing_concepts" | "label_prior_shift"
-    "heldout_concepts": ["head_shape=square"],                # e.g. ["head_shape=square", "foot_shape=pointy_4sided"]
-    "mask_p": 1.0,                                            # drop prob for rows with held-out concepts in TRAIN
-    "test_label_prior": "",                                   # e.g. "0:0.3,1:0.7" for validation prior shift
+    "variant": "imperfect",
+    "imperfect_strategy": "missing_concepts",
+    "heldout_concepts": ["head_shape=square"],
+    "mask_p": 1.0,
+    "test_label_prior": "",
     "seed": 1337,
-    "concept_mode": "hard",                                   # "hard" | "soft"
+    "concept_mode": "hard",
     "train_on_detected": False,
 }
 
@@ -362,6 +364,19 @@ print("Concept order:", concept_names)
 print(f"Concept outputs (mode={CONCEPT_MODE}) shape:", proba.shape)
 print("First row outputs:", proba[0])
 
+y_train_true = train_ds.y.astype(int)
+y_train_proba = cbm.predict_proba(train_ds)
+y_train_pred = np.argmax(y_train_proba, axis=1)
+
+acc_train = accuracy_score(y_train_true, y_train_pred)
+try:
+    cls_index_1 = int(np.where(cbm.front_end_model.model.classes_ == 1)[0][0])
+    roc_train = roc_auc_score(y_train_true, y_train_proba[:, cls_index_1]) if len(np.unique(y_train_true)) == 2 else float("nan")
+except Exception:
+    roc_train = float("nan")
+
+print("Label model metrics (train):", {"accuracy": float(acc_train), "roc_auc": float(roc_train)})
+
 y_val = val_ds.y.astype(int)
 y_val_proba = cbm.predict_proba(val_ds)
 y_val_pred = np.argmax(y_val_proba, axis=1)
@@ -388,26 +403,57 @@ except Exception:
 
 print("Label model metrics (test):", {"accuracy": float(acc_test), "roc_auc": float(roc_test)})
 
+_old_tr = detector.output_mode
+detector.output_mode = "soft"
+C_train_scores = detector.predict(train_ds)
+detector.output_mode = _old_tr
+
+C_train_true = train_ds.C.astype(np.float32)
+sel_covs_tr, sel_accs_tr, aucs_tr, auprcs_tr = [], [], [], []
+for j in range(C_train_true.shape[1]):
+    m = calc_metric(C_train_scores[:, j], C_train_true[:, j], tau=0.5)
+    sel_covs_tr.append(m["coverage"])
+    sel_accs_tr.append(m["selective_accuracy"])
+    try:
+        if len(np.unique(C_train_true[:, j])) == 2:
+            aucs_tr.append(roc_auc_score(C_train_true[:, j], C_train_scores[:, j]))
+            auprcs_tr.append(average_precision_score(C_train_true[:, j], C_train_scores[:, j]))
+    except Exception:
+        pass
+
+concept_train_metrics = {
+    "selective_cov_mean": float(np.nanmean(sel_covs_tr)) if sel_covs_tr else float("nan"),
+    "selective_acc_mean": float(np.nanmean(sel_accs_tr)) if sel_accs_tr else float("nan"),
+    "auroc_macro": float(np.nanmean(aucs_tr)) if aucs_tr else float("nan"),
+    "auprc_macro": float(np.nanmean(auprcs_tr)) if auprcs_tr else float("nan"),
+    "tau": 0.5,
+}
+print("Concept metrics (train):", concept_train_metrics)
+
 _old2 = detector.output_mode
 detector.output_mode = "soft"
 C_test_scores = detector.predict(test_ds)
 detector.output_mode = _old2
 
 C_test_true = test_ds.C.astype(np.float32)
-aucs_t, auprcs_t = [], []
+sel_covs_t, sel_accs_t, aucs_t, auprcs_t = [], [], [], []
 for j in range(C_test_true.shape[1]):
-    yt = C_test_true[:, j]
-    ys = C_test_scores[:, j]
+    m = calc_metric(C_test_scores[:, j], C_test_true[:, j], tau=0.5)
+    sel_covs_t.append(m["coverage"])
+    sel_accs_t.append(m["selective_accuracy"])
     try:
-        if len(np.unique(yt)) == 2:
-            aucs_t.append(roc_auc_score(yt, ys))
-            auprcs_t.append(average_precision_score(yt, ys))
+        if len(np.unique(C_test_true[:, j])) == 2:
+            aucs_t.append(roc_auc_score(C_test_true[:, j], C_test_scores[:, j]))
+            auprcs_t.append(average_precision_score(C_test_true[:, j], C_test_scores[:, j]))
     except Exception:
         pass
 
 concept_test_metrics = {
+    "selective_cov_mean": float(np.nanmean(sel_covs_t)) if sel_covs_t else float("nan"),
+    "selective_acc_mean": float(np.nanmean(sel_accs_t)) if sel_accs_t else float("nan"),
     "auroc_macro": float(np.nanmean(aucs_t)) if aucs_t else float("nan"),
     "auprc_macro": float(np.nanmean(auprcs_t)) if auprcs_t else float("nan"),
+    "tau": 0.5,
 }
 print("Concept metrics (test):", concept_test_metrics)
 
@@ -416,9 +462,6 @@ all_preds = np.argmax(all_probs, axis=1)
 label_names = list(ds.classes)
 
 pred_labels = [label_names[i] for i in all_preds]
-# print("Pred labels:", pred_labels)
-# print("Class order in probs:", label_names)
-# print("First row class probs:", all_probs[0])
 
 metrics_out = {}
 
@@ -433,6 +476,8 @@ except Exception:
 
 metrics_out["label"] = {"accuracy": float(acc), "roc_auc": float(roc), "selective": lbl_sel}
 metrics_out["label_test"] = {"accuracy": float(acc_test), "roc_auc": float(roc_test)}
+metrics_out["label_train"] = {"accuracy": float(acc_train), "roc_auc": float(roc_train)}
+metrics_out["label_val"] = metrics_out["label"]
 
 n_concepts = C_val_true.shape[1]
 
@@ -458,7 +503,9 @@ concept_metrics = {
 }
 
 metrics_out["concepts"] = concept_metrics
-metrics_out["concepts_test"] = concept_test_metrics  # (added)
+metrics_out["concepts_test"] = concept_test_metrics
+metrics_out["concepts_train"] = concept_train_metrics
+metrics_out["concepts_val"] = metrics_out["concepts"]
 
 run_info = {
     "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
