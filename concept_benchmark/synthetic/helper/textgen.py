@@ -39,6 +39,7 @@ def _polish_text(s: str) -> str:
     s = re.sub(r"\bhas no (\w+)\s+\1\b", r"has no \1", s, flags=re.I)
     s = re.sub(r"\b([Ee]lbows|[Kk]nees|[Aa]ntennae)\s+with\s+\1\b", r"With \1", s)
     s = re.sub(r"\b([Ee]lbows|[Kk]nees|[Aa]ntennae)\s+no\s+\1\b", r"No \1", s)
+
     s = re.sub(r"\b[Nn]ot\s+([a-z0-9 _-]+)\s+at the head\b", r"The head isn’t \1", s)
     s = re.sub(r"\b[Nn]ot\s+([a-z0-9 _-]+)\s+for the body\b", r"The body isn’t \1", s)
     s = re.sub(r"\b[Ee]ars (are|:)?\s*triangle\b", r"Ears are triangular", s)
@@ -47,15 +48,28 @@ def _polish_text(s: str) -> str:
     s = re.sub(r"\b[Cc]olor\s+(?!is|:)([a-z]+)\b", r"color is \1", s)
     s = re.sub(r"\b[Mm]outh\s+(?!is|:)(open|closed)\b", r"mouth is \1", s, flags=re.I)
     s = re.sub(r"\b[Cc]olor\s+is\s+([a-z]+)/([a-z]+)\b", r"color is \1 and \2", s)
+
     def _fix_colon_has_no(m):
         item = m.group(1).lower()
         aux = m.group(2).lower()
         return f"{'Has' if aux=='has' else 'No'} {item}."
-    s = re.sub(r"\b(Knees|Elbows|Antennae):\s*(has|no)\b\.?", _fix_colon_has_no, s)
+    s = re.sub(r"\b(Knees|Elbows|Antennae):\s*(has|no)\b\.?", _fix_colon_has_no, s, flags=re.I)
     s = re.sub(r"\b(Knees|Elbows|Antennae):\s*has\s+(knees|elbows|antennae)\b\.?", lambda m: f"Has {m.group(2)}.", s, flags=re.I)
     s = re.sub(r"\b(Knees|Elbows|Antennae):\s*no\s+(knees|elbows|antennae)\b\.?",  lambda m: f"No {m.group(2)}.",  s, flags=re.I)
-    s = re.sub(r"\b(Elbows|Knees|Antennae)\s+no\s+\1\b",  lambda m: f"No {m.group(1).lower()}",  s)
-    s = re.sub(r"\b(Elbows|Knees|Antennae)\s+has\s+\1\b", lambda m: f"Has {m.group(1).lower()}", s)
+    s = re.sub(r"\b(Elbows|Knees|Antennae)\s+no\s+\1\b",  lambda m: f"No {m.group(1).lower()}",  s, flags=re.I)
+    s = re.sub(r"\b(Elbows|Knees|Antennae)\s+has\s+\1\b", lambda m: f"Has {m.group(1).lower()}", s, flags=re.I)
+    s = re.sub(r"\b([Ee]lbows|[Kk]nees|[Aa]ntennae)\s+are\s+(has|no)\s+\1\b",
+               lambda m: ("Has" if m.group(2).lower()=="has" else "No") + " " + m.group(1).lower(), s)
+
+    s = re.sub(r"\b(is|are|was|were)\s+not\s+not\s+([a-z0-9 _-]+)", lambda m: f"{m.group(1)} {m.group(2)}", s, flags=re.I)
+    s = re.sub(r"\b(is|are|was|were)n['’]t not\s+([a-z0-9 _-]+)", lambda m: f"{m.group(1)} {m.group(2)}", s, flags=re.I)
+    s = re.sub(r"\bnot\s+not\s+([a-z0-9 _-]+)", r"\1", s, flags=re.I)
+
+    s = re.sub(r"\bhas\s+has\s+(\w+)\s+\1\b", r"has \1", s, flags=re.I)
+    s = re.sub(r"\bdoes\s+have\s+has\s+(\w+)\s+\1\b", r"does have \1", s, flags=re.I)
+    s = re.sub(r"\b(has|does\s+have)\s+(has|no)\s+(\w+)\s+\3\b",
+               lambda m: f"{m.group(1)} {'no ' if m.group(2).lower()=='no' else ''}{m.group(3)}", s, flags=re.I)
+
     sentences = [w.strip() for w in re.split(r"(?<=[.?!])\s+", s) if w.strip()]
     sentences = [sent[0].upper() + sent[1:] if sent and sent[0].islower() else sent for sent in sentences]
     s = " ".join(sentences)
@@ -157,7 +171,7 @@ def create_robot_text_dataset(source, templates: Sequence[str] | None = None, va
         return None, None
 
     structured_templates_default = [
-        "This robot has a {head_shape} head and a {body_shape} body. It has {has_elbows} and {has_knees}. Its feet are {foot_shape}.",
+        "This robot has a {head_shape} head and a {body_shape} body. It {has_elbows} and {has_knees}. Its feet are {foot_shape}.",
         "Head: {head_shape}. Body: {body_shape}. Elbows: {has_elbows}. Knees: {has_knees}. Feet: {foot_shape}.",
     ]
 
