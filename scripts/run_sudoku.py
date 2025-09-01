@@ -26,7 +26,6 @@ import sys
 import os
 sys.path.append(os.getcwd())
 
-import argparse, json, sys
 from pathlib import Path
 import numpy as np
 import torch
@@ -47,8 +46,7 @@ from concept_benchmark.synthetic.sudoku import (
     default_transform,
     onehot_transform,
     histogram_transform,
-    image_transform,
-    sudoku_image_preprocess,
+    image_transform
 )
 
 # ---------------- image transform wrapper ----------------
@@ -110,7 +108,7 @@ def main():
     ap.add_argument("--data-type", choices=["tabular", "image"], default="image")
     ap.add_argument("--transform", choices=["auto", "default", "onehot", "histogram", "image"], default="auto")
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--ds_name", type=str, default=None)
+    ap.add_argument("--dataset_name", type=str, default=None)
     ap.add_argument("--save-dir", type=Path, default=None)
     ap.add_argument("--save-format", choices=["npz", "pt"], default="npz")
     ap.add_argument("--progress", action="store_true", help="Show a progress bar during generation.")
@@ -152,7 +150,7 @@ def main():
         data_type=args.data_type,
         seed=args.seed,
         transform=transform,
-        ds_name=args.ds_name,
+        ds_name=args.dataset_name,
     )
 
     # -------- summary WITHOUT touching ds.meta ----------
@@ -177,7 +175,7 @@ def main():
     print(f"y shape: {y.shape}")
     print(f"transform: {meta.get('transform')}")
     if args.data_type == "image":
-        print(f"Images & CSVs saved under data_dir/sudoku/{args.ds_name}.")
+        print(f"Images & CSVs saved under data_dir/sudoku/{args.dataset_name}.")
 
     # save (non-image)
     if args.data_type != "image" and args.save_dir is not None:
