@@ -1,3 +1,4 @@
+from __future__ import annotations
 import csv
 from pathlib import Path
 import pandas as pd
@@ -5,9 +6,7 @@ import numpy as np
 import os
 import json
 import datetime
-
 from sklearn.metrics import accuracy_score, roc_auc_score, average_precision_score
-
 from concept_benchmark.synthetic.helper.textgen import create_synthetic_dataset
 from concept_benchmark.paths import pkg_dir, results_dir, data_dir
 from concept_benchmark.synthetic.helper.text_concept_detector import TextConceptDetector
@@ -15,6 +14,8 @@ from concept_benchmark.models import ConceptBasedModel, FrontEndModel
 from concept_benchmark.ext.fileutils import save as save_obj
 from concept_benchmark.metrics import calc_metric
 from concept_benchmark.data import ConceptDatasetSample
+from types import SimpleNamespace
+import argparse, psutil
 
 tpl_path = pkg_dir / "synthetic" / "helper" / "static" / "text_templates" / "Templates.txt"
 with open(tpl_path, "r", encoding="utf-8-sig") as f:
@@ -25,12 +26,59 @@ ROBOT_DATA_DIR = data_dir / "robot_text"
 ROBOT_RUN_DIR.mkdir(parents=True, exist_ok=True)
 ROBOT_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-CONCEPT_MODE = os.environ.get("CONCEPT_MODE", "hard").strip().lower()
-if CONCEPT_MODE not in {"hard", "soft"}:
-    CONCEPT_MODE = "hard"
+settings = {
+    "variant": "imperfect",                                   # "perfect" | "imperfect"
+    "imperfect_strategy": "missing_concepts",                 # "missing_concepts" | "label_prior_shift"
+    "heldout_concepts": ["head_shape=square"],                # e.g. ["head_shape=square", "foot_shape=pointy_4sided"]
+    "mask_p": 1.0,                                            # drop prob for rows with held-out concepts in TRAIN
+    "test_label_prior": "",                                   # e.g. "0:0.3,1:0.7" for validation prior shift
+    "seed": 1337,
+    "concept_mode": "hard",                                   # "hard" | "soft"
+    "train_on_detected": False,
+}
 
-_train_on_detected = os.environ.get("TRAIN_ON_DETECTED", "false").strip().lower()
-train_on_detected = _train_on_detected in {"1", "true", "yes", "y"}
+def _csv_list(s: str) -> list[str]:
+    s = s.strip()
+    return [t.strip() for t in s.split(",")] if s else []
+
+if psutil.Process(psutil.Process().ppid()).name().lower().startswith("pycharm"):
+    print("using defaults from settings (pycharm detected)", flush=True)
+    args_obj = SimpleNamespace(**settings)
+else:
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("--variant", choices=["perfect", "imperfect"], default=settings["variant"])
+    ap.add_argument("--imperfect-strategy", choices=["missing_concepts", "label_prior_shift"],
+                    dest="imperfect_strategy", default=settings["imperfect_strategy"])
+    ap.add_argument("--heldout-concepts", type=_csv_list, default=settings["heldout_concepts"])
+    ap.add_argument("--mask-p", type=float, default=settings["mask_p"])
+    ap.add_argument("--test-label-prior", type=str, default=settings["test_label_prior"])
+    ap.add_argument("--seed", type=int, default=settings["seed"])
+    ap.add_argument("--concept-mode", choices=["hard", "soft"], default=settings["concept_mode"])
+    ap.add_argument("--train-on-detected", action="store_true", default=settings["train_on_detected"])
+    known, _ = ap.parse_known_args()
+
+    merged = dict(settings)
+    merged.update({
+        "variant": known.variant,
+        "imperfect_strategy": known.imperfect_strategy,
+        "heldout_concepts": known.heldout_concepts if isinstance(known.heldout_concepts, list)
+                            else _csv_list(known.heldout_concepts),
+        "mask_p": known.mask_p,
+        "test_label_prior": known.test_label_prior,
+        "seed": known.seed,
+        "concept_mode": known.concept_mode,
+        "train_on_detected": bool(known.train_on_detected),
+    })
+    args_obj = SimpleNamespace(**merged)
+
+VARIANT = args_obj.variant
+IMPERFECT_STRATEGY = args_obj.imperfect_strategy
+HELDOUT_CONCEPTS = args_obj.heldout_concepts
+MASK_P = float(args_obj.mask_p)
+TEST_LABEL_PRIOR = args_obj.test_label_prior
+SEED = int(args_obj.seed)
+CONCEPT_MODE = args_obj.concept_mode
+train_on_detected = bool(args_obj.train_on_detected)
 
 params = {
     "concepts": {
@@ -61,7 +109,6 @@ params = {
     "model": "'glorp' if (int(row['body_shape']=='square') + int(str(row['foot_shape']).startswith('pointy_')) - 2 >= 0) else 'drent'",
 }
 
-
 def sample_concepts(params, n=50, seed=0):
     rng = np.random.default_rng(seed)
     cols = list(params["concepts"].keys())
@@ -73,24 +120,93 @@ def sample_concepts(params, n=50, seed=0):
         rows.append(r)
     return pd.DataFrame(rows, columns=cols)
 
-
 def compute_label(df: pd.DataFrame, model_expr: str) -> pd.Series:
-    SAFE_GLOBALS = {
-        "__builtins__": None,
-        "int": int,
-        "str": str,
-        "float": float,
-        "bool": bool,
-        "any": any,
-        "all": all,
-    }
-
+    SAFE_GLOBALS = {"__builtins__": None, "int": int, "str": str, "float": float, "bool": bool, "any": any, "all": all}
     def eval_one(sr):
         row = sr.to_dict()
         return eval(model_expr, SAFE_GLOBALS, {"row": row})
-
     return df.apply(eval_one, axis=1)
 
+def _subset_sample(sample: ConceptDatasetSample, keep_idx: np.ndarray, concepts, classes) -> ConceptDatasetSample:
+    keep_idx = np.asarray(keep_idx, dtype=int)
+    X = [str(x) for x in np.array(sample.X, dtype=object)[keep_idx]]
+    C = sample.C[keep_idx]
+    y = sample.y[keep_idx]
+    return ConceptDatasetSample(X=X, C=C, y=y, meta={"concepts": concepts, "classes": classes, "data_type": "text"})
+
+def _apply_missing_concepts(train_sample: ConceptDatasetSample, concepts: list[str], heldout: list[str], mask_p: float, seed: int) -> ConceptDatasetSample:
+    if not heldout:
+        return train_sample
+    name_to_idx = {n: i for i, n in enumerate(concepts)}
+    cols = []
+    for spec in heldout:
+        if spec in name_to_idx:
+            cols.append(name_to_idx[spec])
+            continue
+        key = spec.split("=", 1)[0].strip()
+        cols.extend([i for i, n in enumerate(concepts) if n.startswith(key)])
+    cols = sorted(set(cols))
+    if not cols:
+        return train_sample
+    C = train_sample.C.astype(np.float32)
+    active = (C[:, cols] > 0.5).any(axis=1)
+    if mask_p >= 1.0:
+        keep = ~active
+    else:
+        rng = np.random.default_rng(seed)
+        drop = active & (rng.random(active.shape[0]) < mask_p)
+        keep = ~drop
+    keep_idx = np.where(keep)[0]
+    if keep_idx.size == 0:
+        keep_idx = np.where(~active)[0]
+    return _subset_sample(train_sample, keep_idx, concepts, train_sample.meta.get("classes", []))
+
+def _parse_label_prior(spec: str, classes) -> dict:
+    if not spec:
+        return {}
+    out = {}
+    parts = [p.strip() for p in spec.split(",") if p.strip()]
+    for p in parts:
+        k, v = p.split(":")
+        k = k.strip(); v = float(v.strip())
+        if k.isdigit():
+            k = int(k)
+        else:
+            if k in classes:
+                k = int(np.where(np.array(classes, dtype=object) == k)[0][0])
+            else:
+                continue
+        out[k] = v
+    s = sum(out.values())
+    if s > 0:
+        for k in list(out.keys()):
+            out[k] /= s
+    return out
+
+def _apply_label_prior_shift(val_sample: ConceptDatasetSample, prior: dict, seed: int) -> ConceptDatasetSample:
+    if not prior:
+        return val_sample
+    rng = np.random.default_rng(seed)
+    y = val_sample.y.astype(int)
+    classes = sorted(np.unique(y).tolist())
+    n = len(y)
+    target_counts = {c: int(round(prior.get(c, (y == c).mean()) * n)) for c in classes}
+    chosen_idx = []
+    for c in classes:
+        idx = np.where(y == c)[0]
+        k = target_counts[c]
+        if idx.size == 0:
+            continue
+        if k <= idx.size:
+            sel = rng.choice(idx, size=k, replace=False)
+        else:
+            sel = rng.choice(idx, size=k, replace=True)
+        chosen_idx.append(sel)
+    if not chosen_idx:
+        return val_sample
+    keep_idx = np.concatenate(chosen_idx)
+    rng.shuffle(keep_idx)
+    return _subset_sample(val_sample, keep_idx, val_sample.meta.get("concepts", []), val_sample.meta.get("classes", []))
 
 catalog_df = sample_concepts(params, n=10000, seed=0)
 catalog_df["label"] = compute_label(catalog_df, params["model"])
@@ -143,9 +259,26 @@ with out_csv.open("w", newline="", encoding="utf-8") as f:
 
 print(f"\nWrote {len(ds)} rows to {out_csv}")
 
-if ds.cvindices is None or getattr(ds.validation, "n", 0) == 0:
+if ds.cvindices is None or getattr(ds.validation, "n", 0) == 0 or getattr(ds, "test", None) is None:
     ds.generate_cvindices(total_folds_for_cv=[5], replicates=1, seed=0)
-    ds.split(fold_id=list(ds.cvindices.keys())[0], fold_num_validation=1, fold_num_test=None)
+    fold_id = list(ds.cvindices.keys())[0]
+    folds = sorted(set(ds.cvindices[fold_id]))
+    val_fold, test_fold = folds[0], folds[1]
+    ds.split(fold_id=fold_id, fold_num_validation=val_fold, fold_num_test=test_fold)
+
+    print(f"Split sizes → train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
+
+print(f"Variant: {VARIANT} | Strategy: {IMPERFECT_STRATEGY}")
+train_ds = ds.training
+val_ds = ds.validation
+test_ds = ds.test
+
+if VARIANT == "imperfect":
+    if IMPERFECT_STRATEGY == "missing_concepts":
+        train_ds = _apply_missing_concepts(train_ds, ds.concepts, HELDOUT_CONCEPTS, MASK_P, SEED)
+    elif IMPERFECT_STRATEGY == "label_prior_shift":
+        prior = _parse_label_prior(TEST_LABEL_PRIOR, ds.classes)
+        val_ds = _apply_label_prior_shift(val_ds, prior, SEED)
 
 detector = TextConceptDetector(
     embed_dim=128,
@@ -161,14 +294,13 @@ detector = TextConceptDetector(
     validate=True,
 )
 
-
 print("Fitting detector")
-detector.fit(ds.training, ds.validation)
+detector.fit(train_ds, val_ds)
 
 cbm = ConceptBasedModel(concept_detector=detector, front_end_model=FrontEndModel(), propagate=False)
 
-C_train = ds.training.C
-y_train = ds.training.y
+C_train = train_ds.C
+y_train = train_ds.y
 
 if train_on_detected:
     print("Training front-end on detected (noisy) concepts (train_on_detected=True).")
@@ -176,7 +308,7 @@ if train_on_detected:
     try:
         if hasattr(detector, "output_mode"):
             detector.output_mode = "soft"
-        C_train_used = detector.predict(ds.training)
+        C_train_used = detector.predict(train_ds)
     finally:
         if hasattr(detector, "output_mode") and old_mode is not None:
             detector.output_mode = old_mode
@@ -187,11 +319,11 @@ else:
 cbm.front_end_model.fit(C_train_used, y_train)
 
 with np.errstate(invalid="ignore"):
-    C_val_true = ds.validation.C.astype(np.float32)
+    C_val_true = val_ds.C.astype(np.float32)
 
 _old = detector.output_mode
 detector.output_mode = "soft"
-C_val_scores = detector.predict(ds.validation)
+C_val_scores = detector.predict(val_ds)
 detector.output_mode = _old
 
 concept_names = list(ds.concepts)
@@ -230,8 +362,8 @@ print("Concept order:", concept_names)
 print(f"Concept outputs (mode={CONCEPT_MODE}) shape:", proba.shape)
 print("First row outputs:", proba[0])
 
-y_val = ds.validation.y.astype(int)
-y_val_proba = cbm.predict_proba(ds.validation)
+y_val = val_ds.y.astype(int)
+y_val_proba = cbm.predict_proba(val_ds)
 y_val_pred = np.argmax(y_val_proba, axis=1)
 
 acc = accuracy_score(y_val, y_val_pred)
@@ -243,14 +375,50 @@ except Exception:
 
 print("Label model metrics (validation):", {"accuracy": float(acc), "roc_auc": float(roc)})
 
+y_test = test_ds.y.astype(int)
+y_test_proba = cbm.predict_proba(test_ds)
+y_test_pred = np.argmax(y_test_proba, axis=1)
+
+acc_test = accuracy_score(y_test, y_test_pred)
+try:
+    cls_index_1 = int(np.where(cbm.front_end_model.model.classes_ == 1)[0][0])
+    roc_test = roc_auc_score(y_test, y_test_proba[:, cls_index_1]) if len(np.unique(y_test)) == 2 else float("nan")
+except Exception:
+    roc_test = float("nan")
+
+print("Label model metrics (test):", {"accuracy": float(acc_test), "roc_auc": float(roc_test)})
+
+_old2 = detector.output_mode
+detector.output_mode = "soft"
+C_test_scores = detector.predict(test_ds)
+detector.output_mode = _old2
+
+C_test_true = test_ds.C.astype(np.float32)
+aucs_t, auprcs_t = [], []
+for j in range(C_test_true.shape[1]):
+    yt = C_test_true[:, j]
+    ys = C_test_scores[:, j]
+    try:
+        if len(np.unique(yt)) == 2:
+            aucs_t.append(roc_auc_score(yt, ys))
+            auprcs_t.append(average_precision_score(yt, ys))
+    except Exception:
+        pass
+
+concept_test_metrics = {
+    "auroc_macro": float(np.nanmean(aucs_t)) if aucs_t else float("nan"),
+    "auprc_macro": float(np.nanmean(auprcs_t)) if auprcs_t else float("nan"),
+}
+print("Concept metrics (test):", concept_test_metrics)
+
 all_probs = cbm.predict_proba(ds)
 all_preds = np.argmax(all_probs, axis=1)
 label_names = list(ds.classes)
 
 pred_labels = [label_names[i] for i in all_preds]
-print("Pred labels:", pred_labels)
-print("Class order in probs:", label_names)
-print("First row class probs:", all_probs[0])
+# print("Pred labels:", pred_labels)
+# print("Class order in probs:", label_names)
+# print("First row class probs:", all_probs[0])
 
 metrics_out = {}
 
@@ -264,6 +432,7 @@ except Exception:
     lbl_sel = {"coverage": float("nan"), "selective_accuracy": float("nan"), "tau": 0.5}
 
 metrics_out["label"] = {"accuracy": float(acc), "roc_auc": float(roc), "selective": lbl_sel}
+metrics_out["label_test"] = {"accuracy": float(acc_test), "roc_auc": float(roc_test)}
 
 n_concepts = C_val_true.shape[1]
 
@@ -289,6 +458,7 @@ concept_metrics = {
 }
 
 metrics_out["concepts"] = concept_metrics
+metrics_out["concepts_test"] = concept_test_metrics  # (added)
 
 run_info = {
     "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -298,6 +468,12 @@ run_info = {
     "n_concepts": int(n_concepts),
     "classes": list(ds.classes),
     "concept_names": list(ds.concepts),
+    "variant": VARIANT,
+    "strategy": IMPERFECT_STRATEGY,
+    "heldout_concepts": HELDOUT_CONCEPTS,
+    "mask_p": MASK_P,
+    "test_label_prior": TEST_LABEL_PRIOR,
+    "seed": SEED,
 }
 run_meta = {}
 if getattr(detector, "thresholds_", None) is not None:
@@ -318,7 +494,7 @@ payload = {"run": run_info, "metrics": metrics_out}
 with open(ROBOT_RUN_DIR / "metrics.json", "w", encoding="utf-8") as f:
     json.dump(payload, f, indent=2)
 
-save_obj({"cbm": cbm, "detector": detector}, ROBOT_RUN_DIR / "model.pkl", overwrite=True)
+save_obj({"cbm": cbm, "detector": detector, "train_variant": VARIANT, "strategy": IMPERFECT_STRATEGY}, ROBOT_RUN_DIR / "model.pkl", overwrite=True)
 
 print("Saved dataset:", ds_path)
 print("Saved model:", ROBOT_RUN_DIR / "model.pkl")
