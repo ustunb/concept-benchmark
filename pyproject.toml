@@ -36,7 +36,8 @@ dev = [
     "ruff",
     "jupyter",
     "ipykernel",
-    "rich"
+    "rich",
+    "imagemagick"
 ]
 
 [tool.uv]

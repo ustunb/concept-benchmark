@@ -34,7 +34,8 @@ def create_sudoku_dataset(
     data_type: str = "image",
     seed: int = 42,
     transform: Callable[[np.ndarray], np.ndarray] | None = None,
-    ds_name: str | None = None,
+    dataset_name: str | None = None,
+    **kwargs
 ) -> ConceptDataset:
     """Create a synthetic dataset of Sudoku boards with concepts.
 
@@ -54,7 +55,7 @@ def create_sudoku_dataset(
             Should take a board (N x N numpy array) and 
             return a transformed representation as a np.ndarray. 
             Default is None, which uses a simple flattening transform.
-        ds_name (str, optional): name of the dataset, used as folder name
+        dataset_name (str, optional): name of the dataset, used as folder name
             for saving images.
 
     Returns:
@@ -62,9 +63,9 @@ def create_sudoku_dataset(
     """
     # Ensure ds_name is set for image datasets
     if data_type == "image":
-        ds_name = ds_name if ds_name else \
+        dataset_name = dataset_name if dataset_name else \
             datetime.now().strftime("%Y%m%d_%H%M%S")
-        ds_path = SUDOKU_DIR / ds_name
+        ds_path = SUDOKU_DIR / dataset_name
         ds_path.mkdir(parents=True, exist_ok=True)
 
     random.seed(seed)
@@ -320,7 +321,8 @@ def image_transform(
 def sudoku_image_preprocess(
     image: Image.Image,
     standardize: bool = True,
-    to_tensor: bool = True
+    to_tensor: bool = True,
+    vit: bool = True
 ) -> np.ndarray:
     image = image.convert("L")  # Convert to grayscale
     img_arr = np.array(image)
@@ -338,5 +340,22 @@ def sudoku_image_preprocess(
         out = torch.from_numpy(img_arr).float()
     else:
         out = img_arr
+
+    if vit:
+        image = image.convert("RGB")
+
+        image = image.resize((224, 224), Image.BILINEAR)
+
+        # HWC -> CHW float32
+        arr = np.asarray(image, dtype=np.float32)  # [H, W, 3]
+
+        arr = np.transpose(arr, (2, 0, 1))        # [3, H, W]
+
+        # ImageNet normalization used by ViT pretraining
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(3, 1, 1)
+        std  = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(3, 1, 1)
+        arr = (arr - mean) / std
+
+        return torch.from_numpy(arr) if to_tensor else arr
         
     return out
