@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.linear_model import LogisticRegression
+from tqdm import tqdm
 
 from concept_benchmark.data import ConceptDatasetSample
 from concept_benchmark.train import (
@@ -244,6 +245,14 @@ class ConceptBasedModel(object):
         concept_detector: Optional[ConceptDetector] = None,
         front_end_model: Optional[FrontEndModel] = None,
         propagate: bool = False,
+        # Monte Carlo propagation configuration
+        mc_mode: str = "auto",  # 'auto' | 'mc' | 'exact'
+        mc_samples: int = 1024,
+        mc_max_samples: int = 16384,
+        mc_chunk_size: int = 2048,
+        mc_tol: float = 1e-3,
+        random_state: Optional[int] = None,
+        mc_exact_threshold: int = 4096,
         **kwargs,
     ) -> None:
         if concept_detector:
@@ -265,6 +274,16 @@ class ConceptBasedModel(object):
         self._concept_poss = None
         self._y_proba_all_concepts = None
 
+        # MC configuration
+        assert mc_mode in {"auto", "mc", "exact"}
+        self._mc_mode = mc_mode
+        self._mc_samples = int(mc_samples)
+        self._mc_max_samples = int(mc_max_samples)
+        self._mc_chunk_size = int(mc_chunk_size)
+        self._mc_tol = float(mc_tol)
+        self._random_state = random_state
+        self._mc_exact_threshold = int(mc_exact_threshold)
+
     @property
     def propagate(self) -> bool:
         return self._propagate
@@ -283,7 +302,6 @@ class ConceptBasedModel(object):
         """
         return self._y_proba_all_concepts
 
-    # TODO: separate out fit params for concept detector and front-end model
     def fit(
         self,
         train_dataset: ConceptDatasetSample,
@@ -347,7 +365,13 @@ class ConceptBasedModel(object):
         self.front_end_model.fit(C_train, y_train, fit_params=front_fit_params)
 
         if self.propagate:
-            self._prep_propagation()
+            # Only prepare exact propagation tables if we'll use exact mode
+            try:
+                n_concepts = self.concept_detector.n_concepts
+            except Exception:
+                n_concepts = None
+            if n_concepts is not None and self._should_use_exact(n_concepts):
+                self._prep_propagation()
 
     def predict(
         self,
@@ -380,7 +404,11 @@ class ConceptBasedModel(object):
         propagate = self.propagate if propagate is None else propagate
 
         if propagate:
-            return self._propagate_predict_proba(concept_preds)
+            n_concepts = concept_preds.shape[1]
+            if self._should_use_exact(n_concepts):
+                return self._propagate_predict_proba(concept_preds)
+            else:
+                return self._propagate_predict_proba_mc(concept_preds)
 
         pred_y_prob = self.front_end_model.predict_proba(concept_preds)
 
@@ -388,7 +416,6 @@ class ConceptBasedModel(object):
 
         return out
 
-    # TODO: figure out if can be more efficient by vectorizing operations
     def _propagate_predict_proba(
         self,
         concept_preds: np.ndarray,
@@ -396,22 +423,143 @@ class ConceptBasedModel(object):
         """
         Predict probabilities using concept propagation.
         """
+        print("Using concept propagation...")
         if self._concept_poss is None or self._y_proba_all_concepts is None:
             print("Preparing for propagation...")
             self._prep_propagation()
 
-        proba_lst = []
-        for c in concept_preds:
-            concept_probas = self._calc_concept_probas(c)
-            y_probas_concepts = [
-                self.y_proba_all_concepts[tuple(k)] * v
-                for k, v in concept_probas.items()
-            ]
-            proba = np.sum(y_probas_concepts, axis=0)
-            proba_lst.append(proba)
+        # Vectorized propagation over all samples and concept combinations
+        # Shapes:
+        #   concept_preds: (N, C)
+        #   concept_poss:  (M, C) with binary {0,1}
+        #   y_proba_all_concepts: dict[(C,)-> (1,K)] -> stacked to (M, K)
 
-        out = np.array(proba_lst)
+        # Ensure concept combination order aligns with y_proba matrix rows
+        combs = self._concept_poss  # (M, C)
+        # Stack dict values in the same order as combs
+        y_mat = np.vstack([
+            np.asarray(self._y_proba_all_concepts[tuple(c)]).reshape(1, -1)
+            for c in combs
+        ])  # (M, K)
 
+        P = np.asarray(concept_preds, dtype=np.float64)  # (N, C)
+        # Clip for numerical stability when taking logs
+        P = np.clip(P, 1e-9, 1.0 - 1e-9)
+
+        # Compute log-weights for each sample and concept combination:
+        # log w_ij = sum_k [ c_jk * log p_ik + (1-c_jk) * log(1-p_ik) ]
+        logP = np.log(P)                 # (N, C)
+        log1mP = np.log1p(-P)            # (N, C)
+        A = combs.T.astype(np.float64)   # (C, M)
+        logW = logP @ A + log1mP @ (1.0 - A)  # (N, M)
+        W = np.exp(logW)                 # (N, M)
+
+        # Aggregate over concept combinations to get class probabilities
+        # result: (N, K)
+        out = W @ y_mat
+
+        return out
+
+    def _should_use_exact(self, n_concepts: int) -> bool:
+        if self._mc_mode == "exact":
+            return True
+        if self._mc_mode == "mc":
+            return False
+        # auto: use exact if 2^C <= threshold
+        try:
+            return (2 ** n_concepts) <= self._mc_exact_threshold
+        except OverflowError:
+            return False
+
+    def _propagate_predict_proba_mc(self, concept_preds: np.ndarray) -> np.ndarray:
+        """
+        Monte Carlo propagation: approximate E_y[ y | concept probabilities ]
+        by sampling concept vectors and averaging front-end predictions.
+        """
+        print("Using MC concept propagation...")
+        P = np.asarray(concept_preds, dtype=np.float64)
+        P = np.clip(P, 1e-9, 1.0 - 1e-9)
+        N, C = P.shape
+
+        # Initialize accumulators
+        counts = np.zeros(N, dtype=np.int64)
+        sum_acc = None  # will be (N, K)
+        sumsq_acc = None  # will be (N, K)
+        done = np.zeros(N, dtype=bool)
+
+        # RNG: deterministic only if seed provided
+        rng = (np.random.default_rng(self._random_state)
+               if self._random_state is not None else np.random.default_rng())
+
+        target_samples = max(1, self._mc_samples)
+        max_samples = max(target_samples, self._mc_max_samples)
+        chunk_size = max(1, self._mc_chunk_size)
+
+        while True:
+            active_idx = np.where(~done)[0]
+            if active_idx.size == 0:
+                break
+
+            # Determine per-loop chunk size constrained by remaining budget per active example
+            remaining = max_samples - counts[active_idx]
+            if remaining.min() <= 0:
+                # Reached max_samples for some/all active; mark exhausted as done
+                done[active_idx[remaining <= 0]] = True
+                continue
+            s = int(min(chunk_size, remaining.min()))
+
+            # Sample Bernoulli for active examples: shape (A, s, C)
+            P_active = P[active_idx]  # (A, C)
+            Z = (rng.random((P_active.shape[0], s, C)) < P_active[:, None, :]).astype(np.float32)
+            Z_flat = Z.reshape(-1, C)
+
+            # Deduplicate concept vectors to reduce model calls
+            try:
+                uniq, inv = np.unique(Z_flat, axis=0, return_inverse=True)
+                y_uniq = self.front_end_model.predict_proba(uniq)
+                Y_flat = y_uniq[inv]
+            except Exception:
+                # Fallback without deduplication
+                Y_flat = self.front_end_model.predict_proba(Z_flat)
+
+            # Reshape back to (A, s, K)
+            Y = Y_flat.reshape(P_active.shape[0], s, -1)
+            if sum_acc is None:
+                K = Y.shape[2]
+                sum_acc = np.zeros((N, K), dtype=np.float64)
+                sumsq_acc = np.zeros((N, K), dtype=np.float64)
+
+            # Update accumulators
+            chunk_sum = Y.sum(axis=1)        # (A, K)
+            chunk_sumsq = (Y ** 2).sum(axis=1)  # (A, K)
+            sum_acc[active_idx] += chunk_sum
+            sumsq_acc[active_idx] += chunk_sumsq
+            counts[active_idx] += s
+
+            # Check convergence for active examples
+            means = sum_acc[active_idx] / counts[active_idx][:, None]
+            vars_ = sumsq_acc[active_idx] / counts[active_idx][:, None] - means ** 2
+            np.maximum(vars_, 0.0, out=vars_)  # numerical safety
+            se = np.sqrt(vars_ / counts[active_idx][:, None])
+
+            # Aggregate SE across classes (flexible; default: max over classes)
+            # This can be swapped out for other strategies if needed.
+            se_agg = np.max(se, axis=1)
+            conv_mask = (se_agg <= self._mc_tol) & (counts[active_idx] >= target_samples)
+            done[active_idx[conv_mask]] = True
+
+            # Also stop if everyone has at least target_samples and we've hit that
+            if np.all(counts >= target_samples) and done.all():
+                break
+
+            # If some have reached max_samples after this update, mark done
+            done |= counts >= max_samples
+
+        # Final means as output
+        if sum_acc is None:
+            # No sampling happened (edge case), fallback to deterministic round
+            return self.front_end_model.predict_proba((P > 0.5).astype(np.float32))
+        out = sum_acc / counts[:, None]
         return out
 
     def _calc_concept_probas(self, concept_probas: np.ndarray) -> dict:
@@ -447,12 +595,11 @@ class ConceptBasedModel(object):
         """
         Predict probabilities for all concept combination.
         """
-        all_y_probas = {
-            tuple(c): pr
-            for c, pr in zip(
-                self.concept_poss, self.front_end_model.predict_proba(self.concept_poss)
-            )
-        }
+        all_y_probas = {}
+        
+        for c in tqdm(self.concept_poss):
+            pr = self.front_end_model.predict_proba(c.reshape(1, -1))
+            all_y_probas[tuple(c)] = pr
 
         return all_y_probas
 
