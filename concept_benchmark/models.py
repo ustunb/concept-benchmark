@@ -410,7 +410,8 @@ class ConceptBasedModel(object):
             else:
                 return self._propagate_predict_proba_mc(concept_preds)
 
-        pred_y_prob = self.front_end_model.predict_proba(concept_preds)
+        binary_concept_preds = (concept_preds > 0.5).astype(np.float32)
+        pred_y_prob = self.front_end_model.predict_proba(binary_concept_preds)
 
         out = pred_y_prob if not return_concepts else (pred_y_prob, concept_preds)
 

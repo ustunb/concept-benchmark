@@ -76,6 +76,10 @@ def create_synthetic_dataset(**kwargs):
         print(C)
         print(y)
 
+    # colors to string (colors don't play well with pickle)
+    catalog_df['color_left'] = catalog_df['color_left'].astype(str)
+    catalog_df['color_right'] = catalog_df['color_right'].astype(str)
+
     # Meta: metadata for ConceptDataset
     meta = {
         "classes": ["drent", "glorp"],
@@ -95,7 +99,7 @@ def create_synthetic_dataset(**kwargs):
         C=C,
         y=y,
         meta=meta,
-        base_dir=results_dir / "robots",
+        base_dir=image_dir,
     )
 
     return robot_dataset
