@@ -11,7 +11,6 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
 from tqdm.auto import tqdm
-from wand.image import Image as WandImage
 
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.paths import data_dir
@@ -88,7 +87,7 @@ def create_sudoku_dataset(
         if data_type == "image":
             img_path = ds_path / f"valid_{i}.png"
             transform(b, outfile=img_path)
-            X_list.append(str(img_path))
+            X_list.append(img_path)
         else:
             X_list.append(transform(b))
         C_list.append(np.ones(3 * N, dtype=np.int32))
@@ -105,7 +104,7 @@ def create_sudoku_dataset(
         if data_type == "image":
             img_path = ds_path / f"invalid_{i}.png"
             transform(b, outfile=img_path)
-            X_list.append(str(img_path))
+            X_list.append(img_path)
         else:
             X_list.append(transform(b))
         C_list.append(c_arr)
@@ -194,7 +193,7 @@ def image_transform(
     font_size: int = 10,
     standardize: bool = True,
     font_path: str | None = None,
-    handwriting: bool = True,
+    handwriting: bool = False,
     radius: float = 0.5,
     sigma: float = 0.0,
     angle: float = 98,
@@ -315,8 +314,7 @@ def image_transform(
         final_img.save(outfile)
         return str(outfile)
 
-    # Return array if not saving
-    return sudoku_image_preprocess(final_img, standardize=standardize, to_tensor=False)
+    return sudoku_image_preprocess(final_img, standardize=standardize, to_tensor=True)
 
 def sudoku_image_preprocess(
     image: Image.Image,
@@ -329,33 +327,30 @@ def sudoku_image_preprocess(
     """
     """
 
-    if standardize:
-        # Standardize pixel values to [0, 1]
-        img_arr = img_arr.astype(np.float32) / 255.0
-    
-    # add channel dimension (since its grayscale)
-    img_arr = np.expand_dims(img_arr, axis=0)
-
-    if to_tensor:
-        out = torch.from_numpy(img_arr).float()
-    else:
-        out = img_arr
-
     if vit:
-        image = image.convert("RGB")
+        # RGB + resize first
+        try:
+            resample = Image.Resampling.BICUBIC  # Pillow >= 9.1
+        except AttributeError:
+            resample = Image.BICUBIC
+        image = image.convert("RGB").resize((224, 224), resample)
 
-        image = image.resize((224, 224), Image.BILINEAR)
+        # HWC -> CHW, scale to [0,1] before mean/std
+        arr = np.asarray(image, dtype=np.float32) / 255.0          # [H,W,3] -> [0,1]
+        arr = np.transpose(arr, (2, 0, 1))                         # [3,H,W]
 
-        # HWC -> CHW float32
-        arr = np.asarray(image, dtype=np.float32)  # [H, W, 3]
-
-        arr = np.transpose(arr, (2, 0, 1))        # [3, H, W]
-
-        # ImageNet normalization used by ViT pretraining
         mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(3, 1, 1)
         std  = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(3, 1, 1)
         arr = (arr - mean) / std
 
-        return torch.from_numpy(arr) if to_tensor else arr
+        return torch.from_numpy(arr).contiguous() if to_tensor else arr
+
+    # Non-ViT path: grayscale, optional [0,1] standardization, CHW = [1,H,W]
+    gray = image.convert("L")
+    arr = np.asarray(gray, dtype=np.float32)
+    if standardize:
+        arr = arr / 255.0
+    arr = np.expand_dims(arr, axis=0)  # [1,H,W]
+    return torch.from_numpy(arr).contiguous() if to_tensor else arr
         
     return out

@@ -43,7 +43,7 @@ class ViTWrapper(torch.nn.Module):
         return outputs.last_hidden_state[:, 0, :]  # Use the CLS token representation
 
 settings = {
-    "dataset_name": "20250831_173407",
+    "dataset_name": "test",
     "n": 3,
     "n_samples": 1000,
     "valid_ratio": 0.5,
@@ -62,10 +62,11 @@ data = create_sudoku_dataset(**settings)
 data.generate_cvindices(seed=42)
 data.split("K05N01", fold_num_validation=4, fold_num_test=5)
 
+embed_model = ViTWrapper().to(device)
 model = ConceptDetector(
-    embedding_model=ViTWrapper(),
+    embedding_model=embed_model
 )
-model.to(device)
+
 model.fit(
     data.training,
     data.validation, 
