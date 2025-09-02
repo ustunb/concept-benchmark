@@ -3,8 +3,8 @@ import numpy as np
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.paths import results_dir
 
-from helper.robot_catalog import RobotDistribution, generate_robot_catalog
-from helper.utils import model_to_logistic, unlist0
+from .helper.robot_catalog import RobotDistribution, generate_robot_catalog
+from .helper.utils import model_to_logistic, unlist0
 
 
 def create_synthetic_dataset(**kwargs):
