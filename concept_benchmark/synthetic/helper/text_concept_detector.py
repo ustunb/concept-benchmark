@@ -106,10 +106,11 @@ class TextConceptDetector(ConceptDetector):
         threshold_mode: str = "auto",
         validate: bool = True,
         device: Optional[str] = None,
-        model_name: str = "prajjwal1/bert-mini",
+        model_name: str = "distilbert/distilbert-base-uncased", # alternatives: "prajjwal1/bert-tiny", "prajjwal1/bert-mini", "prajjwal1/bert-small", "distilbert/distilbert-base-uncased"
         pooling: str = "cls",
         base_lr: float = 2e-5,
         num_warmup_steps: int = 0,
+        group_unknown_threshold: float = 0.55,
         **kwargs,
     ) -> None:
         super().__init__(embedding_model=None, concept_layers=None)
@@ -148,6 +149,7 @@ class TextConceptDetector(ConceptDetector):
         self.model_name = str(model_name)
         self.pooling = pooling
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.group_unknown_threshold = float(group_unknown_threshold)
 
     def _to_text_list(self, dataset: ConceptDatasetSample) -> List[str]:
         X = getattr(dataset, "X", None)
@@ -200,11 +202,20 @@ class TextConceptDetector(ConceptDetector):
         Xtr = self._to_text_list(train_dataset)
         Ytr = np.asarray(train_dataset.C, dtype=np.float32)
         self._n_concepts = int(Ytr.shape[1])
+        meta_tr = getattr(train_dataset, "meta", {}) or {}
+        names = list(meta_tr.get("concepts", []))
+        group_map = {}
+        if len(names) == int(self._n_concepts):
+            for j, name in enumerate(names):
+                if "=" in name:
+                    g = name.split("=", 1)[0]
+                    group_map.setdefault(g, []).append(j)
+        self._group_map = {g: idxs for g, idxs in group_map.items() if len(idxs) > 1}
 
         meta_tr = getattr(train_dataset, "meta", {}) or {}
         Mtr = meta_tr.get("observed_mask", None)
         if Mtr is None:
-            Mtr = (Ytr > 0.5).astype(np.float32)
+            Mtr = np.ones_like(Ytr, dtype=np.float32)
 
         tr_ds = _TxtDs(Xtr, Ytr, Mtr)
         tr_dl = DataLoader(
@@ -391,7 +402,24 @@ class TextConceptDetector(ConceptDetector):
         prob_all = np.vstack(outs) if outs else np.zeros((0, self._n_concepts), dtype=np.float32)
         if self.output_mode == "hard":
             thr = self.thresholds_ if self.thresholds_ is not None else np.full(self._n_concepts, 0.5, dtype=np.float32)
-            return (prob_all >= thr.reshape(1, -1)).astype(np.float32)
+            hard = (prob_all >= thr.reshape(1, -1)).astype(np.float32)
+            gm = getattr(self, "_group_map", {})
+            for _, idxs in (gm.items() if isinstance(gm, dict) else []):
+                sub = hard[:, idxs]
+                cnt = sub.sum(axis=1)
+                need = cnt != 1
+                if np.any(need):
+                    rows = np.where(need)[0]
+                    psub = prob_all[rows][:, idxs]
+                    pmax = psub.max(axis=1)
+                    pick = psub.argmax(axis=1)
+                    for r, pm, pk in zip(rows, pmax, pick):
+                        if pm < self.group_unknown_threshold:
+                            hard[r, idxs] = 0.0
+                        else:
+                            hard[r, idxs] = 0.0
+                            hard[r, idxs[int(pk)]] = 1.0
+            return hard
         return prob_all
 
     @property

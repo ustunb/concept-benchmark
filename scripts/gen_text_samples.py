@@ -30,14 +30,15 @@ ROBOT_RUN_DIR.mkdir(parents=True, exist_ok=True)
 ROBOT_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 settings = {
-    "variant": "imperfect",
-    "imperfect_strategy": "missing_concepts",
-    "heldout_concepts": ["head_shape=square"],
+    "variant": "perfect",
+    "imperfect_strategy": "",
+    "heldout_concepts": [],
     "mask_p": 1.0,
     "test_label_prior": "",
     "seed": 1337,
     "concept_mode": "hard",
     "train_on_detected": False,
+    "templates_file": "",
 }
 
 def _csv_list(s: str) -> list[str]:
@@ -58,6 +59,7 @@ else:
     ap.add_argument("--seed", type=int, default=settings["seed"])
     ap.add_argument("--concept-mode", choices=["hard", "soft"], default=settings["concept_mode"])
     ap.add_argument("--train-on-detected", action="store_true", default=settings["train_on_detected"])
+    ap.add_argument("--templates-file", type=str, default=settings["templates_file"])
     known, _ = ap.parse_known_args()
 
     merged = dict(settings)
@@ -71,8 +73,13 @@ else:
         "seed": known.seed,
         "concept_mode": known.concept_mode,
         "train_on_detected": bool(known.train_on_detected),
+        "templates_file": known.templates_file or "",
     })
     args_obj = SimpleNamespace(**merged)
+
+if args_obj.templates_file:
+    with open(Path(args_obj.templates_file), "r", encoding="utf-8-sig") as f:
+        templates = [ln.strip() for ln in f if ln.strip()]
 
 VARIANT = args_obj.variant
 IMPERFECT_STRATEGY = args_obj.imperfect_strategy
@@ -227,7 +234,6 @@ catalog_df = pd.DataFrame(
 )
 catalog_df["label"] = compute_label(catalog_df, params["model"])
 
-
 concept_cols = list(params["concepts"].keys())
 llm_user_prompt = (
     "Using the provided attributes, write a natural spoken description (1–3 sentences) "
@@ -283,12 +289,10 @@ if ds.cvindices is None or getattr(ds.validation, "n", 0) == 0 or getattr(ds, "t
     rng.shuffle(base_ids)
     assign = {int(rid): i % n_folds for i, rid in enumerate(base_ids)}
     fold_arr = np.array([assign[int(r)] for r in row_index], dtype=int)
-
     if ds.cvindices is None:
         ds.cvindices = {}
     if "by_robot" not in ds.cvindices:
         ds.cvindices["by_robot"] = fold_arr
-
     ds.split(fold_id="by_robot", fold_num_validation=0, fold_num_test=1)
     print(f"Split sizes → train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
 
@@ -315,6 +319,8 @@ detector = TextConceptDetector(
     pos_weight="auto",
     output_mode=CONCEPT_MODE,
     threshold_mode="auto",
+    pooling="attn",
+    group_unknown_threshold=0.50,
     validate=True,
 )
 
@@ -479,10 +485,61 @@ concept_test_metrics = {
 }
 print("Concept metrics (test):", concept_test_metrics)
 
+def _groups(names):
+    g, singles = {}, []
+    for j, n in enumerate(names):
+        if "=" in n:
+            k = n.split("=", 1)[0]
+            g.setdefault(k, []).append(j)
+        else:
+            singles.append(j)
+    return {k: v for k, v in g.items() if len(v) > 1}, singles
+
+def _bin_metrics(y_true, y_pred):
+    y_true = y_true.astype(int)
+    y_pred = y_pred.astype(int)
+    tp = int(((y_true == 1) & (y_pred == 1)).sum())
+    tn = int(((y_true == 0) & (y_pred == 0)).sum())
+    fp = int(((y_true == 0) & (y_pred == 1)).sum())
+    fn = int(((y_true == 1) & (y_pred == 0)).sum())
+    acc = (tp + tn) / max(1, tp + tn + fp + fn)
+    prec = tp / max(1, tp + fp)
+    rec = tp / max(1, tp + fn)
+    f1 = 2 * prec * rec / max(1e-9, (prec + rec))
+    return {"tp": tp, "tn": tn, "fp": fp, "fn": fn, "acc": float(acc), "prec": float(prec), "rec": float(rec), "f1": float(f1)}
+
+def _concept_error_report(split_name, sample):
+    names = list(sample.concepts)
+    G, singles = _groups(names)
+    oldm = detector.output_mode
+    detector.output_mode = "hard"
+    H = detector.predict(sample)
+    detector.output_mode = oldm
+    T = sample.C.astype(int)
+    per_concept = {n: _bin_metrics(T[:, j], H[:, j]) for j, n in enumerate(names)}
+    per_group = {}
+    for k, idxs in G.items():
+        t = T[:, idxs]
+        h = H[:, idxs]
+        unk = (h.sum(1) == 0)
+        pred = np.where(unk, -1, h.argmax(1))
+        true = t.argmax(1)
+        known = ~unk
+        acc_known = float((pred[known] == true[known]).mean()) if known.any() else float("nan")
+        per_group[k] = {"acc_known": acc_known, "unknown_rate": float(unk.mean())}
+    worst = dict(sorted(per_concept.items(), key=lambda kv: kv[1]["acc"])[:5])
+    print(f"=== Concept error report [{split_name}] ===")
+    print("Per-group:", {k: {kk: round(vv, 4) for kk, vv in v.items()} for k, v in per_group.items()})
+    print("Worst 5 concepts by acc:", {k: round(v["acc"], 4) for k, v in worst.items()})
+    return {"per_concept": per_concept, "per_group": per_group}
+
+_ = _concept_error_report("train", train_ds)
+_ = _concept_error_report("val", val_ds)
+_ = _concept_error_report("test", test_ds)
+
 all_probs = cbm.predict_proba(ds)
 all_preds = np.argmax(all_probs, axis=1)
 label_names = list(ds.classes)
-
 pred_labels = [label_names[i] for i in all_preds]
 
 metrics_out = {}
@@ -502,7 +559,6 @@ metrics_out["label_train"] = {"accuracy": float(acc_train), "roc_auc": float(roc
 metrics_out["label_val"] = metrics_out["label"]
 
 n_concepts = C_val_true.shape[1]
-
 sel_covs, sel_accs = [], []
 aucs, auprcs = [], []
 for j in range(n_concepts):
@@ -568,3 +624,70 @@ save_obj({"cbm": cbm, "detector": detector, "train_variant": VARIANT, "strategy"
 print("Saved dataset:", ds_path)
 print("Saved model:", ROBOT_RUN_DIR / "model.pkl")
 print("Saved metrics:", ROBOT_RUN_DIR / "metrics.json")
+
+
+from concept_benchmark.ext.fileutils import load as load_obj
+
+MODEL = Path("/home/kadekool/concept-benchmark/results/robot_text/model.pkl")
+DATA  = Path("/home/kadekool/concept-benchmark/data/robot_text/robot_text_dataset.pkl")
+
+obj = load_obj(MODEL)
+detector = obj["detector"]
+ds = load_obj(DATA)
+
+def ensure_split(ds):
+    try:
+        if ds.validation.n == 0 and ds.test.n == 0:
+            ds.reset()
+            ds.split(fold_id=0, fold_num_validation=1, fold_num_test=2)
+    except Exception:
+        pass
+
+def pick_split(ds, name):
+    d = {"train": ds.training, "val": ds.validation, "test": ds.test}[name]
+    return d if d.n > 0 else ds
+
+def groups(names):
+    g = {}
+    for j,n in enumerate(names):
+        if "=" in n:
+            g.setdefault(n.split("=",1)[0], []).append(j)
+    return {k:v for k,v in g.items() if len(v)>1}
+
+def metrics(names, hard, C):
+    out = {}
+    for k, idxs in groups(names).items():
+        t = C[:, idxs]; p = hard[:, idxs]
+        if t.shape[0] == 0: out[k] = {"acc_known": float("nan"), "unknown_rate": float("nan")}; continue
+        unk = (p.sum(1) == 0)
+        known = ~unk
+        acc_known = (p.argmax(1)[known] == t.argmax(1)[known]).mean() if known.any() else float("nan")
+        out[k] = {"acc_known": float(acc_known), "unknown_rate": float(unk.mean())}
+    return out
+
+def worst_examples(split_ds, names, hard, C, concept_key, k=10):
+    j = names.index(concept_key)
+    fn_idx = np.where((C[:,j]==1)&(hard[:,j]==0))[0]
+    fp_idx = np.where((C[:,j]==0)&(hard[:,j]==1))[0]
+    return {
+        "n_FN": int(fn_idx.size), "n_FP": int(fp_idx.size),
+        "FN": [str(split_ds.X[i]) for i in fn_idx[:k]],
+        "FP": [str(split_ds.X[i]) for i in fp_idx[:k]],
+    }
+
+
+def run(name):
+    ensure_split(ds)
+    split = pick_split(ds, name)
+    names = list(split.concepts)
+    C = split.C.astype(int)
+    H = detector.predict(split)
+    print(f"=== {name.upper()} (n={split.n}) ===")
+    print("Before:", metrics(names, H, C))
+    ex = worst_examples(split, names, H, C, "head_shape=square", k=5)
+    print("head=square FNs:", ex["n_FN"], "FPs:", ex["n_FP"])
+    print("FN examples:", ex["FN"][:3])
+    print("FP examples:", ex["FP"][:3])
+
+run("val"); run("test")
+

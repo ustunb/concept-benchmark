@@ -81,6 +81,20 @@ def _polish_text(s: str) -> str:
     if s and s[-1] not in ".!?":
         s += "."
     s = re.sub(r"([,.:;!?])\s*([,.:;!?])+", r"\2", s)
+
+    s = re.sub(r"\bNo knees\.\s+Knees\.", "No knees.", s, flags=re.I)
+    s = re.sub(r"\bKnees\.\s+No knees\.", "No knees.", s, flags=re.I)
+    s = re.sub(r"\bNo elbows\.\s+Elbows\.", "No elbows.", s, flags=re.I)
+    s = re.sub(r"\bElbows\.\s+No elbows\.", "No elbows.", s, flags=re.I)
+    s = re.sub(r"\bNo antennae\.\s+Antennae\.", "No antennae.", s, flags=re.I)
+    s = re.sub(r"\bAntennae\.\s+No antennae\.", "No antennae.", s, flags=re.I)
+    s = re.sub(r"(?<!No )\b(Knees|Elbows|Antennae)\.(\s+|$)", "", s, flags=re.I)
+
+    s = re.sub(r"\bKnees are no knees\b\.?", "No knees.", s, flags=re.I)
+    s = re.sub(r"\bElbows are no elbows\b\.?", "No elbows.", s, flags=re.I)
+    s = re.sub(r"\bAntennae are no antennae\b\.?", "No antennae.", s, flags=re.I)
+
+
     return s
 
 def _synonym(name: str, val: str) -> str:
