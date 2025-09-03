@@ -16,9 +16,10 @@ from torchvision.models import ResNet
 # --- repo path shim (safe if already installed) ---
 sys.path.append(os.getcwd())
 
-from concept_benchmark.models import ConceptDetector
-from concept_benchmark.paths import results_dir
+from concept_benchmark.models import ConceptDetector, FrontEndModel
+from concept_benchmark.paths import results_dir, sudoku_data, model_file
 from concept_benchmark.synthetic.sudoku import create_sudoku_dataset, image_transform
+from concept_benchmark.ext import fileutils
 
 device = torch.device(
     "cuda" if torch.cuda.is_available() \
@@ -72,11 +73,13 @@ model.fit(
     data.validation, 
     freeze=True, 
     embed_params={"device": device},
-    fit_params={"epochs": 10, "device": "cpu"}
+    fit_params={"epochs": 10, "device": "cpu", "hidden_size": 360}
 )
-#TODO: save fit
+fileutils.save(model, model_file("test", "sudoku", "vit"))
 
 c_pred = model.predict(data.test, embed_params={"device": device}) > 0.5
 accuracy = (c_pred == data.test.C)
 accuracy_per_concept = accuracy.sum(axis=0) / accuracy.shape[0]
 print("Concept-wise accuracy:", accuracy_per_concept)
+
+front_end = FrontEndModel()
