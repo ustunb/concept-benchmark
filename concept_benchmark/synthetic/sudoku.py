@@ -352,5 +352,3 @@ def sudoku_image_preprocess(
         arr = arr / 255.0
     arr = np.expand_dims(arr, axis=0)  # [1,H,W]
     return torch.from_numpy(arr).contiguous() if to_tensor else arr
-        
-    return out

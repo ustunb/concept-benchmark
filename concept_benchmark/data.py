@@ -659,6 +659,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             y=self.y[indices],
             meta=self.meta,
             indices=indices,
+            preprocess=self.preprocess,
             transform=self.transform,
             concept_transform=self.concept_transform,
             target_transform=self.target_transform,
