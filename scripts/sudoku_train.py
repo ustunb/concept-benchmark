@@ -33,6 +33,12 @@ from concept_benchmark.ext import fileutils
 from concept_benchmark.models import ConceptBasedModel
 from concept_benchmark.metrics import calc_metric
 
+
+"""
+Script to train and evaluate a model on a generated sudoku dataset.
+"""
+
+
 class ViTWrapper(torch.nn.Module):
     def __init__(self, model=None):
         super(__class__, self).__init__()
@@ -83,3 +89,7 @@ accuracy_per_concept = accuracy.sum(axis=0) / accuracy.shape[0]
 print("Concept-wise accuracy:", accuracy_per_concept)
 
 front_end = FrontEndModel()
+front_end.fit(data.training.C, data.training.y)         # fit on gold
+preds = front_end.predict(c_pred.astype(np.float32))    # predict on predicted concepts
+label_acc = float((preds == data.test.y).mean())
+print(f"Label accuracy (using predicted concepts): {label_acc:.4f}")

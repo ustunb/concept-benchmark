@@ -11,6 +11,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
 from tqdm.auto import tqdm
+from typing import Sequence, Tuple, Optional 
 
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.paths import data_dir
@@ -18,6 +19,9 @@ from concept_benchmark.synthetic.sudoku_helper import (
     generate_invalid_board,
     generate_valid_board,
     get_concepts,
+    normalize_positions,
+    normalize_digits,
+    cell_digit_concept_vector
 )
 
 SUDOKU_DIR = data_dir / "sudoku"
@@ -34,6 +38,10 @@ def create_sudoku_dataset(
     seed: int = 42,
     transform: Callable[[np.ndarray], np.ndarray] | None = None,
     dataset_name: str | None = None,
+    add_cell_digit_concepts: bool = False,
+    positions_subset: Sequence[tuple[int, int]] | None = None,
+    digits_subset: Sequence[int] | None = None,
+    cell_concept_prefix: str = "cell",
     **kwargs
 ) -> ConceptDataset:
     """Create a synthetic dataset of Sudoku boards with concepts.
@@ -56,11 +64,15 @@ def create_sudoku_dataset(
             Default is None, which uses a simple flattening transform.
         dataset_name (str, optional): name of the dataset, used as folder name
             for saving images.
-
-    Returns:
-        ConceptDataset
+        add_cell_digit_concepts: If True, append per-cell digit concepts
+            of the form f"{cell_concept_prefix}({r+1},{c+1})_is_{d}".
+        positions_subset: Optional subset of 0-indexed (row, col) pairs.
+            None ⇒ all cells.
+        digits_subset: Optional subset of digits to include. None ⇒ [1..N].
+        cell_concept_prefix: Concept name prefix ("cell" by default).
     """
-    # Ensure ds_name is set for image datasets
+
+    # (existing image folder setup unchanged)
     if data_type == "image":
         dataset_name = dataset_name if dataset_name else \
             datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -73,15 +85,21 @@ def create_sudoku_dataset(
     N = n * n
     transform = transform or default_transform
 
+    # Prep optional cell-digit concept config
+    if add_cell_digit_concepts:
+        _pos = normalize_positions(N, positions_subset)
+        _digs = normalize_digits(N, digits_subset)
+    else:
+        _pos, _digs = [], []
+
     n_valid = int(round(n_samples * float(valid_ratio)))
     n_invalid = n_samples - n_valid
 
-    X_list = []  # features
-    C_list = []  # concept vectors (3*N,)
-    y_list = []  # labels: board_valid (0/1)
+    X_list, C_list, y_list = [], [], []
 
     pbar = tqdm(total=n_valid + n_invalid, desc="Generating Sudoku dataset") if tqdm else None
-     # valid boards
+
+    # ---- valid boards
     for i in range(n_valid):
         b = generate_valid_board(n=n)
         if data_type == "image":
@@ -90,16 +108,27 @@ def create_sudoku_dataset(
             X_list.append(img_path)
         else:
             X_list.append(transform(b))
-        C_list.append(np.ones(3 * N, dtype=np.int32))
+
+        # Base (row/col/block) validity concepts
+        c_base = np.ones(3 * N, dtype=np.int32)
+
+        # Optional per-cell digit concepts
+        if add_cell_digit_concepts:
+            c_cell = cell_digit_concept_vector(b, _pos, _digs)
+            c_vec = np.concatenate([c_base, c_cell], axis=0)
+        else:
+            c_vec = c_base
+
+        C_list.append(c_vec)
         y_list.append(1)
         if pbar: pbar.update(1)
 
-    # invalid boards
+    # ---- invalid boards
     for i in range(n_invalid):
         num_actions = max(1, int(random.randint(1, max_corrupt)))
         b = generate_invalid_board(base_board=generate_valid_board(n=n), num_actions=num_actions)
         concepts = get_concepts(b, return_label=False)
-        c_arr = np.array(list(concepts.values()), dtype=np.int32).flatten()
+        c_base = np.array(list(concepts.values()), dtype=np.int32).flatten()
 
         if data_type == "image":
             img_path = ds_path / f"invalid_{i}.png"
@@ -107,30 +136,45 @@ def create_sudoku_dataset(
             X_list.append(img_path)
         else:
             X_list.append(transform(b))
-        C_list.append(c_arr)
+
+        if add_cell_digit_concepts:
+            c_cell = cell_digit_concept_vector(b, _pos, _digs)
+            c_vec = np.concatenate([c_base, c_cell], axis=0)
+        else:
+            c_vec = c_base
+
+        C_list.append(c_vec)
         y_list.append(0)
         if pbar: pbar.update(1)
 
     if pbar: pbar.close()
 
     X = np.stack(X_list, axis=0)
-    C = np.stack(C_list, axis=0, dtype=np.int32)
-    y = np.array(y_list, dtype=np.int32)
+    C = np.stack(C_list, axis=0).astype(np.int32)
+    y = np.asarray(y_list, dtype=np.int32)
 
     if data_type == "image":
-        # save concepts and labels to same folder as csv
         np.savetxt(ds_path / "concepts.csv", C, delimiter=",")
         np.savetxt(ds_path / "labels.csv", y, delimiter=",")
 
+    # ---- names
     concept_names = (
         [f"row_valid_{i + 1}" for i in range(N)]
         + [f"col_valid_{i + 1}" for i in range(N)]
         + [f"block_valid_{i + 1}" for i in range(N)]
     )
 
-    # TODO: decide whether to store original boards in metadata
+    if add_cell_digit_concepts:
+        # Names follow the same order as _cell_digit_concept_vector
+        extra_names = [
+            f"{cell_concept_prefix}({r+1},{c+1})_is_{d}"
+            for (r, c) in _pos
+            for d in _digs
+        ]
+        concept_names.extend(extra_names)
+
     meta = {
-        "classes": [0, 1],  # 0 for invalid, 1 for valid
+        "classes": [0, 1],
         "concepts": concept_names,
         "data_type": data_type,
         "transform": transform.__name__ if transform else "default",
@@ -138,8 +182,14 @@ def create_sudoku_dataset(
         "seed": seed,
         "n": n,
         "N": N,
+        "cell_digit_concepts": {
+            "enabled": add_cell_digit_concepts,
+            "positions_order_row_major_1based": [(r+1, c+1) for (r, c) in _pos],
+            "digits_order": _digs,
+            "name_prefix": cell_concept_prefix,
+        },
     }
-    
+
     if data_type == "image":
         kwargs = {"preprocess": sudoku_image_preprocess}
     else:
@@ -325,6 +375,14 @@ def sudoku_image_preprocess(
     image = image.convert("L")  # Convert to grayscale
     img_arr = np.array(image)
     """
+    Processes an image of a sudoku board/
+    Args:
+        image: Image to process
+        standardize (bool, optional): If standardizing pixel values to within [0,1]. Defaults to True
+        to_tensor (bool, optional): If converting to tensor or not. Defaults to True.
+        vit (bool, optional): If using the image in a ViT backend model. Defaults to True.
+    Returns: 
+        An array representing the image.
     """
 
     if vit:

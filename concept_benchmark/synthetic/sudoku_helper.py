@@ -1,5 +1,5 @@
 import random
-from typing import Optional
+from typing import Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -508,3 +508,98 @@ def add_noise_to_concept_vector(vec: np.ndarray, eta: float = 0.1, seed: int | N
     rng = np.random.default_rng(seed)
     mask = _bernoulli_mask(vec.shape, eta, rng)
     return np.logical_xor(vec.astype(bool), mask).astype(np.int32)
+
+
+# --------------------------
+# Cell and value position concept helpers
+# --------------------------
+
+
+def normalize_positions(N: int,
+                         positions_subset: Optional[Sequence[Tuple[int, int]]]
+                         ) -> list[Tuple[int, int]]:
+    """
+    Validate and canonicalize a list of cell positions.
+
+    Args:
+        N (int): Board dimension (e.g., 9 for a 9×9 board). Must be >= 1.
+        positions_subset (Optional[Sequence[Tuple[int, int]]]): Optional sequence
+            of 0-indexed (row, col) pairs to include. If ``None``, all cells
+            ``[(0,0), (0,1), …, (N-1,N-1)]`` are used.
+
+    Returns:
+        list[Tuple[int, int]]: A row-major–sorted list of valid (row, col) pairs,
+        each satisfying ``0 <= row < N`` and ``0 <= col < N``.
+
+    Raises:
+        ValueError: If any provided (row, col) lies outside ``[0, N)`` for either
+        coordinate.
+    """
+    if positions_subset is None:
+        return [(r, c) for r in range(N) for c in range(N)]
+    out = []
+    for r, c in positions_subset:
+        if not (0 <= r < N and 0 <= c < N):
+            raise ValueError(f"Cell {(r, c)} out of bounds for N={N}.")
+        out.append((r, c))
+    # stable order: row-major
+    out.sort(key=lambda t: (t[0], t[1]))
+    return out
+
+def normalize_digits(N: int, digits_subset: Optional[Sequence[int]]) -> list[int]:
+    """
+    Validate and canonicalize a list of digits.
+
+    Args:
+        N (int): Board dimension (e.g., 9 for a 9×9 board). Valid digits are
+            integers in ``[1, N]``.
+        digits_subset (Optional[Sequence[int]]): Optional sequence of digits to
+            include. If ``None``, defaults to ``[1, 2, …, N]``.
+
+    Returns:
+        list[int]: A sorted (ascending) list of valid digits in ``[1, N]``.
+
+    Raises:
+        ValueError: If any provided digit is not an integer in ``[1, N]``.
+    """
+    if digits_subset is None:
+        return list(range(1, N + 1))
+    out = []
+    for d in digits_subset:
+        if not (1 <= int(d) <= N):
+            raise ValueError(f"Digit {d} out of range 1..{N}.")
+        out.append(int(d))
+    out.sort()
+    return out
+
+def cell_digit_concept_vector(board: np.ndarray,
+                               positions: Sequence[Tuple[int, int]],
+                               digits: Sequence[int]) -> np.ndarray:
+    """
+    Build a binary vector encoding per-cell digit indicators.
+
+    For each ``(row, col)`` in ``positions`` (row-major order), and for each
+    digit ``d`` in ``digits`` (ascending), emits a 1 iff ``board[row, col] == d``,
+    else 0. The final vector concatenates these indicators in the same nested
+    order.
+
+    Args:
+        board (np.ndarray): An ``N×N`` array of cell values. Expected to contain
+            integers in ``{0, 1, …, N}`` where 0 (or non-positive / None) means
+            “blank”. Only exact equality to digits in ``digits`` yields 1s.
+        positions (Sequence[Tuple[int, int]]): 0-indexed cell coordinates
+            ``(row, col)``. Typically produced by ``_normalize_positions`` for
+            validation and row-major ordering.
+        digits (Sequence[int]): Digits to test for each position. Typically
+            produced by ``_normalize_digits`` to ensure values lie in ``[1, N]``.
+
+    Returns:
+        np.ndarray: A 1D array of dtype ``np.int32`` and length
+        ``len(positions) * len(digits)`` with entries in ``{0, 1}``.
+    """
+    vals = []
+    for (r, c) in positions:
+        v = int(board[r, c]) if board[r, c] is not None else 0
+        for d in digits:
+            vals.append(1 if v == d else 0)
+    return np.asarray(vals, dtype=np.int32)
