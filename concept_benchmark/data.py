@@ -403,25 +403,41 @@ class ConceptDataset(object):
 
     def embed(self, model, batch_size=32, shuffle=False, device="cpu", **kwargs):
         """
-        Embed the dataset using a given model.
+        Embed the dataset using a given model and return a new dataset
+        instance without modifying the current one.
 
         Parameters:
         - model: A model that can embed the dataset.
 
         Returns:
-        - An embedded version of the dataset.
+        - ConceptDataset: a new dataset whose features are the embedded
+          representations. Cross-validation splits are preserved if present.
         """
-        self._full = self._full.embed(
+        # Compute embedded representation for the full dataset sample
+        embedded_full = self._full.embed(
             model, batch_size=batch_size, shuffle=shuffle, device=device, **kwargs
         )
 
-        # apply cv indices to the embedded dataset
+        # Create a new ConceptDataset using the embedded features while
+        # preserving metadata and CV indices from the original dataset.
+        new_ds = ConceptDataset(
+            X=embedded_full.X,
+            C=embedded_full.C,
+            y=embedded_full.y,
+            meta=embedded_full.meta,
+            cvindices=self._cvindices,
+            **self._init_kwargs,
+        )
+
+        # Re-apply existing split configuration on the new dataset, if any.
         if self.fold_id is not None:
-            self.split(
+            new_ds.split(
                 fold_id=self.fold_id,
                 fold_num_validation=self.fold_num_validation,
                 fold_num_test=self.fold_num_test,
             )
+
+        return new_ds
 
 
 @dataclass
@@ -560,7 +576,7 @@ class ConceptDatasetSample(Dataset):
         loader = self.loader(
             batch_size=batch_size,
             shuffle=shuffle,
-            num_workers=kwargs.get("num_workers", 0),
+            num_workers=kwargs.get("num_workers", 8),
             pin_memory=kwargs.get("pin_memory", False),
         )
 
@@ -587,7 +603,7 @@ class ConceptDatasetSample(Dataset):
 
         embedded_X = np.concatenate(embedded_X, axis=0)
 
-        embed_meta = dict(self.meta)
+        embed_meta = dict(self.meta).copy()
         embed_meta["data_type"] = "tabular"
 
         return ConceptDatasetSample(
