@@ -82,10 +82,10 @@ def test_embed_updates_full_and_preserves_splits(tab_medium_cv):
     ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
     n_tr, n_va, n_te = ds.training.n, ds.validation.n, ds.test.n
     model = MeanEmbedder()
-    ds.embed(model, batch_size=4, shuffle=False, device="cpu", num_workers=0)
+    embed_ds = ds.embed(model, batch_size=4, shuffle=False, device="cpu", num_workers=0)
     assert ds._full.meta.get("data_type") == "tabular"
-    assert (ds.training.n, ds.validation.n, ds.test.n) == (n_tr, n_va, n_te)
-    assert isinstance(ds.X, np.ndarray) and ds.X.ndim == 2 and ds.X.shape[1] == 2
+    assert (embed_ds.training.n, embed_ds.validation.n, embed_ds.test.n) == (n_tr, n_va, n_te)
+    assert isinstance(embed_ds.X, np.ndarray) and embed_ds.X.ndim == 2 and embed_ds.X.shape[1] == 2
 
 
 # ---------- Reset behavior ----------
