@@ -114,7 +114,7 @@ class ConceptDataset(object):
             **kwargs: Additional keyword arguments.
         """
         self._init_kwargs = dict(kwargs)
-
+    
         if meta.get("data_type") == "image":
             SampleClass = ConceptImageDatasetSample
             # do not cast X
@@ -659,6 +659,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             y=self.y[indices],
             meta=self.meta,
             indices=indices,
+            preprocess=self.preprocess,
             transform=self.transform,
             concept_transform=self.concept_transform,
             target_transform=self.target_transform,
