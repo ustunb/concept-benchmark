@@ -576,7 +576,7 @@ class ConceptDatasetSample(Dataset):
         loader = self.loader(
             batch_size=batch_size,
             shuffle=shuffle,
-            num_workers=kwargs.get("num_workers", 8),
+            num_workers=kwargs.get("num_workers", 0),
             pin_memory=kwargs.get("pin_memory", False),
         )
 
