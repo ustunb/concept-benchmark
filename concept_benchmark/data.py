@@ -114,7 +114,7 @@ class ConceptDataset(object):
             **kwargs: Additional keyword arguments.
         """
         self._init_kwargs = dict(kwargs)
-
+    
         if meta.get("data_type") == "image":
             SampleClass = ConceptImageDatasetSample
             # do not cast X
@@ -606,6 +606,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
     A sample of a ConceptDataset that contains image data.
     Inherits from ConceptDatasetSample.
     """
+    preprocess: Callable | None = None
 
     base_dir: Path = field(default_factory=lambda: Path("."))
 
@@ -622,6 +623,8 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             img_path = self.base_dir / img_path
         try:
             image = Image.open(img_path).convert("RGB")
+            if self.preprocess is not None:
+                image = self.preprocess(image)
             if self.transform is not None:
                 image = self.transform(image)
         except (AttributeError, FileNotFoundError, OSError) as e:
@@ -656,6 +659,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             y=self.y[indices],
             meta=self.meta,
             indices=indices,
+            preprocess=self.preprocess,
             transform=self.transform,
             concept_transform=self.concept_transform,
             target_transform=self.target_transform,
