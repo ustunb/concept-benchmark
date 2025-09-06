@@ -15,7 +15,7 @@ from typing import Sequence, Tuple, Optional
 
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.paths import data_dir
-from concept_benchmark.synthetic.sudoku_helper import (
+from concept_benchmark.synthetic.helper.sudoku_helper import (
     generate_invalid_board,
     generate_valid_board,
     get_concepts,
