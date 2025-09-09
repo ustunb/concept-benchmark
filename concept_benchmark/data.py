@@ -114,7 +114,7 @@ class ConceptDataset(object):
             **kwargs: Additional keyword arguments.
         """
         self._init_kwargs = dict(kwargs)
-    
+
         if meta.get("data_type") == "image":
             SampleClass = ConceptImageDatasetSample
             # do not cast X
@@ -438,6 +438,35 @@ class ConceptDataset(object):
             )
 
         return new_ds
+
+    def mask(self, p=0.1, sampler=None, fill_value=np.nan):
+        """Adding missingness to concepts.
+
+        Args:
+            p (float) : Probability of missing, using a Bernoulli distribution.
+            sampler (callable) : any function that returns a bool mask. Overwrites p arg. Must accept size kwarg.
+            fill_value (float) : value to fill the mask with
+        """
+
+        # Set sampler
+        if sampler is None:
+            sampler = lambda size : np.random.binomial(n=1,  p=p, size=size).astype(bool)
+
+        # Train
+        mask = sampler(size=self.training.C.shape)
+        self.training.C = self.training.C.astype(type(fill_value))
+        self.training.C[mask] = fill_value
+
+        # Test and validation, if defined
+        if self.test.C is not None:
+            mask  = sampler(size=self.test.C.shape)
+            self.test.C = self.test.C.astype(type(fill_value))
+            self.test.C[mask] = fill_value
+
+        if self.validation.C is not None:
+            mask  = sampler(size=self.validation.C.shape)
+            self.validation.C = self.validation.C.astype(type(fill_value))
+            self.validation.C[mask] = fill_value
 
 
 @dataclass
