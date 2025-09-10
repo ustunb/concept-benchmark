@@ -532,230 +532,226 @@ def _subset_acc(model: ConceptBasedModel, ds: ConceptDatasetSample, mask_rows: n
     return float((yhat[m] == ds.y[m]).mean())
 
 
-def run():
-    ap = argparse.ArgumentParser(add_help=False)
+ap = argparse.ArgumentParser(add_help=False)
 
-    ap.add_argument("--out-dir", type=str, default=settings["out_dir"])
-    ap.add_argument("--mode", choices=["complete_both", "complete_union", "incomplete_union"], default=settings["mode"])
-    ap.add_argument("--n", type=int, default=settings["n"])
-    ap.add_argument("--image-size", type=int, default=settings["image_size"])
-    ap.add_argument("--color-mode", choices=["color", "greyscale"], default=settings["color_mode"])
-    ap.add_argument("--missing-rate", type=float, default=settings["missing_rate"])
-    ap.add_argument("--p-overlap", type=float, default=settings["p_overlap"])
-    ap.add_argument("--seed", type=int, default=settings["seed"])
-    ap.add_argument("--human-label-frac", type=float, default=settings["human_label_frac"])
-    ap.add_argument("--intervention-k", type=int, default=settings["intervention_k"])
-    ap.add_argument("--tau", type=float, default=settings["tau"])
-    ap.add_argument("--clip-model", type=str, default=settings["clip_model"])
-    ap.add_argument("--machine-method", choices=["clip", "agop"], default=settings["machine_method"])
-    ap.add_argument("--eval-split", choices=["validation", "test"], default=settings["eval_split"])
-    ap.add_argument("--include-irrelevant", action="store_true", default=False)
+ap.add_argument("--out-dir", type=str, default=settings["out_dir"])
+ap.add_argument("--mode", choices=["complete_both", "complete_union", "incomplete_union"], default=settings["mode"])
+ap.add_argument("--n", type=int, default=settings["n"])
+ap.add_argument("--image-size", type=int, default=settings["image_size"])
+ap.add_argument("--color-mode", choices=["color", "greyscale"], default=settings["color_mode"])
+ap.add_argument("--missing-rate", type=float, default=settings["missing_rate"])
+ap.add_argument("--p-overlap", type=float, default=settings["p_overlap"])
+ap.add_argument("--seed", type=int, default=settings["seed"])
+ap.add_argument("--human-label-frac", type=float, default=settings["human_label_frac"])
+ap.add_argument("--intervention-k", type=int, default=settings["intervention_k"])
+ap.add_argument("--tau", type=float, default=settings["tau"])
+ap.add_argument("--clip-model", type=str, default=settings["clip_model"])
+ap.add_argument("--machine-method", choices=["clip", "agop"], default=settings["machine_method"])
+ap.add_argument("--eval-split", choices=["validation", "test"], default=settings["eval_split"])
+ap.add_argument("--include-irrelevant", action="store_true", default=False)
 
-    args, _ = ap.parse_known_args()
+args, _ = ap.parse_known_args()
 
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+out_dir = Path(args.out_dir)
+out_dir.mkdir(parents=True, exist_ok=True)
 
-    out = create_multimodal_robot_dataset(
-        mode=args.mode,
-        n=args.n,
-        concepts=DEFAULT_CONCEPTS,
-        seed=args.seed,
-        out_dir=str(out_dir),
-        image_size=args.image_size,
-        color_mode=args.color_mode,
-        missing_rate=args.missing_rate,
-        p_overlap=args.p_overlap,
+out = create_multimodal_robot_dataset(
+    mode=args.mode,
+    n=args.n,
+    concepts=DEFAULT_CONCEPTS,
+    seed=args.seed,
+    out_dir=str(out_dir),
+    image_size=args.image_size,
+    color_mode=args.color_mode,
+    missing_rate=args.missing_rate,
+    p_overlap=args.p_overlap,
+)
+
+C_true, mask_img, mask_txt, meta = _read_pairs(Path(out.meta_json))
+names = meta["concept_names"]
+
+if args.include_irrelevant:
+    C_true, names = _augment_with_irrelevant(C_true, names, meta)
+
+    mask_img = np.hstack([mask_img, np.zeros((mask_img.shape[0], 3), dtype=bool)])
+    mask_txt = np.hstack([mask_txt, np.zeros((mask_txt.shape[0], 3), dtype=bool)])
+
+ds_img, ds_txt = load_concept_datasets(out.meta_json)
+
+tr_i, va_i, te_i = _split(ds_img, seed=args.seed)
+tr_t, va_t, te_t = _split(ds_txt, seed=args.seed)
+
+df_text = pd.read_csv(meta["text_csv"])
+
+txt_train = _to_text_ds(
+    names,
+    meta.get("classes", ["drent", "glorp"]),
+    df_text.iloc[np.where(tr_t.indices)[0]],
+    C_true[np.where(tr_t.indices)[0]],
+    mask_txt[np.where(tr_t.indices)[0]],
+)
+
+txt_valid = _to_text_ds(
+    names,
+    meta.get("classes", ["drent", "glorp"]),
+    df_text.iloc[np.where(va_t.indices)[0]],
+    C_true[np.where(va_t.indices)[0]],
+    mask_txt[np.where(va_t.indices)[0]],
+)
+
+txt_test = _to_text_ds(
+    names,
+    meta.get("classes", ["drent", "glorp"]),
+    df_text.iloc[np.where(te_t.indices)[0]],
+    C_true[np.where(te_t.indices)[0]],
+    mask_txt[np.where(te_t.indices)[0]],
+)
+
+frac = float(args.human_label_frac)
+
+if frac < 1.0:
+    rng = np.random.default_rng(args.seed)
+
+    obs = txt_train.meta["observed_mask"].copy()
+
+    n_all = obs.shape[0] * obs.shape[1]
+    k = int((1.0 - frac) * n_all)
+
+    if k > 0:
+        idx = rng.choice(n_all, size=k, replace=False)
+
+        r = idx // obs.shape[1]
+        c = idx % obs.shape[1]
+
+        obs[r, c] = 0
+
+    txt_train.meta["observed_mask"] = obs
+
+idx_tr = np.where(tr_i.indices)[0]
+idx_va = np.where(va_i.indices)[0]
+idx_te = np.where(te_i.indices)[0]
+
+img_train = _to_image_ds(
+    names,
+    meta["classes"],
+    tr_i.X,
+    tr_i.y,
+    C_true[idx_tr],
+    mask_img[idx_tr],
+    meta["image_dir"],
+)
+
+img_valid = _to_image_ds(
+    names,
+    meta["classes"],
+    va_i.X,
+    va_i.y,
+    C_true[idx_va],
+    mask_img[idx_va],
+    meta["image_dir"],
+)
+
+img_test = _to_image_ds(
+    names,
+    meta["classes"],
+    te_i.X,
+    te_i.y,
+    C_true[idx_te],
+    mask_img[idx_te],
+    meta["image_dir"],
+)
+
+if frac < 1.0:
+    rng = np.random.default_rng(args.seed + 1)
+
+    obs_i = img_train.meta["observed_mask"].copy()
+
+    n_all_i = obs_i.shape[0] * obs_i.shape[1]
+    k_i = int((1.0 - frac) * n_all_i)
+
+    if k_i > 0:
+        idx = rng.choice(n_all_i, size=k_i, replace=False)
+
+        r = idx // obs_i.shape[1]
+        c = idx % obs_i.shape[1]
+
+        obs_i[r, c] = 0
+
+    img_train.meta["observed_mask"] = obs_i
+
+gt = OracleConceptDetector(C_true)
+
+human_txt = TextConceptDetector(output_mode="hard")
+human_txt.fit(txt_train, txt_valid, device="cpu", epochs=6, batch_size=64)
+
+human_img = HumanImageConceptDetector(image_dir=Path(meta["image_dir"]), concept_dim=len(names))
+human_img.fit(img_train, img_valid)
+
+if args.machine_method == "clip":
+    mach = ClipConceptDetector(
+        image_dir=Path(meta["image_dir"]),
+        concept_names=names,
+        model_name=args.clip_model,
     )
 
-    C_true, mask_img, mask_txt, meta = _read_pairs(Path(out.meta_json))
-    names = meta["concept_names"]
+    mach.fit(None, None)
 
-    if args.include_irrelevant:
-        C_true, names = _augment_with_irrelevant(C_true, names, meta)
+else:
+    mach = AgopConceptDetector(image_dir=Path(meta["image_dir"]), concept_dim=8)
+    mach.fit(tr_i, va_i)
 
-        mask_img = np.hstack([mask_img, np.zeros((mask_img.shape[0], 3), dtype=bool)])
-        mask_txt = np.hstack([mask_txt, np.zeros((mask_txt.shape[0], 3), dtype=bool)])
+res = []
 
-    ds_img, ds_txt = load_concept_datasets(out.meta_json)
+r_gt = _eval_cbm("ground_truth", img_train, img_valid, img_test, gt, tau=args.tau, propagate=True)
+r_hu_txt = _eval_cbm("human_text", txt_train, txt_valid, txt_test, human_txt, tau=args.tau, propagate=True)
+r_hu_img = _eval_cbm("human_image", img_train, img_valid, img_test, human_img, tau=args.tau, propagate=True)
 
-    tr_i, va_i, te_i = _split(ds_img, seed=args.seed)
-    tr_t, va_t, te_t = _split(ds_txt, seed=args.seed)
+r_mc = _eval_cbm("machine_" + args.machine_method, img_train, img_valid, img_test, mach, tau=args.tau, propagate=True)
 
-    df_text = pd.read_csv(meta["text_csv"])
+res.extend([r_gt, r_hu_txt, r_hu_img, r_mc])
 
-    txt_train = _to_text_ds(
-        names,
-        meta.get("classes", ["drent", "glorp"]),
-        df_text.iloc[np.where(tr_t.indices)[0]],
-        C_true[np.where(tr_t.indices)[0]],
-        mask_txt[np.where(tr_t.indices)[0]],
-    )
+m_gt = ConceptBasedModel(concept_detector=gt, front_end_model=_front_end(), propagate=True)
+m_gt.fit(img_train, img_valid, freeze=True, fit_params={"epochs": 8, "device": "cpu"})
 
-    txt_valid = _to_text_ds(
-        names,
-        meta.get("classes", ["drent", "glorp"]),
-        df_text.iloc[np.where(va_t.indices)[0]],
-        C_true[np.where(va_t.indices)[0]],
-        mask_txt[np.where(va_t.indices)[0]],
-    )
+m_hu_txt = ConceptBasedModel(concept_detector=human_txt, front_end_model=_front_end(), propagate=True)
+m_hu_txt.fit(txt_train, txt_valid, freeze=True, fit_params={"epochs": 8, "device": "cpu"})
 
-    txt_test = _to_text_ds(
-        names,
-        meta.get("classes", ["drent", "glorp"]),
-        df_text.iloc[np.where(te_t.indices)[0]],
-        C_true[np.where(te_t.indices)[0]],
-        mask_txt[np.where(te_t.indices)[0]],
-    )
+m_hu_img = ConceptBasedModel(concept_detector=human_img, front_end_model=_front_end(), propagate=True)
+m_hu_img.fit(img_train, img_valid, freeze=True, fit_params={"epochs": 8, "device": "cpu"})
 
-    frac = float(args.human_label_frac)
+m_mc = ConceptBasedModel(concept_detector=mach, front_end_model=_front_end(), propagate=True)
+m_mc.fit(img_train, img_valid, freeze=True, fit_params={"epochs": 8, "device": "cpu"})
 
-    if frac < 1.0:
-        rng = np.random.default_rng(args.seed)
+inter_gt = _intervene_eval(m_gt, img_test, C_true, k=int(args.intervention_k))
+inter_hu_txt = _intervene_eval(m_hu_txt, txt_test, C_true, k=int(args.intervention_k))
+inter_hu_img = _intervene_eval(m_hu_img, img_test, C_true, k=int(args.intervention_k))
+inter_mc = _intervene_eval(m_mc, img_test, C_true, k=int(args.intervention_k))
 
-        obs = txt_train.meta["observed_mask"].copy()
+idx_te_all = np.where(te_i.indices)[0]
 
-        n_all = obs.shape[0] * obs.shape[1]
-        k = int((1.0 - frac) * n_all)
+sub_img = _subset_mask(mask_img[idx_te_all], names)
+sub_txt = _subset_mask(mask_txt[idx_te_all], names)
 
-        if k > 0:
-            idx = rng.choice(n_all, size=k, replace=False)
+robust = {
+    "ground_truth_on_img_missing": _subset_acc(m_gt, img_test, sub_img),
+    "human_text_on_text_missing": _subset_acc(m_hu_txt, txt_test, sub_txt),
+    "human_image_on_img_missing": _subset_acc(m_hu_img, img_test, sub_img),
+    "machine_{}_on_img_missing".format(args.machine_method): _subset_acc(m_mc, img_test, sub_img),
+}
 
-            r = idx // obs.shape[1]
-            c = idx % obs.shape[1]
+out_json = {
+    "meta": meta,
+    "settings": vars(args),
+    "results": res,
+    "interventions": {
+        "ground_truth": inter_gt,
+        "human_text": inter_hu_txt,
+        "human_image": inter_hu_img,
+        "machine_" + args.machine_method: inter_mc,
+    },
+    "robustness": robust,
+}
 
-            obs[r, c] = 0
+(out_dir / "summary.json").write_text(json.dumps(out_json, indent=2))
 
-        txt_train.meta["observed_mask"] = obs
-
-    idx_tr = np.where(tr_i.indices)[0]
-    idx_va = np.where(va_i.indices)[0]
-    idx_te = np.where(te_i.indices)[0]
-
-    img_train = _to_image_ds(
-        names,
-        meta["classes"],
-        tr_i.X,
-        tr_i.y,
-        C_true[idx_tr],
-        mask_img[idx_tr],
-        meta["image_dir"],
-    )
-
-    img_valid = _to_image_ds(
-        names,
-        meta["classes"],
-        va_i.X,
-        va_i.y,
-        C_true[idx_va],
-        mask_img[idx_va],
-        meta["image_dir"],
-    )
-
-    img_test = _to_image_ds(
-        names,
-        meta["classes"],
-        te_i.X,
-        te_i.y,
-        C_true[idx_te],
-        mask_img[idx_te],
-        meta["image_dir"],
-    )
-
-    if frac < 1.0:
-        rng = np.random.default_rng(args.seed + 1)
-
-        obs_i = img_train.meta["observed_mask"].copy()
-
-        n_all_i = obs_i.shape[0] * obs_i.shape[1]
-        k_i = int((1.0 - frac) * n_all_i)
-
-        if k_i > 0:
-            idx = rng.choice(n_all_i, size=k_i, replace=False)
-
-            r = idx // obs_i.shape[1]
-            c = idx % obs_i.shape[1]
-
-            obs_i[r, c] = 0
-
-        img_train.meta["observed_mask"] = obs_i
-
-    gt = OracleConceptDetector(C_true)
-
-    human_txt = TextConceptDetector(output_mode="hard")
-    human_txt.fit(txt_train, txt_valid, device="cpu", epochs=6, batch_size=64)
-
-    human_img = HumanImageConceptDetector(image_dir=Path(meta["image_dir"]), concept_dim=len(names))
-    human_img.fit(img_train, img_valid)
-
-    if args.machine_method == "clip":
-        mach = ClipConceptDetector(
-            image_dir=Path(meta["image_dir"]),
-            concept_names=names,
-            model_name=args.clip_model,
-        )
-
-        mach.fit(None, None)
-
-    else:
-        mach = AgopConceptDetector(image_dir=Path(meta["image_dir"]), concept_dim=8)
-        mach.fit(tr_i, va_i)
-
-    res = []
-
-    r_gt = _eval_cbm("ground_truth", img_train, img_valid, img_test, gt, tau=args.tau, propagate=True)
-    r_hu_txt = _eval_cbm("human_text", txt_train, txt_valid, txt_test, human_txt, tau=args.tau, propagate=True)
-    r_hu_img = _eval_cbm("human_image", img_train, img_valid, img_test, human_img, tau=args.tau, propagate=True)
-
-    r_mc = _eval_cbm("machine_" + args.machine_method, img_train, img_valid, img_test, mach, tau=args.tau, propagate=True)
-
-    res.extend([r_gt, r_hu_txt, r_hu_img, r_mc])
-
-    m_gt = ConceptBasedModel(concept_detector=gt, front_end_model=_front_end(), propagate=True)
-    m_gt.fit(img_train, img_valid, freeze=True, fit_params={"epochs": 8, "device": "cpu"})
-
-    m_hu_txt = ConceptBasedModel(concept_detector=human_txt, front_end_model=_front_end(), propagate=True)
-    m_hu_txt.fit(txt_train, txt_valid, freeze=True, fit_params={"epochs": 8, "device": "cpu"})
-
-    m_hu_img = ConceptBasedModel(concept_detector=human_img, front_end_model=_front_end(), propagate=True)
-    m_hu_img.fit(img_train, img_valid, freeze=True, fit_params={"epochs": 8, "device": "cpu"})
-
-    m_mc = ConceptBasedModel(concept_detector=mach, front_end_model=_front_end(), propagate=True)
-    m_mc.fit(img_train, img_valid, freeze=True, fit_params={"epochs": 8, "device": "cpu"})
-
-    inter_gt = _intervene_eval(m_gt, img_test, C_true, k=int(args.intervention_k))
-    inter_hu_txt = _intervene_eval(m_hu_txt, txt_test, C_true, k=int(args.intervention_k))
-    inter_hu_img = _intervene_eval(m_hu_img, img_test, C_true, k=int(args.intervention_k))
-    inter_mc = _intervene_eval(m_mc, img_test, C_true, k=int(args.intervention_k))
-
-    idx_te_all = np.where(te_i.indices)[0]
-
-    sub_img = _subset_mask(mask_img[idx_te_all], names)
-    sub_txt = _subset_mask(mask_txt[idx_te_all], names)
-
-    robust = {
-        "ground_truth_on_img_missing": _subset_acc(m_gt, img_test, sub_img),
-        "human_text_on_text_missing": _subset_acc(m_hu_txt, txt_test, sub_txt),
-        "human_image_on_img_missing": _subset_acc(m_hu_img, img_test, sub_img),
-        "machine_{}_on_img_missing".format(args.machine_method): _subset_acc(m_mc, img_test, sub_img),
-    }
-
-    out_json = {
-        "meta": meta,
-        "settings": vars(args),
-        "results": res,
-        "interventions": {
-            "ground_truth": inter_gt,
-            "human_text": inter_hu_txt,
-            "human_image": inter_hu_img,
-            "machine_" + args.machine_method: inter_mc,
-        },
-        "robustness": robust,
-    }
-
-    (out_dir / "summary.json").write_text(json.dumps(out_json, indent=2))
-
-    print(json.dumps(out_json, indent=2))
-
-
-run()
+print(json.dumps(out_json, indent=2))
