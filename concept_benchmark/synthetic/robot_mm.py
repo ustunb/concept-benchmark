@@ -12,7 +12,7 @@ from PIL import Image
 from .robot_pil import draw_robot_image
 
 try:
-    from concept_benchmark.data import ConceptDataset, ConceptImageDatasetSample
+    from concept_benchmark.data import ConceptDataset, ConceptImageDatasetSample, TextConceptDataset
     HAVE_CB = True
 except Exception:
     HAVE_CB = False
@@ -184,8 +184,12 @@ def create_multimodal_robot_dataset(mode: str, *, n: int = 200, concepts: Option
         y = df_img["y"].values.astype(int)
         meta_img = {"classes": classes, "concepts": meta["concept_names"], "data_type": "image"}
         meta_txt = {"classes": classes, "concepts": meta["concept_names"], "data_type": "text"}
+        if not isinstance(X_img, np.ndarray):
+            X_img = np.array(X_img, dtype=object)
+        if not isinstance(X_txt, np.ndarray):
+            X_txt = np.array(X_txt, dtype=object)
         ds_img = ConceptDataset(X=X_img, C=C_true, y=y, meta=meta_img)
-        ds_txt = ConceptDataset(X=X_txt, C=C_true, y=y, meta=meta_txt)
+        ds_txt = TextConceptDataset(X=X_txt, C=C_true, y=y, meta=meta_txt)
         ds_img.training.base_dir = Path(meta["image_dir"])
         ds = {"image": ds_img, "text": ds_txt}
         (out_dir / "datasets.npz").write_bytes(b"")
