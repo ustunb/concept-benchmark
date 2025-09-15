@@ -1,9 +1,9 @@
-# scripts/demo3_text_genstyle.py
-
 from __future__ import annotations
 from pathlib import Path
 import argparse, json
 import numpy as np, pandas as pd
+from sklearn.cluster import KMeans
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 from concept_benchmark.paths import pkg_dir, results_dir, data_dir
 from concept_benchmark.synthetic.helper.textgen import create_synthetic_dataset
@@ -37,7 +37,13 @@ settings = {
     "intervene_scope": "errors",
     "select_by": "uncertainty",
     "coverages": "0.0,0.1,0.25,0.5,1.0",
-    "tau": 0.5
+    "tau": 0.5,
+    "concept_source": "gt",
+    "machine_k": 16,
+    "machine_soft": 1,
+    "machine_upper_bound": 0,
+    "human_acc": 1.0,
+    "intervene_allow": ""
 }
 
 ap = argparse.ArgumentParser(add_help=False)
@@ -197,10 +203,49 @@ fe_gt = FrontEndModel()
 Xtr_gt = C_train_pred if S["train_on_detected_gt"] else C_train_true
 fe_gt.fit(Xtr_gt, train_ds.y.astype(int))
 
+def _tfidf(texts):
+    v = TfidfVectorizer(ngram_range=(1,2), max_features=50000, dtype=np.float32)
+    Xtr = v.fit_transform([str(t) for t in train_ds.X])
+    Xte = v.transform([str(t) for t in test_ds.X])
+    return v, Xtr, Xte
+
+def _kmeans_soft(X, km):
+    D = km.transform(X)
+    Sft = np.exp(-D)
+    Sft /= (Sft.sum(1, keepdims=True) + 1e-12)
+    return Sft
+
+def _machine_truth_map(H_train_hard, C_train_true):
+    J = H_train_hard.shape[1]
+    mapping = []
+    for j in range(J):
+        col = H_train_hard[:, j].astype(int)
+        best = 0
+        best_idx = 0
+        for t in range(C_train_true.shape[1]):
+            c = C_train_true[:, t].astype(int)
+            agree = int(((col == 1) & (c == 1)).sum() + ((col == 0) & (c == 0)).sum())
+            if agree > best:
+                best = agree; best_idx = t
+        mapping.append(best_idx)
+    return np.array(mapping, dtype=int)
+
 fe_mc = FrontEndModel()
-J_machine_names = ["body_shape=square", "has_antennae"]
-J_machine = [_name_to_col(nm) for nm in J_machine_names]
-fe_mc.fit(C_train_machine_full[:, J_machine], train_ds.y.astype(int))
+if S["concept_source"] == "machine":
+    vec, Xtr_txt, Xte_txt = _tfidf(train_ds.X)
+    km = KMeans(n_clusters=int(S["machine_k"]), n_init=10, random_state=int(S["seed"])+17)
+    km.fit(Xtr_txt)
+    Htr = np.eye(int(S["machine_k"]))[np.argmin(km.transform(Xtr_txt), axis=1)].astype(int)
+    Hte = np.eye(int(S["machine_k"]))[np.argmin(km.transform(Xte_txt), axis=1)].astype(int)
+    Ptr = _kmeans_soft(Xtr_txt, km); Pte = _kmeans_soft(Xte_txt, km)
+    if int(S["machine_soft"]):
+        fe_mc.fit(Ptr, train_ds.y.astype(int))
+    else:
+        fe_mc.fit(Htr, train_ds.y.astype(int))
+    if int(S["machine_upper_bound"]):
+        truth_map = _machine_truth_map(Htr, train_ds.C.astype(int))
+    else:
+        truth_map = None
 
 def _eval(fe, X, y, tau):
     P = fe.predict_proba(X); yhat = np.argmax(P, axis=1)
@@ -210,24 +255,32 @@ def _eval(fe, X, y, tau):
 
 tau = float(S.get("tau", 0.5))
 acc_gt, cov_gt, sel_gt, Pte_gt, yhat_gt = _eval(fe_gt, C_test_true,               test_ds.y.astype(int), tau)
-acc_mc, cov_mc, sel_mc, Pte_mc, yhat_mc = _eval(fe_mc, C_test_pred_noisy[:, J_machine], test_ds.y.astype(int), tau)
+
+acc_mc, cov_mc, sel_mc, Pte_mc, yhat_mc = None, None, None, None, None
+if S["concept_source"] == "machine":
+    if int(S["machine_soft"]):
+        acc_mc, cov_mc, sel_mc, Pte_mc, yhat_mc = _eval(fe_mc, Pte, test_ds.y.astype(int), tau)
+    else:
+        acc_mc, cov_mc, sel_mc, Pte_mc, yhat_mc = _eval(fe_mc, Hte, test_ds.y.astype(int), tau)
 
 elig_global = [_name_to_col(nm) for nm in S["intervene_concepts"].split(",") if nm.strip()]
 elig_mc_local = []
-for nm in S["intervene_concepts"].split(","):
-    nm = nm.strip()
-    if not nm:
-        continue
-    try:
-        jg = _name_to_col(nm)
-    except KeyError:
-        continue
-    if jg in J_machine:
-        elig_mc_local.append(J_machine.index(jg))
+if S["concept_source"] == "machine":
+    elig_mc_local = list(range(int(S["machine_k"])))
 
-covs = [float(x) for x in S["coverages"].split(",") if x.strip()]
+def _allowed_indices_machine(spec, K):
+    if not spec: return np.arange(K, dtype=int)
+    toks = [t.strip() for t in spec.split(",") if t.strip()]
+    out = []
+    for t in toks:
+        if t.startswith("machine_"):
+            try:
+                out.append(int(t.split("_",1)[1]))
+            except:
+                pass
+    return np.array(sorted(set([i for i in out if 0 <= i < K])), dtype=int) if out else np.arange(K, dtype=int)
 
-def _sweep(fe, X0, y, C_true, elig_cols, k, coverages, scope, select_by, seed=0):
+def _sweep(fe, X0, y, C_true, elig_cols, k, coverages, scope, select_by, seed=0, names=None, human_acc=1.0, allow_spec=""):
     P0 = fe.predict_proba(X0); y0 = np.argmax(P0, 1); pmax = P0.max(1)
     idx_all = np.arange(len(y)); errs = idx_all[y0 != y]
     if select_by == "uncertainty":
@@ -237,8 +290,10 @@ def _sweep(fe, X0, y, C_true, elig_cols, k, coverages, scope, select_by, seed=0)
         r = np.random.default_rng(seed)
         order_all = r.permutation(idx_all)
         order_err = r.permutation(errs)
+    allow = np.arange(X0.shape[1], dtype=int) if names is None else (np.arange(X0.shape[1], dtype=int) if allow_spec == "" else _allowed_indices_machine(allow_spec, X0.shape[1]))
     out = []
-    for cov in coverages:
+    r = np.random.default_rng(seed+999)
+    for cov in [float(x) for x in str(coverages).split(",") if x.strip()]:
         if scope == "errors":
             msel = int(round(cov * len(errs))); sel = order_err[:msel]
         else:
@@ -246,30 +301,45 @@ def _sweep(fe, X0, y, C_true, elig_cols, k, coverages, scope, select_by, seed=0)
         X = X0.copy()
         if k > 0 and len(elig_cols) > 0 and len(sel) > 0:
             for i in sel:
-                diffs = np.abs(X[i, elig_cols] - C_true[i, elig_cols])
+                cols = np.array(elig_cols, dtype=int)
+                cols = cols[np.isin(cols, allow)]
+                if cols.size == 0: continue
+                diffs = np.abs(X[i, cols] - C_true[i, cols])
                 kk = min(int(k), diffs.shape[0])
                 fix = np.argpartition(-diffs, kk - 1)[:kk]
-                X[i, np.array(elig_cols)[fix]] = C_true[i, np.array(elig_cols)[fix]]
+                for jj in cols[fix]:
+                    if r.random() < float(human_acc):
+                        X[i, jj] = C_true[i, jj]
+                    else:
+                        X[i, jj] = 1 - C_true[i, jj]
         P1 = fe.predict_proba(X); y1 = np.argmax(P1, 1)
         pre = float((y0 == y).mean()); post = float((y1 == y).mean())
         harm = float(((y0[sel] == y[sel]) & (y1[sel] != y[sel])).mean()) if len(sel) > 0 else 0.0
         out.append({"coverage": cov, "pre": pre, "post": post, "delta": post - pre, "harm_rate": harm, "n_intervened": int(len(sel))})
     return pd.DataFrame(out)
 
-sweep_gt = _sweep(fe_gt, C_test_true,               test_ds.y.astype(int), C_test_true,               [_name_to_col(nm) for nm in S["intervene_concepts"].split(",") if nm.strip()], int(S["intervention_k"]), covs, S["intervene_scope"], S["select_by"], seed=S["seed"])
-sweep_mc = _sweep(fe_mc, C_test_pred_noisy[:, J_machine], test_ds.y.astype(int), C_test_true[:, J_machine], elig_mc_local, int(S["intervention_k"]), covs, S["intervene_scope"], S["select_by"], seed=S["seed"]+7)
+sweep_gt = _sweep(fe_gt, C_test_true, test_ds.y.astype(int), C_test_true, [_name_to_col(nm) for nm in S["intervene_concepts"].split(",") if nm.strip()], int(S["intervention_k"]), S["coverages"], S["intervene_scope"], S["select_by"], seed=S["seed"], names=names, human_acc=float(S["human_acc"]), allow_spec=S["intervene_allow"])
+
+sweep_mc = None
+if S["concept_source"] == "machine":
+    if int(S["machine_upper_bound"]):
+        C_true_mc = C_test_true[:, truth_map]
+    else:
+        C_true_mc = (Pte > 0.5).astype(int) if int(S["machine_soft"]) else Hte
+    sweep_mc = _sweep(fe_mc, (Pte if int(S["machine_soft"]) else Hte), test_ds.y.astype(int), C_true_mc, elig_mc_local, int(S["intervention_k"]), S["coverages"], S["intervene_scope"], S["select_by"], seed=S["seed"]+7, names=None, human_acc=float(S["human_acc"]), allow_spec=S["intervene_allow"])
 
 summary = {
     "settings": S,
     "concept_names": names,
-    "results": [
-        {"name": "ground_truth_frontend", "acc": acc_gt, "coverage": cov_gt, "selective_accuracy": sel_gt},
-        {"name": "machine_frontend", "acc": acc_mc, "coverage": cov_mc, "selective_accuracy": sel_mc}
-    ],
-    "sweep_ground_truth": sweep_gt.to_dict(orient="records"),
-    "sweep_machine": sweep_mc.to_dict(orient="records")
+    "results": [{"name": "ground_truth_frontend", "acc": acc_gt, "coverage": cov_gt, "selective_accuracy": sel_gt}],
+    "sweep_ground_truth": sweep_gt.to_dict(orient="records")
 }
+if sweep_mc is not None:
+    summary["results"].append({"name": "machine_frontend", "acc": acc_mc, "coverage": cov_mc, "selective_accuracy": sel_mc})
+    summary["sweep_machine"] = sweep_mc.to_dict(orient="records")
+
 (Path(S["out_dir"]) / "summary.json").write_text(json.dumps(summary, indent=2))
 sweep_gt.to_csv(Path(S["out_dir"]) / "sweep_ground_truth.csv", index=False)
-sweep_mc.to_csv(Path(S["out_dir"]) / "sweep_machine.csv", index=False)
+if sweep_mc is not None:
+    sweep_mc.to_csv(Path(S["out_dir"]) / "sweep_machine.csv", index=False)
 print(json.dumps(summary, indent=2))
