@@ -1,0 +1,50 @@
+﻿HeadShape: {head_shape} BodyShape: {body_shape} HasKnees: {has_knees} HasAntennae: {has_antennae} EarsShape: {ears_shape} MouthType: {mouth_type} FootShape: {foot_shape} HasElbows: {has_elbows} HandShape: {hand_shape} Color: {color}
+Head {head_shape}; body {body_shape}. Knees {has_knees}; antennae {has_antennae}. Ears {ears_shape}; mouth {mouth_type}; feet {foot_shape}. Elbows {has_elbows}. Hands {hand_shape}. Color {color}.
+{color} color. {hand_shape} hands. Elbows {has_elbows}. {head_shape} head. {body_shape} body. Knees {has_knees}. {ears_shape} ears, {mouth_type} mouth. Feet {foot_shape}.
+Head/body: {head_shape}/{body_shape}; limbs: knees {has_knees}, elbows {has_elbows}, hands {hand_shape}; face: ears {ears_shape}, mouth {mouth_type}; base: feet {foot_shape}; color {color}.
+Head looks {head_shape}; body looks {body_shape}. I think the knees are {has_knees} and it {has_elbows}. Hands are {hand_shape}. Ears read {ears_shape}; mouth seems {mouth_type}. Feet look {foot_shape}. Color is {color}.
+Mouth {mouth_type}; hands {hand_shape}; body {body_shape}; color {color}; ears {ears_shape}; head {head_shape}; elbows {has_elbows}; feet {foot_shape}; knees {has_knees}; antennae {has_antennae}.
+Head is not {head_shape~not}. Body is not {body_shape~not}. Knees {has_knees}. Antennae {has_antennae}. Ears are {ears_shape}. Mouth is {mouth_type}. Feet {foot_shape}. Hands {hand_shape}. Color {color}.
+Head isn’t {head_shape~not}; it’s {head_shape}. Body isn’t {body_shape~not}; it’s {body_shape}. Knees {has_knees}, antennae {has_antennae}. Ears {ears_shape}, mouth {mouth_type}. Elbows {has_elbows}. Hands {hand_shape}. Feet {foot_shape}. Color {color}.
+{head_shape} head, {body_shape} body; knees {has_knees}; antennae {has_antennae}; ears {ears_shape}; mouth {mouth_type}; feet {foot_shape}; elbows {has_elbows}; hands {hand_shape}; {color} color.
+Head is {head_shape} and body is {body_shape}; elbows: {has_elbows} and hands are {hand_shape}; ears {ears_shape}, mouth {mouth_type}; feet {foot_shape}; color {color}.
+Hands are {hand_shape} and the color is {color}. Elbows {has_elbows}. The head is {head_shape}, the body {body_shape}, knees {has_knees}, antennae {has_antennae}, ears {ears_shape}, mouth {mouth_type}, feet {foot_shape}.
+I think the head is {head_shape}. The body isn’t {body_shape~not}. Knees seem {has_knees}. Antennae {has_antennae}. Ears look {ears_shape}. Mouth seems {mouth_type}. Hands {hand_shape}. Feet {foot_shape}. Color {color}.
+Head {head_shape}; body {body_shape}; knees {has_knees}; antennae {has_antennae}; ears {ears_shape}; mouth {mouth_type}; feet {foot_shape}; elbows {has_elbows}; hands {hand_shape}; color {color}.
+Top: {head_shape}. Torso: {body_shape}. Knees: {has_knees}. Antennae: {has_antennae}. Ears: {ears_shape}. Mouth: {mouth_type}. Base/feet: {foot_shape}. Elbows: {has_elbows}. Hands: {hand_shape}. Color: {color}.
+Head’s {head_shape}, body’s {body_shape}. Knees {has_knees}, antennae {has_antennae}. Ears {ears_shape}, mouth {mouth_type}. Hands {hand_shape}; elbows {has_elbows}. Feet {foot_shape}. Looks {color}.
+Not {head_shape~not} at the head; not {body_shape~not} for the body; knees {has_knees}; antennae {has_antennae}. Ears {ears_shape}; mouth {mouth_type}. Feet {foot_shape}. Hands {hand_shape}. Color {color}.
+It’s got a {head_shape} head on a {body_shape} body. Knees {has_knees}, elbows {has_elbows}, antennae {has_antennae}, ears {ears_shape}, mouth {mouth_type}, hands {hand_shape}, feet {foot_shape}, and it’s {color}.
+The head looks {head_shape} and the body seems {body_shape}. I’m pretty sure it {has_knees}, {has_elbows}, and {has_antennae}; ears are {ears_shape}, the mouth is {mouth_type}, hands {hand_shape}, feet {foot_shape}, and the color is {color}.
+The head is {head_shape}, but the body is {body_shape}. It’s got {has_knees}, {has_elbows}, and {has_antennae}; {ears_shape} ears, a {mouth_type} mouth, {hand_shape} hands, {foot_shape} feet, and the color is {color}.
+The head isn’t {head_shape~not} and the body isn’t {body_shape~not}. Knees {has_knees}, elbows {has_elbows}, antennae {has_antennae}, ears {ears_shape}, mouth {mouth_type}, hands {hand_shape}, feet {foot_shape}, color {color}.
+I thought the head was {head_shape~not}, actually it’s {head_shape}, and the body is {body_shape}. It {has_knees}, {has_elbows}, and {has_antennae}; ears {ears_shape}, mouth {mouth_type}, hands {hand_shape}, feet {foot_shape}, and it’s {color}.
+The head, {head_shape}, sits on the body, {body_shape}, with knees {has_knees}, elbows {has_elbows}, and antennae {has_antennae}. It’s also got {ears_shape} ears, a {mouth_type} mouth, {hand_shape} hands, {foot_shape} feet, and a {color} finish.
+What stands out is the {head_shape} head and the {body_shape} body. It also {has_knees}, {has_elbows}, and {has_antennae}; {ears_shape} ears, a {mouth_type} mouth, {hand_shape} hands, {foot_shape} feet, and it’s {color}.
+The head is more {head_shape} than not, and the body is clearly {body_shape}. It’s got {has_knees}, {has_elbows}, and {has_antennae}; {ears_shape} ears, a {mouth_type} mouth, {hand_shape} hands, {foot_shape} feet, and it’s {color}.
+It has a head that’s {head_shape} and a body that’s {body_shape}, with {has_knees}, {has_elbows}, and {has_antennae}. The ears are {ears_shape}, the mouth is {mouth_type}, the hands are {hand_shape}, the feet are {foot_shape}, and the color is {color}.
+Head is {head_shape}, body is {body_shape}. It {has_knees}, {has_elbows}, and {has_antennae}. The ears are {ears_shape}, the mouth {mouth_type}, the hands {hand_shape}, the feet {foot_shape}, and the color {color}.
+The head is {head_shape} and the body is {body_shape}. The color is {color}.
+It {has_knees} and {has_elbows}, with {hand_shape} hands. Feet are {foot_shape}.
+Ears are {ears_shape} and the mouth is {mouth_type}. Antennae {has_antennae}.
+The hands are {hand_shape} and it {has_elbows}. The rest isn’t clear.
+It’s mostly {color}, with a {head_shape} head and a {body_shape} body.
+The head isn’t {head_shape~not} and the body isn’t {body_shape~not}.
+I think the ears are {ears_shape} and the feet look {foot_shape}. Not sure about the rest.
+The hands look {hand_shape} and the feet are {foot_shape}.
+Head {head_shape}, knees {has_knees}, and mouth {mouth_type}.
+Antennae {has_antennae}, but it does {has_knees}.
+It’s {color} overall, and the ears are {ears_shape} with a {mouth_type} mouth.
+Pretty sure the head is {head_shape} and the feet are {foot_shape}.
+It {has_elbows} but {has_knees}.
+Hands are {hand_shape}, ears {ears_shape}, and the body seems {body_shape}.
+Kinda {head_shape~syn} up top and {body_shape~syn} through the body. Hands are {hand_shape~syn}, feet {foot_shape~syn}, color {color}.
+Looks {color} overall, with a {head_shape} head; the body’s more {body_shape} and the ears are {ears_shape}.
+The mouth’s {mouth_type} and the hands are {hand_shape}. The head reads {head_shape}.
+Head isn’t {head_shape~not} and the body isn’t {body_shape~not}. Feet are {foot_shape~syn} and the mouth is {mouth_type}.
+Head comes off {head_shape~syn}, body seems {body_shape}. Ears {ears_shape}; color {color}.
+If I had to sum it up: {head_shape} head, {body_shape} body, {hand_shape~syn} hands; the mouth’s {mouth_type}.
+Mostly {color}, with {foot_shape~syn} feet and {hand_shape} hands; the head looks {head_shape}.
+The ears are {ears_shape}, and the mouth is {mouth_type}. The body looks {body_shape~syn}.
+Hands {hand_shape}, feet {foot_shape}. I’d say the head is {head_shape~syn}.
+Nothing fancy—{head_shape} head, {body_shape} body, {mouth_type} mouth, and a {color} finish.

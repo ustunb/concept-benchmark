@@ -8,7 +8,7 @@ from concept_benchmark.synthetic.robot import create_synthetic_dataset
 
 device = torch.device(
     "cuda" if torch.cuda.is_available() \
-        else ("mps" if torch.backends.mps.is_available() 
+        else ("mps" if torch.backends.mps.is_available()
               else "cpu")
 )
 
@@ -89,8 +89,8 @@ model = ConceptDetector(
 )
 model.fit(
     data.training,
-    data.validation, 
-    freeze=True, 
+    data.validation,
+    freeze=True,
     embed_params={"device": device},
     fit_params={"epochs": 10, "device": "cpu"}
 )

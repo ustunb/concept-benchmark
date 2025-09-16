@@ -5,7 +5,8 @@ description = "Concept Benchmark"
 authors = [
     { name = "Berk Ustun"},
     { name =  "Ryan Hammonds" },
-    { name = "Harry Cheon"}
+    { name = "Harry Cheon"},
+    { name = "Shreyas Kadekodi"},
 ]
 
 requires-python = ">=3.10"
