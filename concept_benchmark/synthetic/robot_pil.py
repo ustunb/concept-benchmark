@@ -1,8 +1,10 @@
 
 from __future__ import annotations
-import math
-from typing import Dict, Iterable, List, Tuple
+
+from typing import Dict, Iterable, Tuple
+
 from PIL import Image, ImageDraw
+
 
 def _poly(draw, pts, fill, outline, width=2):
     draw.polygon(pts, fill=fill, outline=outline)

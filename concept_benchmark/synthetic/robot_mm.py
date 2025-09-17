@@ -1,6 +1,8 @@
 
 from __future__ import annotations
-import itertools, json, math, os, random
+import json
+import math
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -8,14 +10,8 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-from PIL import Image
 from .robot_pil import draw_robot_image
-
-try:
-    from concept_benchmark.data import ConceptDataset, ConceptImageDatasetSample, TextConceptDataset
-    HAVE_CB = True
-except Exception:
-    HAVE_CB = False
+from concept_benchmark.data import ConceptDataset
 
 DEFAULT_CONCEPTS = {
     "head_shape": ["square", "round"],
@@ -177,29 +173,27 @@ def create_multimodal_robot_dataset(mode: str, *, n: int = 200, concepts: Option
     }
     meta_json = out_dir / "meta.json"
     meta_json.write_text(json.dumps(meta, indent=2))
-    if HAVE_CB:
-        C_true = np.vstack(C_true_rows).astype(int)
-        X_img = df_img["path"].values.tolist()
-        X_txt = df_txt["text"].values.tolist()
-        y = df_img["y"].values.astype(int)
-        meta_img = {"classes": classes, "concepts": meta["concept_names"], "data_type": "image"}
-        meta_txt = {"classes": classes, "concepts": meta["concept_names"], "data_type": "text"}
-        if not isinstance(X_img, np.ndarray):
-            X_img = np.array(X_img, dtype=object)
-        if not isinstance(X_txt, np.ndarray):
-            X_txt = np.array(X_txt, dtype=object)
-        ds_img = ConceptDataset(X=X_img, C=C_true, y=y, meta=meta_img)
-        ds_txt = TextConceptDataset(X=X_txt, C=C_true, y=y, meta=meta_txt)
-        ds_img.training.base_dir = Path(meta["image_dir"])
-        ds = {"image": ds_img, "text": ds_txt}
-        (out_dir / "datasets.npz").write_bytes(b"")
+    C_true = np.vstack(C_true_rows).astype(int)
+    X_img = df_img["path"].values.tolist()
+    X_txt = df_txt["text"].values.tolist()
+    y = df_img["y"].values.astype(int)
+    meta_img = {"classes": classes, "concepts": meta["concept_names"], "data_type": "image"}
+    meta_txt = {"classes": classes, "concepts": meta["concept_names"], "data_type": "text"}
+    if not isinstance(X_img, np.ndarray):
+        X_img = np.array(X_img, dtype=object)
+    if not isinstance(X_txt, np.ndarray):
+        X_txt = np.array(X_txt, dtype=object)
+    ds_img = ConceptDataset(X=X_img, C=C_true, y=y, meta=meta_img)
+    ds_txt = ConceptDataset(X=X_txt, C=C_true, y=y, meta=meta_txt)
+    ds_img.training.base_dir = Path(meta["image_dir"])
+    ds = {"image": ds_img, "text": ds_txt}
+    (out_dir / "datasets.npz").write_bytes(b"")
     return MultiModalOutput(image_csv=image_csv, text_csv=text_csv, pairs_csv=pairs_csv, image_dir=img_dir, meta_json=meta_json)
 
 def load_concept_datasets(meta_json_path: os.PathLike | str):
-    if not HAVE_CB:
-        raise RuntimeError("concept_benchmark.data not available in this environment")
     m = json.loads(Path(meta_json_path).read_text())
-    import pandas as pd, numpy as np
+    import pandas as pd
+    import numpy as np
     df_img = pd.read_csv(m["image_csv"])
     df_txt = pd.read_csv(m["text_csv"])
     pairs = pd.read_csv(m["pairs_csv"])
