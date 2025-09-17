@@ -232,3 +232,42 @@ def test_concept_noise_then_missingness_order(tab_small):
     ds.concept_noise = False
     ds.concept_missing = False
     np.testing.assert_array_equal(ds.training.C, base)
+
+
+# ---------- Label noise ----------
+def test_sample_label_noise_reproducible_and_toggle(tab_small):
+    ds = tab_small
+    base_labels = ds.training.base_labels.copy()
+
+    noisy_a = ds.sample_label_noise(p=0.4, rng=2023)
+    noisy_b = ds.sample_label_noise(p=0.4, rng=2023)
+
+    assert set(noisy_a.keys()) == {"full", "training", "validation", "test"}
+    np.testing.assert_array_equal(noisy_a["training"], noisy_b["training"])
+    assert ds.label_noise is False
+    np.testing.assert_array_equal(ds.training.y, base_labels)
+
+    ds.label_noise = True
+    np.testing.assert_array_equal(ds.training.y, noisy_a["training"])
+    ds.label_noise = False
+    np.testing.assert_array_equal(ds.training.y, base_labels)
+
+
+def test_sample_label_noise_with_flip_matrix(tab_small):
+    ds = tab_small
+    base_labels = ds.training.base_labels.copy()
+    flip_matrix = [[0.0, 1.0], [1.0, 0.0]]
+
+    noisy = ds.sample_label_noise(
+        p=0.0,
+        rng=7,
+        label_noise_config={"flip_matrix": flip_matrix},
+        enable=True,
+    )
+
+    assert ds.label_noise is True
+    assert np.all(ds.training.y != base_labels)
+    np.testing.assert_array_equal(ds.training.y, 1 - base_labels)
+
+    ds.label_noise = False
+    np.testing.assert_array_equal(ds.training.y, base_labels)

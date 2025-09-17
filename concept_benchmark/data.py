@@ -15,6 +15,7 @@ from .cv import generate_cvindices, validate_cvindices
 from .helper.data_utils import (
     coerce_rng,
     sample_concept_noise_mask,
+    sample_label_noise,
     sample_mcar_mask,
     sample_mnar_mask,
 )
@@ -168,6 +169,7 @@ class ConceptDataset(object):
         self._cvindices = cvindices
         self.concept_noise = False
         self.concept_missing = False
+        self.label_noise = False
         self.reset()
 
     def reset(self):
@@ -243,7 +245,7 @@ class ConceptDataset(object):
         cpy = ConceptDataset(
             X=self.X,
             C=self._full.base_concepts.copy(),
-            y=self.y,
+            y=self._full.base_labels.copy(),
             meta=self._full.meta,
             cvindices=self._cvindices,
             **self._init_kwargs,
@@ -593,6 +595,57 @@ class ConceptDataset(object):
 
         return masks
 
+    def sample_label_noise(
+        self,
+        *,
+        p: float = 0.1,
+        rng: np.random.Generator | int | None = None,
+        label_noise_config: Mapping[str, object] | None = None,
+        enable: bool | None = None,
+    ) -> dict[str, np.ndarray]:
+        """Sample label noise for each split and optionally enable the view."""
+
+        if enable is not None:
+            self.label_noise = bool(enable)
+
+        rng_generated = coerce_rng(rng)
+
+        noisy_labels: dict[str, np.ndarray] = {}
+
+        full_labels = sample_label_noise(
+            rng_generated,
+            self._full.base_labels,
+            num_classes=self._full.n_classes,
+            base_p=p,
+            config=label_noise_config,
+        )
+        self._full.set_label_noise_labels(full_labels)
+        noisy_labels["full"] = full_labels
+
+        splits = {
+            "training": self.training,
+            "validation": getattr(self, "validation", None),
+            "test": getattr(self, "test", None),
+        }
+
+        for split_name, sample in splits.items():
+            if sample is None or sample.base_labels.size == 0:
+                continue
+            if sample is self._full:
+                noisy_labels[split_name] = full_labels
+                continue
+            new_labels = sample_label_noise(
+                rng_generated,
+                sample.base_labels,
+                num_classes=sample.n_classes,
+                base_p=p,
+                config=label_noise_config,
+            )
+            sample.set_label_noise_labels(new_labels)
+            noisy_labels[split_name] = new_labels
+
+        return noisy_labels
+
 
 class ConceptDatasetSample(Dataset):
     def __init__(
@@ -621,13 +674,18 @@ class ConceptDatasetSample(Dataset):
         self._extra_kwargs = dict(kwargs)
 
         self._X = X
-        self._y = y
+        self._y_base = np.asarray(y, dtype=np.int32)
+        self._label_noise_labels: np.ndarray | None = None
         self._meta = meta
         self.classes, self.concepts = meta["classes"], meta["concepts"]
         self.task = meta["data_type"]
 
         self._C_base = np.asarray(C, dtype=np.int8)
         self.n = len(self._X)
+        if self._y_base.ndim != 1:
+            self._y_base = self._y_base.reshape(-1)
+        if self._y_base.shape[0] != self.n:
+            raise ValueError("Label vector must match number of samples")
 
         if indices is None:
             self.indices = np.ones(self.n, dtype=np.bool_)
@@ -665,11 +723,25 @@ class ConceptDatasetSample(Dataset):
 
     @property
     def y(self) -> np.ndarray:
-        return self._y
+        parent = self.parent
+        apply_noise = bool(parent and getattr(parent, "label_noise", False)) and (
+            self._label_noise_labels is not None
+        )
+        return (
+            self._label_noise_labels
+            if apply_noise
+            else self._y_base
+        )
 
     @y.setter
     def y(self, value: np.ndarray) -> None:
-        self._y = value
+        arr = np.asarray(value, dtype=np.int32)
+        if arr.ndim != 1:
+            arr = arr.reshape(-1)
+        if arr.shape[0] != self.n:
+            raise ValueError("Label vector must match number of samples")
+        self._y_base = arr
+        self._label_noise_labels = None
 
     @property
     def C(self) -> np.ndarray:
@@ -714,6 +786,10 @@ class ConceptDatasetSample(Dataset):
     def base_concepts(self) -> np.ndarray:
         return self._C_base
 
+    @property
+    def base_labels(self) -> np.ndarray:
+        return self._y_base
+
     def set_concept_noise_mask(self, mask: np.ndarray | None) -> None:
         if mask is None:
             self._concept_noise_mask = None
@@ -748,13 +824,28 @@ class ConceptDatasetSample(Dataset):
     def concept_missing_fill_value(self):
         return self._concept_missing_fill_value
 
+    def set_label_noise_labels(self, labels: np.ndarray | None) -> None:
+        if labels is None:
+            self._label_noise_labels = None
+            return
+        arr = np.asarray(labels, dtype=self._y_base.dtype)
+        if arr.ndim != 1:
+            arr = arr.reshape(-1)
+        if arr.shape[0] != self.n:
+            raise ValueError("Label noise array must match number of samples")
+        self._label_noise_labels = arr
+
+    @property
+    def label_noise_labels(self) -> np.ndarray | None:
+        return self._label_noise_labels
+
     def __len__(self):
         return self.n
 
     def __eq__(self, other):
         if not isinstance(other, ConceptDatasetSample):
             return False
-        if not np.array_equal(self.y, other.y):
+        if not np.array_equal(self.base_labels, other.base_labels):
             return False
         if not np.array_equal(self.X, other.X):
             return False
@@ -821,7 +912,7 @@ class ConceptDatasetSample(Dataset):
             parent=self.parent,
             X=self.X[indices],
             C=self.base_concepts[indices],
-            y=self.y[indices],
+            y=self.base_labels[indices],
             meta=self.meta,
             indices=indices,
             transform=self.transform,
@@ -836,6 +927,8 @@ class ConceptDatasetSample(Dataset):
                 self.concept_missing_mask[indices],
                 fill_value=self.concept_missing_fill_value,
             )
+        if self.label_noise_labels is not None:
+            new_sample.set_label_noise_labels(self.label_noise_labels[indices])
         return new_sample
 
     def loader(self, batch_size=32, shuffle=False, **kwargs) -> DataLoader:
@@ -883,7 +976,7 @@ class ConceptDatasetSample(Dataset):
             parent=self.parent,
             X=embedded_X,
             C=self.base_concepts,
-            y=self.y,
+            y=self.base_labels,
             meta=embed_meta,
             indices=self.indices,
         )

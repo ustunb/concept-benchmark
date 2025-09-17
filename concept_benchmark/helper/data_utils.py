@@ -107,3 +107,58 @@ def sample_concept_noise_mask(
     prob_matrix = np.clip(prob_matrix, 0.0, 1.0)
 
     return rng.random(concepts.shape) < prob_matrix
+
+
+def sample_label_noise(
+    rng: np.random.Generator,
+    labels: np.ndarray,
+    *,
+    num_classes: int,
+    base_p: float,
+    config: Mapping[str, object] | None = None,
+) -> np.ndarray:
+    """Return a noisy copy of ``labels`` according to class-dependent probabilities."""
+
+    if num_classes <= 0:
+        raise ValueError("num_classes must be positive")
+
+    labels = np.asarray(labels)
+    if labels.ndim != 1:
+        labels = labels.reshape(-1)
+    if not np.issubdtype(labels.dtype, np.integer):
+        raise ValueError("labels must be integers")
+    if (labels < 0).any() or (labels >= num_classes).any():
+        raise ValueError("labels must be within [0, num_classes)")
+
+    config = dict(config or {})
+
+    flip_matrix = config.get("flip_matrix")
+    if flip_matrix is not None:
+        matrix = np.asarray(flip_matrix, dtype=float)
+        if matrix.shape != (num_classes, num_classes):
+            raise ValueError("flip_matrix must have shape (num_classes, num_classes)")
+        row_sums = matrix.sum(axis=1)
+        if np.any(row_sums <= 0):
+            raise ValueError("flip_matrix rows must sum to a positive value")
+        matrix = matrix / row_sums[:, None]
+        cdf = np.cumsum(matrix, axis=1)
+        rand = rng.random(labels.size)
+        rand = np.minimum(rand, 1.0 - np.finfo(float).eps)
+        rows = cdf[labels]
+        new_labels = np.searchsorted(rows, rand, side="right")
+        return new_labels.astype(labels.dtype, copy=False)
+
+    if not 0.0 <= base_p <= 1.0:
+        raise ValueError("base_p must be between 0 and 1 inclusive")
+
+    new_labels = labels.copy()
+    if num_classes <= 1 or base_p == 0.0:
+        return new_labels
+
+    flip_mask = rng.random(labels.size) < base_p
+    if flip_mask.any():
+        base_vals = labels[flip_mask]
+        choices = rng.integers(0, num_classes - 1, size=flip_mask.sum())
+        choices = choices + (choices >= base_vals)
+        new_labels[flip_mask] = choices.astype(labels.dtype, copy=False)
+    return new_labels
