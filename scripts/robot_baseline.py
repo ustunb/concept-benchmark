@@ -15,8 +15,10 @@ from transformers import (
 )
 
 from concept_benchmark.paths import results_dir, pkg_dir
-from concept_benchmark.synthetic.helper.textgen import create_synthetic_dataset as make_text_ds
-from concept_benchmark.synthetic.robot import create_synthetic_dataset as make_image_ds
+from concept_benchmark.synthetic.robot import (
+    create_robot_text_dataset as make_text_ds,
+    create_synthetic_dataset as make_image_ds,
+)
 from concept_benchmark.data import ConceptDatasetSample
 
 settings = {

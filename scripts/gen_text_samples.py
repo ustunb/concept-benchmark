@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score, roc_auc_score, average_precision_score
 from sklearn.cluster import KMeans
 from sklearn.feature_extraction.text import TfidfVectorizer
-from concept_benchmark.synthetic.helper.textgen import create_synthetic_dataset
+from concept_benchmark.synthetic.robot import create_robot_text_dataset
 from concept_benchmark.paths import pkg_dir, results_dir, data_dir
 from concept_benchmark.synthetic.helper.text_concept_detector import TextConceptDetector
 from concept_benchmark.models import ConceptBasedModel, FrontEndModel
@@ -470,7 +470,7 @@ catalog_df["label"] = compute_label(catalog_df, params["model"])
 concept_cols = list(params["concepts"].keys())
 llm_user_prompt = "Using the provided attributes, write a natural spoken description (1–3 sentences) that sounds like a person describing an image they saw. Do not invent locations or scenarios; focus only on what the attributes imply."
 
-ds = create_synthetic_dataset(
+ds = create_robot_text_dataset(
     source=catalog_df,
     templates=templates,
     variants_per_row=3,

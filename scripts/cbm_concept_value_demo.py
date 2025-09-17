@@ -6,7 +6,7 @@ from sklearn.cluster import KMeans
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 from concept_benchmark.paths import pkg_dir, results_dir, data_dir
-from concept_benchmark.synthetic.helper.textgen import create_synthetic_dataset
+from concept_benchmark.synthetic.robot import create_robot_text_dataset
 from concept_benchmark.data import ConceptDatasetSample
 from concept_benchmark.models import FrontEndModel
 from concept_benchmark.metrics import calc_metric
@@ -78,7 +78,7 @@ def _label(r):
 catalog_df = pd.DataFrame(rows, columns=concept_cols)
 catalog_df["label"] = catalog_df.apply(lambda sr: _label(sr.to_dict()), axis=1)
 
-ds = create_synthetic_dataset(
+ds = create_robot_text_dataset(
     source=catalog_df,
     templates=templates,
     variants_per_row=int(S["n_per_combo"]),

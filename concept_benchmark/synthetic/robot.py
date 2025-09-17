@@ -1,10 +1,245 @@
+import re
+from collections.abc import Iterable, Sequence
+
 import numpy as np
+import pandas as pd
 
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.paths import results_dir
 
 from .helper.robot_catalog import RobotDistribution, generate_robot_catalog
+from .helper import textgen as text_helper
 from .helper.utils import model_to_logistic, unlist0
+
+
+def create_robot_text_dataset(
+    source,
+    templates: Sequence[str] | None = None,
+    variants_per_row: int = 3,
+    include_color: bool = True,
+    rng_seed: int = 0,
+    head_col: str = "head_shape",
+    body_col: str = "body_shape",
+    knees_col: str = "has_knees",
+    elbows_col: str = "has_elbows",
+    foot_col: str = "foot_shape",
+    color_mode_col: str = "color_mode",
+    concept_cols: Iterable[str] | None = None,
+    label_col: str | None = None,
+    label_map: dict | None = None,
+    drop_unknown: bool = True,
+    text_mode: str | None = None,
+    use_llm: bool = False,
+    llm_provider: str = "gemini",
+    llm_model: str = "gemini-1.5-flash",
+    llm_api_key: str | None = None,
+    llm_system: str | None = None,
+    llm_user_prompt: str | None = None,
+) -> ConceptDataset:
+    if templates is None or text_mode == "structured":
+        templates = text_helper.DEFAULT_TEMPLATES
+    templates = [re.sub(r'^[\uFEFF\u200B-\u200D]+', '', t) for t in templates]
+    templates = [text_helper._rewrite_modifiers(t) for t in templates]
+    rng = np.random.default_rng(rng_seed)
+    mode = (text_mode or ("llm" if use_llm else "unstructured")).strip().lower()
+
+    if isinstance(source, ConceptDataset):
+        df = getattr(source, "catalog_df", None)
+        if df is None:
+            raise ValueError("ConceptDataset missing catalog_df")
+        C = np.asarray(source.C)
+        y = np.asarray(source.y)
+        concept_names = list(
+            source.meta.get("concepts", [f"c{i}" for i in range(C.shape[1])])
+        )
+        classes = list(
+            source.meta.get("classes", sorted(map(int, np.unique(y))))
+        )
+    else:
+        if not isinstance(source, pd.DataFrame):
+            raise TypeError("source must be ConceptDataset or pd.DataFrame")
+        if concept_cols is None or label_col is None:
+            raise ValueError(
+                "Provide concept_cols and label_col when source is a DataFrame"
+            )
+        df = source
+        C, concept_names = text_helper._binarize_concepts(df, concept_cols)
+        y = text_helper._to_label(df[label_col].to_numpy(), label_map)
+        if label_map is not None:
+            classes = [str(k) for k, v in sorted(label_map.items(), key=lambda kv: kv[1])]
+        else:
+            raw_uniqs = (
+                pd.Series(df[label_col]).astype(str).str.lower().unique().tolist()
+            )
+            classes = (
+                ["drent", "glorp"]
+                if {"glorp", "drent"} <= set(raw_uniqs)
+                else [str(v) for v in sorted(np.unique(y).tolist())]
+            )
+
+    X, idxs = [], []
+    tbool = (
+        lambda v: (v.lower() in {"true", "t", "yes", "y", "1"})
+        if isinstance(v, str)
+        else bool(v)
+    )
+    colorish = (
+        lambda d: (
+            "color"
+            if any(
+                c in d.columns
+                for c in (
+                    "color",
+                    "left_color",
+                    "right_color",
+                    "primary_color",
+                    "secondary_color",
+                )
+            )
+            else "greyscale"
+        )
+    )
+
+    def _colors_for_row(r):
+        if "left_color" in df.columns and "right_color" in df.columns:
+            return str(r["left_color"]), str(r["right_color"])
+        if "primary_color" in df.columns and "secondary_color" in df.columns:
+            return str(r["primary_color"]), str(r["secondary_color"])
+        if "color1" in df.columns and "color2" in df.columns:
+            return str(r["color1"]), str(r["color2"])
+        return None, None
+
+    structured_templates_default = [
+        "This robot has a {head_shape} head and a {body_shape} body. It {has_elbows} and {has_knees}. Its feet are {foot_shape}.",
+        "Head: {head_shape}. Body: {body_shape}. Elbows: {has_elbows}. Knees: {has_knees}. Feet: {foot_shape}.",
+    ]
+
+    for i, row in df.iterrows():
+        cms = (
+            row.get(color_mode_col, None)
+            if (include_color and color_mode_col in df.columns)
+            else (colorish(df) if include_color else "greyscale")
+        )
+        knees_b = tbool(row.get(knees_col, False))
+        elbows_b = tbool(row.get(elbows_col, False))
+        ant_b = tbool(row.get("has_antennae", False))
+        c1, c2 = _colors_for_row(row)
+        if c1 and c2:
+            color_pair = f"{c1} and {c2}"
+            color_single = f"{c1}/{c2}"
+        else:
+            color_pair = str(row.get("color")) if "color" in df.columns else None
+            color_single = color_pair
+        fill = {
+            "head_shape": str(row.get(head_col, "")).replace("_", " "),
+            "body_shape": str(row.get(body_col, "")).replace("_", " "),
+            "foot_shape": str(row.get(foot_col, "")).replace("_", " "),
+            "ears_shape": str(row.get("ears_shape", "")).replace("_", " "),
+            "mouth_type": str(row.get("mouth_type", "")).replace("_", " "),
+            "hand_shape": str(row.get("hand_shape", "")).replace("_", " "),
+            "has_knees": "has knees" if knees_b else "no knees",
+            "has_elbows": "has elbows" if elbows_b else "no elbows",
+            "has_antennae": "has antennae" if ant_b else "no antennae",
+            "has_knees_word": "has" if knees_b else "no",
+            "has_elbows_word": "has" if elbows_b else "no",
+            "has_antennae_word": "has" if ant_b else "no",
+            "has_knees_bool": "true" if knees_b else "false",
+            "has_elbows_bool": "true" if elbows_b else "false",
+            "has_antennae_bool": "true" if ant_b else "false",
+            "color": color_single if color_single else "unknown",
+            "color_pair": color_pair if color_pair else "unknown",
+            "color_left": c1 if c1 else "unknown",
+            "color_right": c2 if c2 else "unknown",
+            "color_mode": "greyscale" if not include_color else str(cms),
+        }
+        fill["hand_shape"] = text_helper._synonym("hand_shape", fill["hand_shape"])
+        fill["foot_shape"] = text_helper._synonym("foot_shape", fill["foot_shape"])
+        for name in (
+            "head_shape",
+            "body_shape",
+            "ears_shape",
+            "mouth_type",
+            "hand_shape",
+            "foot_shape",
+        ):
+            val = fill.get(name, "")
+            fill[name + "_syn"] = text_helper._synonym(name, val)
+            neg = text_helper._negate(name, val)
+            fill[name + "_not"] = (
+                str(neg).replace("_", " ") if neg is not None else f"not {val}"
+            )
+        fill["has_knees_not"] = "no knees" if knees_b else "with knees"
+        fill["has_elbows_not"] = "no elbows" if elbows_b else "with elbows"
+        fill["has_antennae_not"] = "no antennae" if ant_b else "with antennae"
+        sfill = text_helper._Safe(fill)
+
+        if mode == "llm":
+            if concept_cols is None:
+                concept_keys = [
+                    head_col,
+                    body_col,
+                    foot_col,
+                    knees_col,
+                    elbows_col,
+                    "has_antennae",
+                    "mouth_type",
+                    "ears_shape",
+                    "hand_shape",
+                    "color",
+                ]
+                concept_keys = [k for k in concept_keys if k in df.columns]
+            else:
+                concept_keys = list(concept_cols)
+            concepts_dict = {k: (str(row[k]) if k in row else "") for k in concept_keys}
+            llm_texts = text_helper.unstructured_caption_via_llm(
+                concepts=concepts_dict,
+                provider=llm_provider,
+                model=llm_model,
+                api_key=llm_api_key,
+                system=llm_system,
+                user_prompt=llm_user_prompt,
+                n=variants_per_row,
+            )
+            for out in llm_texts:
+                out = text_helper._polish_text(out)
+                X.append(out)
+                idxs.append(i)
+        elif mode == "structured":
+            base_tpls = templates if templates else structured_templates_default
+            for tpl in rng.choice(base_tpls, size=variants_per_row, replace=True):
+                s = text_helper._rewrite_modifiers(tpl)
+                out = s.format_map(sfill)
+                if drop_unknown:
+                    out = text_helper._clean_unknown(out)
+                out = text_helper._polish_text(out)
+                X.append(out)
+                idxs.append(i)
+        else:
+            for tpl in rng.choice(templates, size=variants_per_row, replace=True):
+                s = text_helper._rewrite_modifiers(tpl)
+                out = s.format_map(sfill)
+                if drop_unknown:
+                    out = text_helper._clean_unknown(out)
+                out = text_helper._polish_text(out)
+                X.append(out)
+                idxs.append(i)
+
+    idxs = np.asarray(idxs, dtype=int)
+    C_out = C[idxs]
+    y_out = y[idxs]
+    meta = {
+        "data_type": "text",
+        "templates": list(templates),
+        "concepts": concept_names,
+        "classes": classes,
+        "row_index": idxs,
+    }
+    return ConceptDataset(
+        X=list(X),
+        C=np.asarray(C_out, dtype=np.int8),
+        y=np.asarray(y_out, dtype=np.int32),
+        meta=meta,
+    )
 
 
 def create_synthetic_dataset(**kwargs):
