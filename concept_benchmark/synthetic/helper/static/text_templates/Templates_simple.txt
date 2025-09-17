@@ -1,0 +1,52 @@
+Head is {head_shape}. Body is {body_shape}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}. Ears {ears_shape}. Mouth {mouth_type}. Hands {hand_shape}. Feet {foot_shape}.
+Head {head_shape}. Body {body_shape}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}. Ears {ears_shape}. Mouth {mouth_type}. Hands {hand_shape}. Feet {foot_shape}.
+Head: {head_shape}. Body: {body_shape}. Knees: {has_knees}. Elbows: {has_elbows}. Antennae: {has_antennae}. Ears: {ears_shape}. Mouth: {mouth_type}. Hands: {hand_shape}. Feet: {foot_shape}.
+Head is {head_shape}; body is {body_shape}; knees {has_knees}; elbows {has_elbows}; antennae {has_antennae}; ears {ears_shape}; mouth {mouth_type}; hands {hand_shape}; feet {foot_shape}.
+Head {head_shape}; body {body_shape}; knees {has_knees}; elbows {has_elbows}; antennae {has_antennae}; ears {ears_shape}; mouth {mouth_type}; hands {hand_shape}; feet {foot_shape}.
+The head is {head_shape}. The body is {body_shape}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}. Ears {ears_shape}. Mouth {mouth_type}. Hands {hand_shape}. Feet {foot_shape}.
+Head = {head_shape}. Body = {body_shape}. Knees = {has_knees}. Elbows = {has_elbows}. Antennae = {has_antennae}. Ears = {ears_shape}. Mouth = {mouth_type}. Hands = {hand_shape}. Feet = {foot_shape}.
+Head is {head_shape}. Body is {body_shape}. Hands {hand_shape}. Feet {foot_shape}. Mouth {mouth_type}. Ears {ears_shape}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}.
+Body is {body_shape}. Head is {head_shape}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}. Hands {hand_shape}. Feet {foot_shape}. Mouth {mouth_type}. Ears {ears_shape}.
+Head {head_shape}. Body {body_shape}. Hands are {hand_shape}. Feet are {foot_shape}. Mouth is {mouth_type}. Ears are {ears_shape}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}.
+Head: {head_shape}; body: {body_shape}; hands: {hand_shape}; feet: {foot_shape}; mouth: {mouth_type}; ears: {ears_shape}; knees: {has_knees}; elbows: {has_elbows}; antennae: {has_antennae}.
+Head is {head_shape}. Body is {body_shape}. Ears {ears_shape}. Mouth {mouth_type}. Hands {hand_shape}. Feet {foot_shape}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}.
+Body {body_shape}. Head {head_shape}. Ears {ears_shape}. Mouth {mouth_type}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}. Hands {hand_shape}. Feet {foot_shape}.
+Head {head_shape}. Body {body_shape}. Mouth is {mouth_type}. Ears are {ears_shape}. Hands are {hand_shape}. Feet are {foot_shape}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}.
+Head is {head_shape}, body is {body_shape}, knees {has_knees}, elbows {has_elbows}, antennae {has_antennae}, ears {ears_shape}, mouth {mouth_type}, hands {hand_shape}, feet {foot_shape}.
+Head={head_shape}; Body={body_shape}; Knees={has_knees}; Elbows={has_elbows}; Antennae={has_antennae}; Ears={ears_shape}; Mouth={mouth_type}; Hands={hand_shape}; Feet={foot_shape}.
+Head is {head_shape}. Body is {body_shape}. Knees are {has_knees}. Elbows are {has_elbows}. Antennae are {has_antennae}. Ears are {ears_shape}. Mouth is {mouth_type}. Hands are {hand_shape}. Feet are {foot_shape}.
+Head {head_shape}. Body {body_shape}. Knees {has_knees}. Elbows {has_elbows}. Ears {ears_shape}. Mouth {mouth_type}. Hands {hand_shape}. Feet {foot_shape}. Antennae {has_antennae}.
+Head is {head_shape}. Body is {body_shape}. Feet {foot_shape}. Hands {hand_shape}. Ears {ears_shape}. Mouth {mouth_type}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}.
+Body {body_shape}. Head {head_shape}. Feet {foot_shape}. Hands {hand_shape}. Ears {ears_shape}. Mouth {mouth_type}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}.
+Head: {head_shape}. Body: {body_shape}. Feet: {foot_shape}. Hands: {hand_shape}. Mouth: {mouth_type}. Ears: {ears_shape}. Knees: {has_knees}. Elbows: {has_elbows}. Antennae: {has_antennae}.
+Head is {head_shape}. Body is {body_shape}. Antennae {has_antennae}. Ears {ears_shape}. Mouth {mouth_type}. Hands {hand_shape}. Feet {foot_shape}. Knees {has_knees}. Elbows {has_elbows}.
+Head {head_shape}; body {body_shape}; antennae {has_antennae}; ears {ears_shape}; mouth {mouth_type}; hands {hand_shape}; feet {foot_shape}; knees {has_knees}; elbows {has_elbows}.
+Head is {head_shape}, body is {body_shape}, ears {ears_shape}, mouth {mouth_type}, hands {hand_shape}, feet {foot_shape}, knees {has_knees}, elbows {has_elbows}, antennae {has_antennae}.
+Head {head_shape}. Body {body_shape}. Ears are {ears_shape}. Mouth is {mouth_type}. Hands are {hand_shape}. Feet are {foot_shape}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}.
+Head = {head_shape}; Body = {body_shape}; Ears = {ears_shape}; Mouth = {mouth_type}; Hands = {hand_shape}; Feet = {foot_shape}; Knees = {has_knees}; Elbows = {has_elbows}; Antennae = {has_antennae}.
+Head is {head_shape}. Body is {body_shape}. Hands are {hand_shape}. Feet are {foot_shape}. Knees are {has_knees}. Elbows are {has_elbows}. Antennae are {has_antennae}. Ears are {ears_shape}. Mouth is {mouth_type}.
+Head {head_shape}. Body {body_shape}. Hands {hand_shape}. Feet {foot_shape}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}. Ears {ears_shape}. Mouth {mouth_type}.
+Body is {body_shape}. Head is {head_shape}. Hands {hand_shape}. Feet {foot_shape}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}. Ears {ears_shape}. Mouth {mouth_type}.
+Head: {head_shape}; Body: {body_shape}; Hands: {hand_shape}; Feet: {foot_shape}; Knees: {has_knees}; Elbows: {has_elbows}; Antennae: {has_antennae}; Ears: {ears_shape}; Mouth: {mouth_type}.
+Head is {head_shape}. Body is {body_shape}. Mouth {mouth_type}. Ears {ears_shape}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}. Hands {hand_shape}. Feet {foot_shape}.
+Body {body_shape}. Head {head_shape}. Mouth {mouth_type}. Ears {ears_shape}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}. Hands {hand_shape}. Feet {foot_shape}.
+Head {head_shape}. Body {body_shape}. Mouth is {mouth_type}. Ears are {ears_shape}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}. Hands are {hand_shape}. Feet are {foot_shape}.
+Head is {head_shape}. Body is {body_shape}. Ears {ears_shape}. Mouth {mouth_type}. Knees {has_knees}. Elbows {has_elbows}. Hands {hand_shape}. Feet {foot_shape}. Antennae {has_antennae}.
+Head {head_shape}. Body {body_shape}. Ears {ears_shape}. Mouth {mouth_type}. Hands {hand_shape}. Feet {foot_shape}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}.
+Head={head_shape}, Body={body_shape}, Ears={ears_shape}, Mouth={mouth_type}, Hands={hand_shape}, Feet={foot_shape}, Knees={has_knees}, Elbows={has_elbows}, Antennae={has_antennae}.
+Head is {head_shape}; Body is {body_shape}; Ears are {ears_shape}; Mouth is {mouth_type}; Hands are {hand_shape}; Feet are {foot_shape}; Knees are {has_knees}; Elbows are {has_elbows}; Antennae are {has_antennae}.
+Head {head_shape}; Body {body_shape}; Ears {ears_shape}; Mouth {mouth_type}; Hands {hand_shape}; Feet {foot_shape}; Knees {has_knees}; Elbows {has_elbows}; Antennae {has_antennae}.
+Head: {head_shape}, Body: {body_shape}, Ears: {ears_shape}, Mouth: {mouth_type}, Hands: {hand_shape}, Feet: {foot_shape}, Knees: {has_knees}, Elbows: {has_elbows}, Antennae: {has_antennae}.
+Head is {head_shape}. Body is {body_shape}. Hands {hand_shape}. Feet {foot_shape}. Ears {ears_shape}. Mouth {mouth_type}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}.
+Body is {body_shape}. Head is {head_shape}. Hands are {hand_shape}. Feet are {foot_shape}. Ears are {ears_shape}. Mouth is {mouth_type}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}.
+Head {head_shape}. Body {body_shape}. Feet {foot_shape}. Hands {hand_shape}. Ears {ears_shape}. Mouth {mouth_type}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}.
+Head: {head_shape}. Body: {body_shape}. Feet: {foot_shape}. Hands: {hand_shape}. Ears: {ears_shape}. Mouth: {mouth_type}. Knees: {has_knees}. Elbows: {has_elbows}. Antennae: {has_antennae}.
+Head is {head_shape}. Body is {body_shape}. Knees {has_knees}. Elbows {has_elbows}. Ears {ears_shape}. Mouth {mouth_type}. Feet {foot_shape}. Hands {hand_shape}. Antennae {has_antennae}.
+Head {head_shape}. Body {body_shape}. Knees {has_knees}. Elbows {has_elbows}. Ears {ears_shape}. Mouth {mouth_type}. Feet {foot_shape}. Hands {hand_shape}. Antennae {has_antennae}.
+The head is {head_shape}. The body is {body_shape}. The ears are {ears_shape}. The mouth is {mouth_type}. The hands are {hand_shape}. The feet are {foot_shape}. The knees are {has_knees}. The elbows are {has_elbows}. The antennae are {has_antennae}.
+Head is {head_shape}. Body is {body_shape}. Ears are {ears_shape}. Mouth is {mouth_type}. Hands are {hand_shape}. Feet are {foot_shape}. Knees are {has_knees}. Elbows are {has_elbows}. Antennae are {has_antennae}.
+Head {head_shape}. Body {body_shape}. Ears {ears_shape}. Mouth {mouth_type}. Hands {hand_shape}. Feet {foot_shape}. Knees {has_knees}. Elbows {has_elbows}. Antennae {has_antennae}.
+Head = {head_shape}; Body = {body_shape}; Ears = {ears_shape}; Mouth = {mouth_type}; Hands = {hand_shape}; Feet = {foot_shape}; Knees = {has_knees}; Elbows = {has_elbows}; Antennae = {has_antennae}.
+Head is {head_shape}, body is {body_shape}, hands {hand_shape}, feet {foot_shape}, ears {ears_shape}, mouth {mouth_type}, knees {has_knees}, elbows {has_elbows}, antennae {has_antennae}.
+Head {head_shape}, body {body_shape}, hands {hand_shape}, feet {foot_shape}, ears {ears_shape}, mouth {mouth_type}, knees {has_knees}, elbows {has_elbows}, antennae {has_antennae}.
+Head: {head_shape}; body: {body_shape}; hands: {hand_shape}; feet: {foot_shape}; ears: {ears_shape}; mouth: {mouth_type}; knees: {has_knees}; elbows: {has_elbows}; antennae: {has_antennae}.

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import warnings
 from collections.abc import Callable, Mapping, Set
 from dataclasses import dataclass, field
@@ -115,16 +117,36 @@ class ConceptDataset(object):
         """
         self._init_kwargs = dict(kwargs)
 
+        if not isinstance(X, np.ndarray):
+            try:
+                X = np.asarray(X)
+            except Exception as e:
+                raise ValueError(f"cannot convert X to np.ndarray: {e}")
+        
+        if not isinstance(C, np.ndarray):
+            try:
+                C = np.asarray(C)
+            except Exception as e:
+                raise ValueError(f"cannot convert C to np.ndarray: {e}")
+    
+        if not isinstance(y, np.ndarray):
+            try:
+                y = np.asarray(y)
+            except Exception as e:
+                raise ValueError(f"cannot convert y to np.ndarray: {e}")
+
         if meta.get("data_type") == "image":
-            SampleClass = ConceptImageDatasetSample
             # do not cast X
-            C = C.astype(np.int8)
-            y = y.astype(np.int32)
+            SampleClass = ConceptImageDatasetSample
+        elif meta.get("data_type") == "text":
+            SampleClass = ConceptDatasetSample
+            X = X.astype(object)
         else:
             SampleClass = ConceptDatasetSample
             X = X.astype(np.float32)
-            C = C.astype(np.int8)
-            y = y.astype(np.int32)
+
+        C = C.astype(np.int8)
+        y = y.astype(np.int32)
 
         self._full = SampleClass(
             parent=self,
