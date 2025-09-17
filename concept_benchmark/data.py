@@ -405,25 +405,70 @@ class ConceptDataset(object):
 
     def embed(self, model, batch_size=32, shuffle=False, device="cpu", **kwargs):
         """
-        Embed the dataset using a given model.
+        Embed the dataset using a given model and return a new dataset
+        instance without modifying the current one.
 
         Parameters:
         - model: A model that can embed the dataset.
 
         Returns:
-        - An embedded version of the dataset.
+        - ConceptDataset: a new dataset whose features are the embedded
+          representations. Cross-validation splits are preserved if present.
         """
-        self._full = self._full.embed(
+        # Compute embedded representation for the full dataset sample
+        embedded_full = self._full.embed(
             model, batch_size=batch_size, shuffle=shuffle, device=device, **kwargs
         )
 
-        # apply cv indices to the embedded dataset
+        # Create a new ConceptDataset using the embedded features while
+        # preserving metadata and CV indices from the original dataset.
+        new_ds = ConceptDataset(
+            X=embedded_full.X,
+            C=embedded_full.C,
+            y=embedded_full.y,
+            meta=embedded_full.meta,
+            cvindices=self._cvindices,
+            **self._init_kwargs,
+        )
+
+        # Re-apply existing split configuration on the new dataset, if any.
         if self.fold_id is not None:
-            self.split(
+            new_ds.split(
                 fold_id=self.fold_id,
                 fold_num_validation=self.fold_num_validation,
                 fold_num_test=self.fold_num_test,
             )
+
+        return new_ds
+
+    def mask(self, p=0.1, sampler=None, fill_value=np.nan):
+        """Adding missingness to concepts.
+
+        Args:
+            p (float) : Probability of missing, using a Bernoulli distribution.
+            sampler (callable) : any function that returns a bool mask. Overwrites p arg. Must accept size kwarg.
+            fill_value (float) : value to fill the mask with
+        """
+
+        # Set sampler
+        if sampler is None:
+            sampler = lambda size : np.random.binomial(n=1,  p=p, size=size).astype(bool)
+
+        # Train
+        mask = sampler(size=self.training.C.shape)
+        self.training.C = self.training.C.astype(type(fill_value))
+        self.training.C[mask] = fill_value
+
+        # Test and validation, if defined
+        if self.test.C is not None:
+            mask  = sampler(size=self.test.C.shape)
+            self.test.C = self.test.C.astype(type(fill_value))
+            self.test.C[mask] = fill_value
+
+        if self.validation.C is not None:
+            mask  = sampler(size=self.validation.C.shape)
+            self.validation.C = self.validation.C.astype(type(fill_value))
+            self.validation.C[mask] = fill_value
 
 
 @dataclass
@@ -589,7 +634,7 @@ class ConceptDatasetSample(Dataset):
 
         embedded_X = np.concatenate(embedded_X, axis=0)
 
-        embed_meta = dict(self.meta)
+        embed_meta = dict(self.meta).copy()
         embed_meta["data_type"] = "tabular"
 
         return ConceptDatasetSample(
@@ -608,6 +653,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
     A sample of a ConceptDataset that contains image data.
     Inherits from ConceptDatasetSample.
     """
+    preprocess: Callable | None = None
 
     base_dir: Path = field(default_factory=lambda: Path("."))
 
@@ -624,6 +670,8 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             img_path = self.base_dir / img_path
         try:
             image = Image.open(img_path).convert("RGB")
+            if self.preprocess is not None:
+                image = self.preprocess(image)
             if self.transform is not None:
                 image = self.transform(image)
         except (AttributeError, FileNotFoundError, OSError) as e:
@@ -658,6 +706,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             y=self.y[indices],
             meta=self.meta,
             indices=indices,
+            preprocess=self.preprocess,
             transform=self.transform,
             concept_transform=self.concept_transform,
             target_transform=self.target_transform,

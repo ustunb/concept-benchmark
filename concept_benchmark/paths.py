@@ -59,3 +59,31 @@ def get_noisyconcept_data(
     f = f"p{concept_noise_prob_str}_p{parity_str}_c{coefs_str}_i{intercept}.data"
 
     return get_dataset_dir("noisyconcepts") / f
+
+def sudoku_data(dataset_name : str, **kwargs) -> str:
+    """
+    Args:
+        dataset_name (str): Name of the dataset (use the same as passed in to the
+            dataset generator).
+    Returns:
+        str: A formatted string representing the path to the generated dataset.
+    """
+    f = "sudoku" / f"{dataset_name}.data"
+    return data_dir / f
+
+def model_file(
+    dataset_name,
+    dataset_type,
+    model_name,
+    **kwargs
+) -> str:
+    """
+   Args:
+        dataset_name (str): Name of the dataset used to train the model.
+        dataset_type (str): Type of data used to train the model (e.g., sudoku, robots, noisy)
+        model_name (str): Name of the embedding model (e.g., ViT)
+    Returns:
+        str: Formatted string representing the path to the saved model settings
+    """
+
+    return results_dir / f"{dataset_name}_{dataset_type}_{model_name}.model"

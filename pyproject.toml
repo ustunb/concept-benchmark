@@ -32,8 +32,10 @@ dependencies = [
     "albumentations",
     "colorir>=2.0.0",
     "pero>=0.18.0",
-    "transformers>=4.55.2",
+    "Pillow>=9.5.0",
     "pycairo>=1.28.0",
+    "transformers>=4.55.2",
+    "wand>=0.6.13",
 ]
 
 [dependency-groups]
@@ -42,7 +44,7 @@ dev = [
     "ruff",
     "jupyter",
     "ipykernel",
-    "rich"
+    "rich",
 ]
 
 [tool.uv]

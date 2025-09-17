@@ -40,6 +40,10 @@ def train_concept_heads(
         "device": "cpu",
         "num_workers": 0,
         "pin_memory": False,
+        "loss_fn": None,
+        # logging controls
+        "verbose": False,
+        "log_interval": 50,
     }
     if fit_params:
         params.update(fit_params)
@@ -102,7 +106,7 @@ def train_concept_heads(
     optim_params.append({"params": heads.parameters(), "lr": params["lr_heads"]})
     optimizer = torch.optim.Adam(optim_params)
 
-    loss_fn = nn.BCEWithLogitsLoss()
+    loss_fn = params["loss_fn"] if params["loss_fn"] is not None else nn.BCEWithLogitsLoss()
 
     train_loader = train_dataset.loader(
         batch_size=params["batch_size"],
@@ -122,11 +126,14 @@ def train_concept_heads(
     best_heads_state = None
     best_encoder_state = None
 
-    for _ in tqdm(range(params["epochs"])):
+    for epoch in tqdm(range(params["epochs"])):
         # Train epoch
         if embedding_model is not None and not freeze:
             embedding_model.train()
         heads.train()
+        running_loss = 0.0
+        batches = 0
+        global_step = 0
         for batch_X, batch_C, _ in train_loader:
             # Move data
             if isinstance(batch_X, torch.Tensor):
@@ -153,6 +160,14 @@ def train_concept_heads(
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            # logging
+            running_loss += float(loss.item())
+            batches += 1
+            global_step += 1
+            if params["verbose"] and params["log_interval"] and (global_step % int(params["log_interval"])) == 0:
+                print(
+                    f"Epoch {epoch+1}/{params['epochs']} step {global_step}: loss={loss.item():.4f}"
+                )
 
         # Validate
         if embedding_model is not None:
@@ -184,7 +199,13 @@ def train_concept_heads(
                 ]
                 val_f1s.append(np.mean(concept_f1s))
 
+        avg_train_loss = running_loss / max(1, batches)
         avg_val_f1 = float(np.mean(val_f1s)) if len(val_f1s) else -1.0
+
+        if params["verbose"]:
+            print(
+                f"Epoch {epoch+1}/{params['epochs']} | train_loss={avg_train_loss:.4f} | val_f1={avg_val_f1:.4f} | best_f1={best_val_f1 if best_val_f1>=0 else 0.0:.4f}"
+            )
 
         if avg_val_f1 > best_val_f1 + params["min_delta"]:
             best_val_f1 = avg_val_f1
@@ -199,7 +220,8 @@ def train_concept_heads(
         else:
             patience_counter += 1
             if patience_counter >= params["patience"]:
-                print(f"Early stopping at val F1={avg_val_f1:.4f}")
+                if params["verbose"]:
+                    print(f"Early stopping at val F1={avg_val_f1:.4f}")
                 break
 
     # Load best states
