@@ -4,6 +4,7 @@ This file contains classes to represent and manipulate a set of all possible rob
 
 import copy
 from pathlib import Path
+from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
@@ -80,113 +81,58 @@ def add_irrelevant_feature(df, feature_name="has_elbows", values=[True, False]):
 
     return pd.concat(df_list)
 
-
-class RobotDistribution(object):
-    """class to represent, manipulate, and sample from probability distributions over robots"""
-
-    STAGE_NAMES = ("anchoring", "probing", "deployment")
-
-    def __init__(self, df, outcome_name=OUTCOME_NAME, outcome_values=ROBOT_TYPES):
-        assert isinstance(df, pd.DataFrame)
-        assert isinstance(outcome_name, str) and len(outcome_name) >= 1
-        assert (
-            isinstance(outcome_values, (list, tuple, set))
-            and len(set(outcome_values)) >= 1
-        )
-
-        # properties
-        self._outcome_name = str(outcome_name)
-        self._outcome_values = [str(k) for k in outcome_values]
-        self._feature_names = [
-            str(k) for k in df.columns if k in ALL_ROBOT_FEATURES.keys()
-        ]
-        self._target_outcome = str(ROBOT_TYPES[0])
-
-        # data frame
-        self._df = pd.DataFrame(df)
-        self._df[self._outcome_name] = OUTCOME_MISSING
-        self._df[list("k_%s" % s for s in self.STAGE_NAMES)] = 0
-
-        # Define positive (indicator) value per feature using collapsed base values
-        robot_feats = {
-            k: [v.split("_")[0] for v in l] for k, l in ALL_ROBOT_FEATURES.items()
-        }
-        self._positive_value_by_feature = {
-            k: robot_feats[k][0] for k in self._feature_names if k in robot_feats
-        }
-
-    @property
-    def df(self):
-        return self._df
-
-    @property
-    def target_outcome(self):
-        return self._target_outcome
-
-    @property
-    def outcome_name(self):
-        """outcome column"""
-        return self._outcome_name
-
-    @property
-    def feature_names(self):
-        """feature columns"""
-        return self._feature_names
-
-    @property
-    def positive_value_by_feature(self):
-        """Mapping from feature name to the value treated as 1 in binary encoding."""
-        return dict(self._positive_value_by_feature)
-
-    # Note: Binary concept encoding is computed where needed (e.g., in main.py)
-
-
 def convert_to_grayscale(image_path):
     """Convert saved image to grayscale"""
     img = Image.open(image_path).convert("L")  # L = grayscale
     img.save(image_path)
 
 
-def generate_robot_catalog(params, drop_irrelevant=True):
-    """
-    :params: Dictionary containing robot generation parameters including:
-            - num_robots: Number of robots to generate
-            - concepts: Dictionary of feature names and possible values
-            - model: String defining the ground truth labeling function
-    :return:
-    """
-    # get the number of generated robot images to determine the number of repetitions for the robot catalog
-    print("Starting robot generation...")
-    print(params)
-    num_robots = params["num_robots"] if "num_robots" in params else 96
-    num_unique_robots = np.prod([len(v) for v in params["concepts"].values()])
+def generate_robot_catalog(
+    *,
+    concepts: dict,
+    num_robots: int | None = None,
+    resolution: int = 224,
+    output_directory: str | Path = ".static/images",
+    draw: bool = False,
+    color_mode: str = "color",
+    drop_irrelevant: bool = True,
+    irrelevant_features: Sequence[str] | None = None,
+    verbose: bool = False,
+    **unused,
+):
+    """Generate the tabular robot catalog and optionally draw robot images."""
+
+    if not concepts:
+        raise ValueError("concepts dictionary must be provided and non-empty")
+
+    if verbose:
+        print("Starting robot generation...")
+
+    num_unique_robots = int(np.prod([len(v) for v in concepts.values()]))
+    total_robots = num_robots or num_unique_robots
     catalog_df = get_robot_catalog_df(
-        concepts=params["concepts"],
-        repetitions=int(np.ceil(float(num_robots) / num_unique_robots)),
+        concepts=concepts,
+        repetitions=int(np.ceil(float(total_robots) / num_unique_robots)),
     )
 
     # filter robot catalog so that you only see differences in selected features
-    for name, values in params["concepts"].items():
+    for name, values in concepts.items():
         if len(values) == 1:
             query_cmd = "{}=='{}'".format(name, values[0])
             catalog_df = catalog_df.query(query_cmd)
 
     init_catalog_df = copy.deepcopy(catalog_df)
 
-    if (
-        "irrelevant_features" in params
-        and len(params["irrelevant_features"]) > 0
-        and drop_irrelevant
-    ):
+    if drop_irrelevant and irrelevant_features:
         # check if irrelevant featuers are in the catalog
         existing_irrelevant_features = [
-            f for f in params["irrelevant_features"] if f in catalog_df.columns
+            f for f in irrelevant_features if f in catalog_df.columns
         ]
         if existing_irrelevant_features:
             catalog_df.drop(columns=existing_irrelevant_features, inplace=True)
 
     catalog_df = collapse_robot_subtypes(
-        df=catalog_df, robot_features=list(params["concepts"].keys())
+        df=catalog_df, robot_features=list(concepts.keys())
     )
     constant_cols = [
         col
@@ -196,15 +142,16 @@ def generate_robot_catalog(params, drop_irrelevant=True):
     catalog_df = catalog_df.drop(columns=constant_cols)
 
     # create local directories
-    output_path = Path(params["output_directory"])
+    output_path = Path(output_directory)
     output_path.mkdir(parents=True, exist_ok=True)
 
     # delete old image files if they exist
-    if params.get("draw", False):
+    if draw:
         for file in output_path.glob("robot_[0-9][0-9][0-9].*"):
             file.unlink()
 
-        print(f"Generating {len(catalog_df)} robot images...")
+        if verbose:
+            print(f"Generating {len(catalog_df)} robot images...")
     png_filenames = []
 
     color_lefts, color_rights = [], []
@@ -213,19 +160,19 @@ def generate_robot_catalog(params, drop_irrelevant=True):
 
         png_file = output_path / png_filename
 
-        if params.get("draw", False):
+        if draw:
             # Generate robot images
             png_robot = draw_robot(
                 filetype="png",
-                width=params["resolution"],
-                height=params["resolution"],
+                width=resolution,
+                height=resolution,
                 **features,
             )
 
             # Save images
             png_robot.export(str(png_file))
 
-            if params.get("color_mode") in ["grayscale", "greyscale"]:
+            if color_mode in ["grayscale", "greyscale"]:
                 convert_to_grayscale(str(png_file))
 
         png_filenames.append(png_filename)

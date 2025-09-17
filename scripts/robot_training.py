@@ -4,7 +4,7 @@ from transformers import ViTModel
 
 from concept_benchmark.models import ConceptDetector
 from concept_benchmark.paths import results_dir
-from concept_benchmark.synthetic.robot import create_synthetic_dataset
+from concept_benchmark.synthetic.robot import create_robot_image_dataset
 
 device = torch.device(
     "cuda" if torch.cuda.is_available() \
@@ -67,7 +67,7 @@ tf = transforms.Compose(
     ]
 )
 
-data = create_synthetic_dataset(**params)
+data = create_robot_image_dataset(**params)
 data.transform = tf
 
 data.generate_cvindices(seed=42)
