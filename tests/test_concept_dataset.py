@@ -105,39 +105,52 @@ def test_split_requires_known_fold_id(tab_small):
 
 
 # ---------- Missingness masking ----------
-def test_mask_mcar_reproducible_and_shape(tab_small):
+def test_sample_concept_missingness_mcar_reproducible(tab_small):
     ds = tab_small
-    original = ds.training.C.copy()
+    original = ds.training.base_concepts.copy()
 
-    masks_a = ds.mask(p=0.2, mechanism="mcar", rng=123)
-    masks_b = ds.mask(p=0.2, mechanism="mcar", rng=123)
+    masks_a = ds.sample_concept_missingness(p=0.2, mechanism="mcar", rng=123)
+    masks_b = ds.sample_concept_missingness(p=0.2, mechanism="mcar", rng=123)
 
     assert set(masks_a.keys()) == {"training", "validation", "test"}
-    assert masks_a["training"].shape == ds.training.C.shape
+    assert masks_a["training"].shape == ds.training.base_concepts.shape
     assert masks_a["validation"].shape[0] == 0
     assert masks_a["test"].shape[0] == 0
     np.testing.assert_array_equal(masks_a["training"], masks_b["training"])
     assert np.isclose(masks_a["training"].mean(), 0.2, atol=0.1)
+    np.testing.assert_array_equal(ds.training.base_concepts, original)
     np.testing.assert_array_equal(ds.training.C, original)
 
 
-def test_mask_apply_in_place_fill(tab_small):
+def test_sample_concept_missingness_enable_toggle(tab_small):
     ds = tab_small
-    original = ds.training.C.copy()
+    original = ds.training.base_concepts.copy()
 
-    masks = ds.mask(p=0.3, mechanism="mcar", rng=999, apply=True, fill_value=-1.0)
+    masks = ds.sample_concept_missingness(
+        p=0.3,
+        mechanism="mcar",
+        rng=999,
+        fill_value=-1.0,
+        enable=True,
+    )
     train_mask = masks["training"]
 
-    assert train_mask.shape == ds.training.C.shape
+    assert ds.concept_missing is True
+    assert train_mask.shape == ds.training.base_concepts.shape
     assert np.all(ds.training.C[train_mask] == -1.0)
-    np.testing.assert_array_equal(ds.training.C[~train_mask], original[~train_mask])
+    np.testing.assert_array_equal(
+        ds.training.C[~train_mask], original[~train_mask]
+    )
+    np.testing.assert_array_equal(ds.training.base_concepts, original)
+    ds.concept_missing = False
+    np.testing.assert_array_equal(ds.training.C, original)
 
 
-def test_mask_mnar_respects_probabilities(tab_medium_cv):
+def test_sample_concept_missingness_mnar_respects_probabilities(tab_medium_cv):
     ds, _ = tab_medium_cv
-    original = ds.training.C.copy()
+    original = ds.training.base_concepts.copy()
 
-    masks = ds.mask(
+    masks = ds.sample_concept_missingness(
         p=0.4,
         mechanism="mnar",
         rng=2024,
@@ -145,11 +158,77 @@ def test_mask_mnar_respects_probabilities(tab_medium_cv):
     )
 
     train_mask = masks["training"]
-    concepts = ds.training.C
+    concepts = ds.training.base_concepts
 
     present_mask = train_mask[concepts == 1]
     absent_mask = train_mask[concepts == 0]
 
     assert present_mask.size > 0 and absent_mask.size > 0
     assert present_mask.mean() > absent_mask.mean()
+    np.testing.assert_array_equal(ds.training.base_concepts, original)
     np.testing.assert_array_equal(ds.training.C, original)
+
+
+# ---------- Concept noise ----------
+def test_sample_concept_noise_reproducible_and_toggle(tab_small):
+    ds = tab_small
+    original = ds.training.base_concepts.copy()
+
+    masks_a = ds.sample_concept_noise(p=0.25, rng=42)
+    masks_b = ds.sample_concept_noise(p=0.25, rng=42)
+
+    assert set(masks_a.keys()) == {"training", "validation", "test"}
+    np.testing.assert_array_equal(masks_a["training"], masks_b["training"])
+    ds.concept_noise = True
+    noisy = ds.training.C
+    expected = np.where(masks_a["training"], 1 - original, original)
+    np.testing.assert_array_equal(noisy, expected)
+    ds.concept_noise = False
+    np.testing.assert_array_equal(ds.training.C, original)
+
+
+def test_sample_concept_noise_asymmetric(tab_small):
+    ds = tab_small
+    base = ds.training.base_concepts.copy()
+
+    masks = ds.sample_concept_noise(
+        p=0.0,
+        rng=7,
+        config={"p01": 0.5, "p10": 0.0},
+    )
+    mask = masks["training"]
+
+    assert np.all(mask[base == 1] == 0)
+    assert mask[base == 0].any()
+
+    ds.concept_noise = True
+    noisy = ds.training.C
+    np.testing.assert_array_equal(noisy[base == 1], base[base == 1])
+    ds.concept_noise = False
+
+
+def test_concept_noise_then_missingness_order(tab_small):
+    ds = tab_small
+    base = ds.training.base_concepts.copy()
+
+    noise_masks = ds.sample_concept_noise(p=1.0, rng=0)
+    missing_masks = ds.sample_concept_missingness(
+        p=0.3,
+        mechanism="mcar",
+        rng=1,
+        fill_value=-1.0,
+    )
+
+    ds.concept_noise = True
+    ds.concept_missing = True
+
+    noisy_then_missing = ds.training.C
+
+    expected_noisy = np.where(noise_masks["training"], 1 - base, base)
+    expected = expected_noisy.astype(np.float32)
+    expected[missing_masks["training"]] = -1.0
+
+    np.testing.assert_array_equal(noisy_then_missing, expected)
+    ds.concept_noise = False
+    ds.concept_missing = False
+    np.testing.assert_array_equal(ds.training.C, base)

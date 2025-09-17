@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable, Mapping, Set
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -86,6 +85,40 @@ def _sample_mnar_mask(
 
         concepts_bool = concepts.astype(bool)
         prob_matrix = np.where(concepts_bool, present_prob, absent_prob)
+
+    prob_matrix = np.clip(prob_matrix, 0.0, 1.0)
+
+    return rng.random(concepts.shape) < prob_matrix
+
+
+def _sample_concept_noise_mask(
+    rng: np.random.Generator,
+    concepts: np.ndarray,
+    *,
+    base_p: float,
+    config: Mapping[str, object] | None,
+) -> np.ndarray:
+    config = dict(config or {})
+    n_concepts = concepts.shape[1]
+
+    prob_matrix = config.get("prob_matrix")
+    if prob_matrix is not None:
+        prob_matrix = np.asarray(prob_matrix, dtype=float)
+        if prob_matrix.shape != concepts.shape:
+            raise ValueError("Provided prob_matrix must match concepts shape")
+    else:
+        flip_prob = config.get("flip_prob")
+        prob_01 = config.get("p01")
+        prob_10 = config.get("p10")
+
+        if prob_01 is None and prob_10 is None:
+            flip_prob = _broadcast_prob(flip_prob, n_concepts, default=base_p)
+            prob_matrix = np.broadcast_to(flip_prob, concepts.shape)
+        else:
+            p01 = _broadcast_prob(prob_01, n_concepts, default=base_p)
+            p10 = _broadcast_prob(prob_10, n_concepts, default=base_p)
+            concepts_bool = concepts.astype(bool)
+            prob_matrix = np.where(concepts_bool, p10, p01)
 
     prob_matrix = np.clip(prob_matrix, 0.0, 1.0)
 
@@ -238,6 +271,8 @@ class ConceptDataset(object):
         )
 
         self._cvindices = cvindices
+        self.concept_noise = False
+        self.concept_missing = False
         self.reset()
 
     def reset(self):
@@ -312,7 +347,7 @@ class ConceptDataset(object):
     def __copy__(self):
         cpy = ConceptDataset(
             X=self.X,
-            C=self.C,
+            C=self._full.base_concepts.copy(),
             y=self.y,
             meta=self._full.meta,
             cvindices=self._cvindices,
@@ -538,17 +573,17 @@ class ConceptDataset(object):
 
         return new_ds
 
-    def mask(
+    def sample_concept_missingness(
         self,
         *,
         p: float = 0.1,
         mechanism: str = "mcar",
         rng: np.random.Generator | int | None = None,
         mnar_config: Mapping[str, object] | None = None,
-        apply: bool = False,
         fill_value: float = np.nan,
+        enable: bool | None = None,
     ) -> dict[str, np.ndarray]:
-        """Sample concept missingness masks.
+        """Sample concept-level missingness masks.
 
         Args:
             p: Baseline prevalence of missingness.
@@ -561,8 +596,10 @@ class ConceptDataset(object):
                       observed concept value is 1 or 0 respectively.
                     - ``prob_matrix``: full matrix of probabilities overriding the
                       per-concept values. Shape must match the concept matrix.
-            apply: If ``True``, apply the sampled mask in-place using ``fill_value``.
-            fill_value: Value used when ``apply`` is ``True``.
+            fill_value: Value used when applying the mask (via the
+                ``concept_missing`` toggle).
+            enable: If provided, sets ``self.concept_missing`` to the boolean value
+                after sampling. Defaults to ``None`` (no change).
 
         Returns:
             A dictionary mapping split name (``"training"``, ``"validation"``,
@@ -575,6 +612,9 @@ class ConceptDataset(object):
 
         rng_generated = _coerce_rng(rng)
 
+        if enable is not None:
+            self.concept_missing = bool(enable)
+
         masks: dict[str, np.ndarray] = {}
         splits = {
             "training": self.training,
@@ -583,62 +623,235 @@ class ConceptDataset(object):
         }
 
         for split_name, sample in splits.items():
-            if sample is None or sample.C is None:
+            if sample is None or sample.base_concepts is None:
                 continue
 
-            if sample.C.size == 0:
-                masks[split_name] = np.zeros_like(sample.C, dtype=bool)
+            if sample.base_concepts.size == 0:
+                masks[split_name] = np.zeros_like(sample.base_concepts, dtype=bool)
                 continue
 
             if mechanism_key == "mcar":
-                mask = _sample_mcar_mask(rng_generated, sample.C.shape, p)
+                mask = _sample_mcar_mask(rng_generated, sample.base_concepts.shape, p)
             else:
                 mask = _sample_mnar_mask(
-                    rng_generated, sample.C, base_p=p, config=mnar_config
+                    rng_generated, sample.base_concepts, base_p=p, config=mnar_config
                 )
 
+            sample.set_concept_missing_mask(mask, fill_value=fill_value)
             masks[split_name] = mask
 
-            if apply:
-                if fill_value is None:
-                    raise ValueError("fill_value must be provided when apply=True")
+        return masks
 
-                # Work on a copy to avoid unintentionally sharing state.
-                updated = sample.C.astype(type(fill_value), copy=True)
-                updated[mask] = fill_value
-                sample.C = updated
+    def sample_concept_noise(
+        self,
+        *,
+        p: float = 0.1,
+        rng: np.random.Generator | int | None = None,
+        config: Mapping[str, object] | None = None,
+        enable: bool | None = None,
+    ) -> dict[str, np.ndarray]:
+        """Sample concept-level noise masks (bit flips).
+
+        Args:
+            p: Baseline probability of flipping each concept bit.
+            rng: Optional ``np.random.Generator`` or int seed for reproducibility.
+            config: Optional configuration dict with keys:
+                - ``flip_prob``: symmetric flip probability per concept.
+                - ``p01``: probability of flipping 0→1 (scalar or per-concept array).
+                - ``p10``: probability of flipping 1→0 (scalar or per-concept array).
+                - ``prob_matrix``: full matrix of flip probabilities overriding the
+                  above options.
+            enable: If provided, sets ``self.concept_noise`` to the boolean value
+                after sampling.
+
+        Returns:
+            Dictionary mapping split name to the boolean flip mask for that split.
+        """
+
+        if enable is not None:
+            self.concept_noise = bool(enable)
+
+        rng_generated = _coerce_rng(rng)
+        masks: dict[str, np.ndarray] = {}
+        splits = {
+            "training": self.training,
+            "validation": getattr(self, "validation", None),
+            "test": getattr(self, "test", None),
+        }
+
+        for split_name, sample in splits.items():
+            if sample is None or sample.base_concepts is None:
+                continue
+
+            if sample.base_concepts.size == 0:
+                masks[split_name] = np.zeros_like(sample.base_concepts, dtype=bool)
+                continue
+
+            mask = _sample_concept_noise_mask(
+                rng_generated,
+                sample.base_concepts,
+                base_p=p,
+                config=config,
+            )
+            sample.set_concept_noise_mask(mask)
+            masks[split_name] = mask
 
         return masks
 
 
-@dataclass
 class ConceptDatasetSample(Dataset):
-    X: np.ndarray
-    C: np.ndarray
-    y: np.ndarray
-    meta: dict
-    parent: "ConceptDataset" = None
-    indices: np.ndarray = None
-    transform: Callable | None = None
-    concept_transform: Callable | None = None
-    target_transform: Callable | None = None
+    def __init__(
+        self,
+        X: np.ndarray,
+        C: np.ndarray,
+        y: np.ndarray,
+        meta: dict,
+        *,
+        parent: "ConceptDataset" = None,
+        indices: np.ndarray | None = None,
+        transform: Callable | None = None,
+        concept_transform: Callable | None = None,
+        target_transform: Callable | None = None,
+        **kwargs,
+    ) -> None:
+        if not {"classes", "concepts", "data_type"}.issubset(meta.keys()):
+            raise ValueError(
+                "metedata dict must contain keys 'classes', 'concepts', and 'data_type'"
+            )
 
-    def __post_init__(self):
-        assert {"classes", "concepts", "data_type"}.issubset(self.meta.keys()), (
-            "metedata dict must contain keys 'classes', 'concepts', and 'data_type'"
-        )
+        self.parent = parent
+        self.transform = transform
+        self.concept_transform = concept_transform
+        self.target_transform = target_transform
+        self._extra_kwargs = dict(kwargs)
 
-        self.classes, self.concepts = self.meta["classes"], self.meta["concepts"]
-        self.task = self.meta["data_type"]  # image, tabular, etc...
+        self._X = X
+        self._y = y
+        self._meta = meta
+        self.classes, self.concepts = meta["classes"], meta["concepts"]
+        self.task = meta["data_type"]
 
-        self.n = len(self.X)
+        self._C_base = np.asarray(C, dtype=np.int8)
+        self.n = len(self._X)
 
-        if self.indices is None:
+        if indices is None:
             self.indices = np.ones(self.n, dtype=np.bool_)
         else:
-            self.indices = self.indices.flatten().astype(np.bool_)
+            self.indices = np.asarray(indices).flatten().astype(np.bool_)
+
+        self._concept_noise_mask: np.ndarray | None = None
+        self._concept_missing_mask: np.ndarray | None = None
+        self._concept_missing_fill_value: float = np.nan
 
         assert self.__check_rep__()
+
+    @property
+    def meta(self) -> dict:
+        return self._meta
+
+    @meta.setter
+    def meta(self, value: dict) -> None:
+        if not {"classes", "concepts", "data_type"}.issubset(value.keys()):
+            raise ValueError(
+                "metedata dict must contain keys 'classes', 'concepts', and 'data_type'"
+            )
+        self._meta = value
+        self.classes, self.concepts = value["classes"], value["concepts"]
+        self.task = value["data_type"]
+
+    @property
+    def X(self) -> np.ndarray:
+        return self._X
+
+    @X.setter
+    def X(self, value: np.ndarray) -> None:
+        self._X = value
+        self.n = len(self._X)
+
+    @property
+    def y(self) -> np.ndarray:
+        return self._y
+
+    @y.setter
+    def y(self, value: np.ndarray) -> None:
+        self._y = value
+
+    @property
+    def C(self) -> np.ndarray:
+        base = self._C_base
+        parent = self.parent
+        noise_mask = self._concept_noise_mask
+        missing_mask = self._concept_missing_mask
+        fill_value = self._concept_missing_fill_value
+
+        apply_noise = bool(parent and getattr(parent, "concept_noise", False)) and (
+            noise_mask is not None
+        )
+        apply_missing = bool(
+            parent and getattr(parent, "concept_missing", False)
+        ) and (missing_mask is not None)
+
+        if not apply_noise and not apply_missing:
+            return base
+
+        if apply_noise:
+            concepts = np.where(noise_mask, 1 - base, base)
+        else:
+            concepts = base.copy()
+
+        if apply_missing:
+            dtype = np.result_type(concepts.dtype, type(fill_value))
+            concepts = concepts.astype(dtype)
+            concepts[missing_mask] = fill_value
+
+        return concepts
+
+    @C.setter
+    def C(self, value: np.ndarray) -> None:
+        arr = np.asarray(value, dtype=np.int8)
+        if arr.ndim != 2:
+            raise ValueError("Concept matrix must be 2-dimensional")
+        if arr.shape[0] != self.n:
+            raise ValueError("Concept matrix must match number of samples")
+        self._C_base = arr
+
+    @property
+    def base_concepts(self) -> np.ndarray:
+        return self._C_base
+
+    def set_concept_noise_mask(self, mask: np.ndarray | None) -> None:
+        if mask is None:
+            self._concept_noise_mask = None
+            return
+        mask_arr = np.asarray(mask, dtype=np.bool_)
+        if mask_arr.shape != self.base_concepts.shape:
+            raise ValueError("Noise mask must match concept shape")
+        self._concept_noise_mask = mask_arr
+
+    @property
+    def concept_noise_mask(self) -> np.ndarray | None:
+        return self._concept_noise_mask
+
+    def set_concept_missing_mask(
+        self, mask: np.ndarray | None, *, fill_value: float = np.nan
+    ) -> None:
+        if mask is None:
+            self._concept_missing_mask = None
+            self._concept_missing_fill_value = fill_value
+            return
+        mask_arr = np.asarray(mask, dtype=np.bool_)
+        if mask_arr.shape != self.base_concepts.shape:
+            raise ValueError("Missingness mask must match concept shape")
+        self._concept_missing_mask = mask_arr
+        self._concept_missing_fill_value = fill_value
+
+    @property
+    def concept_missing_mask(self) -> np.ndarray | None:
+        return self._concept_missing_mask
+
+    @property
+    def concept_missing_fill_value(self):
+        return self._concept_missing_fill_value
 
     def __len__(self):
         return self.n
@@ -650,12 +863,10 @@ class ConceptDatasetSample(Dataset):
             return False
         if not np.array_equal(self.X, other.X):
             return False
-        if not np.array_equal(self.C, other.C):
+        if not np.array_equal(self.base_concepts, other.base_concepts):
             return False
-        # Use parent's deep comparator for meta
         if not _deep_equal(self.meta, other.meta):
             return False
-        # Compare transforms by identity to avoid ambiguous equality
         if self.transform is not other.transform:
             return False
         if self.concept_transform is not other.concept_transform:
@@ -665,7 +876,6 @@ class ConceptDatasetSample(Dataset):
         return True
 
     def __check_rep__(self):
-        """returns True is object satisfies representation invariants"""
         return True
 
     def __getitem__(self, idx):
@@ -690,7 +900,15 @@ class ConceptDatasetSample(Dataset):
         return x, c, y
 
     def __repr__(self):
-        return f"ConceptDatasetSample<n={self.n}, n_concepts={self.n_concepts}, n_classes={self.n_classes}, data_type={self.meta.get('data_type')}>"
+        return (
+            "ConceptDatasetSample<n={n}, n_concepts={nc}, n_classes={nl}, "
+            "data_type={dt}>"
+        ).format(
+            n=self.n,
+            nc=self.n_concepts,
+            nl=self.n_classes,
+            dt=self.meta.get("data_type"),
+        )
 
     @property
     def n_concepts(self):
@@ -700,48 +918,38 @@ class ConceptDatasetSample(Dataset):
     def n_classes(self):
         return len(self.classes)
 
-    #### methods #####
     def filter(self, indices):
-        """filters samples based on indices"""
         assert isinstance(indices, np.ndarray)
         assert indices.ndim == 1 and indices.shape[0] == self.n
         assert np.isin(indices, (0, 1)).all()
-        return self.__class__(
+        new_sample = self.__class__(
             parent=self.parent,
             X=self.X[indices],
-            C=self.C[indices],
+            C=self.base_concepts[indices],
             y=self.y[indices],
             meta=self.meta,
             indices=indices,
             transform=self.transform,
             concept_transform=self.concept_transform,
             target_transform=self.target_transform,
+            **self._extra_kwargs,
         )
+        if self.concept_noise_mask is not None:
+            new_sample.set_concept_noise_mask(self.concept_noise_mask[indices])
+        if self.concept_missing_mask is not None:
+            new_sample.set_concept_missing_mask(
+                self.concept_missing_mask[indices],
+                fill_value=self.concept_missing_fill_value,
+            )
+        return new_sample
 
     def loader(self, batch_size=32, shuffle=False, **kwargs) -> DataLoader:
-        """
-        Returns a DataLoader for the dataset.
-
-        Parameters:
-        - batch_size (int): Size of each batch.
-        - shuffle (bool): Whether to shuffle the data.
-        - **kwargs: Additional keyword arguments for DataLoader.
-        """
         loader = DataLoader(self, batch_size=batch_size, shuffle=shuffle, **kwargs)
         return loader
 
     def embed(
         self, model, batch_size=32, shuffle=False, device="cpu", **kwargs
     ) -> "ConceptDatasetSample":
-        """
-        Embed the dataset using a given model.
-
-        Parameters:
-        - model: A model that can embed the dataset.
-
-        Returns:
-        - An embedded version of the dataset.
-        """
         model = model.to(device)
         model.eval()
         loader = self.loader(
@@ -753,7 +961,6 @@ class ConceptDatasetSample(Dataset):
 
         embedded_X = []
         for x_batch, c_batch, y_batch in tqdm(loader):
-            # Normalize x_batch to a tensor batch if possible
             if isinstance(x_batch, (list, tuple)):
                 x_batch = [
                     torch.as_tensor(x) if not isinstance(x, torch.Tensor) else x
@@ -780,25 +987,47 @@ class ConceptDatasetSample(Dataset):
         return ConceptDatasetSample(
             parent=self.parent,
             X=embedded_X,
-            C=self.C,
+            C=self.base_concepts,
             y=self.y,
             meta=embed_meta,
             indices=self.indices,
         )
 
 
-@dataclass
 class ConceptImageDatasetSample(ConceptDatasetSample):
-    """
-    A sample of a ConceptDataset that contains image data.
-    Inherits from ConceptDatasetSample.
-    """
-    preprocess: Callable | None = None
-
-    base_dir: Path = field(default_factory=lambda: Path("."))
-
-    def __post_init__(self):
-        super().__post_init__()
+    def __init__(
+        self,
+        X: np.ndarray,
+        C: np.ndarray,
+        y: np.ndarray,
+        meta: dict,
+        *,
+        parent: "ConceptDataset" = None,
+        indices: np.ndarray | None = None,
+        transform: Callable | None = None,
+        concept_transform: Callable | None = None,
+        target_transform: Callable | None = None,
+        preprocess: Callable | None = None,
+        base_dir: Path | str | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            X=X,
+            C=C,
+            y=y,
+            meta=meta,
+            parent=parent,
+            indices=indices,
+            transform=transform,
+            concept_transform=concept_transform,
+            target_transform=target_transform,
+            **kwargs,
+        )
+        self.preprocess = preprocess
+        if base_dir is None:
+            self.base_dir = Path(".")
+        else:
+            self.base_dir = Path(base_dir)
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
@@ -833,7 +1062,16 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         return chk
 
     def __repr__(self):
-        return f"ConceptImageDatasetSample<n={self.n}, n_concepts={self.n_concepts}, n_classes={self.n_classes}, data_type={self.meta.get('data_type')}, base_dir={self.base_dir}>"
+        return (
+            "ConceptImageDatasetSample<n={n}, n_concepts={nc}, n_classes={nl}, "
+            "data_type={dt}, base_dir={bd}>"
+        ).format(
+            n=self.n,
+            nc=self.n_concepts,
+            nl=self.n_classes,
+            dt=self.meta.get("data_type"),
+            bd=self.base_dir,
+        )
 
     def filter(self, indices):
         assert isinstance(indices, np.ndarray)
@@ -842,7 +1080,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         return self.__class__(
             parent=self.parent,
             X=self.X[indices],
-            C=self.C[indices],
+            C=self.base_concepts[indices],
             y=self.y[indices],
             meta=self.meta,
             indices=indices,
@@ -851,4 +1089,5 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             concept_transform=self.concept_transform,
             target_transform=self.target_transform,
             base_dir=self.base_dir,
+            **self._extra_kwargs,
         )
