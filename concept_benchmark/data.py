@@ -15,6 +15,83 @@ from tqdm import tqdm
 from .cv import generate_cvindices, validate_cvindices
 
 
+def _coerce_rng(rng: np.random.Generator | int | None) -> np.random.Generator:
+    """Return a numpy Generator from either an int seed or an existing RNG."""
+    if rng is None:
+        return np.random.default_rng()
+    if isinstance(rng, (int, np.integer)):
+        return np.random.default_rng(int(rng))
+    if isinstance(rng, np.random.Generator):
+        return rng
+
+    # Support legacy RandomState by spawning a new Generator with a fresh seed.
+    if isinstance(rng, np.random.RandomState):
+        seed = rng.randint(low=0, high=2**32 - 1)
+        return np.random.default_rng(seed)
+
+    raise TypeError(
+        "rng must be None, an int seed, np.random.Generator, or RandomState"
+    )
+
+
+def _broadcast_prob(value, n_concepts: int, *, default: float) -> np.ndarray:
+    """Coerce scalar/per-concept probabilities to a 1D array of length n_concepts."""
+    if value is None:
+        value = default
+    arr = np.asarray(value, dtype=float)
+    if arr.ndim == 0:
+        arr = np.full((n_concepts,), float(arr), dtype=float)
+    elif arr.shape != (n_concepts,):
+        raise ValueError(
+            "Probability specification must be a scalar or length-n_concepts array"
+        )
+    return np.clip(arr, 0.0, 1.0)
+
+
+def _sample_mcar_mask(
+    rng: np.random.Generator, shape: tuple[int, ...], p: float
+) -> np.ndarray:
+    if not 0.0 <= p <= 1.0:
+        raise ValueError("p must be between 0 and 1 inclusive")
+    return rng.random(shape) < p
+
+
+def _sample_mnar_mask(
+    rng: np.random.Generator,
+    concepts: np.ndarray,
+    *,
+    base_p: float,
+    config: Mapping[str, object] | None,
+) -> np.ndarray:
+    if not 0.0 <= base_p <= 1.0:
+        raise ValueError("base_p must be between 0 and 1 inclusive")
+
+    config = dict(config or {})
+    n_concepts = concepts.shape[1]
+
+    prob_matrix = config.get("prob_matrix")
+    if prob_matrix is not None:
+        prob_matrix = np.asarray(prob_matrix, dtype=float)
+        if prob_matrix.shape != concepts.shape:
+            raise ValueError("Provided prob_matrix must match concepts shape")
+    else:
+        present_default = min(base_p * 1.5, 1.0)
+        absent_default = max(base_p * 0.5, 0.0)
+        present_prob = _broadcast_prob(
+            config.get("present_prob"), n_concepts, default=present_default
+        )
+        absent_prob = _broadcast_prob(
+            config.get("absent_prob"), n_concepts, default=absent_default
+        )
+
+        concepts_bool = concepts.astype(bool)
+        prob_matrix = np.where(concepts_bool, present_prob, absent_prob)
+
+    prob_matrix = np.clip(prob_matrix, 0.0, 1.0)
+
+    return rng.random(concepts.shape) < prob_matrix
+
+
 def _deep_equal(a, b) -> bool:
     """Type-aware deep equality for nested structures and array-like values.
 
@@ -461,34 +538,77 @@ class ConceptDataset(object):
 
         return new_ds
 
-    def mask(self, p=0.1, sampler=None, fill_value=np.nan):
-        """Adding missingness to concepts.
+    def mask(
+        self,
+        *,
+        p: float = 0.1,
+        mechanism: str = "mcar",
+        rng: np.random.Generator | int | None = None,
+        mnar_config: Mapping[str, object] | None = None,
+        apply: bool = False,
+        fill_value: float = np.nan,
+    ) -> dict[str, np.ndarray]:
+        """Sample concept missingness masks.
 
         Args:
-            p (float) : Probability of missing, using a Bernoulli distribution.
-            sampler (callable) : any function that returns a bool mask. Overwrites p arg. Must accept size kwarg.
-            fill_value (float) : value to fill the mask with
+            p: Baseline prevalence of missingness.
+            mechanism: Missingness mechanism, either ``"mcar"`` or ``"mnar"``.
+            rng: Optional ``np.random.Generator`` or int seed for reproducibility.
+            mnar_config: Optional configuration dict used when ``mechanism="mnar"``.
+                Accepted keys:
+                    - ``present_prob`` / ``absent_prob``: scalar or per-concept
+                      probabilities (length ``n_concepts``) applied when the
+                      observed concept value is 1 or 0 respectively.
+                    - ``prob_matrix``: full matrix of probabilities overriding the
+                      per-concept values. Shape must match the concept matrix.
+            apply: If ``True``, apply the sampled mask in-place using ``fill_value``.
+            fill_value: Value used when ``apply`` is ``True``.
+
+        Returns:
+            A dictionary mapping split name (``"training"``, ``"validation"``,
+            ``"test"``) to the sampled boolean mask for that split.
         """
 
-        # Set sampler
-        if sampler is None:
-            sampler = lambda size : np.random.binomial(n=1,  p=p, size=size).astype(bool)
+        mechanism_key = mechanism.lower()
+        if mechanism_key not in {"mcar", "mnar"}:
+            raise ValueError("mechanism must be either 'mcar' or 'mnar'")
 
-        # Train
-        mask = sampler(size=self.training.C.shape)
-        self.training.C = self.training.C.astype(type(fill_value))
-        self.training.C[mask] = fill_value
+        rng_generated = _coerce_rng(rng)
 
-        # Test and validation, if defined
-        if self.test.C is not None:
-            mask  = sampler(size=self.test.C.shape)
-            self.test.C = self.test.C.astype(type(fill_value))
-            self.test.C[mask] = fill_value
+        masks: dict[str, np.ndarray] = {}
+        splits = {
+            "training": self.training,
+            "validation": getattr(self, "validation", None),
+            "test": getattr(self, "test", None),
+        }
 
-        if self.validation.C is not None:
-            mask  = sampler(size=self.validation.C.shape)
-            self.validation.C = self.validation.C.astype(type(fill_value))
-            self.validation.C[mask] = fill_value
+        for split_name, sample in splits.items():
+            if sample is None or sample.C is None:
+                continue
+
+            if sample.C.size == 0:
+                masks[split_name] = np.zeros_like(sample.C, dtype=bool)
+                continue
+
+            if mechanism_key == "mcar":
+                mask = _sample_mcar_mask(rng_generated, sample.C.shape, p)
+            else:
+                mask = _sample_mnar_mask(
+                    rng_generated, sample.C, base_p=p, config=mnar_config
+                )
+
+            masks[split_name] = mask
+
+            if apply:
+                if fill_value is None:
+                    raise ValueError("fill_value must be provided when apply=True")
+
+                # Work on a copy to avoid unintentionally sharing state.
+                updated = sample.C.astype(type(fill_value), copy=True)
+                updated[mask] = fill_value
+                sample.C = updated
+
+        return masks
 
 
 @dataclass

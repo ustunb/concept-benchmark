@@ -102,3 +102,54 @@ def test_split_requires_known_fold_id(tab_small):
     ds = tab_small
     with pytest.raises(AssertionError):
         ds.split(fold_id=None, fold_num_validation=1, fold_num_test=2)
+
+
+# ---------- Missingness masking ----------
+def test_mask_mcar_reproducible_and_shape(tab_small):
+    ds = tab_small
+    original = ds.training.C.copy()
+
+    masks_a = ds.mask(p=0.2, mechanism="mcar", rng=123)
+    masks_b = ds.mask(p=0.2, mechanism="mcar", rng=123)
+
+    assert set(masks_a.keys()) == {"training", "validation", "test"}
+    assert masks_a["training"].shape == ds.training.C.shape
+    assert masks_a["validation"].shape[0] == 0
+    assert masks_a["test"].shape[0] == 0
+    np.testing.assert_array_equal(masks_a["training"], masks_b["training"])
+    assert np.isclose(masks_a["training"].mean(), 0.2, atol=0.1)
+    np.testing.assert_array_equal(ds.training.C, original)
+
+
+def test_mask_apply_in_place_fill(tab_small):
+    ds = tab_small
+    original = ds.training.C.copy()
+
+    masks = ds.mask(p=0.3, mechanism="mcar", rng=999, apply=True, fill_value=-1.0)
+    train_mask = masks["training"]
+
+    assert train_mask.shape == ds.training.C.shape
+    assert np.all(ds.training.C[train_mask] == -1.0)
+    np.testing.assert_array_equal(ds.training.C[~train_mask], original[~train_mask])
+
+
+def test_mask_mnar_respects_probabilities(tab_medium_cv):
+    ds, _ = tab_medium_cv
+    original = ds.training.C.copy()
+
+    masks = ds.mask(
+        p=0.4,
+        mechanism="mnar",
+        rng=2024,
+        mnar_config={"present_prob": 0.8, "absent_prob": 0.1},
+    )
+
+    train_mask = masks["training"]
+    concepts = ds.training.C
+
+    present_mask = train_mask[concepts == 1]
+    absent_mask = train_mask[concepts == 0]
+
+    assert present_mask.size > 0 and absent_mask.size > 0
+    assert present_mask.mean() > absent_mask.mean()
+    np.testing.assert_array_equal(ds.training.C, original)
