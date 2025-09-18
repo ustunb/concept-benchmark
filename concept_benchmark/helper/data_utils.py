@@ -145,7 +145,14 @@ def sample_label_noise(
         rand = rng.random(labels.size)
         rand = np.minimum(rand, 1.0 - np.finfo(float).eps)
         rows = cdf[labels]
-        new_labels = np.searchsorted(rows, rand, side="right")
+        new_labels = np.fromiter(
+            (
+                np.searchsorted(row, r, side="right")
+                for row, r in zip(rows, rand, strict=False)
+            ),
+            dtype=labels.dtype,
+            count=labels.size,
+        )
         return new_labels.astype(labels.dtype, copy=False)
 
     if not 0.0 <= base_p <= 1.0:
