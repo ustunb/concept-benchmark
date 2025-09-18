@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable, Mapping, Set
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +12,13 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from .cv import generate_cvindices, validate_cvindices
+from .helper.data_utils import (
+    coerce_rng,
+    sample_concept_noise_mask,
+    sample_label_noise,
+    sample_mcar_mask,
+    sample_mnar_mask,
+)
 
 
 def _deep_equal(a, b) -> bool:
@@ -90,6 +96,9 @@ class ConceptDataset(object):
         transform: Callable | None = None,
         concept_transform: Callable | None = None,
         target_transform: Callable | None = None,
+        concept_noise: bool = False,
+        concept_missing: bool = False,
+        label_noise: bool = False,
         **kwargs,
     ) -> None:
         """ConceptDataset
@@ -113,9 +122,20 @@ class ConceptDataset(object):
                 Defaults to None.
             target_transform (Callable, optional): Transformation function for labels. \
                 Defaults to None.
+            concept_noise (bool, optional): Whether concept noise is enabled by default.
+            concept_missing (bool, optional): Whether concept missingness is enabled by default.
+            label_noise (bool, optional): Whether label noise is enabled by default.
             **kwargs: Additional keyword arguments.
         """
         self._init_kwargs = dict(kwargs)
+        self._concept_noise = bool(concept_noise)
+        self._concept_missing = bool(concept_missing)
+        self._label_noise = bool(label_noise)
+        self._init_kwargs.update(
+            concept_noise=self._concept_noise,
+            concept_missing=self._concept_missing,
+            label_noise=self._label_noise,
+        )
 
         if not isinstance(X, np.ndarray):
             try:
@@ -157,6 +177,9 @@ class ConceptDataset(object):
             transform=transform,
             concept_transform=concept_transform,
             target_transform=target_transform,
+            concept_noise=self._concept_noise,
+            concept_missing=self._concept_missing,
+            label_noise=self._label_noise,
             **kwargs,
         )
 
@@ -176,7 +199,30 @@ class ConceptDataset(object):
         self.training = self._full
         self.validation = self._full.filter(indices=np.zeros(self.n, dtype=np.bool_))
         self.test = self._full.filter(indices=np.zeros(self.n, dtype=np.bool_))
+        self._apply_noise_settings()
         assert self.__check_rep__()
+
+    def _iter_samples(self):
+        seen = set()
+        for sample in (
+            getattr(self, "_full", None),
+            getattr(self, "training", None),
+            getattr(self, "validation", None),
+            getattr(self, "test", None),
+        ):
+            if sample is None:
+                continue
+            sid = id(sample)
+            if sid in seen:
+                continue
+            seen.add(sid)
+            yield sample
+
+    def _apply_noise_settings(self):
+        for sample in self._iter_samples():
+            sample.concept_noise = self._concept_noise
+            sample.concept_missing = self._concept_missing
+            sample.label_noise = self._label_noise
 
     #### built-ins ####
 
@@ -235,12 +281,15 @@ class ConceptDataset(object):
     def __copy__(self):
         cpy = ConceptDataset(
             X=self.X,
-            C=self.C,
-            y=self.y,
+            C=self._full.base_concepts.copy(),
+            y=self._full.base_labels.copy(),
             meta=self._full.meta,
             cvindices=self._cvindices,
             **self._init_kwargs,
         )
+        cpy.concept_noise = self.concept_noise
+        cpy.concept_missing = self.concept_missing
+        cpy.label_noise = self.label_noise
 
         return cpy
 
@@ -307,6 +356,33 @@ class ConceptDataset(object):
     @target_transform.setter
     def target_transform(self, target_transform):
         self._full.target_transform = target_transform
+
+    @property
+    def concept_noise(self) -> bool:
+        return self._concept_noise
+
+    @concept_noise.setter
+    def concept_noise(self, value: bool) -> None:
+        self._concept_noise = bool(value)
+        self._apply_noise_settings()
+
+    @property
+    def concept_missing(self) -> bool:
+        return self._concept_missing
+
+    @concept_missing.setter
+    def concept_missing(self, value: bool) -> None:
+        self._concept_missing = bool(value)
+        self._apply_noise_settings()
+
+    @property
+    def label_noise(self) -> bool:
+        return self._label_noise
+
+    @label_noise.setter
+    def label_noise(self, value: bool) -> None:
+        self._label_noise = bool(value)
+        self._apply_noise_settings()
 
     #### cross validation ####
     @property
@@ -395,6 +471,7 @@ class ConceptDataset(object):
             indices=np.isin(self.folds, self.fold_num_validation)
         )
         self.test = self._full.filter(indices=np.isin(self.folds, self.fold_num_test))
+        self._apply_noise_settings()
         return
 
     def generate_cvindices(
@@ -461,64 +538,394 @@ class ConceptDataset(object):
 
         return new_ds
 
-    def mask(self, p=0.1, sampler=None, fill_value=np.nan):
-        """Adding missingness to concepts.
+    def sample_concept_missingness(
+        self,
+        *,
+        p: float = 0.1,
+        mechanism: str = "mcar",
+        rng: np.random.Generator | int | None = None,
+        mnar_config: Mapping[str, object] | None = None,
+        fill_value: float = np.nan,
+        enable: bool | None = None,
+    ) -> dict[str, np.ndarray]:
+        """Sample concept-level missingness masks.
 
         Args:
-            p (float) : Probability of missing, using a Bernoulli distribution.
-            sampler (callable) : any function that returns a bool mask. Overwrites p arg. Must accept size kwarg.
-            fill_value (float) : value to fill the mask with
+            p: Baseline prevalence of missingness.
+            mechanism: Missingness mechanism, either ``"mcar"`` or ``"mnar"``.
+            rng: Optional ``np.random.Generator`` or int seed for reproducibility.
+            mnar_config: Optional configuration dict used when ``mechanism="mnar"``.
+                Accepted keys:
+                    - ``present_prob`` / ``absent_prob``: scalar or per-concept
+                      probabilities (length ``n_concepts``) applied when the
+                      observed concept value is 1 or 0 respectively.
+                    - ``prob_matrix``: full matrix of probabilities overriding the
+                      per-concept values. Shape must match the concept matrix.
+            fill_value: Value used when applying the mask (via the
+                ``concept_missing`` toggle).
+            enable: If provided, sets ``self.concept_missing`` to the boolean value
+                after sampling. Defaults to ``None`` (no change).
+
+        Returns:
+            A dictionary mapping split name (``"training"``, ``"validation"``,
+            ``"test"``) to the sampled boolean mask for that split.
         """
 
-        # Set sampler
-        if sampler is None:
-            sampler = lambda size : np.random.binomial(n=1,  p=p, size=size).astype(bool)
+        mechanism_key = mechanism.lower()
+        if mechanism_key not in {"mcar", "mnar"}:
+            raise ValueError("mechanism must be either 'mcar' or 'mnar'")
 
-        # Train
-        mask = sampler(size=self.training.C.shape)
-        self.training.C = self.training.C.astype(type(fill_value))
-        self.training.C[mask] = fill_value
+        rng_generated = coerce_rng(rng)
 
-        # Test and validation, if defined
-        if self.test.C is not None:
-            mask  = sampler(size=self.test.C.shape)
-            self.test.C = self.test.C.astype(type(fill_value))
-            self.test.C[mask] = fill_value
+        if enable is not None:
+            self.concept_missing = bool(enable)
 
-        if self.validation.C is not None:
-            mask  = sampler(size=self.validation.C.shape)
-            self.validation.C = self.validation.C.astype(type(fill_value))
-            self.validation.C[mask] = fill_value
+        masks: dict[str, np.ndarray] = {}
+        splits = {
+            "training": self.training,
+            "validation": getattr(self, "validation", None),
+            "test": getattr(self, "test", None),
+        }
 
+        for split_name, sample in splits.items():
+            if sample is None or sample.base_concepts is None:
+                continue
 
-@dataclass
-class ConceptDatasetSample(Dataset):
-    X: np.ndarray
-    C: np.ndarray
-    y: np.ndarray
-    meta: dict
-    parent: "ConceptDataset" = None
-    indices: np.ndarray = None
-    transform: Callable | None = None
-    concept_transform: Callable | None = None
-    target_transform: Callable | None = None
+            if sample.base_concepts.size == 0:
+                masks[split_name] = np.zeros_like(sample.base_concepts, dtype=bool)
+                continue
 
-    def __post_init__(self):
-        assert {"classes", "concepts", "data_type"}.issubset(self.meta.keys()), (
-            "metedata dict must contain keys 'classes', 'concepts', and 'data_type'"
+            if mechanism_key == "mcar":
+                mask = sample_mcar_mask(rng_generated, sample.base_concepts.shape, p)
+            else:
+                mask = sample_mnar_mask(
+                    rng_generated, sample.base_concepts, base_p=p, config=mnar_config
+                )
+
+            sample.set_concept_missing_mask(mask, fill_value=fill_value)
+            masks[split_name] = mask
+
+        return masks
+
+    def sample_concept_noise(
+        self,
+        *,
+        p: float = 0.1,
+        rng: np.random.Generator | int | None = None,
+        config: Mapping[str, object] | None = None,
+        enable: bool | None = None,
+    ) -> dict[str, np.ndarray]:
+        """Sample concept-level noise masks (bit flips).
+
+        Args:
+            p: Baseline probability of flipping each concept bit.
+            rng: Optional ``np.random.Generator`` or int seed for reproducibility.
+            config: Optional configuration dict with keys:
+                - ``flip_prob``: symmetric flip probability per concept.
+                - ``p01``: probability of flipping 0→1 (scalar or per-concept array).
+                - ``p10``: probability of flipping 1→0 (scalar or per-concept array).
+                - ``prob_matrix``: full matrix of flip probabilities overriding the
+                  above options.
+            enable: If provided, sets ``self.concept_noise`` to the boolean value
+                after sampling.
+
+        Returns:
+            Dictionary mapping split name to the boolean flip mask for that split.
+        """
+
+        if enable is not None:
+            self.concept_noise = bool(enable)
+
+        rng_generated = coerce_rng(rng)
+        masks: dict[str, np.ndarray] = {}
+        splits = {
+            "training": self.training,
+            "validation": getattr(self, "validation", None),
+            "test": getattr(self, "test", None),
+        }
+
+        for split_name, sample in splits.items():
+            if sample is None or sample.base_concepts is None:
+                continue
+
+            if sample.base_concepts.size == 0:
+                masks[split_name] = np.zeros_like(sample.base_concepts, dtype=bool)
+                continue
+
+            mask = sample_concept_noise_mask(
+                rng_generated,
+                sample.base_concepts,
+                base_p=p,
+                config=config,
+            )
+            sample.set_concept_noise_mask(mask)
+            masks[split_name] = mask
+
+        return masks
+
+    def sample_label_noise(
+        self,
+        *,
+        p: float = 0.1,
+        rng: np.random.Generator | int | None = None,
+        label_noise_config: Mapping[str, object] | None = None,
+        enable: bool | None = None,
+    ) -> dict[str, np.ndarray]:
+        """Sample label noise for each split and optionally enable the view."""
+
+        if enable is not None:
+            self.label_noise = bool(enable)
+
+        rng_generated = coerce_rng(rng)
+
+        noisy_labels: dict[str, np.ndarray] = {}
+
+        full_labels = sample_label_noise(
+            rng_generated,
+            self._full.base_labels,
+            num_classes=self._full.n_classes,
+            base_p=p,
+            config=label_noise_config,
         )
+        self._full.set_label_noise_labels(full_labels)
+        noisy_labels["full"] = full_labels
 
-        self.classes, self.concepts = self.meta["classes"], self.meta["concepts"]
-        self.task = self.meta["data_type"]  # image, tabular, etc...
+        splits = {
+            "training": self.training,
+            "validation": getattr(self, "validation", None),
+            "test": getattr(self, "test", None),
+        }
 
-        self.n = len(self.X)
+        for split_name, sample in splits.items():
+            if sample is None or sample.base_labels.size == 0:
+                continue
+            if sample is self._full:
+                noisy_labels[split_name] = full_labels
+                continue
+            new_labels = sample_label_noise(
+                rng_generated,
+                sample.base_labels,
+                num_classes=sample.n_classes,
+                base_p=p,
+                config=label_noise_config,
+            )
+            sample.set_label_noise_labels(new_labels)
+            noisy_labels[split_name] = new_labels
 
-        if self.indices is None:
+        return noisy_labels
+
+
+class ConceptDatasetSample(Dataset):
+    def __init__(
+        self,
+        X: np.ndarray,
+        C: np.ndarray,
+        y: np.ndarray,
+        meta: dict,
+        *,
+        parent: "ConceptDataset" = None,
+        indices: np.ndarray | None = None,
+        transform: Callable | None = None,
+        concept_transform: Callable | None = None,
+        target_transform: Callable | None = None,
+        concept_noise: bool = False,
+        concept_missing: bool = False,
+        label_noise: bool = False,
+        **kwargs,
+    ) -> None:
+        if not {"classes", "concepts", "data_type"}.issubset(meta.keys()):
+            raise ValueError(
+                "metedata dict must contain keys 'classes', 'concepts', and 'data_type'"
+            )
+
+        self.parent = parent
+        self.transform = transform
+        self.concept_transform = concept_transform
+        self.target_transform = target_transform
+        self._extra_kwargs = dict(kwargs)
+
+        self._X = X
+        self._y_base = np.asarray(y, dtype=np.int32)
+        self._label_noise_labels: np.ndarray | None = None
+        self._meta = meta
+        self.classes, self.concepts = meta["classes"], meta["concepts"]
+        self.task = meta["data_type"]
+
+        self._C_base = np.asarray(C, dtype=np.int8)
+        self.n = len(self._X)
+        if self._y_base.ndim != 1:
+            self._y_base = self._y_base.reshape(-1)
+        if self._y_base.shape[0] != self.n:
+            raise ValueError("Label vector must match number of samples")
+
+        if indices is None:
             self.indices = np.ones(self.n, dtype=np.bool_)
         else:
-            self.indices = self.indices.flatten().astype(np.bool_)
+            self.indices = np.asarray(indices).flatten().astype(np.bool_)
+
+        self._concept_noise_mask: np.ndarray | None = None
+        self._concept_missing_mask: np.ndarray | None = None
+        self._concept_missing_fill_value: float = np.nan
+        self._concept_noise_enabled = bool(concept_noise)
+        self._concept_missing_enabled = bool(concept_missing)
+        self._label_noise_enabled = bool(label_noise)
 
         assert self.__check_rep__()
+
+    @property
+    def meta(self) -> dict:
+        return self._meta
+
+    @meta.setter
+    def meta(self, value: dict) -> None:
+        if not {"classes", "concepts", "data_type"}.issubset(value.keys()):
+            raise ValueError(
+                "metedata dict must contain keys 'classes', 'concepts', and 'data_type'"
+            )
+        self._meta = value
+        self.classes, self.concepts = value["classes"], value["concepts"]
+        self.task = value["data_type"]
+
+    @property
+    def X(self) -> np.ndarray:
+        return self._X
+
+    @X.setter
+    def X(self, value: np.ndarray) -> None:
+        self._X = value
+        self.n = len(self._X)
+
+    @property
+    def y(self) -> np.ndarray:
+        apply_noise = self._label_noise_enabled and (
+            self._label_noise_labels is not None
+        )
+        return self._label_noise_labels if apply_noise else self._y_base
+
+    @y.setter
+    def y(self, value: np.ndarray) -> None:
+        arr = np.asarray(value, dtype=np.int32)
+        if arr.ndim != 1:
+            arr = arr.reshape(-1)
+        if arr.shape[0] != self.n:
+            raise ValueError("Label vector must match number of samples")
+        self._y_base = arr
+        self._label_noise_labels = None
+
+    @property
+    def C(self) -> np.ndarray:
+        base = self._C_base
+        noise_mask = self._concept_noise_mask
+        missing_mask = self._concept_missing_mask
+        fill_value = self._concept_missing_fill_value
+
+        apply_noise = self._concept_noise_enabled and (noise_mask is not None)
+        apply_missing = self._concept_missing_enabled and (missing_mask is not None)
+
+        if not apply_noise and not apply_missing:
+            return base
+
+        if apply_noise:
+            concepts = np.where(noise_mask, 1 - base, base)
+        else:
+            concepts = base.copy()
+
+        if apply_missing:
+            dtype = np.result_type(concepts.dtype, type(fill_value))
+            concepts = concepts.astype(dtype)
+            concepts[missing_mask] = fill_value
+
+        return concepts
+
+    @C.setter
+    def C(self, value: np.ndarray) -> None:
+        arr = np.asarray(value, dtype=np.int8)
+        if arr.ndim != 2:
+            raise ValueError("Concept matrix must be 2-dimensional")
+        if arr.shape[0] != self.n:
+            raise ValueError("Concept matrix must match number of samples")
+        self._C_base = arr
+
+    @property
+    def base_concepts(self) -> np.ndarray:
+        return self._C_base
+
+    @property
+    def base_labels(self) -> np.ndarray:
+        return self._y_base
+
+    def set_concept_noise_mask(self, mask: np.ndarray | None) -> None:
+        if mask is None:
+            self._concept_noise_mask = None
+            return
+        mask_arr = np.asarray(mask, dtype=np.bool_)
+        if mask_arr.shape != self.base_concepts.shape:
+            raise ValueError("Noise mask must match concept shape")
+        self._concept_noise_mask = mask_arr
+
+    @property
+    def concept_noise_mask(self) -> np.ndarray | None:
+        return self._concept_noise_mask
+
+    def set_concept_missing_mask(
+        self, mask: np.ndarray | None, *, fill_value: float = np.nan
+    ) -> None:
+        if mask is None:
+            self._concept_missing_mask = None
+            self._concept_missing_fill_value = fill_value
+            return
+        mask_arr = np.asarray(mask, dtype=np.bool_)
+        if mask_arr.shape != self.base_concepts.shape:
+            raise ValueError("Missingness mask must match concept shape")
+        self._concept_missing_mask = mask_arr
+        self._concept_missing_fill_value = fill_value
+
+    @property
+    def concept_missing_mask(self) -> np.ndarray | None:
+        return self._concept_missing_mask
+
+    @property
+    def concept_missing_fill_value(self):
+        return self._concept_missing_fill_value
+
+    @property
+    def concept_noise(self) -> bool:
+        return self._concept_noise_enabled
+
+    @concept_noise.setter
+    def concept_noise(self, value: bool) -> None:
+        self._concept_noise_enabled = bool(value)
+
+    @property
+    def concept_missing(self) -> bool:
+        return self._concept_missing_enabled
+
+    @concept_missing.setter
+    def concept_missing(self, value: bool) -> None:
+        self._concept_missing_enabled = bool(value)
+
+    @property
+    def label_noise(self) -> bool:
+        return self._label_noise_enabled
+
+    @label_noise.setter
+    def label_noise(self, value: bool) -> None:
+        self._label_noise_enabled = bool(value)
+
+    def set_label_noise_labels(self, labels: np.ndarray | None) -> None:
+        if labels is None:
+            self._label_noise_labels = None
+            return
+        arr = np.asarray(labels, dtype=self._y_base.dtype)
+        if arr.ndim != 1:
+            arr = arr.reshape(-1)
+        if arr.shape[0] != self.n:
+            raise ValueError("Label noise array must match number of samples")
+        self._label_noise_labels = arr
+
+    @property
+    def label_noise_labels(self) -> np.ndarray | None:
+        return self._label_noise_labels
 
     def __len__(self):
         return self.n
@@ -526,16 +933,14 @@ class ConceptDatasetSample(Dataset):
     def __eq__(self, other):
         if not isinstance(other, ConceptDatasetSample):
             return False
-        if not np.array_equal(self.y, other.y):
+        if not np.array_equal(self.base_labels, other.base_labels):
             return False
         if not np.array_equal(self.X, other.X):
             return False
-        if not np.array_equal(self.C, other.C):
+        if not np.array_equal(self.base_concepts, other.base_concepts):
             return False
-        # Use parent's deep comparator for meta
         if not _deep_equal(self.meta, other.meta):
             return False
-        # Compare transforms by identity to avoid ambiguous equality
         if self.transform is not other.transform:
             return False
         if self.concept_transform is not other.concept_transform:
@@ -545,7 +950,6 @@ class ConceptDatasetSample(Dataset):
         return True
 
     def __check_rep__(self):
-        """returns True is object satisfies representation invariants"""
         return True
 
     def __getitem__(self, idx):
@@ -570,7 +974,15 @@ class ConceptDatasetSample(Dataset):
         return x, c, y
 
     def __repr__(self):
-        return f"ConceptDatasetSample<n={self.n}, n_concepts={self.n_concepts}, n_classes={self.n_classes}, data_type={self.meta.get('data_type')}>"
+        return (
+            "ConceptDatasetSample<n={n}, n_concepts={nc}, n_classes={nl}, "
+            "data_type={dt}>"
+        ).format(
+            n=self.n,
+            nc=self.n_concepts,
+            nl=self.n_classes,
+            dt=self.meta.get("data_type"),
+        )
 
     @property
     def n_concepts(self):
@@ -580,48 +992,43 @@ class ConceptDatasetSample(Dataset):
     def n_classes(self):
         return len(self.classes)
 
-    #### methods #####
     def filter(self, indices):
-        """filters samples based on indices"""
         assert isinstance(indices, np.ndarray)
         assert indices.ndim == 1 and indices.shape[0] == self.n
         assert np.isin(indices, (0, 1)).all()
-        return self.__class__(
+        new_sample = self.__class__(
             parent=self.parent,
             X=self.X[indices],
-            C=self.C[indices],
-            y=self.y[indices],
+            C=self.base_concepts[indices],
+            y=self.base_labels[indices],
             meta=self.meta,
             indices=indices,
+            concept_noise=self.concept_noise,
+            concept_missing=self.concept_missing,
+            label_noise=self.label_noise,
             transform=self.transform,
             concept_transform=self.concept_transform,
             target_transform=self.target_transform,
+            **self._extra_kwargs,
         )
+        if self.concept_noise_mask is not None:
+            new_sample.set_concept_noise_mask(self.concept_noise_mask[indices])
+        if self.concept_missing_mask is not None:
+            new_sample.set_concept_missing_mask(
+                self.concept_missing_mask[indices],
+                fill_value=self.concept_missing_fill_value,
+            )
+        if self.label_noise_labels is not None:
+            new_sample.set_label_noise_labels(self.label_noise_labels[indices])
+        return new_sample
 
     def loader(self, batch_size=32, shuffle=False, **kwargs) -> DataLoader:
-        """
-        Returns a DataLoader for the dataset.
-
-        Parameters:
-        - batch_size (int): Size of each batch.
-        - shuffle (bool): Whether to shuffle the data.
-        - **kwargs: Additional keyword arguments for DataLoader.
-        """
         loader = DataLoader(self, batch_size=batch_size, shuffle=shuffle, **kwargs)
         return loader
 
     def embed(
         self, model, batch_size=32, shuffle=False, device="cpu", **kwargs
     ) -> "ConceptDatasetSample":
-        """
-        Embed the dataset using a given model.
-
-        Parameters:
-        - model: A model that can embed the dataset.
-
-        Returns:
-        - An embedded version of the dataset.
-        """
         model = model.to(device)
         model.eval()
         loader = self.loader(
@@ -633,7 +1040,6 @@ class ConceptDatasetSample(Dataset):
 
         embedded_X = []
         for x_batch, c_batch, y_batch in tqdm(loader):
-            # Normalize x_batch to a tensor batch if possible
             if isinstance(x_batch, (list, tuple)):
                 x_batch = [
                     torch.as_tensor(x) if not isinstance(x, torch.Tensor) else x
@@ -657,28 +1063,63 @@ class ConceptDatasetSample(Dataset):
         embed_meta = dict(self.meta).copy()
         embed_meta["data_type"] = "tabular"
 
-        return ConceptDatasetSample(
+        new_sample = ConceptDatasetSample(
             parent=self.parent,
             X=embedded_X,
-            C=self.C,
-            y=self.y,
+            C=self.base_concepts,
+            y=self.base_labels,
             meta=embed_meta,
             indices=self.indices,
+            concept_noise=self.concept_noise,
+            concept_missing=self.concept_missing,
+            label_noise=self.label_noise,
         )
+        if self.concept_noise_mask is not None:
+            new_sample.set_concept_noise_mask(self.concept_noise_mask.copy())
+        if self.concept_missing_mask is not None:
+            new_sample.set_concept_missing_mask(
+                self.concept_missing_mask.copy(),
+                fill_value=self.concept_missing_fill_value,
+            )
+        if self.label_noise_labels is not None:
+            new_sample.set_label_noise_labels(self.label_noise_labels.copy())
+        return new_sample
 
 
-@dataclass
 class ConceptImageDatasetSample(ConceptDatasetSample):
-    """
-    A sample of a ConceptDataset that contains image data.
-    Inherits from ConceptDatasetSample.
-    """
-    preprocess: Callable | None = None
-
-    base_dir: Path = field(default_factory=lambda: Path("."))
-
-    def __post_init__(self):
-        super().__post_init__()
+    def __init__(
+        self,
+        X: np.ndarray,
+        C: np.ndarray,
+        y: np.ndarray,
+        meta: dict,
+        *,
+        parent: "ConceptDataset" = None,
+        indices: np.ndarray | None = None,
+        transform: Callable | None = None,
+        concept_transform: Callable | None = None,
+        target_transform: Callable | None = None,
+        preprocess: Callable | None = None,
+        base_dir: Path | str | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            X=X,
+            C=C,
+            y=y,
+            meta=meta,
+            parent=parent,
+            indices=indices,
+            transform=transform,
+            concept_transform=concept_transform,
+            target_transform=target_transform,
+            **kwargs,
+        )
+        self.preprocess = preprocess
+        if base_dir is None:
+            self.base_dir = Path(".")
+        else:
+            self.base_dir = Path(base_dir)
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
@@ -713,22 +1154,45 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         return chk
 
     def __repr__(self):
-        return f"ConceptImageDatasetSample<n={self.n}, n_concepts={self.n_concepts}, n_classes={self.n_classes}, data_type={self.meta.get('data_type')}, base_dir={self.base_dir}>"
+        return (
+            "ConceptImageDatasetSample<n={n}, n_concepts={nc}, n_classes={nl}, "
+            "data_type={dt}, base_dir={bd}>"
+        ).format(
+            n=self.n,
+            nc=self.n_concepts,
+            nl=self.n_classes,
+            dt=self.meta.get("data_type"),
+            bd=self.base_dir,
+        )
 
     def filter(self, indices):
         assert isinstance(indices, np.ndarray)
         assert indices.ndim == 1 and indices.shape[0] == self.n
         assert np.isin(indices, (0, 1)).all()
-        return self.__class__(
+        new_sample = self.__class__(
             parent=self.parent,
             X=self.X[indices],
-            C=self.C[indices],
-            y=self.y[indices],
+            C=self.base_concepts[indices],
+            y=self.base_labels[indices],
             meta=self.meta,
             indices=indices,
+            concept_noise=self.concept_noise,
+            concept_missing=self.concept_missing,
+            label_noise=self.label_noise,
             preprocess=self.preprocess,
             transform=self.transform,
             concept_transform=self.concept_transform,
             target_transform=self.target_transform,
             base_dir=self.base_dir,
+            **self._extra_kwargs,
         )
+        if self.concept_noise_mask is not None:
+            new_sample.set_concept_noise_mask(self.concept_noise_mask[indices])
+        if self.concept_missing_mask is not None:
+            new_sample.set_concept_missing_mask(
+                self.concept_missing_mask[indices],
+                fill_value=self.concept_missing_fill_value,
+            )
+        if self.label_noise_labels is not None:
+            new_sample.set_label_noise_labels(self.label_noise_labels[indices])
+        return new_sample
