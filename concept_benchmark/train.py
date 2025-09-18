@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any, Dict, Optional, Protocol, Tuple, Union
 
 import numpy as np
@@ -69,6 +70,36 @@ def _extract_logits(output: Any) -> torch.Tensor:
         output = torch.as_tensor(output)
     return output
 
+def _build_observation_mask(
+    tensor: torch.Tensor,
+    *,
+    fill_value: Any,
+    enabled: bool,
+) -> torch.Tensor:
+    """Return a boolean mask indicating observed concept entries.
+
+    Args:
+        tensor: Concept target tensor for a mini-batch.
+        fill_value: Sentinel value stored for missing annotations.
+        enabled: Whether missing annotations are present.
+
+    Returns:
+        torch.Tensor: Boolean tensor with ``True`` for observed labels.
+    """
+
+    if not enabled:
+        return torch.ones_like(tensor, dtype=torch.bool)
+
+    if isinstance(fill_value, float) and math.isnan(fill_value):
+        return ~torch.isnan(tensor)
+
+    fill_tensor = torch.as_tensor(
+        fill_value,
+        device=tensor.device,
+        dtype=tensor.dtype,
+    )
+    return ~torch.isclose(tensor, fill_tensor)
+
 
 class DefaultConceptTrainer:
     """Default BCE-with-logits trainer with early stopping on mean validation F1."""
@@ -128,7 +159,27 @@ class DefaultConceptTrainer:
 
         model = model.to(device)
 
-        loss_fn = cfg["loss_fn"] if cfg["loss_fn"] is not None else nn.BCEWithLogitsLoss()
+        default_loss_fn = nn.BCEWithLogitsLoss(reduction="none")
+        loss_fn = cfg["loss_fn"] if cfg["loss_fn"] is not None else default_loss_fn
+        use_masked_loss = cfg["loss_fn"] is None
+
+        train_missing_enabled = bool(getattr(train_dataset, "concept_missing", False)) and getattr(
+            train_dataset, "concept_missing_mask", None
+        ) is not None
+        train_fill_value = getattr(train_dataset, "concept_missing_fill_value", float("nan"))
+
+        valid_missing_enabled = False
+        valid_fill_value = float("nan")
+        if valid_dataset is not None:
+            valid_missing_enabled = bool(getattr(valid_dataset, "concept_missing", False)) and getattr(
+                valid_dataset, "concept_missing_mask", None
+            ) is not None
+            valid_fill_value = getattr(valid_dataset, "concept_missing_fill_value", float("nan"))
+
+        if train_missing_enabled and not use_masked_loss:
+            raise ValueError(
+                "Custom loss functions must handle concept-missing masks; set fit_params['loss_fn']=None to use the default masked BCE loss."
+            )
 
         if cfg["optimizer_factory"] is not None:
             optimizer = cfg["optimizer_factory"](model.parameters())
@@ -176,7 +227,8 @@ class DefaultConceptTrainer:
             model.train()
             running_loss = 0.0
             batches = 0
-            for batch_X, batch_C, _ in train_loader:
+            for batch in train_loader:
+                batch_X, batch_C, *_ = batch
                 # Training forward/backward pass
                 batch_X = _prepare_inputs(batch_X, device)
                 if isinstance(batch_C, torch.Tensor):
@@ -185,8 +237,24 @@ class DefaultConceptTrainer:
                     batch_C = torch.as_tensor(batch_C, device=device)
                 batch_C = batch_C.float()
 
+                mask_tensor = _build_observation_mask(
+                    batch_C,
+                    fill_value=train_fill_value,
+                    enabled=train_missing_enabled,
+                )
+                targets = torch.where(mask_tensor, batch_C, torch.zeros_like(batch_C))
+
                 logits = _extract_logits(model(batch_X))
-                loss = loss_fn(logits, batch_C)
+
+                if use_masked_loss:
+                    loss_tensor = loss_fn(logits, targets)
+                    mask_float = mask_tensor.to(loss_tensor.dtype)
+                    observed = mask_float.sum()
+                    if observed <= 0:
+                        continue
+                    loss = (loss_tensor * mask_float).sum() / observed
+                else:
+                    loss = loss_fn(logits, targets)
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -213,8 +281,10 @@ class DefaultConceptTrainer:
                 model.eval()
                 preds = []
                 targets = []
+                masks = []
                 with torch.no_grad():
-                    for batch_X, batch_C, _ in valid_loader:
+                    for batch in valid_loader:
+                        batch_X, batch_C, *_ = batch
                         # Validation forward pass for metrics only
                         batch_X = _prepare_inputs(batch_X, device)
                         if isinstance(batch_C, torch.Tensor):
@@ -223,23 +293,38 @@ class DefaultConceptTrainer:
                             batch_C = torch.as_tensor(batch_C, device=device)
                         batch_C = batch_C.float()
 
+                        mask_tensor = _build_observation_mask(
+                            batch_C,
+                            fill_value=valid_fill_value,
+                            enabled=valid_missing_enabled,
+                        )
+                        targets_tensor = torch.where(
+                            mask_tensor,
+                            batch_C,
+                            torch.zeros_like(batch_C),
+                        )
+
                         logits = _extract_logits(model(batch_X))
                         prob = torch.sigmoid(logits).cpu().numpy()
                         preds.append(prob)
-                        targets.append(batch_C.cpu().numpy())
+                        targets.append(targets_tensor.cpu().numpy())
+                        masks.append(mask_tensor.cpu().numpy().astype(bool))
 
                 if preds:
                     pred_arr = np.vstack(preds)
-                    tgt_arr = np.vstack(targets).astype(int)
+                    tgt_arr = np.vstack(targets)
+                    mask_arr = np.vstack(masks).astype(bool) if masks else np.ones_like(tgt_arr, dtype=bool)
                     concept_f1s = []
                     for j in range(num_concepts):
-                        try:
-                            concept_f1s.append(
-                                f1_score(tgt_arr[:, j], (pred_arr[:, j] > 0.5).astype(int))
-                            )
-                        except ValueError:
-                            concept_f1s.append(0.0)
-                    val_metric = float(np.mean(concept_f1s))
+                        observed = mask_arr[:, j]
+                        if not np.any(observed):
+                            continue
+                        y_true = tgt_arr[observed, j].astype(int)
+                        y_pred = (pred_arr[observed, j] > 0.5).astype(int)
+                        if np.unique(y_true).size < 2:
+                            continue
+                        concept_f1s.append(f1_score(y_true, y_pred))
+                    val_metric = float(np.mean(concept_f1s)) if concept_f1s else float("nan")
                 history["val_f1"].append(val_metric)
 
                 improved = val_metric > best_metric + cfg["min_delta"]

@@ -376,12 +376,28 @@ class ConceptDetector(object):
             raise RuntimeError("Must call fit(...) before calibrating.")
 
         logits = self._predict_logits(valid_dataset)
-        concepts = valid_dataset.C.astype(int)
+        concepts = valid_dataset.C.copy()
+
+        if (
+            bool(getattr(valid_dataset, "concept_missing", False))
+            and getattr(valid_dataset, "concept_missing_mask", None) is not None
+        ):
+            fill_value = getattr(valid_dataset, "concept_missing_fill_value", np.nan)
+            if isinstance(fill_value, float) and np.isnan(fill_value):
+                observed_mask = ~np.isnan(concepts)
+            else:
+                observed_mask = ~np.isclose(concepts, fill_value)
+        else:
+            observed_mask = np.ones_like(concepts, dtype=bool)
 
         params = []
         for i in range(self._n_concepts):
-            z = logits[:, i:i + 1]
-            y = concepts[:, i]
+            observed = observed_mask[:, i]
+            if not np.any(observed):
+                params.append({"w": 1.0, "b": 0.0})
+                continue
+            z = logits[observed, i:i + 1]
+            y = concepts[observed, i].astype(int)
             if np.unique(y).size < 2:
                 params.append({"w": 1.0, "b": 0.0})
                 continue
