@@ -3,7 +3,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from concept_benchmark.models import ConceptDetector
+from concept_benchmark.models import ConceptDetector, JointConceptModel
+from concept_benchmark.train import TrainerResult
 
 
 import pytest
@@ -28,9 +29,10 @@ def _any_state_diff(state_a, state_b):
 def test_detector_fit_predict_no_encoder(tabular_train_valid):
     train, valid, d, k = tabular_train_valid
     det = ConceptDetector(embedding_model=None)
-    det.fit(train, valid, freeze=True, fit_params={"epochs": 1, "device": "cpu", "batch_size": 16})
-    assert isinstance(det.concept_layers, nn.ModuleList)
-    assert len(det.concept_layers) == k
+    det.fit(train, valid, freeze=False, fit_params={"epochs": 1, "device": "cpu", "batch_size": 16})
+    assert isinstance(det.model, nn.Module)
+    assert det.n_concepts == k
+    assert isinstance(det.training_result, TrainerResult)
     pr = det.predict(valid, calibrate=False)
     _proba_checks(pr, len(valid), k)
 
@@ -42,6 +44,7 @@ def test_detector_fit_predict_with_encoder_freeze_variants(tabular_train_valid):
     det_frozen = ConceptDetector(embedding_model=copy.deepcopy(enc))
     before = copy.deepcopy(det_frozen.embedding_model.state_dict())
     det_frozen.fit(train, valid, freeze=True, fit_params={"epochs": 1, "device": "cpu"})
+    assert isinstance(det_frozen.model, JointConceptModel)
     after = det_frozen.embedding_model.state_dict()
     assert not _any_state_diff(before, after)
     pr = det_frozen.predict(valid, calibrate=False)
@@ -72,7 +75,7 @@ def test_detector_calibration_with_encoder_finetune(tabular_train_valid):
         calibrate=True,
         fit_params={"epochs": 2, "device": "cpu", "lr_encoder": 1e-2, "lr_heads": 1e-2, "batch_size": 8},
     )
-    assert len(det.concept_layers) == k
+    assert det.n_concepts == k
     # Calibrated by default when calibration params exist
     pr = det.predict(valid)
     _proba_checks(pr, len(valid), k)
@@ -86,7 +89,7 @@ def test_detector_calibration_with_encoder_finetune(tabular_train_valid):
 def test_detector_predict_raises_when_calibrate_requested_but_not_fitted(tabular_train_valid):
     train, valid, d, k = tabular_train_valid
     det = ConceptDetector(embedding_model=None)
-    det.fit(train, valid, freeze=True, fit_params={"epochs": 1, "device": "cpu"})
+    det.fit(train, valid, freeze=False, fit_params={"epochs": 1, "device": "cpu"})
     # Calibration requested but not fitted should raise
     with pytest.raises(RuntimeError):
         det.predict(valid, calibrate=True)

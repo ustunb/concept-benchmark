@@ -1,4 +1,7 @@
-from typing import Optional
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Dict, Optional, Protocol, Tuple, Union
 
 import numpy as np
 import torch
@@ -9,230 +12,254 @@ from tqdm import tqdm
 from concept_benchmark.data import ConceptDatasetSample
 
 
-def train_concept_heads(
-    train_dataset: ConceptDatasetSample,
-    valid_dataset: ConceptDatasetSample,
-    embedding_model: Optional[nn.Module],
-    *,
-    input_dim: Optional[int] = None,
-    l1_size: int = 100,
-    freeze: bool = False,
-    fit_params: Optional[dict] = None,
-) -> nn.ModuleList:
-    """
-    Train per-concept heads with optional finetuning of the embedding model.
+@dataclass
+class TrainerResult:
+    """Container returned by a concept trainer."""
 
-    - If `freeze=True`, only head parameters are updated; the embedding model runs in eval mode.
-    - If `freeze=False` and an embedding model is provided, both embedding model and heads are optimized with separate LRs (joint training).
-    - Loss: mean BCEWithLogits across concepts.
-    - Early stopping based on mean validation F1.
+    model: nn.Module
+    history: Optional[Dict[str, Any]] = None
+    best_metric: Optional[float] = None
 
-    Returns:
-        nn.ModuleList: trained list of per-concept heads (each maps embedding -> 1 logit).
-    """
-    params = {
-        "epochs": 10,
-        "batch_size": 64,
-        "lr_encoder": 1e-5,
-        "lr_heads": 1e-3,
-        "min_delta": 0.001,
-        "patience": 5,
-        "device": "cpu",
-        "num_workers": 0,
-        "pin_memory": False,
-        "loss_fn": None,
-        # logging controls
-        "verbose": False,
-        "log_interval": 50,
-    }
-    if fit_params:
-        params.update(fit_params)
 
-    device = params["device"]
+TrainerOutput = Union[nn.Module, Tuple[nn.Module, Dict[str, Any]], TrainerResult]
 
-    # Infer number of concepts and embedding dimension
-    num_concepts = train_dataset.n_concepts
 
-    # If input_dim unknown, infer from a small forward pass
-    if input_dim is None:
-        samp_bs = min(8, max(1, getattr(train_dataset, "n", 8)))
-        samp_loader = train_dataset.loader(
-            batch_size=samp_bs,
-            shuffle=False,
-            num_workers=params["num_workers"],
-            pin_memory=params["pin_memory"],
-        )
-        with torch.no_grad():
-            bx, _, _ = next(iter(samp_loader))
-            if isinstance(bx, torch.Tensor):
-                bx = bx.to(device)
-            if embedding_model is None:
-                emb = bx
-            else:
-                embedding_model = embedding_model.to(device)
-                embedding_model.eval()
-                emb = embedding_model(bx)
-            if isinstance(emb, (list, tuple)):
-                emb = emb[0]
-            if not isinstance(emb, torch.Tensor):
-                emb = torch.as_tensor(emb, device=device, dtype=torch.float32)
-            input_dim = int(emb.shape[1])
+class ConceptTrainer(Protocol):
+    """Protocol for pluggable concept trainers."""
 
-    # Heads: independent per-concept MLPs
-    heads = nn.ModuleList(
-        [
-            nn.Sequential(
-                nn.Linear(input_dim, l1_size), nn.ReLU(), nn.Linear(l1_size, 1)
+    def __call__(
+        self,
+        model: nn.Module,
+        train_dataset: ConceptDatasetSample,
+        valid_dataset: Optional[ConceptDatasetSample],
+        *,
+        num_concepts: int,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> TrainerOutput:
+        ...
+
+
+def _prepare_inputs(x: Any, device: torch.device) -> Any:
+    """Move nested tensors/arrays to the target device while preserving structure."""
+    if isinstance(x, torch.Tensor):
+        return x.to(device)
+    if isinstance(x, dict):
+        return {k: _prepare_inputs(v, device) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        prepared = [_prepare_inputs(v, device) for v in x]
+        try:
+            return torch.stack(prepared, dim=0)
+        except Exception:
+            return prepared
+    return torch.as_tensor(x, device=device)
+
+
+def _extract_logits(output: Any) -> torch.Tensor:
+    """Convert a model forward output into a tensor of logits."""
+    if isinstance(output, (list, tuple)):
+        if not output:
+            raise ValueError("Model forward returned an empty sequence.")
+        output = output[0]
+    if isinstance(output, dict):
+        if "logits" in output:
+            output = output["logits"]
+        else:
+            raise TypeError("Cannot extract logits from dict output without 'logits' key.")
+    if not isinstance(output, torch.Tensor):
+        output = torch.as_tensor(output)
+    return output
+
+
+class DefaultConceptTrainer:
+    """Default BCE-with-logits trainer with early stopping on mean validation F1."""
+
+    def __call__(
+        self,
+        model: nn.Module,
+        train_dataset: ConceptDatasetSample,
+        valid_dataset: Optional[ConceptDatasetSample],
+        *,
+        num_concepts: int,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> TrainerResult:
+        """Train ``model`` on concept supervision and return the best checkpoint.
+
+        Args:
+            model: Joint concept model emitting ``num_concepts`` logits.
+            train_dataset: Dataset used for optimisation.
+            valid_dataset: Optional dataset used for early stopping and metric
+                tracking. Pass ``None`` to disable early stopping.
+            num_concepts: Number of concept targets in the dataset; used for
+                computing mean validation F1.
+            params: Optional dictionary overriding the default hyperparameters
+                (e.g. ``epochs``, ``batch_size``, ``lr``).
+
+        Returns:
+            TrainerResult: Object containing the best-scoring model snapshot plus
+            training history.
+
+        Raises:
+            ValueError: If the model forward pass returns an empty sequence of
+                outputs.
+        """
+        cfg: Dict[str, Any] = {
+            "epochs": 10,
+            "batch_size": 64,
+            "valid_batch_size": None,
+            "lr": 1e-3,
+            "weight_decay": 0.0,
+            "min_delta": 0.0,
+            "patience": 5,
+            "device": "cpu",
+            "num_workers": 0,
+            "pin_memory": False,
+            "loss_fn": None,
+            "optimizer_factory": None,
+            "scheduler_factory": None,
+            "use_tqdm": True,
+            "verbose": False,
+            "log_interval": 50,
+        }
+        if params:
+            cfg.update(params)
+
+        device = torch.device(cfg["device"])
+        valid_batch_size = cfg["valid_batch_size"] or cfg["batch_size"]
+
+        model = model.to(device)
+
+        loss_fn = cfg["loss_fn"] if cfg["loss_fn"] is not None else nn.BCEWithLogitsLoss()
+
+        if cfg["optimizer_factory"] is not None:
+            optimizer = cfg["optimizer_factory"](model.parameters())
+        else:
+            optimizer = torch.optim.Adam(
+                model.parameters(), lr=cfg["lr"], weight_decay=cfg["weight_decay"]
             )
-            for _ in range(num_concepts)
-        ]
-    )
 
-    # Move modules to device
-    if embedding_model is not None:
-        embedding_model.to(device)
-        if freeze:
-            for p in embedding_model.parameters():
-                p.requires_grad = False
-        embedding_model.eval() if freeze else embedding_model.train()
-    heads.to(device)
+        scheduler = None
+        if cfg["scheduler_factory"] is not None:
+            scheduler = cfg["scheduler_factory"](optimizer)
 
-    # Optimizer parameter groups
-    optim_params = []
-    if embedding_model is not None and not freeze:
-        optim_params.append(
-            {"params": embedding_model.parameters(), "lr": params["lr_encoder"]}
+        train_loader = train_dataset.loader(
+            batch_size=cfg["batch_size"],
+            shuffle=True,
+            num_workers=cfg["num_workers"],
+            pin_memory=cfg["pin_memory"],
         )
-    optim_params.append({"params": heads.parameters(), "lr": params["lr_heads"]})
-    optimizer = torch.optim.Adam(optim_params)
+        valid_loader = (
+            valid_dataset.loader(
+                batch_size=valid_batch_size,
+                shuffle=False,
+                num_workers=cfg["num_workers"],
+                pin_memory=cfg["pin_memory"],
+            )
+            if valid_dataset is not None
+            else None
+        )
 
-    loss_fn = params["loss_fn"] if params["loss_fn"] is not None else nn.BCEWithLogitsLoss()
+        best_metric = float("-inf")
+        best_state: Optional[Dict[str, torch.Tensor]] = None
+        patience_counter = 0
 
-    train_loader = train_dataset.loader(
-        batch_size=params["batch_size"],
-        shuffle=True,
-        num_workers=params["num_workers"],
-        pin_memory=params["pin_memory"],
-    )
-    valid_loader = valid_dataset.loader(
-        batch_size=params["batch_size"],
-        shuffle=False,
-        num_workers=params["num_workers"],
-        pin_memory=params["pin_memory"],
-    )
+        history: Dict[str, Any] = {
+            "train_loss": [],
+            "val_f1": [],
+        }
 
-    best_val_f1 = -1.0
-    patience_counter = 0
-    best_heads_state = None
-    best_encoder_state = None
+        epoch_iter = range(cfg["epochs"])
+        if cfg["use_tqdm"]:
+            epoch_iter = tqdm(epoch_iter)
 
-    for epoch in tqdm(range(params["epochs"])):
-        # Train epoch
-        if embedding_model is not None and not freeze:
-            embedding_model.train()
-        heads.train()
-        running_loss = 0.0
-        batches = 0
         global_step = 0
-        for batch_X, batch_C, _ in train_loader:
-            # Move data
-            if isinstance(batch_X, torch.Tensor):
-                batch_X = batch_X.to(device)
-            if isinstance(batch_C, torch.Tensor):
-                batch_C = batch_C.to(device)
-            batch_C = batch_C.float()
-
-            # Forward
-            with torch.set_grad_enabled(True):
-                if embedding_model is None:
-                    emb = batch_X
-                else:
-                    emb = embedding_model(batch_X)
-                if isinstance(emb, (list, tuple)):
-                    emb = emb[0]
-                if not isinstance(emb, torch.Tensor):
-                    emb = torch.as_tensor(emb, device=device, dtype=torch.float32)
-
-                logits = [head(emb).squeeze(1) for head in heads]
-                logits = torch.stack(logits, dim=1)
-                loss = loss_fn(logits, batch_C)
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            # logging
-            running_loss += float(loss.item())
-            batches += 1
-            global_step += 1
-            if params["verbose"] and params["log_interval"] and (global_step % int(params["log_interval"])) == 0:
-                print(
-                    f"Epoch {epoch+1}/{params['epochs']} step {global_step}: loss={loss.item():.4f}"
-                )
-
-        # Validate
-        if embedding_model is not None:
-            embedding_model.eval()
-        heads.eval()
-        val_f1s = []
-        with torch.no_grad():
-            for batch_X, batch_C, _ in valid_loader:
-                if isinstance(batch_X, torch.Tensor):
-                    batch_X = batch_X.to(device)
+        for epoch in epoch_iter:
+            model.train()
+            running_loss = 0.0
+            batches = 0
+            for batch_X, batch_C, _ in train_loader:
+                # Training forward/backward pass
+                batch_X = _prepare_inputs(batch_X, device)
                 if isinstance(batch_C, torch.Tensor):
                     batch_C = batch_C.to(device)
+                else:
+                    batch_C = torch.as_tensor(batch_C, device=device)
                 batch_C = batch_C.float()
 
-                emb = batch_X if embedding_model is None else embedding_model(batch_X)
-                if isinstance(emb, (list, tuple)):
-                    emb = emb[0]
-                if not isinstance(emb, torch.Tensor):
-                    emb = torch.as_tensor(emb, device=device, dtype=torch.float32)
+                logits = _extract_logits(model(batch_X))
+                loss = loss_fn(logits, batch_C)
 
-                logits = [head(emb).squeeze(1) for head in heads]
-                logits = torch.stack(logits, dim=1)
-                preds = (torch.sigmoid(logits) > 0.5).int().cpu().numpy()
-                target = batch_C.cpu().numpy().astype(int)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
-                # F1 per concept then mean
-                concept_f1s = [
-                    f1_score(target[:, i], preds[:, i]) for i in range(num_concepts)
-                ]
-                val_f1s.append(np.mean(concept_f1s))
+                running_loss += float(loss.item())
+                batches += 1
+                global_step += 1
 
-        avg_train_loss = running_loss / max(1, batches)
-        avg_val_f1 = float(np.mean(val_f1s)) if len(val_f1s) else -1.0
+                if cfg["verbose"] and cfg["log_interval"]:
+                    if global_step % int(cfg["log_interval"]) == 0:
+                        print(
+                            f"Epoch {epoch + 1}/{cfg['epochs']} step {global_step}: loss={loss.item():.4f}"
+                        )
 
-        if params["verbose"]:
-            print(
-                f"Epoch {epoch+1}/{params['epochs']} | train_loss={avg_train_loss:.4f} | val_f1={avg_val_f1:.4f} | best_f1={best_val_f1 if best_val_f1>=0 else 0.0:.4f}"
-            )
+            avg_train_loss = running_loss / max(1, batches)
+            history["train_loss"].append(avg_train_loss)
 
-        if avg_val_f1 > best_val_f1 + params["min_delta"]:
-            best_val_f1 = avg_val_f1
-            patience_counter = 0
-            best_heads_state = {
-                k: v.cpu().clone() for k, v in heads.state_dict().items()
-            }
-            if embedding_model is not None and not freeze:
-                best_encoder_state = {
-                    k: v.cpu().clone() for k, v in embedding_model.state_dict().items()
-                }
-        else:
-            patience_counter += 1
-            if patience_counter >= params["patience"]:
-                if params["verbose"]:
-                    print(f"Early stopping at val F1={avg_val_f1:.4f}")
-                break
+            if scheduler is not None:
+                scheduler.step()
 
-    # Load best states
-    if best_heads_state is not None:
-        heads.load_state_dict(best_heads_state)
-    if embedding_model is not None and not freeze and best_encoder_state is not None:
-        embedding_model.load_state_dict(best_encoder_state)
+            val_metric = float("nan")
+            if valid_loader is not None:
+                model.eval()
+                preds = []
+                targets = []
+                with torch.no_grad():
+                    for batch_X, batch_C, _ in valid_loader:
+                        # Validation forward pass for metrics only
+                        batch_X = _prepare_inputs(batch_X, device)
+                        if isinstance(batch_C, torch.Tensor):
+                            batch_C = batch_C.to(device)
+                        else:
+                            batch_C = torch.as_tensor(batch_C, device=device)
+                        batch_C = batch_C.float()
 
-    # Ensure on CPU for downstream wrapping/embedding
-    heads.cpu()
-    if embedding_model is not None:
-        embedding_model.cpu()
+                        logits = _extract_logits(model(batch_X))
+                        prob = torch.sigmoid(logits).cpu().numpy()
+                        preds.append(prob)
+                        targets.append(batch_C.cpu().numpy())
 
-    return heads
+                if preds:
+                    pred_arr = np.vstack(preds)
+                    tgt_arr = np.vstack(targets).astype(int)
+                    concept_f1s = []
+                    for j in range(num_concepts):
+                        try:
+                            concept_f1s.append(
+                                f1_score(tgt_arr[:, j], (pred_arr[:, j] > 0.5).astype(int))
+                            )
+                        except ValueError:
+                            concept_f1s.append(0.0)
+                    val_metric = float(np.mean(concept_f1s))
+                history["val_f1"].append(val_metric)
+
+                improved = val_metric > best_metric + cfg["min_delta"]
+                if improved:
+                    best_metric = val_metric
+                    patience_counter = 0
+                    best_state = {
+                        k: v.detach().cpu().clone() for k, v in model.state_dict().items()
+                    }
+                else:
+                    patience_counter += 1
+                    if patience_counter >= cfg["patience"]:
+                        break
+
+        if best_state is not None:
+            model.load_state_dict(best_state)
+            model.to(device)
+
+        model = model.cpu()
+        model.eval()
+
+        best_value = None if best_metric == float("-inf") else best_metric
+        return TrainerResult(model=model, history=history, best_metric=best_value)
