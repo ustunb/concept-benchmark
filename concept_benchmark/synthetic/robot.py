@@ -1,6 +1,8 @@
 import re
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Callable, Mapping, Protocol, runtime_checkable
 
 import numpy as np
 import pandas as pd
@@ -15,6 +17,188 @@ from .helper.robot_catalog import (
 )
 from .helper import textgen as text_helper
 from .helper.utils import model_to_logistic, unlist0
+
+
+def _sigmoid(x: float | np.ndarray) -> float | np.ndarray:
+    return 1.0 / (1.0 + np.exp(-x))
+
+
+def _default_eval_globals() -> dict[str, Any]:
+    return {
+        "np": np,
+        "numpy": np,
+        "expit": _sigmoid,
+        "sigmoid": _sigmoid,
+        "int": int,
+        "float": float,
+        "bool": bool,
+        "abs": abs,
+        "min": min,
+        "max": max,
+        "round": round,
+    }
+
+
+def _value_to_probability(
+    value: Any,
+    *,
+    positive_label: str = "glorp",
+    negative_label: str = "drent",
+) -> float:
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if positive_label and lowered == positive_label.lower():
+            return 1.0
+        if negative_label and lowered == negative_label.lower():
+            return 0.0
+        try:
+            value = float(value)
+        except ValueError as exc:  # pragma: no cover - defensive branch
+            raise ValueError(
+                "Could not interpret label model output as probability"
+            ) from exc
+    if isinstance(value, (bool, np.bool_)):
+        return float(value)
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return float(value)
+    raise TypeError(
+        "Label model must return a string label, boolean, or probability value"
+    )
+
+
+def _clip_probability(p: float) -> float:
+    return float(np.clip(p, 0.0, 1.0))
+
+
+def _bayes_accuracy(probabilities: np.ndarray) -> float:
+    return float(np.mean(np.maximum(probabilities, 1.0 - probabilities)))
+
+
+def _apply_flip_noise(probabilities: np.ndarray, epsilon: float) -> np.ndarray:
+    if not 0.0 <= epsilon <= 0.5:
+        raise ValueError("flip probability epsilon must be between 0 and 0.5")
+    if epsilon == 0.0:
+        return probabilities
+    return probabilities * (1.0 - 2.0 * epsilon) + epsilon
+
+
+def _solve_flip_probability(
+    base_probabilities: np.ndarray,
+    target_accuracy: float,
+) -> float:
+    base_accuracy = _bayes_accuracy(base_probabilities)
+    if base_accuracy <= 0.5 + 1e-8:
+        raise ValueError("Base label model must yield Bayes accuracy above random chance")
+    if not 0.5 <= target_accuracy <= base_accuracy + 1e-8:
+        raise ValueError(
+            f"target_accuracy must be in [0.5, {base_accuracy:.3f}] for symmetric flip noise"
+        )
+    if target_accuracy >= base_accuracy:
+        return 0.0
+    numerator = target_accuracy - 0.5
+    denominator = base_accuracy - 0.5
+    ratio = numerator / denominator
+    epsilon = 0.5 * (1.0 - ratio)
+    return float(np.clip(epsilon, 0.0, 0.5))
+
+
+def estimate_bayes_accuracy(probabilities: Sequence[float]) -> float:
+    """Compute the Bayes optimal accuracy implied by label probabilities."""
+    probs = np.asarray(probabilities, dtype=np.float64)
+    if probs.ndim != 1:
+        raise ValueError("Probabilities must be a 1D iterable")
+    return _bayes_accuracy(probs)
+
+
+def symmetric_flip_probability_for_target(
+    probabilities: Sequence[float], target_accuracy: float
+) -> float:
+    """Solve the symmetric flip noise needed to reach ``target_accuracy``."""
+    probs = np.asarray(probabilities, dtype=np.float64)
+    if probs.ndim != 1:
+        raise ValueError("Probabilities must be a 1D iterable")
+    return _solve_flip_probability(probs, target_accuracy)
+
+
+@runtime_checkable
+class RobotLabelModel(Protocol):
+    def proba(self, row: pd.Series) -> float:
+        """Return P(label=1 | row)."""
+
+
+@dataclass
+class ExpressionLabelModel(RobotLabelModel):
+    expression: str
+    mode: str = "deterministic"
+    positive_label: str = "glorp"
+    negative_label: str = "drent"
+    global_namespace: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        expr = unlist0(self.expression)
+        self._compiled = compile(expr, "<robot_label_model>", "eval")
+        base_globals = _default_eval_globals()
+        if self.global_namespace:
+            base_globals.update(self.global_namespace)
+        self._globals = {"__builtins__": {}} | base_globals
+
+    def proba(self, row: pd.Series) -> float:
+        result = eval(self._compiled, self._globals, {"row": row})
+        if self.mode == "stochastic":
+            prob = _value_to_probability(result)
+        else:
+            prob = _value_to_probability(
+                result, positive_label=self.positive_label, negative_label=self.negative_label
+            )
+            prob = 1.0 if prob >= 0.5 else 0.0
+        return _clip_probability(prob)
+
+
+@dataclass
+class CallableLabelModel(RobotLabelModel):
+    fn: Callable[[pd.Series], Any]
+    positive_label: str = "glorp"
+    negative_label: str = "drent"
+
+    def proba(self, row: pd.Series) -> float:
+        value = self.fn(row)
+        prob = _value_to_probability(
+            value, positive_label=self.positive_label, negative_label=self.negative_label
+        )
+        return _clip_probability(prob)
+
+
+@dataclass
+class NoisyLabelModel(RobotLabelModel):
+    base: RobotLabelModel
+    flip_probability: float | Callable[[pd.Series], float]
+
+    def proba(self, row: pd.Series) -> float:
+        p = _clip_probability(self.base.proba(row))
+        epsilon = self.flip_probability(row) if callable(self.flip_probability) else self.flip_probability
+        epsilon = float(np.clip(epsilon, 0.0, 0.5))
+        return _clip_probability(p * (1.0 - 2.0 * epsilon) + epsilon)
+
+
+def _coerce_label_model(
+    model: Any,
+    *,
+    model_type: str,
+) -> RobotLabelModel:
+    if isinstance(model, (list, tuple)):
+        if not model:
+            raise ValueError("Empty model specification provided")
+        return _coerce_label_model(model[0], model_type=model_type)
+    if isinstance(model, RobotLabelModel):
+        return model
+    if callable(model):
+        return CallableLabelModel(model)
+    if isinstance(model, str):
+        expr = unlist0(model)
+        if model_type == "stochastic" and ">=" in expr and "expit" not in expr:
+            expr = model_to_logistic(expr)
+        return ExpressionLabelModel(expr, mode=model_type)
+    raise TypeError("model must be a string, callable, or RobotLabelModel instance")
 
 
 def create_synthetic_dataset(data_type: str = "image", **kwargs) -> ConceptDataset:
@@ -278,6 +462,8 @@ def create_robot_image_dataset(
     draw: bool = False,
     model: str = "",
     model_type: str = "deterministic",
+    target_accuracy: float | None = None,
+    rng_seed: int | None = 0,
     spurious_features: Sequence[str] | None = None,
     irrelevant_features: Sequence[str] | None = None,
     color_mode: str = "color",
@@ -287,7 +473,34 @@ def create_robot_image_dataset(
     epochs: int | None = None,
     **extra_params,
 ) -> ConceptDataset:
-    """Create an image-based robot ConceptDataset."""
+    """Create an image-based robot ConceptDataset.
+
+    Args:
+        concepts: Mapping from concept name to allowed values.
+        samples_per_instance: Number of sampled robots per concept configuration.
+        num_robots: Explicit number of robots to generate.
+        size: Rendering size key.
+        resolution: Override resolution.
+        output_directory: Directory where rendered images are stored.
+        draw: Whether to render robots to disk.
+        model: String expression, callable, or :class:`RobotLabelModel` that returns
+            label probabilities. Strings are evaluated with ``row`` bound to the
+            catalog row; deterministic expressions should emit ``'glorp'``/``'drent'``
+            (or booleans), stochastic expressions should emit probabilities.
+        model_type: "deterministic" skips label sampling and expects 0/1 outcomes;
+            "stochastic" samples labels from the provided probabilities.
+        target_accuracy: Optional desired Bayes optimal accuracy. If provided, the
+            routine applies symmetric label-flip noise to match the target (down to
+            chance level 0.5).
+        rng_seed: Seed used when sampling stochastic labels.
+        spurious_features: Features treated as spurious.
+        irrelevant_features: Additional features to drop from the catalog.
+        color_mode: Rendering color mode.
+        verbose: Print catalog debug information.
+
+    Returns:
+        A :class:`ConceptDataset` with metadata describing the labeling process.
+    """
 
     if not concepts:
         raise ValueError("'concepts' dictionary must be provided and non-empty")
@@ -319,22 +532,32 @@ def create_robot_image_dataset(
     catalog_df[OUTCOME_NAME] = OUTCOME_MISSING
     df = catalog_df
 
-    # Specify true labels
-    if model_type == "deterministic":
-        glorp_model_true = lambda row: eval(unlist0(model))
-    elif model_type == "stochastic":
-        glorp_model_true = lambda row: eval(model_to_logistic(model))
-    else:
+    if model_type not in {"deterministic", "stochastic"}:
         raise ValueError("Invalid model_type. Use 'deterministic' or 'stochastic'.")
 
-    df[OUTCOME_NAME] = df.apply(glorp_model_true, axis=1)
-    catalog_df[OUTCOME_NAME] = catalog_df.apply(glorp_model_true, axis=1)
+    label_model = _coerce_label_model(model, model_type=model_type)
 
-    if model_type == "deterministic":
-        # change "glorp" to 1 and "drent" to 0
-        catalog_df[OUTCOME_NAME] = catalog_df[OUTCOME_NAME].apply(
-            lambda x: 1 if x == "glorp" else 0
-        )
+    base_probabilities = []
+    for _, row in df.iterrows():
+        base_probabilities.append(_clip_probability(label_model.proba(row)))
+    base_probabilities = np.asarray(base_probabilities, dtype=np.float64)
+
+    epsilon = 0.0
+    probabilities = base_probabilities
+    if target_accuracy is not None:
+        epsilon = _solve_flip_probability(base_probabilities, target_accuracy)
+        probabilities = _apply_flip_noise(base_probabilities, epsilon)
+
+    rng = np.random.default_rng(rng_seed)
+    sample_labels = model_type == "stochastic" or (target_accuracy is not None and epsilon > 0.0)
+    if sample_labels:
+        labels = rng.binomial(1, np.clip(probabilities, 0.0, 1.0)).astype(np.int32)
+    else:
+        labels = (probabilities >= 0.5).astype(np.int32)
+
+    catalog_df["glorp_probability_base"] = base_probabilities.astype(np.float32)
+    catalog_df["glorp_probability"] = probabilities.astype(np.float32)
+    catalog_df[OUTCOME_NAME] = labels
 
     if verbose:
         print("Catalog DataFrame:")
@@ -369,6 +592,21 @@ def create_robot_image_dataset(
     catalog_df['color_left'] = catalog_df['color_left'].astype(str)
     catalog_df['color_right'] = catalog_df['color_right'].astype(str)
 
+    base_accuracy = _bayes_accuracy(base_probabilities)
+    bayes_accuracy = _bayes_accuracy(probabilities)
+    label_descriptor = model if isinstance(model, str) else repr(model)
+    label_stats = {
+        "model_type": model_type,
+        "base_bayes_accuracy": base_accuracy,
+        "bayes_accuracy": bayes_accuracy,
+    }
+    if target_accuracy is not None:
+        label_stats["target_accuracy"] = float(target_accuracy)
+    if epsilon:
+        label_stats["flip_probability"] = float(epsilon)
+    if rng_seed is not None:
+        label_stats["rng_seed"] = int(rng_seed)
+
     # Meta: metadata for ConceptDataset
     meta = {
         "classes": ["drent", "glorp"],
@@ -377,7 +615,9 @@ def create_robot_image_dataset(
         "image_dir": image_dir,
         "resolution": eff_resolution,
         "color_mode": color_mode,
-        "labeling_function": model,
+        "label_model": label_descriptor,
+        "labeling_function": label_descriptor,
+        "label_stats": label_stats,
         "num_robots": total_robots,
         "robot_ids": catalog_df["id"].values,
         "catalog_df": catalog_df,
