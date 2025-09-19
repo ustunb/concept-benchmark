@@ -74,14 +74,23 @@ def get_model_file(
     model_type: str,
     n: int,
     concept_noise: float = 0.0,
+    concept_missing: float = 0.0,
+    concept_missing_mech: str = "none",
     target_accuracy: float = 1.0,
     **kwargs
 ) -> Path:
     """Get the file path for the model based on its parameters."""
     if data_name == "sudoku":
-        filename = f"sudoku_{data_type}_{model_type}_{n**2}_{kwargs.get('max_corrupt')}_{concept_noise}_{target_accuracy}.model"
+        filename = f"sudoku_{data_type}_{model_type}_{n**2}_{kwargs.get('max_corrupt')}"
     elif data_name == "robot":
-        filename = f"robot_{data_type}_{model_type}_{n}_{concept_noise}_{target_accuracy}.model"
+        filename = f"robot_{data_type}_{model_type}_{n}"
+        
+    filename += f"_{concept_noise}"
+
+    if concept_missing:
+        filename += f"_{concept_missing_mech}_{concept_missing}"
+
+    filename += f"_{target_accuracy}.model"
 
     return results_dir / filename
     
