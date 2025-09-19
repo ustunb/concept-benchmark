@@ -227,6 +227,7 @@ def create_robot_text_dataset(
     variants_per_row: int = 3,
     include_color: bool = True,
     rng_seed: int = 0,
+    concept_noise: float | None = None,
     head_col: str = "head_shape",
     body_col: str = "body_shape",
     knees_col: str = "has_knees",
@@ -250,6 +251,12 @@ def create_robot_text_dataset(
     templates = [re.sub(r'^[\uFEFF\u200B-\u200D]+', '', t) for t in templates]
     templates = [text_helper._rewrite_modifiers(t) for t in templates]
     rng = np.random.default_rng(rng_seed)
+    if concept_noise is not None:
+        if not 0.0 <= concept_noise <= 1.0:
+            raise ValueError("concept_noise must be within [0.0, 1.0]")
+        concept_noise_p = float(concept_noise)
+    else:
+        concept_noise_p = 0.0
     mode = (text_mode or ("llm" if use_llm else "unstructured")).strip().lower()
 
     if isinstance(source, ConceptDataset):
@@ -443,18 +450,30 @@ def create_robot_text_dataset(
         "classes": classes,
         "row_index": idxs,
     }
-    return ConceptDataset(
+    if concept_noise is not None:
+        meta["concept_noise"] = {
+            "enabled": concept_noise_p > 0.0,
+            "scheme": "uniform_flip",
+            "p": concept_noise_p,
+        }
+
+    dataset = ConceptDataset(
         X=list(X),
         C=np.asarray(C_out, dtype=np.int8),
         y=np.asarray(y_out, dtype=np.int32),
         meta=meta,
     )
 
+    if concept_noise_p > 0.0:
+        dataset.sample_concept_noise(p=concept_noise_p, rng=rng_seed, enable=True)
+
+    return dataset
+
 
 def create_robot_image_dataset(
     *,
     concepts: dict,
-    samples_per_instance: int = 1,
+    n: int = 1,
     num_robots: int | None = None,
     size: str = "large",
     resolution: int | None = None,
@@ -463,6 +482,7 @@ def create_robot_image_dataset(
     model: str = "",
     model_type: str = "deterministic",
     target_accuracy: float | None = None,
+    concept_noise: float | None = None,
     rng_seed: int | None = 0,
     spurious_features: Sequence[str] | None = None,
     irrelevant_features: Sequence[str] | None = None,
@@ -477,7 +497,7 @@ def create_robot_image_dataset(
 
     Args:
         concepts: Mapping from concept name to allowed values.
-        samples_per_instance: Number of sampled robots per concept configuration.
+        n: Number of sampled robots per concept configuration (previously `samples_per_instance`).
         num_robots: Explicit number of robots to generate.
         size: Rendering size key.
         resolution: Override resolution.
@@ -492,6 +512,8 @@ def create_robot_image_dataset(
         target_accuracy: Optional desired Bayes optimal accuracy. If provided, the
             routine applies symmetric label-flip noise to match the target (down to
             chance level 0.5).
+        concept_noise: Probability of flipping each concept bit independently.
+            Must be in [0.0, 1.0].
         rng_seed: Seed used when sampling stochastic labels.
         spurious_features: Features treated as spurious.
         irrelevant_features: Additional features to drop from the catalog.
@@ -508,7 +530,7 @@ def create_robot_image_dataset(
         raise ValueError("'model' expression must be provided for label generation")
 
     num_combinations = int(np.prod([len(v) for v in concepts.values()]))
-    total_robots = num_robots or num_combinations * samples_per_instance
+    total_robots = num_robots or num_combinations * n
     eff_resolution = resolution if resolution is not None else (600 if size == "large" else 36)
     spurious = list(spurious_features or [])
     irrelevant = list(irrelevant_features) if irrelevant_features is not None else spurious
@@ -547,6 +569,13 @@ def create_robot_image_dataset(
     if target_accuracy is not None:
         epsilon = _solve_flip_probability(base_probabilities, target_accuracy)
         probabilities = _apply_flip_noise(base_probabilities, epsilon)
+
+    if concept_noise is not None:
+        if not 0.0 <= concept_noise <= 1.0:
+            raise ValueError("concept_noise must be within [0.0, 1.0]")
+        concept_noise_p = float(concept_noise)
+    else:
+        concept_noise_p = 0.0
 
     rng = np.random.default_rng(rng_seed)
     sample_labels = model_type == "stochastic" or (target_accuracy is not None and epsilon > 0.0)
@@ -623,6 +652,13 @@ def create_robot_image_dataset(
         "catalog_df": catalog_df,
     }
 
+    if concept_noise is not None:
+        meta["concept_noise"] = {
+            "enabled": concept_noise_p > 0.0,
+            "scheme": "uniform_flip",
+            "p": concept_noise_p,
+        }
+
     robot_dataset = ConceptDataset(
         X=X,
         C=C,
@@ -630,6 +666,9 @@ def create_robot_image_dataset(
         meta=meta,
         base_dir=image_dir,
     )
+
+    if concept_noise_p > 0.0:
+        robot_dataset.sample_concept_noise(p=concept_noise_p, rng=rng_seed, enable=True)
 
     return robot_dataset
 

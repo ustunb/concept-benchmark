@@ -27,7 +27,7 @@ from concept_benchmark.synthetic.helper.sudoku_helper import (
 SUDOKU_DIR = data_dir / "sudoku"
 
 
-# TODO: label noise, concept noise, concept masking toggles
+# TODO: concept masking toggles
 def create_sudoku_dataset(
     *,
     n: int = 3,
@@ -36,6 +36,8 @@ def create_sudoku_dataset(
     max_corrupt: int = 3,
     data_type: str = "image",
     seed: int = 42,
+    target_accuracy: float | None = None,
+    concept_noise: float | None = None,
     transform: Callable[[np.ndarray], np.ndarray] | None = None,
     dataset_name: str | None = None,
     add_cell_digit_concepts: bool = False,
@@ -64,6 +66,11 @@ def create_sudoku_dataset(
             Default is None, which uses a simple flattening transform.
         dataset_name (str, optional): name of the dataset, used as folder name
             for saving images.
+        target_accuracy (float, optional): Desired Bayes accuracy of the noisy
+            labeler. Must be in [0.5, 1.0]. When provided, symmetric Bernoulli
+            label noise is injected via ``ConceptDataset.sample_label_noise``.
+        concept_noise (float, optional): Probability of flipping each concept bit
+            independently. Must be in [0.0, 1.0].
         add_cell_digit_concepts: If True, append per-cell digit concepts
             of the form f"{cell_concept_prefix}({r+1},{c+1})_is_{d}".
         positions_subset: Optional subset of 0-indexed (row, col) pairs.
@@ -81,6 +88,20 @@ def create_sudoku_dataset(
 
     random.seed(seed)
     np.random.seed(seed)
+
+    if target_accuracy is not None:
+        if not 0.5 <= target_accuracy <= 1.0:
+            raise ValueError("target_accuracy must be within [0.5, 1.0]")
+        epsilon = float(np.clip(1.0 - target_accuracy, 0.0, 0.5))
+    else:
+        epsilon = 0.0
+
+    if concept_noise is not None:
+        if not 0.0 <= concept_noise <= 1.0:
+            raise ValueError("concept_noise must be within [0.0, 1.0]")
+        concept_noise_p = float(concept_noise)
+    else:
+        concept_noise_p = 0.0
 
     N = n * n
     transform = transform or default_transform
@@ -190,12 +211,35 @@ def create_sudoku_dataset(
         },
     }
 
+    if target_accuracy is not None:
+        meta["label_noise"] = {
+            "enabled": epsilon > 0.0,
+            "scheme": "symmetric",
+            "epsilon": epsilon,
+            "target_accuracy": target_accuracy,
+        }
+
+    if concept_noise is not None:
+        meta["concept_noise"] = {
+            "enabled": concept_noise_p > 0.0,
+            "scheme": "uniform_flip",
+            "p": concept_noise_p,
+        }
+
     if data_type == "image":
         kwargs = {"preprocess": sudoku_image_preprocess}
     else:
         kwargs = {}
 
-    return ConceptDataset(X=X, C=C, y=y, meta=meta, **kwargs)
+    dataset = ConceptDataset(X=X, C=C, y=y, meta=meta, **kwargs)
+
+    if concept_noise_p > 0.0:
+        dataset.sample_concept_noise(p=concept_noise_p, rng=seed, enable=True)
+
+    if epsilon > 0.0:
+        dataset.sample_label_noise(p=epsilon, rng=seed, enable=True)
+
+    return dataset
 
 
 def default_transform(board: np.ndarray) -> np.ndarray:
