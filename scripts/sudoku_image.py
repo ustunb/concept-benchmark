@@ -1,6 +1,7 @@
 import os
 import sys
 sys.path.append(os.getcwd())
+from tqdm import tqdm
 import pickle
 import numpy as np
 from sklearn.metrics import confusion_matrix
@@ -27,7 +28,7 @@ settings = {
     "n": 3,
     "n_samples": 1000,
     "valid_ratio": 0.5,
-    "max_corrupt": 20,
+    "max_corrupt": 81,
     "data_type": "image",
     "transform": transform,
     "model_type": "vit"
@@ -77,14 +78,12 @@ train_loader = get_loader(data, "training")
 val_loader = get_loader(data, "validation")
 test_loader = get_loader(data, "test")
 
-
-# Models
 class SudokuCNN(nn.Module):
     def __init__(self):
 
         super().__init__()
 
-        # extract one feature per 25x25 patch
+        # extract 64 features per 25x25 patch
         self.patch_conv = nn.Conv2d(1, 64, 25, stride=25)
 
         # classifier after flattening convolution product
@@ -145,73 +144,112 @@ for epoch in range(n_epochs):
 
 torch.save(model, results_dir / "sudoku_digit_detector.pt")
 
+class ConceptSudokuCNN(nn.Module):
+    def __init__(self, embedding_dim=16, hidden_dim=64):
+        super(ConceptSudokuCNN, self).__init__()
 
-class SudokuConceptDector(nn.Module):
-    def __init__(self, sudoku_cnn):
+        # :brain: 1. Shared Backbone (Feature Extractor)
+        self.embedding = nn.Embedding(num_embeddings=10, embedding_dim=embedding_dim)
+        self.conv1 = nn.Conv2d(embedding_dim, 64, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
 
-        super().__init__()
+        # :dart: 2. Prediction Heads
+        # Each head is a small neural network that processes aggregated features.
+        # The input to each head's MLP will be the number of channels from the last conv layer (128).
 
-        # pre-trained digit classifier
-        self.sudoku_cnn = sudoku_cnn
-
-        # concept detector head
-        n_features = int(81 * 9)
-
-        self.concept_head = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(n_features, 364),
+        # Head for predicting Row validity
+        self.row_head = nn.Sequential(
+            nn.Linear(128, hidden_dim),
             nn.ReLU(),
-            nn.Linear(364, 91),
-            nn.ReLU(),
-            nn.Linear(91, 27)
+            nn.Linear(hidden_dim, 1)
         )
 
-    def forward(self, X):
-        digits = self.sudoku_cnn(X)
-        # probs = F.softmax(digits, dim=-1)  # (B, 81, 9)
-        return self.concept_head(digits)
+        # Head for predicting Column validity
+        self.col_head = nn.Sequential(
+            nn.Linear(128, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1)
+        )
+
+        # Head for predicting Block validity
+        self.block_head = nn.Sequential(
+            nn.Linear(128, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1)
+        )
+
+        # A pooling layer to aggregate features for the 3x3 blocks
+        self.block_pool = nn.AdaptiveAvgPool2d((3, 3))
+
+    def forward(self, x):
+        # Ensure input is long type for embedding layer
+        x = x.long()
+
+        # --- Shared Backbone ---
+        x = self.embedding(x) # (N, 81, D_embed)
+        x = x.permute(0, 2, 1).view(-1, x.size(2), 9, 9) # (N, D_embed, 9, 9)
+        x = F.relu(self.conv1(x))
+        features = F.relu(self.conv2(x)) # (N, 128, 9, 9) - These are the shared features
+
+        # --- Row Predictions ---
+        # Aggregate features along each row (mean across the width dimension)
+        row_features = torch.mean(features, dim=3) # (N, 128, 9)
+        row_features = row_features.permute(0, 2, 1) # (N, 9, 128)
+        row_preds = self.row_head(row_features).squeeze(-1) # (N, 9)
+
+        # --- Column Predictions ---
+        # Aggregate features along each column (mean across the height dimension)
+        col_features = torch.mean(features, dim=2) # (N, 128, 9)
+        col_features = col_features.permute(0, 2, 1) # (N, 9, 128)
+        col_preds = self.col_head(col_features).squeeze(-1) # (N, 9)
+
+        # --- Block Predictions ---
+        # Pool features in each 3x3 block
+        block_features = self.block_pool(features) # (N, 128, 3, 3)
+        # Flatten the 3x3 grid to get 9 block vectors
+        block_features = block_features.view(features.size(0), features.size(1), -1) # (N, 128, 9)
+        block_features = block_features.permute(0, 2, 1) # (N, 9, 128)
+        block_preds = self.block_head(block_features).squeeze(-1) # (N, 9)
+
+        # Concatenate all predictions
+        all_preds = torch.cat([row_preds, col_preds, block_preds], dim=1) # (N, 27)
+
+        return torch.sigmoid(all_preds)
+
 
 print("Training: prediction on concepts")
-
 sudoku_cnn = torch.load(results_dir / "sudoku_digit_detector.pt", weights_only=False)
-model = SudokuConceptDector(sudoku_cnn)
 
-loss_fn = nn.BCEWithLogitsLoss()
-opt = torch.optim.AdamW(model.parameters(), lr=1e-5)
-n_epochs = 200
+model = ConceptSudokuCNN().to(device)
+criterion = nn.BCELoss() # Binary Cross-Entropy Loss for binary classification
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
-for epoch in range(n_epochs):
-
+for epoch in tqdm(range(200)):
     for X, board, concepts, y in train_loader:
-        logits = model(X)
-        loss = loss_fn(logits, concepts)
 
+        board_pred = sudoku_cnn(X).argmax(dim=2)
+
+        # Zero the gradients
+        optimizer.zero_grad()
+
+        # Forward pass
+        outputs = model(board_pred.to(device))
+        loss = criterion(outputs, concepts.float().to(device))
+
+        # Backward pass and optimize
         loss.backward()
-        opt.step()
-        opt.zero_grad()
+        optimizer.step()
 
+concepts_all = []
+concepts_pred_all = []
+for X, board, concepts, y in test_loader:
     with torch.no_grad():
+        board_pred = sudoku_cnn(X).argmax(dim=2)
+        outputs = model(board_pred.to(device))
+        concepts_pred_all.append((outputs > 0.5).to(int).to('cpu'))
+        concepts_all.append(concepts)
+conf_matrix = confusion_matrix(
+    torch.vstack(concepts_all).flatten(), torch.vstack(concepts_pred_all).flatten()
+)
+print("test concept confusion matrix: \n", conf_matrix)
 
-        loss = 0
-        acc = 0
-        conf_matrix = np.zeros(4)
-
-        for X, board, concepts, y in val_loader:
-
-            logits = model(X)
-            c_pred = torch.sigmoid(logits) > 0.5
-            y_pred = (c_pred).all(dim=1) # AND
-
-            loss += loss_fn(logits, concepts)
-            acc += (c_pred == concepts).to(torch.float16).mean()
-            conf_matrix += confusion_matrix(y, y_pred).ravel()
-
-
-        if epoch % 10 != 0:
-            continue
-
-        perf = [f"{i}: {j}" for i, j in zip(["tn", "fp", "fn", "tp"], confusion_matrix(y, y_pred).ravel())]
-        loss = round(float(loss / len(val_loader)), 3)
-        acc = round(float(acc / len(val_loader)), 3)
-
-        print(f"epoch {epoch} \t val_loss: {loss:.3f} \t val_acc: {acc:.3f}", "\t", "\t".join(perf))
