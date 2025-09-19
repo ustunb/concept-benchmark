@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from concept_benchmark.models import ConceptDetector, JointConceptModel
+from concept_benchmark.models import ConceptBasedModel, ConceptDetector, JointConceptModel
 from concept_benchmark.train import TrainerResult
 
 
@@ -113,3 +113,42 @@ def test_detector_calibrate_after_fit_changes_predictions(tabular_train_valid):
     _proba_checks(pr_uncal, len(valid), k)
     _proba_checks(pr_cal, len(valid), k)
     assert not np.allclose(pr_uncal, pr_cal)
+
+
+def test_detector_save_load_round_trip(tabular_train_valid, tmp_path):
+    train, valid, d, k = tabular_train_valid
+    det = ConceptDetector(embedding_model=nn.Linear(d, 6))
+    det.fit(
+        train,
+        valid,
+        freeze=False,
+        fit_params={"epochs": 1, "device": "cpu", "batch_size": 16},
+    )
+    path = tmp_path / "detector.pkl"
+    det.save(path, overwrite=True, msg=False)
+    det_loaded = ConceptDetector.load(path, map_location="cpu")
+    pr_orig = det.predict(valid, calibrate=False)
+    pr_loaded = det_loaded.predict(valid, calibrate=False)
+    _proba_checks(pr_loaded, len(valid), k)
+    assert np.allclose(pr_orig, pr_loaded)
+    param = next(det_loaded.model.parameters())
+    assert param.device.type == "cpu"
+
+
+def test_concept_based_model_save_load(tabular_train_valid, tmp_path):
+    train, valid, d, k = tabular_train_valid
+    model = ConceptBasedModel()
+    model.fit(
+        train,
+        valid,
+        freeze=False,
+        concept_fit_params={"epochs": 1, "device": "cpu", "batch_size": 16},
+        calibrate=False,
+    )
+    path = tmp_path / "cbm.pkl"
+    model.save(path, overwrite=True, msg=False)
+    loaded = ConceptBasedModel.load(path, map_location="cpu")
+    preds_original = model.predict(valid)
+    preds_loaded = loaded.predict(valid)
+    assert np.array_equal(preds_original, preds_loaded)
+    assert type(loaded.front_end_model.model) is type(model.front_end_model.model)

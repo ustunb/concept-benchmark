@@ -1,3 +1,5 @@
+import copy
+import os
 import itertools
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
@@ -8,6 +10,7 @@ from sklearn.linear_model import LogisticRegression
 from tqdm import tqdm
 
 from concept_benchmark.data import ConceptDatasetSample
+from concept_benchmark.ext.fileutils import load as load_object, save as save_object
 from concept_benchmark.train import (
     ConceptTrainer,
     DefaultConceptTrainer,
@@ -119,6 +122,112 @@ class ConceptDetector(object):
         self.training_result: Optional[TrainerResult] = None
         self._n_concepts: Optional[int] = None
         self._eval_config: Dict[str, Any] = {}
+
+    def to(self, device: Union[str, torch.device]) -> "ConceptDetector":
+        """Move the underlying torch modules to a target device."""
+        target = torch.device(device)
+        if self.model is not None:
+            self.model.to(target)
+            if isinstance(self.model, JointConceptModel):
+                self.embedding_model = self.model.backbone
+        elif self.embedding_model is not None:
+            self.embedding_model.to(target)
+        return self
+
+    def state_dict(self) -> Dict[str, Any]:
+        """Return a serialization-friendly snapshot of the detector."""
+        model_copy = None
+        if self.model is not None:
+            model_copy = copy.deepcopy(self.model)
+            model_copy.to("cpu")
+        embedding_copy = None
+        if self.embedding_model is not None:
+            embedding_copy = copy.deepcopy(self.embedding_model)
+            if isinstance(embedding_copy, nn.Module):
+                embedding_copy.to("cpu")
+
+        training_summary = None
+        if self.training_result is not None:
+            training_summary = {
+                "history": copy.deepcopy(self.training_result.history),
+                "best_metric": self.training_result.best_metric,
+            }
+
+        return {
+            "version": 1,
+            "model": model_copy,
+            "embedding_model": embedding_copy,
+            "calibration_params": copy.deepcopy(self.calibration_params),
+            "eval_config": copy.deepcopy(self._eval_config),
+            "n_concepts": self._n_concepts,
+            "training_summary": training_summary,
+        }
+
+    def load_state_dict(self, state: Dict[str, Any]) -> None:
+        """Restore detector state saved with :meth:`state_dict`."""
+        version = state.get("version", 1)
+        if version != 1:
+            raise ValueError(f"Unsupported ConceptDetector state version: {version}")
+
+        self.model = state.get("model")
+        if isinstance(self.model, JointConceptModel):
+            self.embedding_model = self.model.backbone
+        else:
+            self.embedding_model = state.get("embedding_model")
+            if isinstance(self.embedding_model, nn.Module):
+                self.embedding_model.to("cpu")
+        if self.model is not None and isinstance(self.model, nn.Module):
+            self.model.to("cpu")
+            self.model.eval()
+
+        self.calibration_params = state.get("calibration_params")
+        self._eval_config = state.get("eval_config", {})
+        self._n_concepts = state.get("n_concepts")
+
+        summary = state.get("training_summary")
+        if summary is not None:
+            self.training_result = TrainerResult(
+                model=None,
+                history=copy.deepcopy(summary.get("history")),
+                best_metric=summary.get("best_metric"),
+            )
+        else:
+            self.training_result = None
+
+    def save(
+        self,
+        path: Union[str, "os.PathLike"],
+        *,
+        overwrite: bool = False,
+        msg: bool = True,
+    ) -> "os.PathLike":
+        """Persist the detector using concept_benchmark.ext.fileutils.save."""
+        payload = {"version": 1, "state": self.state_dict()}
+        return save_object(payload, path, overwrite=overwrite, msg=msg)
+
+    @classmethod
+    def load(
+        cls,
+        path: Union[str, "os.PathLike"],
+        *,
+        map_location: Optional[Union[str, torch.device]] = "cpu",
+    ) -> "ConceptDetector":
+        """Restore a detector previously saved with ``save``."""
+        payload = load_object(path)
+        if isinstance(payload, dict) and "state" in payload:
+            state = payload["state"]
+        elif isinstance(payload, dict) and "detector" in payload:
+            detector = payload["detector"]
+            if map_location is not None:
+                detector.to(map_location)
+            return detector
+        else:
+            state = payload
+        detector = cls()
+        detector.load_state_dict(state)
+        if map_location is not None:
+            detector.to(map_location)
+        return detector
 
     def _default_head(self, feature_dim: int, hidden_dim: int, num_concepts: int) -> nn.Module:
         """Build a simple MLP concept head when the caller does not provide one.
@@ -600,6 +709,97 @@ class ConceptBasedModel(object):
         Return predicted probabilities for all concept combinations.
         """
         return self._y_proba_all_concepts
+
+    def _config_dict(self) -> Dict[str, Any]:
+        return {
+            "propagate": self._propagate,
+            "mc_mode": self._mc_mode,
+            "mc_samples": self._mc_samples,
+            "mc_max_samples": self._mc_max_samples,
+            "mc_chunk_size": self._mc_chunk_size,
+            "mc_tol": self._mc_tol,
+            "random_state": self._random_state,
+            "mc_exact_threshold": self._mc_exact_threshold,
+        }
+
+    def state_dict(self) -> Dict[str, Any]:
+        """Return a serialization-friendly snapshot of the ConceptBasedModel."""
+        return {
+            "version": 1,
+            "concept_detector": self.concept_detector.state_dict(),
+            "front_end_model": copy.deepcopy(self.front_end_model),
+            "config": self._config_dict(),
+            "concept_poss": copy.deepcopy(self._concept_poss),
+            "y_proba_all_concepts": copy.deepcopy(self._y_proba_all_concepts),
+        }
+
+    def load_state_dict(self, state: Dict[str, Any]) -> None:
+        """Restore model state saved with :meth:`state_dict`."""
+        version = state.get("version", 1)
+        if version != 1:
+            raise ValueError(f"Unsupported ConceptBasedModel state version: {version}")
+
+        detector_state = state.get("concept_detector")
+        if detector_state is None:
+            raise RuntimeError("Serialized ConceptBasedModel missing detector state")
+        if isinstance(detector_state, ConceptDetector):
+            detector_state = detector_state.state_dict()
+        self.concept_detector = ConceptDetector()
+        self.concept_detector.load_state_dict(detector_state)
+
+        self.front_end_model = copy.deepcopy(state.get("front_end_model", FrontEndModel()))
+        config = state.get("config", {})
+        self._propagate = config.get("propagate", False)
+        self._mc_mode = config.get("mc_mode", "auto")
+        self._mc_samples = config.get("mc_samples", 1024)
+        self._mc_max_samples = config.get("mc_max_samples", 16384)
+        self._mc_chunk_size = config.get("mc_chunk_size", 2048)
+        self._mc_tol = config.get("mc_tol", 1e-3)
+        self._random_state = config.get("random_state")
+        self._mc_exact_threshold = config.get("mc_exact_threshold", 4096)
+
+        self._concept_poss = state.get("concept_poss")
+        self._y_proba_all_concepts = state.get("y_proba_all_concepts")
+
+    def save(
+        self,
+        path: Union[str, "os.PathLike"],
+        *,
+        overwrite: bool = False,
+        include_propagation_cache: bool = True,
+        msg: bool = True,
+    ) -> "os.PathLike":
+        """Persist the full ConceptBasedModel to disk."""
+        state = self.state_dict()
+        if not include_propagation_cache:
+            state["concept_poss"] = None
+            state["y_proba_all_concepts"] = None
+        payload = {"version": 1, "state": state}
+        return save_object(payload, path, overwrite=overwrite, msg=msg)
+
+    @classmethod
+    def load(
+        cls,
+        path: Union[str, "os.PathLike"],
+        *,
+        map_location: Optional[Union[str, torch.device]] = "cpu",
+    ) -> "ConceptBasedModel":
+        """Load a ConceptBasedModel saved with :meth:`save`."""
+        payload = load_object(path)
+        if isinstance(payload, ConceptBasedModel):
+            model = payload
+            if map_location is not None:
+                model.concept_detector.to(map_location)
+            return model
+        if isinstance(payload, dict) and "state" in payload:
+            state = payload["state"]
+        else:
+            state = payload
+        model = cls()
+        model.load_state_dict(state)
+        if map_location is not None:
+            model.concept_detector.to(map_location)
+        return model
 
     def fit(
         self,
