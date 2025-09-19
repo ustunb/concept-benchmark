@@ -144,7 +144,7 @@ class InterventionConfig:
     def _resolve_budget(budget: Optional[float], total: int) -> int:
         if budget is None:
             return total
-        if isinstance(budget, float) and not float(budget).is_integer():
+        if isinstance(budget, float):
             if not (0.0 <= budget <= 1.0):
                 raise ValueError("Fractional budgets must lie within [0, 1].")
             return min(total, max(0, math.ceil(budget * total)))
@@ -271,7 +271,7 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
                 "Conceptual safeguards require tau to be specified in the config."
             )
 
-        y_prob = model.front_end_model.predict_proba(batch.C_pred)
+        y_prob = model._propagate_predict_proba_mc(batch.C_pred)
         predicted = np.argmax(y_prob, axis=1)
         confidences = y_prob[np.arange(batch.n_samples), predicted]
         abstain_mask = (confidences >= config.tau) & (confidences <= 1.0 - config.tau)
@@ -473,15 +473,29 @@ class ConceptInterventionRunner:
             instance_ids=instance_ids,
         )
 
-        y_prob_before = self.model.front_end_model.predict_proba(batch.C_pred)
+        # Propose interventions based on the strategy.
         proposal = strategy.propose(self.model, batch, config)
         if proposal.mask.shape != batch.C_pred.shape:
             raise InterventionError(
-                "Strategy returned a mask with shape"
-                f" {proposal.mask.shape}, expected {batch.C_pred.shape}."
+            "Strategy returned a mask with shape"
+            f" {proposal.mask.shape}, expected {batch.C_pred.shape}."
             )
+
+        # TODO: see if we can get rid of explicit >= 0.5
+        # Determine how to get predictions from the downstream model.
+        # Conceptual safeguards operate on concept probabilities, others on binarized concepts.
+        if isinstance(strategy, ConceptualSafeguardsStrategy):
+            predict_proba_fn = self.model._propagate_predict_proba_mc
+            concepts_before = batch.C_pred
+        else:
+            predict_proba_fn = self.model.front_end_model.predict_proba
+            concepts_before = batch.C_pred >= 0.5
+
+        # Evaluate the model before and after the intervention.
+        y_prob_before = predict_proba_fn(concepts_before)
         C_intervened = np.where(proposal.mask, batch.C_true, batch.C_pred)
-        y_prob_after = self.model.front_end_model.predict_proba(C_intervened)
+        concepts_after = C_intervened if isinstance(strategy, ConceptualSafeguardsStrategy) else (C_intervened >= 0.5)
+        y_prob_after = predict_proba_fn(concepts_after)
         y_pred_after = np.argmax(y_prob_after, axis=1)
 
         return InterventionResult(

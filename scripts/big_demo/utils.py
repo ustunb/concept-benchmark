@@ -90,7 +90,10 @@ def get_model_file(
     if concept_missing:
         filename += f"_{concept_missing_mech}_{concept_missing}"
 
-    filename += f"_{target_accuracy}.model"
+    if model_type in {"fe", "dnn"}:
+        filename += f"_{target_accuracy}"
+        
+    filename += ".model"
 
     return results_dir / filename
     
