@@ -602,6 +602,27 @@ class FrontEndModel(object):
         """
         Fit the front-end model to the dataset.
         """
+        if not isinstance(C, np.ndarray):
+            C = np.asarray(C)
+        if not isinstance(y, np.ndarray):
+            y = np.asarray(y)
+
+        if C.ndim != 2:
+            raise ValueError("Concept matrix must be two-dimensional.")
+        if y.ndim != 1:
+            raise ValueError("Label vector must be one-dimensional.")
+        if C.shape[0] != y.shape[0]:
+            raise ValueError("Number of samples in C and y must match.")
+
+        valid_rows = ~np.isnan(C).any(axis=1)
+        if not np.any(valid_rows):
+            raise ValueError(
+                "No samples without missing concepts are available for training."
+            )
+        if np.count_nonzero(valid_rows) != C.shape[0]:
+            C = C[valid_rows]
+            y = y[valid_rows]
+
         lr_params = {
             "random_state": 42,
             "max_iter": 1000,
