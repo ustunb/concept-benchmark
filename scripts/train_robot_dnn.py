@@ -8,7 +8,7 @@ def get_dataset_path(**settings) -> str:
 settings = {
     'samples_per_instance': 1,
     'draw': False,
-    'output_directory': results_dir / 'robots',
+    'output_directory': results_dir / 'robots_large',
     'concepts': {
         'head_shape': ['square', 'round'],
         'body_shape': ['square', 'round'],
@@ -52,8 +52,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
+from utils import determine_device
 
-device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+device = determine_device()
 
 class RobotClassifierCNN(nn.Module):
     def __init__(self, num_classes=1):
@@ -106,7 +107,13 @@ model = RobotClassifierCNN()
 criterion = nn.BCELoss() # Binary Cross-Entropy Loss for binary classification
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-train_loader = data.training.loader(batch_size=32, shuffle=True)
+loader_config = {
+    'batch_size': 32,
+    'num_workers': 12,
+    'pin_memory': True
+}
+
+train_loader = data.training.loader(shuffle=True, **loader_config)
 
 for epoch in tqdm(range(10)): 
     for boards, _, labels in train_loader:
@@ -139,11 +146,10 @@ def evaluate_model(model, data_loader):
     accuracy = correct / total
     return accuracy
 
-valid_loader = data.validation.loader(batch_size=32, shuffle=False)
-test_loader = data.test.loader(batch_size=32, shuffle=False)
-train_accuracy = evaluate_model(model, train_loader)
+valid_loader = data.validation.loader(shuffle=False, **loader_config)
+test_loader = data.test.loader(shuffle=False, **loader_config)
+# train_accuracy = evaluate_model(model, train_loader)
 valid_accuracy = evaluate_model(model, valid_loader)
 test_accuracy = evaluate_model(model, test_loader)
-print(f"Training Accuracy: {train_accuracy*100:.2f}%")
 print(f"Validation Accuracy: {valid_accuracy*100:.2f}%")
 print(f"Test Accuracy: {test_accuracy*100:.2f}%")

@@ -1,37 +1,74 @@
-from dataclasses import dataclass
-from typing import Any, Dict, Optional, Protocol, Tuple, Union
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from tqdm import tqdm
-from concept_benchmark.ext.fileutils import load
-from concept_benchmark.models import ConceptDetector, ConceptBasedModel
-from concept_benchmark.paths import results_dir
-from utils import determine_device
 
+class SudokuValidatorCNN(nn.Module):
+    def __init__(self, embedding_dim=16):
+        """
+        Initializes the Sudoku Validator model.
+        
+        Args:
+            embedding_dim (int): The size of the vector for each number embedding.
+        """
+        super(SudokuValidatorCNN, self).__init__()
+        
+        # 🧠 The Embedding Layer
+        # We have 10 possible tokens: 0 (for padding/empty) and 1-9 for numbers.
+        # It will map each number to a dense vector of size `embedding_dim`.
+        self.embedding = nn.Embedding(num_embeddings=10, embedding_dim=embedding_dim)
+        
+        # The first Conv2d layer will take the embedding dimension as its input channels.
+        self.conv1 = nn.Conv2d(in_channels=embedding_dim, out_channels=64, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, padding=1)
+        
+        # A fully connected network for the final classification.
+        # The input size is 128 (channels) * 9 (height) * 9 (width).
+        self.fc1 = nn.Linear(128 * 9 * 9, 256)
+        # self.dropout = nn.Dropout(0.5)
+        self.fc2 = nn.Linear(256, 1)
 
-def get_dataset_path(**settings) -> str:
-    return results_dir / f"sudoku_{settings['n']**2}_{settings['data_type']}.data"
+    def forward(self, x):
+        """
+        Defines the forward pass of the model.
+        
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, 81).
+                                The board should be flattened.
+        """
+        # Ensure input is long type for embedding layer
+        x = x.long()
+        
+        # 1. Apply embedding
+        # Input: (batch_size, 81)
+        # Output: (batch_size, 81, embedding_dim)
+        x = self.embedding(x)
+        
+        # 2. Reshape for CNN
+        # PyTorch CNNs expect input in (N, C, H, W) format.
+        # We need to permute the dimensions.
+        # (batch_size, 81, embedding_dim) -> (batch_size, embedding_dim, 81)
+        x = x.permute(0, 2, 1)
+        # -> (batch_size, embedding_dim, 9, 9)
+        x = x.view(-1, x.size(1), 9, 9)
+        
+        # 3. Pass through convolutional layers
+        # Output of conv1: (batch_size, 64, 9, 9)
+        # Output of conv2: (batch_size, 128, 9, 9)
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        
+        # 4. Flatten for the fully connected layers
+        # Output: (batch_size, 128 * 9 * 9)
+        x = torch.flatten(x, 1)
+        
+        # 5. Pass through dense layers for classification
+        x = F.relu(self.fc1(x))
+        # x = self.dropout(x)
+        x = self.fc2(x)
+        
+        # 6. Apply sigmoid to get a probability
+        return torch.sigmoid(x)
 
-settings = {
-    "n": 3,
-    "n_samples": 5000,
-    "valid_ratio": 0.5,
-    "max_corrupt": 21,
-    "data_type": "tabular",
-    "seed": 42,
-}
-
-data = load(get_dataset_path(**settings))
-data.split(fold_id='K05N01', fold_num_validation=4, fold_num_test=5)
-
-
-device = determine_device()
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
 class SpecializedHeadSudokuCNN(nn.Module):
     def __init__(self, embedding_dim=16, hidden_dim=32, channels=128):
@@ -180,30 +217,77 @@ class ConceptSudokuCNN(nn.Module):
         
         return logits
 
+class RobotClassifierCNN(nn.Module):
+    def __init__(self, num_classes=1):
+        super(RobotClassifierCNN, self).__init__()
+        
+        # --- Feature Extractor ---
+        # Input images are assumed to be 3-channel RGB
+        
+        # Block 1
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
+        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2) # Halves the dimensions
+        
+        # Block 2
+        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1)
+        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2) # Halves the dimensions again
+        
+        # Block 3
+        self.conv3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1)
+        self.pool3 = nn.MaxPool2d(kernel_size=2, stride=2)
+        
+        # --- Classifier Head ---
+        # The input size to the linear layer depends on the input image size.
+        # Let's assume input images are 224 x 224 pixels.
+        # After 3 pooling layers, the size becomes 224 -> 112 -> 56 -> 28
+        # So the feature map size is 64 (channels) * 28 * 28
+        self.fc1 = nn.Linear(64 * 28 * 28, 128)
+        self.dropout = nn.Dropout(0.5)
+        self.fc2 = nn.Linear(128, num_classes)
 
-loader_config = {
-    'device': device,
-    'batch_size': 32,
-    'num_workers': 12,
-    'pin_memory': True,
-}
+    def forward(self, x):
+        # Pass through the feature extractor
+        x = self.pool1(F.relu(self.conv1(x)))
+        x = self.pool2(F.relu(self.conv2(x)))
+        x = self.pool3(F.relu(self.conv3(x)))
+        
+        # Flatten the feature maps for the classifier
+        x = torch.flatten(x, 1)
+        
+        # Pass through the classifier
+        x = F.relu(self.fc1(x))
+        x = self.dropout(x)
+        x = self.fc2(x)
+        
+        # For binary classification, we apply a sigmoid function to the output
+        return torch.sigmoid(x)
 
-cbm = ConceptBasedModel(
-    concept_detector=ConceptDetector(model=SpecializedHeadSudokuCNN()),
-)
-cbm.fit(
-    train_dataset=data.training,
-    valid_dataset=data.validation,
-    freeze=False,
-    concept_embed_params={'shuffle': False, **loader_config},
-    concept_fit_params={'epochs': 30, 'lr': 1e-3, 'patience': 30, **loader_config},
-)
+class RobotConceptClassifier(nn.Module):
+    def __init__(self, num_concepts: int):
+        super(RobotConceptClassifier, self).__init__()
+        
+        # 1) Shared CNN Backbone
+        self.backbone = nn.Sequential(
+            nn.Conv2d(3, 16, kernel_size=3, padding=1), nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            nn.Conv2d(16, 32, kernel_size=3, padding=1), nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1), nn.ReLU(),
+            nn.MaxPool2d(2, 2)
+        )
+        
+        # 224 -> 112 -> 56 -> 28 after 3 MaxPool(2,2)
+        feature_size = 64 * 28 * 28
 
-(cbm.predict(data.training) == data.training.y).mean()
-(cbm.predict(data.validation) == data.validation.y).mean()
-(cbm.predict(data.test) == data.test.y).mean()
+        # 2) One head per concept (order matches input labels), wrapped in nn.Sequential
+        self.heads = nn.ModuleList([
+            nn.Linear(feature_size, 1)
+            for _ in range(num_concepts)
+        ])
 
-cbm.save(results_dir / "sudoku_cnn_specialized_head.cbm")
-
-cbm2 = ConceptBasedModel.load(results_dir / "sudoku_cnn_specialized_head.cbm")
-cbm2.predict(data.test)
+    def forward(self, x):
+        features = self.backbone(x)
+        features = torch.flatten(features, 1)
+        # Concatenate per-concept logits into shape (N, num_concepts)
+        logits = torch.cat([head(features) for head in self.heads], dim=1)
+        return logits
