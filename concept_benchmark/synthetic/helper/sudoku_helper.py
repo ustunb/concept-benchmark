@@ -89,7 +89,7 @@ BASE_BOARD = build_base_board(3)
 
 
 # --------------------------
-# Invalid board generators 
+# Invalid board generators
 # --------------------------
 # Categories:
 #   A) Invalid by swapping numbers within rows/columns
@@ -196,7 +196,7 @@ INVALID_MODES = {
     "cols_only_swap_within_row": invalid_cols_only_by_within_row_swap,
     # B) swap entire rows/cols across bands/stacks → blocks-only invalid
     "blocks_only_row_swap_across_bands": invalid_blocks_only_by_row_swap_across_bands,
-    "blocks_only_col_swap_across_stacks": invalid_blocks_only_by_col_swap_across_stacks, 
+    "blocks_only_col_swap_across_stacks": invalid_blocks_only_by_col_swap_across_stacks,
 }
 
 

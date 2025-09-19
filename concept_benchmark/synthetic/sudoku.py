@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
 from tqdm.auto import tqdm
-from typing import Sequence, Tuple, Optional 
+from typing import Sequence, Tuple, Optional
 
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.paths import data_dir
@@ -54,13 +54,13 @@ def create_sudoku_dataset(
             Defaults to 0.5.
         max_corrupt (int, optional): Maximum number of changes to
             make an invalid board. Defaults to 3.
-        data_type (str, optional): Type of data representation 
+        data_type (str, optional): Type of data representation
             (e.g., "tabular" or "image"). Defaults to "tabular".
-        seed (int, optional): Random seed for reproducibility. 
+        seed (int, optional): Random seed for reproducibility.
             Defaults to 42.
-        transform (Callable[[np.ndarray], np.ndarray], optional): 
-            Should take a board (N x N numpy array) and 
-            return a transformed representation as a np.ndarray. 
+        transform (Callable[[np.ndarray], np.ndarray], optional):
+            Should take a board (N x N numpy array) and
+            return a transformed representation as a np.ndarray.
             Default is None, which uses a simple flattening transform.
         dataset_name (str, optional): name of the dataset, used as folder name
             for saving images.
@@ -100,8 +100,10 @@ def create_sudoku_dataset(
     pbar = tqdm(total=n_valid + n_invalid, desc="Generating Sudoku dataset") if tqdm else None
 
     # ---- valid boards
+    valid_boards = np.zeros((n_valid, n**2, n**2))
     for i in range(n_valid):
         b = generate_valid_board(n=n)
+        valid_boards[i] = b
         if data_type == "image":
             img_path = ds_path / f"valid_{i}.png"
             transform(b, outfile=img_path)
@@ -124,9 +126,12 @@ def create_sudoku_dataset(
         if pbar: pbar.update(1)
 
     # ---- invalid boards
+    invalid_boards = np.zeros((n_valid, n**2, n**2))
     for i in range(n_invalid):
+
         num_actions = max(1, int(random.randint(1, max_corrupt)))
         b = generate_invalid_board(base_board=generate_valid_board(n=n), num_actions=num_actions)
+        invalid_boards[i] = b
         concepts = get_concepts(b, return_label=False)
         c_base = np.array(list(concepts.values()), dtype=np.int32).flatten()
 
@@ -156,6 +161,8 @@ def create_sudoku_dataset(
     if data_type == "image":
         np.savetxt(ds_path / "concepts.csv", C, delimiter=",")
         np.savetxt(ds_path / "labels.csv", y, delimiter=",")
+        np.save(ds_path / "valid_boards.npy", valid_boards)
+        np.save(ds_path / "invalid_boards.npy", valid_boards)
 
     # ---- names
     concept_names = (
@@ -188,6 +195,7 @@ def create_sudoku_dataset(
             "digits_order": _digs,
             "name_prefix": cell_concept_prefix,
         },
+        "boards": torch.from_numpy(np.vstack((valid_boards, invalid_boards)))
     }
 
     if data_type == "image":
@@ -265,7 +273,7 @@ def image_transform(
             use default font. Defaults to None.
         outfile (str | None, optional): Path to save the image (e.g.,
             "board.png"). If None, do not write to disk. Defaults to None.
-        handwriting (bool, optional): Makes the numbers look handwritten if True. 
+        handwriting (bool, optional): Makes the numbers look handwritten if True.
             Defaults to False.
         radius (float, optional): size of Gaussian aperture. Defaults to 0.
             Only used if using handwriting=True
@@ -381,7 +389,7 @@ def sudoku_image_preprocess(
         standardize (bool, optional): If standardizing pixel values to within [0,1]. Defaults to True
         to_tensor (bool, optional): If converting to tensor or not. Defaults to True.
         vit (bool, optional): If using the image in a ViT backend model. Defaults to True.
-    Returns: 
+    Returns:
         An array representing the image.
     """
 
