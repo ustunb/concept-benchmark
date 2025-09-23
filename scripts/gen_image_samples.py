@@ -11,7 +11,7 @@ from sklearn.cluster import KMeans
 
 from concept_benchmark.models import ConceptDetector, ConceptBasedModel, FrontEndModel
 from concept_benchmark.paths import results_dir
-from concept_benchmark.synthetic.robot import create_synthetic_dataset
+from concept_benchmark.synthetic.robot import create_robot_image_dataset
 from concept_benchmark.data import ConceptDatasetSample
 
 device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"))
@@ -141,7 +141,7 @@ tf = transforms.Compose([
 ])
 
 rng = np.random.default_rng(int(settings["seed"]))
-data = create_synthetic_dataset(**params)
+data = create_robot_image_dataset(**params)
 data.transform = tf
 data.generate_cvindices(seed=int(settings["seed"]))
 data.split("K05N01", fold_num_validation=4, fold_num_test=5)
