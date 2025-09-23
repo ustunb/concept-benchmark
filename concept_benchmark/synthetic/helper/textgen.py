@@ -41,11 +41,13 @@ def _polish_text(s: str) -> str:
 
     s = re.sub(r"\b[Nn]ot\s+([a-z0-9 _-]+)\s+at the head\b", r"The head isn’t \1", s)
     s = re.sub(r"\b[Nn]ot\s+([a-z0-9 _-]+)\s+for the body\b", r"The body isn’t \1", s)
+
     s = re.sub(r"\b[Ee]ars (are|:)?\s*triangle\b", r"Ears are triangular", s)
     s = re.sub(r"\bhand[s]?\s+edgy\s+square\b", r"hands are square-edged", s, flags=re.I)
     s = re.sub(r"\b[Ff]eet\s+pointy\s+4sided\b", r"feet are pointed four-sided", s)
-    s = re.sub(r"\b[Cc]olor\s+(?!is|:)([a-z]+)\b", r"color is \1", s)
-    s = re.sub(r"\b[Mm]outh\s+(?!is|:)(open|closed)\b", r"mouth is \1", s, flags=re.I)
+
+    s = re.sub(r"\b[Cc]olor\s*[:—–-]?\s+(?!is|:)([a-z]+)\b", r"color is \1", s)
+    s = re.sub(r"\b[Mm]outh\s*[:—–-]?\s*(open|closed)\b", r"mouth is \1", s, flags=re.I)
     s = re.sub(r"\b[Cc]olor\s+is\s+([a-z]+)/([a-z]+)\b", r"color is \1 and \2", s)
 
     def _fix_colon_has_no(m):
@@ -55,10 +57,27 @@ def _polish_text(s: str) -> str:
     s = re.sub(r"\b(Knees|Elbows|Antennae):\s*(has|no)\b\.?", _fix_colon_has_no, s, flags=re.I)
     s = re.sub(r"\b(Knees|Elbows|Antennae):\s*has\s+(knees|elbows|antennae)\b\.?", lambda m: f"Has {m.group(2)}.", s, flags=re.I)
     s = re.sub(r"\b(Knees|Elbows|Antennae):\s*no\s+(knees|elbows|antennae)\b\.?",  lambda m: f"No {m.group(2)}.",  s, flags=re.I)
+
     s = re.sub(r"\b(Elbows|Knees|Antennae)\s+no\s+\1\b",  lambda m: f"No {m.group(1).lower()}",  s, flags=re.I)
     s = re.sub(r"\b(Elbows|Knees|Antennae)\s+has\s+\1\b", lambda m: f"Has {m.group(1).lower()}", s, flags=re.I)
     s = re.sub(r"\b([Ee]lbows|[Kk]nees|[Aa]ntennae)\s+are\s+(has|no)\s+\1\b",
                lambda m: ("Has" if m.group(2).lower()=="has" else "No") + " " + m.group(1).lower(), s)
+
+    s = re.sub(r"\b[Aa]ntennae\s*[:—–-]?\s*no\s+antennae\b\.?", "No antennae", s)
+    s = re.sub(r"\b[Aa]ntennae\s*[:—–-]?\s*has\s+antennae\b\.?", "Has antennae", s)
+
+    s = re.sub(r"\b(joints|hinges|articulation|limbs)\s+(has|no)\s+elbows/(has|no)\s+knees\b\.?",
+               lambda m: f"{'Has' if m.group(2).lower()=='has' else 'No'} elbows; "
+                         f"{'has' if m.group(3).lower()=='has' else 'no'} knees", s, flags=re.I)
+    s = re.sub(r"\bno elbows/no knees\b", "no elbows and no knees", s, flags=re.I)
+    s = re.sub(r"\bhas elbows/has knees\b", "has elbows and knees", s, flags=re.I)
+    s = re.sub(r"\bhas elbows/no knees\b", "has elbows; no knees", s, flags=re.I)
+    s = re.sub(r"\bno elbows/has knees\b", "no elbows; has knees", s, flags=re.I)
+
+    s = re.sub(r"\bthen[- ]sharp[- ]cornered\b", "sharp-cornered", s, flags=re.I)
+    s = re.sub(r"\bsharp\s+cornered\b", "sharp-cornered", s, flags=re.I)
+    s = re.sub(r"\bboxy\s+(head|body)\b", r"square \1", s, flags=re.I)
+    s = re.sub(r"\b(head|body)\s+boxy\b", r"\1 square", s, flags=re.I)
 
     s = re.sub(r"\b(is|are|was|were)\s+not\s+not\s+([a-z0-9 _-]+)", lambda m: f"{m.group(1)} {m.group(2)}", s, flags=re.I)
     s = re.sub(r"\b(is|are|was|were)n['’]t not\s+([a-z0-9 _-]+)", lambda m: f"{m.group(1)} {m.group(2)}", s, flags=re.I)
@@ -93,8 +112,16 @@ def _polish_text(s: str) -> str:
     s = re.sub(r"\bElbows are no elbows\b\.?", "No elbows.", s, flags=re.I)
     s = re.sub(r"\bAntennae are no antennae\b\.?", "No antennae.", s, flags=re.I)
 
-
+    s = re.sub(
+        r"\b(?:elbows\s*/\s*knees|knees\s*/\s*elbows)\s+(no|has)\s+elbows\s*/\s+(no|has)\s+knees\b",
+        lambda m: f"{m.group(1).lower()} elbows; {m.group(2).lower()} knees",
+        s, flags=re.I)
+    s = re.sub(
+        r"\bantennae\s+(?:is|are|read|reads)\s+(no|has)\s+antennae\b",
+        lambda m: "No antennae" if m.group(1).lower() == "no" else "Has antennae",
+        s, flags=re.I)
     return s
+
 
 def _synonym(name: str, val: str) -> str:
     v = str(val).replace("_", " ").lower()
@@ -110,7 +137,9 @@ def _synonym(name: str, val: str) -> str:
         num = {"3": "three", "4": "four", "5": "five", "6": "six"}
         v = v.replace("pointy", "pointed")
         v = v.replace("lshaped", "l-shaped").replace("l shaped", "l-shaped")
-        v = re.sub(r"(\d)\s*sided", lambda m: f"{num.get(m.group(1), m.group(1))}-sided", v)
+        v = re.sub(r"\bflat\s*(\d)\s*sided\b", lambda m: f"{num.get(m.group(1), '?')}-sided, not pointy", v)
+        v = re.sub(r"\bpointed?\s*(\d)\s*sided\b", lambda m: f"{num.get(m.group(1), '?')}-sided, pointed", v)
+        v = re.sub(r"\b(\d)\s*sided\b", lambda m: f"{num.get(m.group(1), m.group(1))}-sided", v)
         return v
     return v
 

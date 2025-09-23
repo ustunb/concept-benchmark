@@ -1,0 +1,104 @@
+{"when": {"head_body_same": true, "corners_head": true}, "text": "Both head and body are square. Ears are {EARS_NAT}; mouth is {MOUTH_NAT}. Hands are {HANDS_NAT}; feet are {FEET_NAT}. Features include {ANT_NAT}, {ELBOWS_NAT}, and {KNEES_NAT}."}
+{"when": {"head_body_same": true, "corners_head": true}, "text": "Square up top and square below. ears are {EARS_NAT}, mouth is {MOUTH_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}. Features include {ANT_NAT}, {ELBOWS_NAT}, and {KNEES_NAT}."}
+{"when": {"head_body_same": true, "rounded_head": true}, "text": "The head and body are round throughout. Ears are {EARS_NAT} and the mouth is {MOUTH_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; features include {ANT_NAT}, {ELBOWS_NAT}, and {KNEES_NAT}."}
+{"when": {"head_body_same": true, "rounded_head": true}, "text": "Round meets round: a curved head with a matching body. ears are {EARS_NAT}; mouth is {MOUTH_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; features include {ANT_NAT}, {ELBOWS_NAT}, and {KNEES_NAT}."}
+{"when": {"head_body_same": true}, "text": "Head and body match: {HEAD_NAT} with a {BODY_NAT} frame. hands are {HANDS_NAT}; feet are {FEET_NAT}. The face reads {EARS_NAT}/{MOUTH_NAT}; features include {ANT_NAT}, {ELBOWS_NAT}, and {KNEES_NAT}."}
+{"when": {"head_body_same": true}, "text": "The silhouette is consistent: {HEAD_NAT} head, {BODY_NAT} body. ears are {EARS_NAT}; mouth is {MOUTH_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; features include {ANT_NAT}, {ELBOWS_NAT}, and {KNEES_NAT}."}
+
+{"when": {"corners_head": true, "rounded_body": true}, "text": "Square head, round body. ears are {EARS_NAT}; mouth is {MOUTH_NAT}. hands are {HANDS_NAT} and feet are {FEET_NAT}; features include {ANT_NAT}, {ELBOWS_NAT}, and {KNEES_NAT}."}
+{"when": {"rounded_head": true, "corners_body": true}, "text": "Round head, square body. ears are {EARS_NAT}; the mouth is {MOUTH_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; features include {ANT_NAT}, {ELBOWS_NAT}, and {KNEES_NAT}."}
+{"when": {"corners_head": true}, "text": "A square head over a {BODY_NAT} body. ears are {EARS_NAT}; mouth is {MOUTH_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; features include {ANT_NAT}, {ELBOWS_NAT}, and {KNEES_NAT}."}
+{"when": {"rounded_head": true}, "text": "A round head over a {BODY_NAT} body. ears are {EARS_NAT}; mouth is {MOUTH_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; features include {ANT_NAT}, {ELBOWS_NAT}, and {KNEES_NAT}."}
+{"when": {"corners_body": true}, "text": "A {HEAD_NAT} head with a square body. ears are {EARS_NAT}; mouth is {MOUTH_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; features include {ANT_NAT}, {ELBOWS_NAT}, and {KNEES_NAT}."}
+{"when": {"rounded_body": true}, "text": "A {HEAD_NAT} head with a round body. ears are {EARS_NAT}; mouth is {MOUTH_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; features include {ANT_NAT}, {ELBOWS_NAT}, and {KNEES_NAT}."}
+
+{"when": {"ears_shape": "square"}, "text": "Square ears and a {MOUTH_NAT} mouth. Head {HEAD_NAT}, body {BODY_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; features include {ANT_NAT}, {ELBOWS_NAT}, and {KNEES_NAT}."}
+{"when": {"ears_shape": "triangle"}, "text": "Triangular ears frame a {MOUTH_NAT} mouth. Head {HEAD_NAT}, body {BODY_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; features include {ANT_NAT}, {ELBOWS_NAT}, and {KNEES_NAT}."}
+
+{"when": {"mouth_type": "open"}, "text": "The mouth is open; the head is {HEAD_NAT}, the body {BODY_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; features include {ANT_NAT}, {ELBOWS_NAT}, and {KNEES_NAT}."}
+{"when": {"mouth_type": "closed"}, "text": "The mouth is closed; the head is {HEAD_NAT}, the body {BODY_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; features include {ANT_NAT}, {ELBOWS_NAT}, and {KNEES_NAT}."}
+
+{"when": {"has_antennae_bool": true}, "text": "With antennae, a {HEAD_NAT} head and {BODY_NAT} body present neatly. ears are {EARS_NAT}; mouth is {MOUTH_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; joints read {ELBOWS_NAT}/{KNEES_NAT}."}
+{"when": {"has_antennae_bool": false}, "text": "No antennae present; a {HEAD_NAT} head sits over a {BODY_NAT} body. ears are {EARS_NAT}; mouth is {MOUTH_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; joints read {ELBOWS_NAT}/{KNEES_NAT}."}
+
+{"when": {"any": true}, "text": "The head is {HEAD_NAT} and the body is {BODY_NAT}. ears are {EARS_NAT}; the mouth is {MOUTH_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Head {HEAD_NAT}, body {BODY_NAT}. Hands are {HANDS_NAT}, feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "A {HEAD_NAT} head paired with a {BODY_NAT} torso. hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; with antennae status {ANT_NAT} and {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "From top to base: {HEAD_NAT} head, {BODY_NAT} body; hands are {HANDS_NAT}, feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Viewed straight on: {HEAD_NAT} head over {BODY_NAT} body; hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "The shapes are clear: {HEAD_NAT} up top, {BODY_NAT} below; hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Simple readout: head {HEAD_NAT}, body {BODY_NAT}; hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "You get a {HEAD_NAT} head and a {BODY_NAT} body; hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Clean profile: {HEAD_NAT} head, {BODY_NAT} body; hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Basic description: head {HEAD_NAT}; body {BODY_NAT}; hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "The build reads as {HEAD_NAT} on top and {BODY_NAT} below; hands are {HANDS_NAT}; feet are {FEET_NAT}. The face shows {EARS_NAT}/{MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+
+{"when": {"any": true}, "text": "The head curves like a gentle bowl while the body follows the same arc. ears are {EARS_NAT}; mouth is {MOUTH_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Angles on the head, angles on the body-the whole thing stacks neatly. hands are {HANDS_NAT}; feet are {FEET_NAT}; the face {EARS_NAT}/{MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "It looks tidy: {HEAD_NAT} above, {BODY_NAT} below. The rest is plain-hands are {HANDS_NAT}, feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; plus {ANT_NAT} and {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Head and body align: {HEAD_NAT} then {BODY_NAT}. ears are {EARS_NAT}; mouth is {MOUTH_NAT}; hands are {HANDS_NAT}; feet are {FEET_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "The outline is steady-{HEAD_NAT} head, {BODY_NAT} body. hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+
+{"when": {"any": true}, "text": "The curves of the head bring to mind a bowling ball rolling true; the body echoes that same roundness. ears are {EARS_NAT}, mouth is {MOUTH_NAT}; hands are {HANDS_NAT}; feet are {FEET_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "The head stands like a little chess rook and the body stacks beneath it. hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; the mouth is {MOUTH_NAT}; {ANT_NAT}; and {ELBOWS_NAT}; {KNEES_NAT}-it feels composed."}
+{"when": {"any": true}, "text": "Trace the head’s arc with a finger and the body completes the circle. ears are {EARS_NAT}; mouth is {MOUTH_NAT}; hands are {HANDS_NAT}; feet are {FEET_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "There’s a quiet geometry here: {HEAD_NAT} resting on {BODY_NAT}; hands are {HANDS_NAT}; feet are {FEET_NAT}. The face shows {EARS_NAT}/{MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}-calm and complete."}
+{"when": {"any": true}, "text": "The head looks like a drum lid; the body like the drum. ears are {EARS_NAT}; mouth is {MOUTH_NAT}; hands are {HANDS_NAT}; feet are {FEET_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+
+{"when": {"any": true}, "text": "At a glance, the head is {HEAD_NAT} and the body {BODY_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}-straightforward."}
+{"when": {"any": true}, "text": "A neat match: {HEAD_NAT} head with a {BODY_NAT} body. hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Nothing too fancy: head {HEAD_NAT}, body {BODY_NAT}; hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Look closely: {HEAD_NAT} up top, {BODY_NAT} below. hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "The head settles into {HEAD_NAT}, the body follows as {BODY_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}. The face shows {EARS_NAT}/{MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+
+{"when": {"any": true}, "text": "There’s a hint of a lantern’s face in the head, with the body as its frame. ears are {EARS_NAT}; mouth is {MOUTH_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}. {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Think of smooth river stones stacked-head then body. The rest is simple: hands are {HANDS_NAT}, feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "The head feels tidy and deliberate; the body follows suit. hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}-balanced posture."}
+{"when": {"any": true}, "text": "A small sculpture: {HEAD_NAT} head, {BODY_NAT} trunk; hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "The form lands with clarity: {HEAD_NAT} over {BODY_NAT}; hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+
+{"when": {"any": true}, "text": "The head is smooth like a polished coin and the body much the same. ears are {EARS_NAT}; mouth is {MOUTH_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}. {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "You could draw it in two strokes: {HEAD_NAT} for the head, {BODY_NAT} for the body; then hands are {HANDS_NAT}, feet are {FEET_NAT}; face {EARS_NAT}/{MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Everything lines up: {HEAD_NAT} head; {BODY_NAT} body; hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Head and body repeat the same idea-{HEAD_NAT} then {BODY_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "A calm, simple build: {HEAD_NAT} up top, {BODY_NAT} below. hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+
+{"when": {"any": true}, "text": "The head has quiet edges; the body mirrors them. ears are {EARS_NAT}; mouth is {MOUTH_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}. {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}-gentle and clear."}
+{"when": {"any": true}, "text": "The body follows the head’s lead-{HEAD_NAT} then {BODY_NAT}. The rest adds up: hands are {HANDS_NAT}, feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "From head to base, the theme holds. {HEAD_NAT} above, {BODY_NAT} below; hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Even at a glance, the structure is obvious: {HEAD_NAT}, {BODY_NAT}; hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "One look: {HEAD_NAT} head, {BODY_NAT} body. hands are {HANDS_NAT}; feet are {FEET_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}-the whole picture."}
+
+{"when": {"any": true}, "text": "Hands are {HANDS_NAT} and feet are {FEET_NAT}. The head is {HEAD_NAT}, the body {BODY_NAT}. ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "feet are {FEET_NAT}, hands are {HANDS_NAT}; body {BODY_NAT}; head {HEAD_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Ears are {EARS_NAT}, mouth is {MOUTH_NAT}. Body {BODY_NAT}; head {HEAD_NAT}. hands are {HANDS_NAT}; feet are {FEET_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "{HANDS_NAT} for the hands, {FEET_NAT} at the base; above that a {BODY_NAT} frame and a {HEAD_NAT} head; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "{MOUTH_NAT} mouth, {EARS_NAT} ears; a {HEAD_NAT} head over a {BODY_NAT} body; hands are {HANDS_NAT}; feet are {FEET_NAT}; plus {ANT_NAT} and {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "{ANT_NAT}. feet are {FEET_NAT}; hands are {HANDS_NAT}; the body is {BODY_NAT}; the head is {HEAD_NAT}; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; and {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Start at the base: {FEET_NAT}. Climb past {HANDS_NAT} hands to a {BODY_NAT} torso and a {HEAD_NAT} head; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "{EARS_NAT} ears frame a {MOUTH_NAT} mouth; below, a {HEAD_NAT} head, then a {BODY_NAT} body; hands are {HANDS_NAT}, feet are {FEET_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Feet are {FEET_NAT}. Above them, a {BODY_NAT} body. The head is {HEAD_NAT}. Hands are {HANDS_NAT}. ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}-simple."}
+{"when": {"any": true}, "text": "Hands first: {HANDS_NAT}. Then {EARS_NAT} ears and a {MOUTH_NAT} mouth on a {HEAD_NAT} head over a {BODY_NAT} body; feet are {FEET_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "{MOUTH_NAT} to speak, {EARS_NAT} to listen; a {HEAD_NAT} head, a {BODY_NAT} body; {HANDS_NAT} hands, {FEET_NAT} feet; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "From fingers to face: {HANDS_NAT} hands, {BODY_NAT} body, {HEAD_NAT} head, {MOUTH_NAT} mouth, {EARS_NAT} ears; feet are {FEET_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "{FEET_NAT} feet ground it; {HANDS_NAT} hands steady it; {BODY_NAT} body carries it; {HEAD_NAT} head guides it; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Note the signal {ANT_NAT}; then the tools-{HANDS_NAT} hands and {FEET_NAT} feet; only after that the {BODY_NAT} body and {HEAD_NAT} head; the face reads {EARS_NAT}/{MOUTH_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+
+{"when": {"any": true}, "text": "Like a statue assembled bottom-up: {FEET_NAT}, then {HANDS_NAT}, then a {BODY_NAT} trunk, crowned by a {HEAD_NAT} head; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "It opens with the small things-{EARS_NAT} and a {MOUTH_NAT} mouth-before you notice the {HEAD_NAT} head, {BODY_NAT} body, {HANDS_NAT} hands, and {FEET_NAT} feet; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Begin at the hands are {HANDS_NAT}. Skip to the head: {HEAD_NAT}. Fill in the rest-{BODY_NAT} body, {FEET_NAT} feet, {EARS_NAT} ears, {MOUTH_NAT} mouth; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "The feet whisper {FEET_NAT}, the hands echo {HANDS_NAT}; between them a {BODY_NAT} body, above them a {HEAD_NAT} head; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Before the shape, the details: {MOUTH_NAT}, {EARS_NAT}. After, the outline: {HEAD_NAT} over {BODY_NAT}. Finally, {HANDS_NAT} hands and {FEET_NAT} feet; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "I noticed the feet first-{FEET_NAT}-then the sure {HANDS_NAT} hands; only later the {BODY_NAT} body and the {HEAD_NAT} head came into focus; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+
+{"when": {"any": true}, "text": "{HANDS_NAT} hands give it poise; {FEET_NAT} feet give it stance; {BODY_NAT} body gives it weight; {HEAD_NAT} head gives it intent; ears are {EARS_NAT}; mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "{EARS_NAT} and {MOUTH_NAT} set the face; behind them sits a {HEAD_NAT} head, carried by a {BODY_NAT} body, balanced on {FEET_NAT} feet with {HANDS_NAT} hands nearby; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "feet are {FEET_NAT}; ears are {EARS_NAT}; hands are {HANDS_NAT}; mouth is {MOUTH_NAT}; body {BODY_NAT}; head {HEAD_NAT}-unconventional order, same clarity; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Count it out of order: hands are {HANDS_NAT}, head {HEAD_NAT}, feet are {FEET_NAT}, body {BODY_NAT}, ears are {EARS_NAT}, mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "{ANT_NAT}; then a shuffle of traits-{FEET_NAT} feet, {HEAD_NAT} head, {HANDS_NAT} hands, {BODY_NAT} body; the face reads {EARS_NAT}/{MOUTH_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+
+{"when": {"any": true}, "text": "If you start with touch, you feel {HANDS_NAT}; with ground, you see {FEET_NAT}; with outline, you read {BODY_NAT}/{HEAD_NAT}; with sound, {EARS_NAT}/{MOUTH_NAT}; the radio line is {ANT_NAT}; the bends are {ELBOWS_NAT}/{KNEES_NAT}."}
+{"when": {"any": true}, "text": "hands are {HANDS_NAT}; then notice antennae-{ANT_NAT}; last come the big blocks-{HEAD_NAT} head, {BODY_NAT} body-on {FEET_NAT} feet; plus ears are {EARS_NAT} and mouth is {MOUTH_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Feet first, then face: {FEET_NAT}; {MOUTH_NAT} mouth and {EARS_NAT} ears; a {HEAD_NAT} head over a {BODY_NAT} body; hands are {HANDS_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "Reverse the usual scan: body {BODY_NAT}, head {HEAD_NAT}, feet are {FEET_NAT}, hands are {HANDS_NAT}, ears are {EARS_NAT}, mouth is {MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
+{"when": {"any": true}, "text": "The rhythm goes feet-hands-body-head: {FEET_NAT}, {HANDS_NAT}, {BODY_NAT}, {HEAD_NAT}; the rest hums {EARS_NAT}/{MOUTH_NAT}; {ANT_NAT}; {ELBOWS_NAT}; {KNEES_NAT}."}
