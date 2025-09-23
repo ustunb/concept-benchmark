@@ -41,6 +41,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest",
+    "python-lsp-ruff",
     "ruff",
     "jupyter",
     "ipykernel",
