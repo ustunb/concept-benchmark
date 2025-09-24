@@ -1,5 +1,6 @@
 from __future__ import annotations
 import csv
+import hashlib
 import re
 from pathlib import Path
 import pandas as pd
@@ -166,8 +167,10 @@ def _nat_from_tokens(row: dict, seed: int) -> dict:
         f"{row['ears_shape']}|{row['mouth_type']}|{row['hand_shape']}|"
         f"{row['has_antennae']}|{row['has_knees']}|{row['has_elbows']}"
     )
+
     def pick(opts, key):
-        return opts[abs(hash(f"{seed}:{fp}:{key}")) % len(opts)]
+        h = hashlib.sha256(f"{seed}:{fp}:{key}".encode()).hexdigest()
+        return opts[int(h, 16) % len(opts)]
 
     head_map = {
         "square": ["square", "square-shaped", "boxy", "right-angled", "angular"],
@@ -222,22 +225,57 @@ def _nat_from_tokens(row: dict, seed: int) -> dict:
         "ELBOWS_NAT": elbows_nat,
     }
 
-def _names_from_params(params) -> list[str]:
-    names = []
-    for k, vals in params["concepts"].items():
-        for v in vals:
-            names.append(f"{k}={v}")
-    return names
+def _core_concept_names() -> list[str]:
+    return [
+        "head_is_square",
+        "body_is_square",
+        "has_knees",
+        "has_elbows",
+        "foot_is_pointy",
+        "has_antennae",
+        "ears_is_triangle",
+        "mouth_is_open",
+        "hands_are_pointy",
+    ]
 
-def _onehot_for_row(row: dict, params, names: list[str]) -> np.ndarray:
-    J = len(names); vec = np.zeros((J,), dtype=np.float32)
-    pos = 0
-    for k, vals in params["concepts"].items():
-        for v in vals:
-            if str(row[k]) == str(v):
-                vec[pos] = 1.0
-            pos += 1
-    return vec
+def _core_vector_from_row(row: dict) -> np.ndarray:
+    def b(x): return str(x).lower()
+    return np.array([
+        1.0 if str(row["head_shape"]) == "square" else 0.0,
+        1.0 if str(row["body_shape"]) == "square" else 0.0,
+        1.0 if b(row["has_knees"])   == "true"   else 0.0,
+        1.0 if b(row["has_elbows"])  == "true"   else 0.0,
+        1.0 if str(row["foot_shape"]).startswith("pointy_") else 0.0,
+        1.0 if b(row["has_antennae"])== "true"   else 0.0,
+        1.0 if str(row["ears_shape"]) == "triangle" else 0.0,
+        1.0 if str(row["mouth_type"]) == "open"     else 0.0,
+        1.0 if str(row["hand_shape"]).startswith("edgy_") else 0.0,
+    ], dtype=np.float32)
+
+def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, variants_per_row: int, seed: int, row_variants: list[int] | None = None):
+    corpus = _load_jsonl(corpus_path)
+    names = _core_concept_names()
+    classes = [0, 1]
+    X, C, y, row_index = [], [], [], []
+    for i, sr in catalog_df.iterrows():
+        row = {k: sr[k] for k in params["concepts"].keys()}
+        repeats = int(row_variants[i]) if row_variants is not None else int(variants_per_row)
+        for v in range(repeats):
+            text = _render_from_corpus(row, corpus, seed + v)
+            X.append(text)
+            C.append(_core_vector_from_row(row))
+            y.append(1 if str(sr["label"]) == "glorp" else 0)
+            row_index.append(i)
+    X = [str(t) for t in X]
+    C = np.stack(C, axis=0).astype(np.float32)
+    y = np.asarray(y, dtype=int)
+    ds = ConceptDatasetSample(
+        X=X, C=C, y=y, meta={"concepts": tuple(names), "classes": (0,1), "data_type": "text"}
+    )
+    setattr(ds, "_full", type("Full", (), {"meta": {"row_index": np.asarray(row_index, dtype=int)}}))
+    return ds
+
+
 
 def _render_from_corpus(row: dict, corpus: list[dict], seed: int) -> str:
     # (Optional) filter corpus by conditions if you kept _line_matches/_signals; otherwise use corpus directly
@@ -250,7 +288,7 @@ def _render_from_corpus(row: dict, corpus: list[dict], seed: int) -> str:
         cand = corpus
 
     key = f'{seed}:{row["head_shape"]}:{row["body_shape"]}:{row["foot_shape"]}:{row["ears_shape"]}:{row["mouth_type"]}:{row["hand_shape"]}:{row["has_antennae"]}:{row["has_knees"]}:{row["has_elbows"]}'
-    idx = abs(hash(key)) % len(cand)
+    idx = int(hashlib.sha256(key.encode()).hexdigest(), 16) % len(cand)
     txt = str(cand[idx].get("text", ""))
 
     # 1) naturalized placeholders (HEAD_NAT, BODY_NAT, …)
@@ -278,28 +316,6 @@ def _render_from_corpus(row: dict, corpus: list[dict], seed: int) -> str:
             txt = txt.replace(ph, v)
 
     return txt
-
-def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, variants_per_row: int, seed: int):
-    corpus = _load_jsonl(corpus_path)
-    names = _names_from_params(params)
-    classes = [0, 1]
-    X, C, y, row_index = [], [], [], []
-    for i, sr in catalog_df.iterrows():
-        row = {k: sr[k] for k in params["concepts"].keys()}
-        for v in range(int(variants_per_row)):
-            text = _render_from_corpus(row, corpus, seed + v)
-            X.append(text)
-            C.append(_onehot_for_row(row, params, names))
-            y.append(1 if str(sr["label"]) == "glorp" else 0)
-            row_index.append(i)
-    X = [str(t) for t in X]
-    C = np.stack(C, axis=0).astype(np.float32)
-    y = np.asarray(y, dtype=int)
-    ds = ConceptDatasetSample(
-        X=X, C=C, y=y, meta={"concepts": tuple(names), "classes": (0,1), "data_type": "text"}
-    )
-    setattr(ds, "_full", type("Full", (), {"meta": {"row_index": np.asarray(row_index, dtype=int)}}))
-    return ds
 
 if psutil.Process(psutil.Process().ppid()).name().lower().startswith("pycharm"):
     args_obj = SimpleNamespace(**settings)
@@ -349,6 +365,7 @@ else:
     ap.add_argument("--test-miss-mode", choices=["drop_cols", "soft0.5", "hard0"], default="soft0.5")
     ap.add_argument("--reuse-detector", type=int, default=0)
     ap.add_argument("--detector-model", type=str, default="")
+    ap.add_argument("--skip-fit", type=int, default=0)
     ap.add_argument("--test-label-flip", type=float, default=0.0)
     ap.add_argument("--label-model-type", choices=["deterministic", "stochastic"], default="deterministic")
     ap.add_argument("--label-model-alpha", type=float, default=10.0)
@@ -411,6 +428,10 @@ else:
         "concept_label_noise_mode": known.concept_label_noise_mode,
         "concept_label_noise_rate": float(known.concept_label_noise_rate),
         "concept_label_noise_confusion": known.concept_label_noise_confusion or "",
+        "variants_per_row_minority": int(getattr(known, "variants_per_row_minority", 0)),
+        "variants_per_row_majority": int(getattr(known, "variants_per_row_majority", 0)),
+        "minority_mult": float(getattr(known, "minority_mult", 1.0)),
+
     })
     if merged["test_corr"] is not None and merged["test_corr"] >= 0:
         merged["test_break"] = max(0.0, min(1.0, 1.0 - float(merged["test_corr"])))
@@ -524,7 +545,8 @@ def _apply_test_missing(H, names, specs, rate, mode, seed):
 
 def compute_label(df: pd.DataFrame, model_expr: str,
                   label_model_type: str = "deterministic",
-                  alpha: float = 1.0, bias: float = 0.0, seed: int = 0) -> pd.Series:
+                  alpha: float = 1.0, bias: float = 0.0, seed: int = 0,
+                  noise_rate: float = 0.0, flip_probs: tuple[float, float] | None = None) -> pd.Series:
     SAFE_GLOBALS = {"__builtins__": None, "int": int, "str": str, "float": float, "bool": bool, "any": any, "all": all, "np": np}
     rng = np.random.default_rng(int(seed))
     expr_text = None
@@ -550,7 +572,23 @@ def compute_label(df: pd.DataFrame, model_expr: str,
         if p >= 1.0:
             return "glorp"
         return "glorp" if rng.random() < p else "drent"
-    return df.apply(eval_one, axis=1)
+    labels = df.apply(eval_one, axis=1).astype(str)
+    if flip_probs is not None:
+        a, b = float(flip_probs[0]), float(flip_probs[1])
+        out = []
+        for lab in labels:
+            if lab == "glorp":
+                out.append("drent" if (rng.random() < a) else "glorp")
+            else:
+                out.append("glorp" if (rng.random() < b) else ("drent" if lab == "drent" else lab))
+        return pd.Series(out, index=labels.index)
+    if noise_rate and float(noise_rate) > 0.0:
+        q = float(noise_rate)
+        flips = rng.random(labels.shape[0]) < q
+        flipped = labels.copy()
+        flipped.iloc[flips] = flipped.iloc[flips].map(lambda L: "drent" if L == "glorp" else "glorp")
+        return flipped
+    return labels
 
 def _load_detector_from_path(p):
     p = Path(p)
@@ -719,12 +757,13 @@ def _degrade_to_acc(H: np.ndarray, T: np.ndarray, target: float, seed: int) -> n
 
 def _indices_for(names, spec):
     out = []
-    spec = spec.strip()
+    spec = str(spec).strip()
     if "=" in spec:
         if spec in names:
             out.append(names.index(spec))
     else:
-        out.extend([i for i, n in enumerate(names) if n.startswith(spec + "=")])
+        out.extend([i for i, n in enumerate(names)
+                    if (n == spec) or n.startswith(spec) or n.startswith(spec + "=")])
     return sorted(set(out))
 
 def _apply_per_concept_degrade(H: np.ndarray, T: np.ndarray, names: list[str], mapping: dict, seed: int) -> np.ndarray:
@@ -859,17 +898,32 @@ catalog_df["label"] = compute_label(
 concept_cols = list(params["concepts"].keys())
 ds = None
 
-# If user passed a JSONL corpus explicitly, use it
+
 if args_obj.templates_file and str(args_obj.templates_file).lower().endswith(".jsonl"):
-    ds = _build_ds_from_corpus(catalog_df, params, Path(args_obj.templates_file), int(args_obj.variants_per_row), SEED)
+    _lbl = catalog_df["label"].astype(str)
+    n_pos = int((_lbl == "glorp").sum()); n_neg = int((_lbl == "drent").sum())
+    minority_label = "glorp" if n_pos < n_neg else ("drent" if n_neg < n_pos else "glorp")
+    base_vpr = int(args_obj.variants_per_row)
+    vpr_min = int(args_obj.variants_per_row_minority) if int(args_obj.variants_per_row_minority) > 0 else max(1, int(round(base_vpr * float(args_obj.minority_mult))))
+    vpr_maj = int(args_obj.variants_per_row_majority) if int(args_obj.variants_per_row_majority) > 0 else base_vpr
+    row_variants = [vpr_min if lab == minority_label else vpr_maj for lab in _lbl]
+    ds = _build_ds_from_corpus(catalog_df, params, Path(args_obj.templates_file), base_vpr, SEED, row_variants=row_variants)
     setattr(ds, "cvindices", None)
-# Else if user selected hard difficulty, try default HardCorpus.jsonl
+
 elif args_obj.template_difficulty == "hard":
     default_jsonl = pkg_dir / "synthetic" / "helper" / "static" / "text_templates" / "HardCorpus.jsonl"
     print(f"Using hard corpus: {default_jsonl}")
     if default_jsonl.is_file():
-        ds = _build_ds_from_corpus(catalog_df, params, default_jsonl, int(args_obj.variants_per_row), SEED)
+        _lbl = catalog_df["label"].astype(str)
+        n_pos = int((_lbl == "glorp").sum()); n_neg = int((_lbl == "drent").sum())
+        minority_label = "glorp" if n_pos < n_neg else ("drent" if n_neg < n_pos else "glorp")
+        base_vpr = int(args_obj.variants_per_row)
+        vpr_min = int(args_obj.variants_per_row_minority) if int(args_obj.variants_per_row_minority) > 0 else max(1, int(round(base_vpr * float(args_obj.minority_mult))))
+        vpr_maj = int(args_obj.variants_per_row_majority) if int(args_obj.variants_per_row_majority) > 0 else base_vpr
+        row_variants = [vpr_min if lab == minority_label else vpr_maj for lab in _lbl]
+        ds = _build_ds_from_corpus(catalog_df, params, default_jsonl, base_vpr, SEED, row_variants=row_variants)
         setattr(ds, "cvindices", None)
+
 
     # Fallback to legacy template mechanism if not using hard-corpus
 if ds is None:
@@ -950,8 +1004,17 @@ def _manual_by_robot_split(ds_obj, row_index_arr, n_folds=5, seed=0):
     rng = np.random.default_rng(seed)
     base_ids = np.unique(row_index_arr)
     rng.shuffle(base_ids)
-    assign = {int(rid): i % n_folds for i, rid in enumerate(base_ids)}
-    fold_arr = np.array([assign[int(r)] for r in row_index_arr], dtype=int)
+
+    n_ids = len(base_ids)
+    n_val = int(np.floor(0.15 * n_ids))
+    n_te  = int(np.floor(0.15 * n_ids))
+    val_ids = set(base_ids[:n_val])
+    te_ids  = set(base_ids[n_val:n_val + n_te])
+
+    fold_arr = np.empty(len(row_index_arr), dtype=int)
+    for i, rid in enumerate(row_index_arr):
+        r = int(rid)
+        fold_arr[i] = 0 if r in val_ids else (1 if r in te_ids else 2)  # 0=val, 1=test, 2=train
 
     def _subset_mask(mask):
         idx = np.where(mask)[0]
@@ -971,11 +1034,11 @@ def _manual_by_robot_split(ds_obj, row_index_arr, n_folds=5, seed=0):
     ds_obj.validation = _subset_mask(val_mask)
     ds_obj.test       = _subset_mask(test_mask)
 
-    # expose cvindices so downstream code can read it
     try:
         ds_obj.cvindices = {"by_robot": fold_arr}
     except Exception:
         pass
+
 
 need_split = (
     getattr(ds, "cvindices", None) is None
@@ -984,17 +1047,26 @@ need_split = (
 )
 
 if hasattr(ds, "split") and need_split:
-    n_folds = 5
     rng = np.random.default_rng(0)
     base_ids = np.unique(row_index)
     rng.shuffle(base_ids)
-    assign = {int(rid): i % n_folds for i, rid in enumerate(base_ids)}
-    fold_arr = np.array([assign[int(r)] for r in row_index], dtype=int)
+    n = len(base_ids)
+    n_val  = int(np.floor(0.15 * n))
+    n_test = int(np.floor(0.15 * n))
+    val_ids  = set(base_ids[:n_val])
+    test_ids = set(base_ids[n_val:n_val + n_test])
+
+    fold_arr = np.empty(len(row_index), dtype=int)
+    for i, rid in enumerate(row_index):
+        r = int(rid)
+        fold_arr[i] = 0 if r in val_ids else (1 if r in test_ids else 2)  # 0=val, 1=test, 2=train
+
     if getattr(ds, "cvindices", None) is None:
         ds.cvindices = {}
     ds.cvindices["by_robot"] = fold_arr
     ds.split(fold_id="by_robot", fold_num_validation=0, fold_num_test=1)
     print(f"Split sizes → train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
+
 elif need_split:
     _manual_by_robot_split(ds, row_index, n_folds=5, seed=0)
     print(f"Split sizes → train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
@@ -1087,14 +1159,22 @@ train_ds.meta = dict(getattr(train_ds, "meta", {}) or {})
 if label_mask is not None:
     train_ds.meta["observed_mask"] = label_mask
 
+SKIP = int(getattr(args_obj, "skip_fit", 0)) == 1
 if int(args_obj.reuse_detector) and args_obj.detector_model:
-    print(f"Loading detector from: {args_obj.detector_model}")
-    detector = _load_detector_from_path(args_obj.detector_model)
+    print(f"Loading detector/cbm from: {args_obj.detector_model}")
+    obj_det = load_obj(str(args_obj.detector_model))
+    if isinstance(obj_det, dict) and "detector" in obj_det:
+        detector = obj_det["detector"]
     if hasattr(detector, "output_mode"):
         detector.output_mode = CONCEPT_MODE
+    if SKIP and isinstance(obj_det, dict) and "cbm" in obj_det:
+        cbm = obj_det["cbm"]
 else:
+    if SKIP:
+        raise ValueError("skip-fit=1 requires --reuse-detector=1 and --detector-model pointing to a saved model.")
     print("Fitting detector")
     detector.fit(train_ds, val_ds)
+
 
 cbm = ConceptBasedModel(concept_detector=detector, front_end_model=FrontEndModel(), propagate=False)
 
@@ -1113,7 +1193,27 @@ if train_on_detected:
 else:
     C_train_used = C_train
 
-cbm.front_end_model.fit(C_train_used, y_train)
+noise_mode = merged.get("concept_label_noise_mode", "none")
+if noise_mode == "subjective":
+    rate = float(merged.get("concept_label_noise_rate", 0.20))
+    C_train_used = apply_subjective_noise(C_train_used.astype(int).copy(),
+                                          rate=rate,
+                                          seed=int(merged.get("seed", 0)) + 101)
+elif noise_mode == "machine":
+    confusion_json = merged.get("concept_label_noise_confusion", "")
+    confusion = None
+    if confusion_json:
+        try:
+            confusion = json.loads(confusion_json)
+        except Exception:
+            confusion = None
+    C_train_used = apply_machine_noise(C_train_used.astype(int).copy(),
+                                       confusion=confusion,
+                                       seed=int(merged.get("seed", 0)) + 201)
+
+
+if not SKIP:
+    cbm.front_end_model.fit(C_train_used, y_train)
 
 with np.errstate(invalid="ignore"):
     C_val_true = val_ds.C.astype(np.float32)
@@ -1394,21 +1494,27 @@ detector = obj["detector"]
 ds = load_obj(DATA)
 
 def ensure_split(ds):
-    # already split?
     if hasattr(ds, "training") and hasattr(ds, "validation") and hasattr(ds, "test"):
         if getattr(ds.training, "n", 0) > 0 and getattr(ds.validation, "n", 0) > 0 and getattr(ds.test, "n", 0) > 0:
             return
 
-    # get by-robot row_index (falls back to plain indices)
     row_index = getattr(getattr(ds, "_full", ds), "meta", {}).get("row_index", np.arange(len(ds)))
 
-    # helper: manual split by robot-id (5 folds; val=0, test=1, rest=train)
-    def _manual_by_robot_split(ds_obj, row_index_arr, n_folds=5, seed=0):
+    def _manual_by_robot_split(ds_obj, row_index_arr, seed=0):
         rng = np.random.default_rng(seed)
         base_ids = np.unique(row_index_arr)
         rng.shuffle(base_ids)
-        assign = {int(rid): i % n_folds for i, rid in enumerate(base_ids)}
-        fold_arr = np.array([assign[int(r)] for r in row_index_arr], dtype=int)
+
+        n_ids = len(base_ids)
+        n_val = int(np.floor(0.15 * n_ids))
+        n_te  = int(np.floor(0.15 * n_ids))
+        val_ids = set(base_ids[:n_val])
+        te_ids  = set(base_ids[n_val:n_val + n_te])
+
+        fold_arr = np.empty(len(row_index_arr), dtype=int)
+        for i, rid in enumerate(row_index_arr):
+            r = int(rid)
+            fold_arr[i] = 0 if r in val_ids else (1 if r in te_ids else 2)  # 0=val, 1=test, 2=train
 
         def _subset_mask(mask):
             idx = np.where(mask)[0]
@@ -1428,21 +1534,28 @@ def ensure_split(ds):
         ds_obj.validation = _subset_mask(val_mask)
         ds_obj.test       = _subset_mask(test_mask)
 
-        # expose cvindices so downstream code can read it
         try:
             ds_obj.cvindices = {"by_robot": fold_arr}
         except Exception:
             pass
 
-    # try native .split() with a by_robot fold, else fall back to manual
+    # try native .split() with explicit 70/15/15, else manual
     try:
         if hasattr(ds, "split"):
-            n_folds = 5
             rng = np.random.default_rng(0)
             base_ids = np.unique(row_index)
             rng.shuffle(base_ids)
-            assign = {int(rid): i % n_folds for i, rid in enumerate(base_ids)}
-            fold_arr = np.array([assign[int(r)] for r in row_index], dtype=int)
+            n_ids = len(base_ids)
+            n_val = int(np.floor(0.15 * n_ids))
+            n_te  = int(np.floor(0.15 * n_ids))
+            val_ids = set(base_ids[:n_val])
+            te_ids  = set(base_ids[n_val:n_val + n_te])
+
+            fold_arr = np.empty(len(row_index), dtype=int)
+            for i, rid in enumerate(row_index):
+                r = int(rid)
+                fold_arr[i] = 0 if r in val_ids else (1 if r in te_ids else 2)
+
             if getattr(ds, "cvindices", None) is None:
                 ds.cvindices = {}
             ds.cvindices["by_robot"] = fold_arr
@@ -1451,8 +1564,7 @@ def ensure_split(ds):
     except Exception:
         pass
 
-    # manual split if native path not available
-    _manual_by_robot_split(ds, row_index, n_folds=5, seed=0)
+    _manual_by_robot_split(ds, row_index, seed=0)
 
 def pick_split(ds, name):
     # safeguard if ensure_split hasn’t been called
@@ -1493,7 +1605,7 @@ def run(name):
     H = detector.predict(split)
     print(f"=== {name.upper()} (n={split.n}) ===")
     print("Before:", metrics(names, H, C))
-    ex = worst_examples(split, names, H, C, "head_shape=square", k=5)
+    ex = worst_examples(split, names, H, C, "head_is_square", k=5)
     print("head=square FNs:", ex["n_FN"], "FPs:", ex["n_FP"])
     print("FN examples:", ex["FN"][:3])
     print("FP examples:", ex["FP"][:3])
@@ -1593,6 +1705,13 @@ if args_obj.blackbox_metrics and Path(args_obj.blackbox_metrics).is_file():
     bb_acc = float(_m.get("accuracy", _m.get("acc_test", 0.0)))
 
 miss_meta_capture = None
+_sel_obj = os.environ.get("SELECTION_OBJ", "reduce_base").lower()
+
+base_proba_cls = None
+base_pred_cls = None
+base_acc_cls = None
+
+
 for ta in acc_grid:
     if ta == "raw":
         H0 = H_test_src.copy()
@@ -1603,41 +1722,84 @@ for ta in acc_grid:
     if target_acc_concepts:
         H0 = _apply_per_concept_degrade(H0, T_truth_src, names_vec, target_acc_concepts, SEED+99)
 
+    base_proba = fe_src.predict_proba(H0)
+    base_pred = np.argmax(base_proba, axis=1)
+    base_acc = float(accuracy_score(y_test_true, base_pred))
+    try:
+        cls_index_1 = int(np.where(cbm.front_end_model.model.classes_ == 1)[0][0])
+    except Exception:
+        cls_index_1 = 1 if base_proba.shape[1] > 1 else 0
+    sel_pre = calc_metric(base_proba[:, cls_index_1], y_test_true, tau=0.5)
+
+
+    if args_obj.concept_source != "gt":
+        concept_err_rate = float((H_test_src != T_truth_src).mean())
+        print(f"DBG concept_err_rate (detected vs truth): {concept_err_rate:.4f}")
+        run_info["concept_err_rate"] = concept_err_rate
+    else:
+        run_info["concept_err_rate"] = 0.0
+    acc_upper = float(accuracy_score(y_test_true, np.argmax(fe_src.predict_proba(T_truth_src), axis=1)))
+    print(f"DBG upper_bound_acc (all concepts set to truth): {acc_upper:.4f}")
+    run_info["upper_bound_acc"] = acc_upper
+
     acc_k0 = None
 
     for k in budgets:
         Hm = H0.copy()
+        edit_counts = np.zeros(Hm.shape[0], dtype=int)
+
         if k > 0:
-            if args_obj.policy == "uncertainty":
-                U = U_full_src.copy()
-                mask = np.ones(U.shape[1], dtype=bool)
-                if allow_idxs.size > 0:
-                    mask[:] = False
-                    mask[allow_idxs] = True
-                U[:, ~mask] = -1.0
-                topk = np.argsort(-U, axis=1)[:, :k]
-                for i in range(Hm.shape[0]):
-                    sel = [j for j in topk[i] if j < Hm.shape[1] and (allow_idxs.size == 0 or j in allow_idxs)]
-                    Hm[i] = _apply_human_edit(Hm[i], T_truth_src[i], sel, names_vec, float(args_obj.human_acc), acc_map,
-                                              rng)
-            else:
-                mask = np.ones(Hm.shape[1], dtype=bool)
-                if allow_idxs.size > 0:
-                    mask[:] = False
-                    mask[allow_idxs] = True
-                for i in range(Hm.shape[0]):
-                    errs = np.where((Hm[i] != T_truth_src[i]) & mask)[0]
-                    if errs.size > 0:
-                        sel = errs[:k]
-                        Hm[i] = _apply_human_edit(Hm[i], T_truth_src[i], sel, names_vec, float(args_obj.human_acc),
-                                                  acc_map, rng)
+            cols_all = allow_idxs if allow_idxs.size > 0 else np.arange(Hm.shape[1], dtype=int)
+            y0 = fe_src.predict(Hm)
+            for i in range(Hm.shape[0]):
+                x = Hm[i].copy()
+                base = int(y0[i])
+                rem = list(int(c) for c in cols_all)
+                picks = []
+                for _ in range(int(k)):
+                    if not rem:
+                        break
+                    proba = fe_src.predict_proba(x.reshape(1, -1))[0]
+                    if _sel_obj == "increase_true":
+                        tgt = int(y_test_true[i])
+                        p0 = float(proba[tgt])
+                        best_j, best_gain = -1, -np.inf
+                        for j in rem:
+                            tmp = x.copy();
+                            tmp[j] = T_truth_src[i, j]
+                            p1 = float(fe_src.predict_proba(tmp.reshape(1, -1))[0, tgt])
+                            gain = p1 - p0
+                            if gain > best_gain:
+                                best_gain, best_j = gain, j
+                    else:
+                        p0 = float(proba[base])
+                        best_j, best_drop = -1, -np.inf
+                        for j in rem:
+                            tmp = x.copy();
+                            tmp[j] = T_truth_src[i, j]
+                            p1 = float(fe_src.predict_proba(tmp.reshape(1, -1))[0, base])
+                            d = p0 - p1
+                            if d > best_drop:
+                                best_drop, best_j = d, j
+                    if best_j < 0:
+                        break
+                    picks.append(best_j)
+                    x[best_j] = T_truth_src[i, best_j]
+                    rem.remove(best_j)
+                if picks:
+                    Hm[i] = _apply_human_edit(Hm[i], T_truth_src[i], picks, names_vec, float(args_obj.human_acc),
+                                              acc_map, rng)
+                    edit_counts[i] = len(picks)
+
+        changed_bits = int(np.sum(Hm != H0))
+        changed_rows = int(np.sum((Hm != H0).any(axis=1)))
+        print(f"DBG ta={ta_label} k={k}: changed_bits={changed_bits} changed_rows={changed_rows}")
 
         H_infer = Hm
         names_infer = list(names_vec)
-        H_infer, names_infer, miss_meta = _apply_test_missing(
-            H_infer, names_infer, args_obj.test_miss, float(args_obj.test_miss_rate), args_obj.test_miss_mode, SEED
-        )
-
+        H_infer, names_infer, miss_meta = _apply_test_missing(H_infer, names_infer, args_obj.test_miss,
+                                                              float(args_obj.test_miss_rate), args_obj.test_miss_mode,
+                                                              SEED)
         if miss_meta is not None and miss_meta_capture is None:
             miss_meta_capture = dict(miss_meta)
 
@@ -1659,26 +1821,52 @@ for ta in acc_grid:
         if k == 0:
             acc_k0 = acc_k
 
+        try:
+            cls_index_1 = int(np.where(cbm.front_end_model.model.classes_ == 1)[0][0])
+        except Exception:
+            cls_index_1 = 1 if y_proba.shape[1] > 1 else 0
+        sel_post = calc_metric(y_proba[:, cls_index_1], y_test_true, tau=0.5)
+
+        interventions = int(np.sum(edit_counts > 0))
+        concepts_per_intervention = float(edit_counts[edit_counts > 0].mean()) if interventions > 0 else 0.0
+        incorrect_after = (y_pred != y_test_true)
+        failed_interventions = int(np.sum((edit_counts > 0) & incorrect_after))
+        failed_interventions_rate = float(failed_interventions) / float(interventions) if interventions > 0 else 0.0
+
+        gain_vs_k0 = (acc_k - base_acc) if base_acc is not None else float("nan")
+        concept_checks_total = int(k * Hm.shape[0])
+        edit_effectiveness = (gain_vs_k0 / max(1, k)) if not np.isnan(gain_vs_k0) else float("nan")
+        edit_effectiveness_per_intervention = (gain_vs_k0 / max(1, interventions)) if not np.isnan(gain_vs_k0) else float("nan")
+
         rec = {
             "target_acc": ta,
             "budget": k,
+            "acc_cbm_pre": base_acc,
             "acc_cbm_intv": acc_k,
-            "concept_checks": int(k * Hm.shape[0]),
+            "raw_gain_vs_k0": gain_vs_k0,
+            "gain_acc_human": (acc_k - float(getattr(args_obj, "human_alone", 0.75))) if hasattr(args_obj, "human_alone") else float("nan"),
+            "gain_acc_dnn": (acc_k - bb_acc) if bb_acc is not None else float("nan"),
+            "delta_vs_blackbox": (acc_k - bb_acc) if bb_acc is not None else float("nan"),
+            "concept_checks": concept_checks_total,
+            "confirmation_cost": concept_checks_total,
+            "edit_effectiveness": edit_effectiveness,
+            "edit_effectiveness_per_intervention": edit_effectiveness_per_intervention,
+            "interventions_pct": float(interventions) / float(Hm.shape[0]),
+            "concepts_per_intervention": concepts_per_intervention,
+            "failed_interventions_pct": failed_interventions_rate,
+            "sel_acc_pre": float(sel_pre.get("selective_accuracy", float("nan"))),
+            "sel_cov_pre": float(sel_pre.get("coverage", float("nan"))),
+            "sel_acc_post": float(sel_post.get("selective_accuracy", float("nan"))),
+            "sel_cov_post": float(sel_post.get("coverage", float("nan"))),
+            "coverage_automated": float(sel_pre.get("coverage", float("nan"))),
+            "coverage_after_confirmation": acc_k,
             "concept_source": args_obj.concept_source,
             "test_miss": args_obj.test_miss,
             "test_miss_rate": float(args_obj.test_miss_rate),
             "test_miss_mode": args_obj.test_miss_mode,
+            "concept_err_rate": float(concept_err_rate) if "concept_err_rate" in locals() else float("nan"),
+            "upper_bound_acc": float(acc_upper) if "acc_upper" in locals() else float("nan"),
         }
-
-        if acc_k0 is not None:
-            rec["raw_gain_vs_k0"] = acc_k - acc_k0
-
-        if hasattr(args_obj, "human_alone"):
-            rec["gain_acc_human"] = acc_k - float(args_obj.human_alone)
-
-        if bb_acc is not None:
-            rec["delta_vs_blackbox"] = acc_k - bb_acc
-            rec["gain_acc_dnn"] = rec["delta_vs_blackbox"]
 
         rows.append(rec)
 
@@ -1694,13 +1882,35 @@ if miss_meta_capture is not None:
                 f.write(f"{n}\n")
 
     if miss_meta_capture.get("realized"):
-        rows = [{"concept": k, "realized_rate": v} for k, v in miss_meta_capture["realized"].items()]
-        pd.DataFrame(rows).to_csv(run_dir / f"mask_realized_{miss_tag}_{seed_tag}.csv", index=False)
+        mask_rows = [{"concept": k, "realized_rate": v} for k, v in miss_meta_capture["realized"].items()]
+        pd.DataFrame(mask_rows).to_csv(run_dir / f"mask_realized_{miss_tag}_{seed_tag}.csv", index=False)
 
 viab = pd.DataFrame(rows)
 viab_path = run_dir / f"viability_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
 viab.to_csv(viab_path, index=False)
 print("Saved intervention metrics:", viab_path)
+
+
+def _first_k_at_least():
+    ks = viab.sort_values(["target_acc", "budget"])
+    out = []
+    for ta_val, grp in ks.groupby("target_acc"):
+        k_dnn = grp.loc[grp["acc_cbm_intv"] >= (
+            bb_acc if bb_acc is not None else -1), "budget"].min() if bb_acc is not None else np.nan
+        human_ref = float(getattr(args_obj, "human_alone", np.nan))
+        k_h = grp.loc[grp["acc_cbm_intv"] >= human_ref, "budget"].min() if not np.isnan(human_ref) else np.nan
+        out.append({
+            "target_acc": ta_val,
+            "edits_to_match_dnn": (int(k_dnn) if pd.notna(k_dnn) else -1),
+            "edits_to_match_human": (int(k_h) if pd.notna(k_h) else -1),
+        })
+    return pd.DataFrame(out)
+
+
+summary_edit = _first_k_at_least()
+summary_path = run_dir / f"viability_summary_edits_to_match_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+summary_edit.to_csv(summary_path, index=False)
+print("Saved edits-to-match summary:", summary_path)
 
 if int(args_obj.make_plots):
     for ta in acc_grid:

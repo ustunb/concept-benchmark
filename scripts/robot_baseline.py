@@ -531,21 +531,43 @@ if modality == "text":
             llm_user_prompt="Describe the robot based only on attributes.",
         )
 
-    # simple 75/15/10 split
-    idx = np.arange(len(ds.X))
-    rng = np.random.default_rng(int(settings["seed"]))
-    rng.shuffle(idx)
-    n = len(idx)
-    n_tr = int(0.75 * n)
-    n_val = int(0.15 * n)
-    tr, va, te = idx[:n_tr], idx[n_tr:n_tr + n_val], idx[n_tr + n_val:]
+    # 70/15/15 split; by-robot if row_index is available, else by-instance
+    row_index = getattr(getattr(ds, "_full", None), "meta", {}).get("row_index", None)
 
-    # subset helper (ConceptDatasetSample expected)
+    if isinstance(row_index, np.ndarray) and len(row_index) == len(ds.X):
+        rng = np.random.default_rng(int(settings["seed"]))
+        base_ids = np.unique(row_index)
+        rng.shuffle(base_ids)
+        n_ids = len(base_ids)
+        n_val_ids = int(np.floor(0.15 * n_ids))
+        n_te_ids = int(np.floor(0.15 * n_ids))
+        val_ids = set(base_ids[:n_val_ids])
+        te_ids = set(base_ids[n_val_ids:n_val_ids + n_te_ids])
+        mask_val = np.array([rid in val_ids for rid in row_index], dtype=bool)
+        mask_te = np.array([rid in te_ids for rid in row_index], dtype=bool)
+        mask_tr = ~(mask_val | mask_te)
+        tr = np.where(mask_tr)[0]
+        va = np.where(mask_val)[0]
+        te = np.where(mask_te)[0]
+    else:
+        n = len(ds.X)
+        idx = np.arange(n)
+        rng = np.random.default_rng(int(settings["seed"]))
+        rng.shuffle(idx)
+        tr_end = int(0.70 * n)
+        va_end = int(0.85 * n)
+        tr, va, te = idx[:tr_end], idx[tr_end:va_end], idx[va_end:]
+
+
     def _subset(ds_obj, take):
         X = [ds_obj.X[i] for i in take]
         C = ds_obj.C[take]
         y = ds_obj.y[take]
-        return ConceptDatasetSample(X=X, C=C, y=y, meta={"concepts": ds_obj.concepts, "classes": ds_obj.classes, "data_type": "text"})
+        return ConceptDatasetSample(
+            X=X, C=C, y=y,
+            meta={"concepts": ds_obj.concepts, "classes": ds_obj.classes, "data_type": "text"}
+        )
+
 
     ds.training = _subset(ds, tr)
     ds.validation = _subset(ds, va)
@@ -572,13 +594,17 @@ else:
     meta["label"] = compute_label(meta, label_expr)
     n = min(int(settings["n"]), len(meta))
     meta = meta.iloc[:n].reset_index(drop=True)
-    split = int(0.8 * n)
-    tr = meta.iloc[:split]
-    te = meta.iloc[split:]
+    n_tr = int(0.70 * n)
+    n_va = int(0.15 * n)
+    tr = meta.iloc[:n_tr]
+    va = meta.iloc[n_tr:n_tr + n_va]  # not used by baseline training; held out for consistency
+    te = meta.iloc[n_tr + n_va:]
+
     paths_tr = [imgs_dir / p for p in tr["path"]]
     ytr = tr["label"].map({"drent": 0, "glorp": 1}).astype(int).values
     paths_te = [imgs_dir / p for p in te["path"]]
     yte = te["label"].map({"drent": 0, "glorp": 1}).astype(int).values
+
     acc, tok_or_proc, model = train_eval_image(
         paths_tr, ytr, paths_te, yte,
         model_id=model_id,
