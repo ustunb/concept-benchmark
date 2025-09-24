@@ -1034,14 +1034,15 @@ class ConceptBasedModel(object):
             Z = (rng.random((P_active.shape[0], s, C)) < P_active[:, None, :]).astype(np.float32)
             Z_flat = Z.reshape(-1, C)
 
+            # NOTE: commented out deduplication; often not worth the overhead
             # Deduplicate concept vectors to reduce model calls
-            try:
-                uniq, inv = np.unique(Z_flat, axis=0, return_inverse=True)
-                y_uniq = self.front_end_model.predict_proba(uniq)
-                Y_flat = y_uniq[inv]
-            except Exception:
-                # Fallback without deduplication
-                Y_flat = self.front_end_model.predict_proba(Z_flat)
+            # try:
+            #     uniq, inv = np.unique(Z_flat, axis=0, return_inverse=True)
+            #     y_uniq = self.front_end_model.predict_proba(uniq)
+            #     Y_flat = y_uniq[inv]
+            # except Exception:
+            #     # Fallback without deduplication
+            Y_flat = self.front_end_model.predict_proba(Z_flat)
 
             # Reshape back to (A, s, K)
             Y = Y_flat.reshape(P_active.shape[0], s, -1)
