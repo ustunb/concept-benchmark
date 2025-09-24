@@ -175,6 +175,10 @@ class InterventionResult:
     y_prob_after: np.ndarray
     y_pred_after: np.ndarray
     proposal: StrategyProposal
+    selective_acc_before: Optional[float] = None
+    selective_acc_after: Optional[float] = None
+    coverage_before: Optional[float] = None
+    coverage_after: Optional[float] = None
 
 
 class InterventionStrategy:
@@ -273,6 +277,7 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
 
         y_prob = model._propagate_predict_proba_mc(batch.C_pred)
         predicted = np.argmax(y_prob, axis=1)
+        selective_acc_before = (predicted == batch.y_true).mean()
         confidences = y_prob[np.arange(batch.n_samples), predicted]
         abstain_mask = (confidences >= config.tau) & (confidences <= 1.0 - config.tau)
         candidate_ids = np.nonzero(abstain_mask)[0]
@@ -289,7 +294,12 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
         )
         mask = np.zeros_like(batch.C_pred, dtype=bool)
         self._apply_ordering(mask, order, selected, config=config)
-        return StrategyProposal(mask=mask, ordering_used=order, selected_instances=selected)
+        return StrategyProposal(
+            mask=mask, 
+            ordering_used=order, 
+            selected_instances=selected,
+            details={"selective_acc_before": selective_acc_before}
+        )
 
 
 class OrderedCBMStrategy(InterventionStrategy):
@@ -498,6 +508,17 @@ class ConceptInterventionRunner:
         y_prob_after = predict_proba_fn(concepts_after)
         y_pred_after = np.argmax(y_prob_after, axis=1)
 
+        # Conceptual Safeguards results
+        cs_results = {}
+        if isinstance(strategy, ConceptualSafeguardsStrategy):
+            cs_results['selective_acc_before'] = proposal.details.get("selective_acc_before", None)
+            cs_results['coverage_before'] = proposal.selected_instances.size / batch.n_samples if batch.n_samples > 0 else 0.0
+
+            abstain_post = (y_prob_after.max(axis=1) >= config.tau) & (y_prob_after.max(axis=1) <= 1.0 - config.tau)
+
+            cs_results['selective_acc_after'] = (y_pred_after[~abstain_post] == batch.y_true[~abstain_post]).mean() if (~abstain_post).any() else -np.inf
+            cs_results['coverage_after'] = 1 - abstain_post.mean()
+
         return InterventionResult(
             C_pred=batch.C_pred,
             C_intervened=C_intervened,
@@ -506,6 +527,7 @@ class ConceptInterventionRunner:
             y_prob_after=y_prob_after,
             y_pred_after=y_pred_after,
             proposal=proposal,
+            **cs_results,
         )
 
     def _build_batch(
