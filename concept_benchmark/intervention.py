@@ -277,9 +277,11 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
 
         y_prob = model._propagate_predict_proba_mc(batch.C_pred)
         predicted = np.argmax(y_prob, axis=1)
-        selective_acc_before = (predicted == batch.y_true).mean()
         confidences = y_prob[np.arange(batch.n_samples), predicted]
         abstain_mask = (confidences >= config.tau) & (confidences <= 1.0 - config.tau)
+
+        selective_acc_before = (predicted[~abstain_mask] == batch.y_true[~abstain_mask]).mean()
+
         candidate_ids = np.nonzero(abstain_mask)[0]
         selected = self._select_instances(
             candidate_ids,
@@ -512,9 +514,9 @@ class ConceptInterventionRunner:
         cs_results = {}
         if isinstance(strategy, ConceptualSafeguardsStrategy):
             cs_results['selective_acc_before'] = proposal.details.get("selective_acc_before", None)
-            cs_results['coverage_before'] = proposal.selected_instances.size / batch.n_samples if batch.n_samples > 0 else 0.0
+            cs_results['coverage_before'] = 1 - (proposal.selected_instances.size / batch.n_samples) if batch.n_samples > 0 else 0.0
 
-            abstain_post = (y_prob_after.max(axis=1) >= config.tau) & (y_prob_after.max(axis=1) <= 1.0 - config.tau)
+            abstain_post = (y_prob_after[:, 1] >= config.tau) & (y_prob_after[:, 1] <= 1.0 - config.tau)
 
             cs_results['selective_acc_after'] = (y_pred_after[~abstain_post] == batch.y_true[~abstain_post]).mean() if (~abstain_post).any() else -np.inf
             cs_results['coverage_after'] = 1 - abstain_post.mean()
