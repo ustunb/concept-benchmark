@@ -48,7 +48,7 @@ DEFAULT_ROBOT_SETTINGS = {
     'size': 'large',  
     'color_mode': 'color',  
     'data_type': 'image',
-    'target_accuracy': 1,
+    'target_accuracy': 1.0,
     'concept_noise': 0.0,
 }
 
@@ -85,10 +85,10 @@ def get_model_file(
     elif data_name == "robot":
         filename = f"robot_{data_type}_{model_type}_{n}"
         
-    filename += f"_{concept_noise}"
-
-    if concept_missing:
-        filename += f"_{concept_missing_mech}_{concept_missing}"
+    if data_name != "sudoku" or model_type == "cd":
+        filename += f"_{concept_noise}"
+        if concept_missing:
+            filename += f"_{concept_missing_mech}_{concept_missing}"
 
     if model_type in {"fe", "dnn"}:
         filename += f"_{target_accuracy}"

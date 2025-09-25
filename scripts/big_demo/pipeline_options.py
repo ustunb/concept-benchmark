@@ -17,7 +17,7 @@ import types
 from dataclasses import dataclass, field
 from itertools import product
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, MutableMapping, Sequence, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -231,14 +231,10 @@ def build_stage_configs() -> Dict[str, StageConfig]:
             base_args={
                 "data_name": "sudoku",
                 "n": 3,
-                "concept_missing": CONCEPT_MISSING_RATE,
-                "concept_missing_mech": "mcar",
+                "max_corrupt": 21
             },
-            sweeps={
-                "concept_noise": CONCEPT_NOISE_OPTIONS,
-                "concept_missing_mech": MISSING_MECHANISMS,
-                "target_accuracy": TARGET_ACCURACY_OPTIONS,
-            },
+            # Just train one "good" front-end model for sudoku
+            sweeps={},
             adjust=set_missing_rate,
         ),
         "train_front_end_robot": StageConfig(
