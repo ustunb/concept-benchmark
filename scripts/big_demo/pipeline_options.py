@@ -173,8 +173,8 @@ def set_missing_rate(args: MutableMapping[str, Any], labels: Dict[str, str]) -> 
 def build_stage_configs() -> Dict[str, StageConfig]:
     python_prefix = "scripts/big_demo"
     return {
-        "dataset_sudoku": StageConfig(
-            name="dataset_sudoku",
+        "setup_dataset_sudoku": StageConfig(
+            name="setup_dataset_sudoku",
             script=f"{python_prefix}/setup_sudoku_dataset.py",
             base_args={
                 "data_type": "tabular",
@@ -186,8 +186,8 @@ def build_stage_configs() -> Dict[str, StageConfig]:
                 "target_accuracy": TARGET_ACCURACY_OPTIONS,
             },
         ),
-        "dataset_robot": StageConfig(
-            name="dataset_robot",
+        "setup_dataset_robot": StageConfig(
+            name="setup_dataset_robot",
             script=f"{python_prefix}/setup_robot_dataset.py",
             base_args={
                 "data_type": "image",
@@ -326,14 +326,28 @@ def json_output(stage_name: str, commands: List[str], combos: List[Combination])
     return {stage_name: stage_payload}
 
 
+STAGE_TYPES = [
+    "setup_dataset",
+    "train_dnn",
+    "train_concept_detector",
+    "train_front_end"
+]
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Enumerate big demo pipeline commands")
     all_stages = build_stage_configs()
     parser.add_argument(
+        "--dataset",
+        nargs="+",
+        choices=("sudoku", "robot"),
+        default=("sudoku", "robot"),
+        help="Select dataset stages (implies related training stages)",
+    )
+    parser.add_argument(
         "--stages",
         nargs="+",
-        choices=sorted(all_stages.keys()),
-        default=list(all_stages.keys()),
+        choices=STAGE_TYPES,
+        default=STAGE_TYPES,
         help="Subset of stages to enumerate",
     )
     parser.add_argument(
@@ -379,7 +393,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.execute and args.dry_run:
         parser.error("Use only one of --execute or --dry-run")
 
-    selected = [all_stages[name] for name in args.stages]
+    selected_stages = [
+        f"{stype}_{dset}" for stype in args.stages for dset in args.dataset
+    ]
+
+    selected = [all_stages[name] for name in selected_stages if name in all_stages]
 
     run_commands = args.execute
 
