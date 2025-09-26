@@ -13,9 +13,9 @@ settings = {
     'n': 3,
     'max_corrupt': 21,
     'concept_noise': 0.0,  
-    'concept_missing': 0.2,
-    'concept_missing_mech': 'mcar',
-    'target_accuracy': 0.8,
+    'concept_missing': 0.0,
+    'concept_missing_mech': 'none',
+    'target_accuracy': 1.0,
 }
 
 if Process(pid=os.getppid()).name() not in ("node"):

@@ -16,9 +16,9 @@ settings = {
     'data_type': 'tabular',
     'n': 3,
     'max_corrupt': 21,
-    'concept_noise': 0.05,
-    'concept_missing': 0.05,
-    'concept_missing_mech': 'mcar',
+    'concept_noise': 0.00,
+    'concept_missing': 0.00,
+    'concept_missing_mech': 'none',
     'target_accuracy': 1.0, # doesn't matter but need for dataset loading
     'epochs': 50,
     'patience': 20,
@@ -58,8 +58,8 @@ device = determine_device()
 config = {
     'device': device,
     'batch_size': 32,
-    'num_workers': 12,
-    'pin_memory': True,
+    'num_workers': 0 if device.type == 'mps' else 12,
+    'pin_memory': False if device.type == 'mps' else True,
 }
 
 model.fit(

@@ -53,16 +53,9 @@ except ModuleNotFoundError as err:
     sys.modules.setdefault("torch", torch_stub)
     import utils as big_demo_utils
 
-CONCEPT_NOISE: float = big_demo_utils.CONCEPT_NOISE
+CONCEPT_NOISE: Sequence[float] = big_demo_utils.CONCEPT_NOISE
 DIFFICULTY: Dict[str, float] = big_demo_utils.DIFFICULTY
-
-
-# utils.py currently misspells this constant; fall back gracefully if needed.
-CONCEPT_MISSING_RATE: float = getattr(
-    big_demo_utils,
-    "CONCEPT_MISSING",
-    getattr(big_demo_utils, "CONCET_MISSING", 0.05),
-)
+CONCEPT_MISSING_RATE: Sequence[float] = big_demo_utils.CONCEPT_MISSING
 
 
 @dataclass(frozen=True)
@@ -72,9 +65,6 @@ class Option:
     label: str
     value: Any
 
-    def __str__(self) -> str:  # pragma: no cover - convenience
-        return self.label
-
 
 @dataclass
 class Combination:
@@ -82,6 +72,12 @@ class Combination:
 
     args: Dict[str, Any]
     labels: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class MissingnessMode:
+    mechanism: str
+    level: float
 
 
 @dataclass
@@ -123,9 +119,8 @@ TARGET_ACCURACY_OPTIONS: Tuple[Option, ...] = tuple(
     Option(label=label, value=value) for label, value in DIFFICULTY.items()
 )
 
-CONCEPT_NOISE_OPTIONS: Tuple[Option, ...] = (
-    Option(label="off", value=0.0),
-    Option(label="on", value=CONCEPT_NOISE),
+CONCEPT_NOISE_OPTIONS: Tuple[Option, ...] = tuple(
+    Option(label=f"concept_noise_{noise_level}", value=noise_level) for noise_level in CONCEPT_NOISE
 )
 
 MISSING_MECHANISMS: Tuple[Option, ...] = (
@@ -135,9 +130,44 @@ MISSING_MECHANISMS: Tuple[Option, ...] = (
 )
 
 
-def set_missing_rate(args: MutableMapping[str, Any], _: Dict[str, str]) -> None:
+def _format_missing_level(level: float) -> str:
+    return str(level)
+
+
+def _build_missingness_modes() -> Tuple[Option, ...]:
+    options: List[Option] = []
+    for mechanism_option in MISSING_MECHANISMS:
+        mechanism = mechanism_option.value
+        levels: Sequence[float]
+        if mechanism == "none":
+            levels = (0.0,)
+        else:
+            levels = CONCEPT_MISSING_RATE
+        for missing_level in levels:
+            label_level = _format_missing_level(missing_level)
+            options.append(
+                Option(
+                    label=f"missing_{mechanism}_{label_level}",
+                    value=MissingnessMode(mechanism=mechanism, level=missing_level),
+                )
+            )
+    return tuple(options)
+
+
+MISSINGNESS_MODES: Tuple[Option, ...] = _build_missingness_modes()
+
+
+def set_missing_rate(args: MutableMapping[str, Any], labels: Dict[str, str]) -> None:
+    mode = args.pop("missingness", None)
+    if isinstance(mode, MissingnessMode):
+        labels.pop("missingness", None)
+        args["concept_missing_mech"] = mode.mechanism
+        args["concept_missing"] = mode.level
+        labels["concept_missing_mech"] = mode.mechanism
+        labels["concept_missing"] = f"concept_missing_{_format_missing_level(mode.level)}"
     mechanism = args.get("concept_missing_mech", "none")
-    args["concept_missing"] = 0.0 if mechanism == "none" else CONCEPT_MISSING_RATE
+    if mechanism == "none":
+        args["concept_missing"] = 0.0
 
 
 def build_stage_configs() -> Dict[str, StageConfig]:
@@ -198,13 +228,13 @@ def build_stage_configs() -> Dict[str, StageConfig]:
                 "data_name": "sudoku",
                 "n": 3,
                 "max_corrupt": 21,
-                "concept_missing": CONCEPT_MISSING_RATE,
-                "concept_missing_mech": "mcar",
+                "concept_missing": 0.0,
+                "concept_missing_mech": "none",
                 "target_accuracy": DIFFICULTY["easy"],
             },
             sweeps={
                 "concept_noise": CONCEPT_NOISE_OPTIONS,
-                "concept_missing_mech": MISSING_MECHANISMS,
+                "missingness": MISSINGNESS_MODES,
             },
             adjust=set_missing_rate,
         ),
@@ -215,13 +245,13 @@ def build_stage_configs() -> Dict[str, StageConfig]:
                 "data_name": "robot",
                 "data_type": "image",
                 "n": 1,
-                "concept_missing": CONCEPT_MISSING_RATE,
-                "concept_missing_mech": "mcar",
+                "concept_missing": 0.0,
+                "concept_missing_mech": "none",
                 "target_accuracy": DIFFICULTY["easy"],
             },
             sweeps={
                 "concept_noise": CONCEPT_NOISE_OPTIONS,
-                "concept_missing_mech": MISSING_MECHANISMS,
+                "missingness": MISSINGNESS_MODES,
             },
             adjust=set_missing_rate,
         ),
@@ -235,7 +265,6 @@ def build_stage_configs() -> Dict[str, StageConfig]:
             },
             # Just train one "good" front-end model for sudoku
             sweeps={},
-            adjust=set_missing_rate,
         ),
         "train_front_end_robot": StageConfig(
             name="train_front_end_robot",
@@ -244,12 +273,12 @@ def build_stage_configs() -> Dict[str, StageConfig]:
                 "data_name": "robot",
                 "data_type": "image",
                 "n": 1,
-                "concept_missing": CONCEPT_MISSING_RATE,
-                "concept_missing_mech": "mcar",
+                "concept_missing": 0.0,
+                "concept_missing_mech": "none",
             },
             sweeps={
                 "concept_noise": CONCEPT_NOISE_OPTIONS,
-                "concept_missing_mech": MISSING_MECHANISMS,
+                "missingness": MISSINGNESS_MODES,
                 "target_accuracy": TARGET_ACCURACY_OPTIONS,
             },
             adjust=set_missing_rate,
