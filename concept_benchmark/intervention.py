@@ -26,8 +26,10 @@ concept bottleneck literature:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import itertools
 import math
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
+import warnings
 
 import numpy as np
 
@@ -118,11 +120,14 @@ class InterventionConfig:
     select_only_abstained: bool = False
     per_instance_ordering: bool = True
     allow_repeated: bool = False
+    score_threshold: float = 0.2
     _rng: np.random.Generator = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.tau is not None and not (0.0 <= self.tau <= 0.5):
             raise ValueError("tau must lie within [0, 0.5].")
+        if not (0.0 <= self.score_threshold <= 1.0):
+            raise ValueError("score_threshold must lie within [0, 1].")
         self._rng = np.random.default_rng(self.random_state)
 
     @property
@@ -440,6 +445,199 @@ class RandomInterventionStrategy(InterventionStrategy):
         return StrategyProposal(mask=mask, ordering_used=ordering_used, selected_instances=selected)
 
 
+
+class ScoreIntervention(InterventionStrategy):
+    """Intervene on fixed-size concept subsets exceeding a score threshold."""
+
+    def __init__(self) -> None:
+        super().__init__(name="score_intervention")
+
+    def propose(
+        self,
+        model: ConceptBasedModel,
+        batch: InterventionBatch,
+        config: InterventionConfig,
+    ) -> StrategyProposal:
+        n_samples, n_concepts = batch.C_pred.shape
+        mask = np.zeros_like(batch.C_pred, dtype=bool)
+
+        concepts_before = (batch.C_pred >= 0.5).astype(int)
+        p_before = model.front_end_model.predict_proba(concepts_before)
+        y_pred_before = np.argmax(p_before, axis=1)
+
+        scores = np.zeros(n_samples, dtype=float)
+        selected = np.array([], dtype=int)
+
+        m = config.max_concepts_per_instance
+        threshold = config.score_threshold
+
+        if m is None or m <= 0:
+            details = self._build_details(
+                model=model,
+                mask=mask,
+                batch=batch,
+                p_before=p_before,
+                y_pred_before=y_pred_before,
+                scores=scores,
+                selected=selected,
+                threshold=threshold,
+                m=0,
+            )
+            return StrategyProposal(
+                mask=mask,
+                ordering_used=None,
+                selected_instances=selected,
+                details=details,
+            )
+
+        if m > n_concepts:
+            warnings.warn(
+                "max_concepts_per_instance exceeds number of concepts; clipping to n_concepts",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            m = n_concepts
+
+        combination_arrays = [np.asarray(combo, dtype=int) for combo in itertools.combinations(range(n_concepts), m)]
+
+        best_subset_arrays: List[Optional[np.ndarray]] = [None] * n_samples
+
+        for idx in range(n_samples):
+            base_vector = concepts_before[idx]
+            base_prob = p_before[idx]
+            best_score = -math.inf
+            best_subset_array: Optional[np.ndarray] = None
+
+            for combo_indices in combination_arrays:
+                flipped = base_vector.copy()
+                flipped[combo_indices] = 1 - flipped[combo_indices]
+                p_after = model.front_end_model.predict_proba(flipped[None, :])[0]
+                score = float(np.max(np.abs(p_after - base_prob)))
+                if score > best_score:
+                    best_score = score
+                    best_subset_array = combo_indices
+
+            if best_subset_array is not None:
+                scores[idx] = max(best_score, 0.0)
+                best_subset_arrays[idx] = best_subset_array
+
+        selected_indices: List[int] = []
+        for idx, subset_array in enumerate(best_subset_arrays):
+            if subset_array is None:
+                continue
+            if scores[idx] > threshold:
+                mask[idx, subset_array] = True
+                selected_indices.append(idx)
+
+        if selected_indices:
+            selected = np.asarray(selected_indices, dtype=int)
+        else:
+            selected = np.array([], dtype=int)
+
+        details = self._build_details(
+            model=model,
+            mask=mask,
+            batch=batch,
+            p_before=p_before,
+            y_pred_before=y_pred_before,
+            scores=scores,
+            selected=selected,
+            threshold=threshold,
+            m=m,
+        )
+
+        return StrategyProposal(
+            mask=mask,
+            ordering_used=None,
+            selected_instances=selected,
+            details=details,
+        )
+
+    @staticmethod
+    def _build_details(
+        *,
+        model: ConceptBasedModel,
+        mask: np.ndarray,
+        batch: InterventionBatch,
+        p_before: np.ndarray,
+        y_pred_before: np.ndarray,
+        scores: np.ndarray,
+        selected: np.ndarray,
+        threshold: float,
+        m: int,
+    ) -> Dict[str, Any]:
+        overall_acc_before: Optional[float] = None
+        acc_non_intervened_before: Optional[float] = None
+        confusion_selected_before: Optional[np.ndarray] = None
+        confusion_selected_after: Optional[np.ndarray] = None
+        confusion_non_selected_before: Optional[np.ndarray] = None
+        confusion_non_selected_after: Optional[np.ndarray] = None
+
+        def compute_confusion(y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
+            n_classes = p_before.shape[1]
+            matrix = np.zeros((n_classes, n_classes), dtype=int)
+            for truth, prediction in zip(y_true, y_pred):
+                matrix[int(truth), int(prediction)] += 1
+            return matrix
+
+        if batch.y_true is not None:
+            overall_acc_before = float(np.mean(y_pred_before == batch.y_true))
+            non_selected = np.setdiff1d(np.arange(batch.n_samples), selected, assume_unique=True)
+            if non_selected.size:
+                acc_non_intervened_before = float(
+                    np.mean(y_pred_before[non_selected] == batch.y_true[non_selected])
+                )
+            else:
+                acc_non_intervened_before = math.nan
+
+            if selected.size:
+                confusion_selected_before = compute_confusion(batch.y_true[selected], y_pred_before[selected])
+            else:
+                confusion_selected_before = np.zeros((p_before.shape[1], p_before.shape[1]), dtype=int)
+
+            if non_selected.size:
+                confusion_non_selected_before = compute_confusion(
+                    batch.y_true[non_selected], y_pred_before[non_selected]
+                )
+            else:
+                confusion_non_selected_before = np.zeros((p_before.shape[1], p_before.shape[1]), dtype=int)
+
+        overwrite_mask = mask & ~np.isnan(batch.C_true)
+        C_intervened = np.where(overwrite_mask, batch.C_true, batch.C_pred)
+        concepts_after = (C_intervened >= 0.5).astype(int)
+        p_after = model.front_end_model.predict_proba(concepts_after)
+        y_pred_after = np.argmax(p_after, axis=1)
+
+        overall_acc_after: Optional[float] = None
+        if batch.y_true is not None:
+            overall_acc_after = float(np.mean(y_pred_after == batch.y_true))
+            if selected.size:
+                confusion_selected_after = compute_confusion(batch.y_true[selected], y_pred_after[selected])
+            else:
+                confusion_selected_after = np.zeros((p_before.shape[1], p_before.shape[1]), dtype=int)
+
+            non_selected = np.setdiff1d(np.arange(batch.n_samples), selected, assume_unique=True)
+            if non_selected.size:
+                confusion_non_selected_after = compute_confusion(
+                    batch.y_true[non_selected], y_pred_after[non_selected]
+                )
+            else:
+                confusion_non_selected_after = np.zeros((p_before.shape[1], p_before.shape[1]), dtype=int)
+
+        return {
+            "scores": scores,
+            "threshold": threshold,
+            "m": m,
+            "overall_acc_before": overall_acc_before,
+            "acc_non_intervened_before": acc_non_intervened_before,
+            "overall_acc_after": overall_acc_after,
+            "confusion_selected_before": confusion_selected_before,
+            "confusion_selected_after": confusion_selected_after,
+            "confusion_non_selected_before": confusion_non_selected_before,
+            "confusion_non_selected_after": confusion_non_selected_after,
+        }
+
+
 class ConceptInterventionRunner:
     """Utility that coordinates intervention preparation and execution."""
 
@@ -505,7 +703,8 @@ class ConceptInterventionRunner:
 
         # Evaluate the model before and after the intervention.
         y_prob_before = predict_proba_fn(concepts_before)
-        C_intervened = np.where(proposal.mask, batch.C_true, batch.C_pred)
+        overwrite_mask = proposal.mask & ~np.isnan(batch.C_true)
+        C_intervened = np.where(overwrite_mask, batch.C_true, batch.C_pred)
         concepts_after = C_intervened if isinstance(strategy, ConceptualSafeguardsStrategy) else (C_intervened >= 0.5)
         y_prob_after = predict_proba_fn(concepts_after)
         y_pred_after = np.argmax(y_prob_after, axis=1)
@@ -571,6 +770,7 @@ __all__ = [
     "InterventionError",
     "InterventionResult",
     "OrderedCBMStrategy",
+    "ScoreIntervention",
     "RandomInterventionStrategy",
     "StrategyProposal",
 ]
