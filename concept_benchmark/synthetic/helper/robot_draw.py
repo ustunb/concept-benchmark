@@ -13,30 +13,30 @@ from .utils import generate_color_schemes
 ROBOT_TYPES = ("glorp", "drent")
 
 ALL_ROBOT_FEATURES = {
-    "foot_shape": (
+    "foot_shape": [
         "flat_4sided",
         "flat_5sided",
         "flat_lshaped",
         "pointy_3sided",
         "pointy_4sided",
         "pointy_6sided",
-    ),
-    "body_shape": ("square", "round"),  # no subtypes (could add)
-    "head_shape": ("square", "round"),  # no subtypes (could add)
+    ],
+    "body_shape": ["square", "round"],  # no subtypes (could add)
+    "head_shape": ["square", "round"],  # no subtypes (could add)
     #
-    'has_elbows': ('true', 'false'),  # all round
-    "has_knees": ("true", "false"),
-    "has_antennae": ["false", "true"],
-    "ears_shape": ("square", "triangle"),
-    "mouth_type": ("closed", "open"),
-    "hand_shape": (
+    'has_elbows': [True, False],  # all round
+    "has_knees": [True, False],
+    "has_antennae": [True, False],
+    "ears_shape": ["square", "triangle"],
+    "mouth_type": ["closed", "open"],
+    "hand_shape": [
         "round_circle",
         "round_oval",
         "round_oval2",
         "edgy_triangle",
         "edgy_square",
         "edgy_trapezoid",
-    ),
+    ],
 }
 
 COLOR_SCHEMES = generate_color_schemes(
@@ -134,7 +134,7 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
     ray.draw(canvas, x=x_right, y=y_arm, length=arm_length, angle=pero.rads(0))
 
     # elbows
-    if "has_elbows" in features.keys() and features["has_elbows"] == "true":
+    if features.get("has_elbows", False):
         elbow = pero.Ellipse(y=y_arm, width=0.3 * r, height=0.3 * r)
         elbow.draw(canvas, x=x_left - 0.5 * arm_length, fill_color=color_left)
         elbow.draw(canvas, x=x_right + 0.5 * arm_length, fill_color=color_right)
@@ -250,7 +250,7 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
     line.draw(canvas, x1=x_right, x2=x_right, y1=y_top * 0.9, y2=y_top + leg_height)
 
     # knees
-    if features["has_knees"] == "true":
+    if features.get("has_knees", False):
         knee = pero.Ellipse(
             x=x_left, y=y_top + 0.5 * leg_height, width=0.3 * r, height=0.3 * r
         )
@@ -410,7 +410,7 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
     ############################################################################
 
     # antennae
-    if features.get("has_antennae", True):  # default to True if not specified
+    if features.get("has_antennae", False):  # default to False if not specified
         antenna_length = 1.5 * r if head_shape == "round" else 1.75 * r
         antenna_width = 4
 
