@@ -281,6 +281,7 @@ def create_robot_image_dataset(
     spurious_features: Sequence[str] | None = None,
     irrelevant_features: Sequence[str] | None = None,
     color_mode: str = "color",
+    blur: dict | None = None,
     verbose: bool = False,
     train_concept_detector: bool | None = None,
     epochs: int | None = None,
@@ -308,6 +309,7 @@ def create_robot_image_dataset(
         output_directory=output_directory,
         draw=draw,
         color_mode=color_mode,
+        blur=blur,
         drop_irrelevant=drop_irrelevant,
         irrelevant_features=irrelevant,
         verbose=verbose,
@@ -347,20 +349,12 @@ def create_robot_image_dataset(
         feat for feat in catalog_df.columns if feat in ALL_ROBOT_FEATURES
     ]
     pos_map = {
-        feat: ALL_ROBOT_FEATURES[feat][0].split("_")[0]
+        feat: ALL_ROBOT_FEATURES[feat][0].split("_")[0] \
+        if isinstance(ALL_ROBOT_FEATURES[feat][0], str) \
+        else ALL_ROBOT_FEATURES[feat][0]
         for feat in feature_names
     }
-    # Binary encode concepts: 1 if feature equals designated positive value, else 0
-    C_cols = []
-    for feat in feature_names:
-        pos_val = pos_map.get(feat)
-        col = (
-            (catalog_df[feat].astype(str).str.split("_").str[0] == str(pos_val))
-            .astype(np.int32)
-            .to_numpy()
-        )
-        C_cols.append(col)
-    C = np.stack(C_cols, axis=1).astype(np.int8)
+    C = (catalog_df[pos_map.keys()] == pos_map.values()).to_numpy().astype(np.int8)
 
     # y: Labels pr P(y=1|x)
     y = catalog_df[OUTCOME_NAME].values
