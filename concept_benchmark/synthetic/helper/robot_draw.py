@@ -5,6 +5,18 @@ Robot feature taxonomy and drawing utilities for synthetic robot images.
 import numpy as np
 import pero
 
+try:  # optional backends for raster conversions
+    import cairo
+except ImportError:  # pragma: no cover - optional dependency
+    cairo = None
+
+try:
+    from PIL import Image as PILImage
+    from PIL import ImageFilter as PILImageFilter
+except ImportError:  # pragma: no cover - optional dependency
+    PILImage = None
+    PILImageFilter = None
+
 from .utils import generate_color_schemes
 
 # from itertools import combinations_with_replacement as cwr
@@ -56,8 +68,8 @@ DEFAULT_ROBOT_FEATURES = {
     "foot_shape": "flat",
     "foot_subtype_choice": "default",
     #
-    "has_knees": "true",
-    #'has_elbows': 'true',
+    "has_knees": True,
+    #'has_elbows': True,
     #
     "color_scheme": COLOR_SCHEMES[0],
 }
@@ -88,12 +100,13 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
 
     # colors
     if isinstance(features["color_scheme"], int):
-        print(np.mod(features["color_scheme"] + col_scheme_add, len(COLOR_SCHEMES)))
         color_scheme_id = np.mod(
             features["color_scheme"] + col_scheme_add, len(COLOR_SCHEMES)
         )
         color_left, color_right = COLOR_SCHEMES[color_scheme_id]
-        print(color_left, color_right)
+        if kwargs.get("verbose", False):
+            print(np.mod(features["color_scheme"] + col_scheme_add, len(COLOR_SCHEMES)))
+            print(color_left, color_right)
     elif isinstance(features["color_scheme"], tuple):
         color_left, color_right = features["color_scheme"]
 
@@ -569,3 +582,410 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
 
     return canvas
 
+
+def image_to_numpy_and_pillow(img):
+    """Render a ``pero.Image`` into NumPy and Pillow representations."""
+
+    if cairo is None:
+        raise ImportError("cairo backend required to rasterize pero.Image")
+    if PILImage is None:
+        raise ImportError("Pillow required to convert pero.Image to PIL.Image")
+
+    from pero.backends.cairo.canvas import CairoCanvas
+
+    width = int(img.width)
+    height = int(img.height)
+
+    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
+    context = cairo.Context(surface)
+    context.set_fill_rule(cairo.FILL_RULE_EVEN_ODD)
+
+    canvas = CairoCanvas(context, width=width, height=height)
+    img.draw(canvas)
+
+    stride = surface.get_stride()
+    buf = surface.get_data()
+
+    array = np.frombuffer(buf, dtype=np.uint8)
+    array = array.reshape((height, stride // 4, 4))
+    array = array[:, :width, :]
+
+    rgba = array[:, :, [2, 1, 0, 3]].copy()
+    pil_image = PILImage.fromarray(rgba, mode="RGBA")
+
+    return rgba, pil_image
+
+
+def draw_robot_mask(width=600, height=600, parts=("body",), mode: str = "exact", **kwargs):
+    """Draw a binary mask (white on black) for selected robot parts.
+
+    Currently supports: 'body', 'hands', 'feet'.
+    """
+    # features must match draw_robot defaults
+    features = dict(DEFAULT_ROBOT_FEATURES)
+    features.update(kwargs)
+
+    canvas = pero.Image(width=width, height=height)
+    canvas.fill(pero.colors.Black)
+    canvas.line_width = 0
+
+    # lengths and anchors (copy from draw_robot)
+    r = canvas.height / 12.0
+    y_top = 2 * r
+    x_mid = 0.5 * canvas.width
+
+    # head dims
+    head_height = 1.75 * r
+    head_width = 1.75 * r
+
+    # advance past head to body
+    y_top += head_height
+    y_body = y_top
+
+    # body dims
+    body_width = 3.5 * r
+    body_height = 4.0 * r
+    x_left = x_mid - 0.5 * body_width
+    x_right = x_mid + 0.5 * body_width
+
+    if mode not in {"exact", "uniform_rect"}:
+        raise ValueError("mask_mode must be 'exact' or 'uniform_rect'")
+
+    # body mask
+    if mode == "uniform_rect":
+        if "body" in parts:
+            half_w = 0.57 * body_width
+            rect = pero.Rect(
+                x=x_mid - half_w,
+                y=y_body,
+                width=2 * half_w,
+                height=body_height,
+            )
+            rect.draw(canvas, fill_color=pero.colors.White, line_width=0)
+
+        if "hands" in parts:
+            y_arm = y_top + 0.33 * body_height
+            arm_length = 0.75 * body_width
+            hand_size = 0.6 * r
+            hand_x_left = x_left - arm_length
+            hand_x_right = x_right + arm_length
+
+            margin_x = 1.1 * hand_size
+            margin_y = hand_size
+
+            # left hand rectangle
+            rect_left = pero.Rect(
+                x=hand_x_left - margin_x,
+                y=y_arm - margin_y,
+                width=margin_x + hand_size,
+                height=2 * margin_y,
+            )
+            rect_left.draw(canvas, fill_color=pero.colors.White, line_width=0)
+
+            # right hand rectangle
+            rect_right = pero.Rect(
+                x=hand_x_right - hand_size,
+                y=y_arm - margin_y,
+                width=margin_x + hand_size,
+                height=2 * margin_y,
+            )
+            rect_right.draw(canvas, fill_color=pero.colors.White, line_width=0)
+
+        if "feet" in parts:
+            foot_gap = 1.0 * r
+            foot_width = (body_width - 2.0 * foot_gap) / 2.0
+            foot_height = foot_width
+            x_left_foot = x_mid - 0.5 * foot_gap - 0.5 * foot_width
+            x_right_foot = x_mid + 0.5 * foot_gap + 0.5 * foot_width
+            leg_height = 0.75 * (body_height - foot_height)
+            y_top_feet = y_body + body_height + leg_height
+
+            x_min = x_left_foot - foot_width
+            x_max = x_right_foot + foot_width
+            y_min = y_top_feet
+            y_max = y_top_feet + foot_height
+            rect = pero.Rect(
+                x=x_min,
+                y=y_min,
+                width=x_max - x_min,
+                height=y_max - y_min,
+            )
+            rect.draw(canvas, fill_color=pero.colors.White, line_width=0)
+
+        return canvas
+
+    if "body" in parts:
+        body_shape = features["body_shape"]
+        if body_shape == "round":
+            body = pero.Arc(
+                x=x_mid,
+                y=y_body + 0.5 * body_height,
+                radius=0.57 * body_width,
+                line_color=None,
+            )
+            # draw both halves filled white to cover full round body
+            body.draw(
+                canvas,
+                start_angle=pero.rads(90),
+                end_angle=pero.rads(-90),
+                fill_color=pero.colors.White,
+            )
+            body.draw(
+                canvas,
+                start_angle=pero.rads(-90),
+                end_angle=pero.rads(90),
+                fill_color=pero.colors.White,
+            )
+        elif body_shape == "square":
+            body = pero.Rect(
+                x=x_mid - 0.5 * body_width,
+                y=y_body,
+                height=body_height,
+            )
+            body.draw(
+                canvas,
+                line_width=0,
+                fill_color=pero.colors.White,
+                width=body_width,
+            )
+
+    # hands mask
+    if "hands" in parts:
+        y_arm = y_top + 0.33 * body_height
+        arm_length = 0.75 * body_width
+        hand_shape = features.get("hand_shape", "round_circle")
+        hand_type, hand_subtype = hand_shape.split("_")[0], hand_shape.split("_")[1]
+        hand_x_left = x_left - arm_length
+        hand_x_right = x_right + arm_length
+        hand_y = y_arm
+        hand_size = 0.6 * r
+
+        if hand_type == "round":
+            if hand_subtype == "circle":
+                hand = pero.Ellipse(width=hand_size, height=hand_size)
+                hand.draw(canvas, x=hand_x_left, y=hand_y, fill_color=pero.colors.White)
+                hand.draw(canvas, x=hand_x_right, y=hand_y, fill_color=pero.colors.White)
+            elif hand_subtype == "oval":
+                hand = pero.Ellipse(width=hand_size * 1.5, height=hand_size)
+                hand.draw(canvas, x=hand_x_left, y=hand_y, fill_color=pero.colors.White)
+                hand.draw(canvas, x=hand_x_right, y=hand_y, fill_color=pero.colors.White)
+            elif hand_subtype == "oval2":
+                hand = pero.Ellipse(width=hand_size, height=hand_size * 1.5)
+                hand.draw(canvas, x=hand_x_left, y=hand_y, fill_color=pero.colors.White)
+                hand.draw(canvas, x=hand_x_right, y=hand_y, fill_color=pero.colors.White)
+        elif hand_type == "edgy":
+            if hand_subtype == "triangle":
+                hand = pero.Polygon(line_color=None)
+                p_left = (
+                    (hand_x_left, hand_y - hand_size / 2),
+                    (hand_x_left, hand_y + hand_size / 2),
+                    (hand_x_left - hand_size, hand_y),
+                )
+                hand.draw(canvas, points=p_left, fill_color=pero.colors.White)
+                p_right = (
+                    (hand_x_right, hand_y - hand_size / 2),
+                    (hand_x_right, hand_y + hand_size / 2),
+                    (hand_x_right + hand_size, hand_y),
+                )
+                hand.draw(canvas, points=p_right, fill_color=pero.colors.White)
+            elif hand_subtype == "square":
+                hand = pero.Rect(width=hand_size, height=hand_size)
+                hand.draw(
+                    canvas,
+                    x=hand_x_left - hand_size / 2,
+                    y=hand_y - hand_size / 2,
+                    fill_color=pero.colors.White,
+                )
+                hand.draw(
+                    canvas,
+                    x=hand_x_right - hand_size / 2,
+                    y=hand_y - hand_size / 2,
+                    fill_color=pero.colors.White,
+                )
+            elif hand_subtype == "trapezoid":
+                hand = pero.Polygon(line_color=None)
+                p_left = (
+                    (hand_x_left, hand_y - hand_size / 4),
+                    (hand_x_left, hand_y + hand_size / 4),
+                    (hand_x_left - hand_size, hand_y + hand_size / 2),
+                    (hand_x_left - hand_size, hand_y - hand_size / 2),
+                )
+                hand.draw(canvas, points=p_left, fill_color=pero.colors.White)
+                p_right = (
+                    (hand_x_right, hand_y - hand_size / 4),
+                    (hand_x_right, hand_y + hand_size / 4),
+                    (hand_x_right + hand_size, hand_y + hand_size / 2),
+                    (hand_x_right + hand_size, hand_y - hand_size / 2),
+                )
+                hand.draw(canvas, points=p_right, fill_color=pero.colors.White)
+
+    # feet mask
+    if "feet" in parts:
+        y_top_feet = y_body + body_height
+        foot_gap = 1.0 * r
+        foot_width = (body_width - 2.0 * foot_gap) / 2.0
+        foot_height = foot_width
+        x_left_foot = x_mid - 0.5 * foot_gap - 0.5 * foot_width
+        x_right_foot = x_mid + 0.5 * foot_gap + 0.5 * foot_width
+
+        leg_height = 0.75 * (body_height - foot_height)
+        y_top_feet += leg_height
+
+        foot_subtype = features["foot_shape"]
+        if foot_subtype in FOOT_SUBTYPES.keys():
+            if features.get("foot_subtype_choice", "default") == "default":
+                foot_subtype = "%s" % FOOT_SUBTYPES[foot_subtype][0]
+
+        if foot_subtype == "flat_4sided":
+            p_left = (
+                (x_left_foot - 0.5 * foot_width, y_top_feet),
+                (x_left_foot - 0.5 * foot_width, y_top_feet + foot_height),
+                (x_left_foot + 0.5 * foot_width, y_top_feet + foot_height),
+                (x_left_foot + 0.5 * foot_width, y_top_feet),
+            )
+            p_right = (
+                (x_right_foot - 0.5 * foot_width, y_top_feet),
+                (x_right_foot - 0.5 * foot_width, y_top_feet + foot_height),
+                (x_right_foot + 0.5 * foot_width, y_top_feet + foot_height),
+                (x_right_foot + 0.5 * foot_width, y_top_feet),
+            )
+        elif foot_subtype == "flat_5sided":
+            p_left = (
+                (x_left_foot, y_top_feet),
+                (x_left_foot - 0.5 * foot_width, y_top_feet + 0.3 * foot_height),
+                (x_left_foot - 0.5 * foot_width, y_top_feet + foot_height),
+                (x_left_foot + 0.5 * foot_width, y_top_feet + foot_height),
+                (x_left_foot + 0.5 * foot_width, y_top_feet + 0.3 * foot_height),
+            )
+            p_right = (
+                (x_right_foot, y_top_feet),
+                (x_right_foot - 0.5 * foot_width, y_top_feet + 0.3 * foot_height),
+                (x_right_foot - 0.5 * foot_width, y_top_feet + foot_height),
+                (x_right_foot + 0.5 * foot_width, y_top_feet + foot_height),
+                (x_right_foot + 0.5 * foot_width, y_top_feet + 0.3 * foot_height),
+            )
+        elif foot_subtype == "flat_lshaped":
+            p_left = (
+                (x_left_foot - 0.5 * foot_width, y_top_feet),
+                (x_left_foot - 0.5 * foot_width, y_top_feet + 0.5 * foot_height),
+                (x_left_foot - 1.00 * foot_width, y_top_feet + 0.5 * foot_height),
+                (x_left_foot - 1.00 * foot_width, y_top_feet + 1.0 * foot_height),
+                (x_left_foot + 0.5 * foot_width, y_top_feet + 1.0 * foot_height),
+                (x_left_foot + 0.5 * foot_width, y_top_feet),
+            )
+            p_right = (
+                (x_right_foot + 0.5 * foot_width, y_top_feet),
+                (x_right_foot + 0.5 * foot_width, y_top_feet + 0.5 * foot_height),
+                (x_right_foot + 1.00 * foot_width, y_top_feet + 0.5 * foot_height),
+                (x_right_foot + 1.00 * foot_width, y_top_feet + 1.0 * foot_height),
+                (x_right_foot - 0.5 * foot_width, y_top_feet + 1.0 * foot_height),
+                (x_right_foot - 0.5 * foot_width, y_top_feet),
+            )
+        elif foot_subtype == "pointy_3sided":
+            p_left = (
+                (x_left_foot - 0.5 * foot_width, y_top_feet),
+                (x_left_foot + 0.5 * foot_width, y_top_feet),
+                (x_left_foot, y_top_feet + foot_height),
+            )
+            p_right = (
+                (x_right_foot - 0.5 * foot_width, y_top_feet),
+                (x_right_foot + 0.5 * foot_width, y_top_feet),
+                (x_right_foot, y_top_feet + foot_height),
+            )
+        elif foot_subtype == "pointy_4sided":
+            p_left = (
+                (x_left_foot, y_top_feet),
+                (x_left_foot - 0.5 * foot_width, y_top_feet + 0.5 * foot_height),
+                (x_left_foot, y_top_feet + foot_height),
+                (x_left_foot + 0.5 * foot_width, y_top_feet + 0.5 * foot_height),
+            )
+            p_right = (
+                (x_right_foot, y_top_feet),
+                (x_right_foot - 0.5 * foot_width, y_top_feet + 0.5 * foot_height),
+                (x_right_foot, y_top_feet + foot_height),
+                (x_right_foot + 0.5 * foot_width, y_top_feet + 0.5 * foot_height),
+            )
+        elif foot_subtype == "pointy_6sided":
+            p_left = (
+                (x_left_foot, y_top_feet),
+                (x_left_foot - 0.33 * foot_width, y_top_feet + 0.33 * foot_height),
+                (x_left_foot - 0.33 * foot_width, y_top_feet + 0.66 * foot_height),
+                (x_left_foot, y_top_feet + foot_height),
+                (x_left_foot + 0.33 * foot_width, y_top_feet + 0.66 * foot_height),
+                (x_left_foot + 0.33 * foot_width, y_top_feet + 0.33 * foot_height),
+            )
+            p_right = (
+                (x_right_foot, y_top_feet),
+                (x_right_foot - 0.33 * foot_width, y_top_feet + 0.33 * foot_height),
+                (x_right_foot - 0.33 * foot_width, y_top_feet + 0.66 * foot_height),
+                (x_right_foot, y_top_feet + foot_height),
+                (x_right_foot + 0.33 * foot_width, y_top_feet + 0.66 * foot_height),
+                (x_right_foot + 0.33 * foot_width, y_top_feet + 0.33 * foot_height),
+            )
+        else:
+            p_left = p_right = None
+
+        if p_left is not None and p_right is not None:
+            foot = pero.Polygon(line_color=None)
+            foot.draw(canvas, points=p_left, fill_color=pero.colors.White)
+            foot.draw(canvas, points=p_right, fill_color=pero.colors.White)
+
+    return canvas
+
+
+def blur_parts(
+    img,
+    parts=("body",),
+    radius=2.0,
+    expand_mask_px=None,
+    feather_mask_px=0,
+    mask_mode: str = "uniform_rect",
+    **kwargs,
+):
+    """Apply Gaussian blur to selected parts of a rendered pero.Image.
+
+    Args:
+        img: pero.Image
+            The already drawn robot image (PNG path not required).
+        parts: tuple[str]
+            Currently supports ('body',). Extendable later.
+        radius: float
+            Gaussian blur radius.
+        kwargs: feature overrides used to match the mask to the robot.
+    Returns:
+        PIL.Image: blurred composite image in RGBA.
+    """
+    if PILImage is None or PILImageFilter is None:
+        raise ImportError("Pillow is required for blurring operations")
+
+    # render original to PIL
+    _, base_pil = image_to_numpy_and_pillow(img)
+
+    # render mask to PIL (white = blur area)
+    mask_img = draw_robot_mask(
+        width=int(img.width),
+        height=int(img.height),
+        parts=parts,
+        mode=mask_mode,
+        **kwargs,
+    )
+    _, mask_pil = image_to_numpy_and_pillow(mask_img)
+    mask_l = mask_pil.convert("L")
+
+    # optionally expand mask to include stroke/border region
+    if expand_mask_px is None:
+        expand_mask_px = int(round(radius))
+    if expand_mask_px and expand_mask_px > 0 and PILImageFilter is not None:
+        size = max(3, 2 * int(expand_mask_px) + 1)  # odd size >= 3
+        mask_l = mask_l.filter(PILImageFilter.MaxFilter(size=size))
+
+    # optionally feather mask edge for smoother transition
+    if feather_mask_px and feather_mask_px > 0 and PILImageFilter is not None:
+        mask_l = mask_l.filter(PILImageFilter.GaussianBlur(radius=float(feather_mask_px)))
+
+    # blurred version of the whole image
+    blurred = base_pil.filter(PILImageFilter.GaussianBlur(radius=radius))
+
+    # composite: where mask is white, take blurred, otherwise original
+    out = PILImage.composite(blurred, base_pil, mask_l)
+    return out
