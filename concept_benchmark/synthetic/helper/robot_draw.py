@@ -2,20 +2,11 @@
 Robot feature taxonomy and drawing utilities for synthetic robot images.
 """
 
+import cairo
 import numpy as np
 import pero
-
-try:  # optional backends for raster conversions
-    import cairo
-except ImportError:  # pragma: no cover - optional dependency
-    cairo = None
-
-try:
-    from PIL import Image as PILImage
-    from PIL import ImageFilter as PILImageFilter
-except ImportError:  # pragma: no cover - optional dependency
-    PILImage = None
-    PILImageFilter = None
+from PIL import Image as PILImage
+from PIL import ImageFilter as PILImageFilter
 
 from .utils import generate_color_schemes
 
@@ -36,7 +27,7 @@ ALL_ROBOT_FEATURES = {
     "body_shape": ["square", "round"],  # no subtypes (could add)
     "head_shape": ["square", "round"],  # no subtypes (could add)
     #
-    'has_elbows': [True, False],  # all round
+    "has_elbows": [True, False],  # all round
     "has_knees": [True, False],
     "has_antennae": [True, False],
     "ears_shape": ["square", "triangle"],
@@ -586,11 +577,6 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
 def image_to_numpy_and_pillow(img):
     """Render a ``pero.Image`` into NumPy and Pillow representations."""
 
-    if cairo is None:
-        raise ImportError("cairo backend required to rasterize pero.Image")
-    if PILImage is None:
-        raise ImportError("Pillow required to convert pero.Image to PIL.Image")
-
     from pero.backends.cairo.canvas import CairoCanvas
 
     width = int(img.width)
@@ -616,7 +602,9 @@ def image_to_numpy_and_pillow(img):
     return rgba, pil_image
 
 
-def draw_robot_mask(width=600, height=600, parts=("body",), mode: str = "exact", **kwargs):
+def draw_robot_mask(
+    width=600, height=600, parts=("body",), mode: str = "exact", **kwargs
+):
     """Draw a binary mask (white on black) for selected robot parts.
 
     Currently supports: 'body', 'hands', 'feet'.
@@ -764,15 +752,21 @@ def draw_robot_mask(width=600, height=600, parts=("body",), mode: str = "exact",
             if hand_subtype == "circle":
                 hand = pero.Ellipse(width=hand_size, height=hand_size)
                 hand.draw(canvas, x=hand_x_left, y=hand_y, fill_color=pero.colors.White)
-                hand.draw(canvas, x=hand_x_right, y=hand_y, fill_color=pero.colors.White)
+                hand.draw(
+                    canvas, x=hand_x_right, y=hand_y, fill_color=pero.colors.White
+                )
             elif hand_subtype == "oval":
                 hand = pero.Ellipse(width=hand_size * 1.5, height=hand_size)
                 hand.draw(canvas, x=hand_x_left, y=hand_y, fill_color=pero.colors.White)
-                hand.draw(canvas, x=hand_x_right, y=hand_y, fill_color=pero.colors.White)
+                hand.draw(
+                    canvas, x=hand_x_right, y=hand_y, fill_color=pero.colors.White
+                )
             elif hand_subtype == "oval2":
                 hand = pero.Ellipse(width=hand_size, height=hand_size * 1.5)
                 hand.draw(canvas, x=hand_x_left, y=hand_y, fill_color=pero.colors.White)
-                hand.draw(canvas, x=hand_x_right, y=hand_y, fill_color=pero.colors.White)
+                hand.draw(
+                    canvas, x=hand_x_right, y=hand_y, fill_color=pero.colors.White
+                )
         elif hand_type == "edgy":
             if hand_subtype == "triangle":
                 hand = pero.Polygon(line_color=None)
@@ -981,7 +975,9 @@ def blur_parts(
 
     # optionally feather mask edge for smoother transition
     if feather_mask_px and feather_mask_px > 0 and PILImageFilter is not None:
-        mask_l = mask_l.filter(PILImageFilter.GaussianBlur(radius=float(feather_mask_px)))
+        mask_l = mask_l.filter(
+            PILImageFilter.GaussianBlur(radius=float(feather_mask_px))
+        )
 
     # blurred version of the whole image
     blurred = base_pil.filter(PILImageFilter.GaussianBlur(radius=radius))
