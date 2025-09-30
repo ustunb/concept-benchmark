@@ -11,7 +11,7 @@ settings = {
     'data_type': 'tabular',
     'n': 3,
     'max_corrupt': 21,
-    'concept_noise': 0.00,
+    'concept_noise': 0.15,
     'concept_missing': 0.00,
     'concept_missing_mech': 'none',
     'target_accuracy': 1.0, # doesn't matter but need for dataset loading
@@ -39,7 +39,7 @@ cs = ConceptBasedModel(
 
 
 runner = ConceptInterventionRunner(model=cs)
-config = InterventionConfig(tau=0.3)
+config = InterventionConfig(tau=0.05)
 strategy = ConceptualSafeguardsStrategy()
 result = runner.run(
     strategy=strategy,
@@ -47,6 +47,7 @@ result = runner.run(
     dataset=data.test,
 )
 
+result.strat_metrics
 
 # ScoreIntervention example
 cbm = ConceptBasedModel(

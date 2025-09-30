@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import shlex
 import subprocess
 import sys
@@ -386,12 +387,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Continue executing commands even if a prior command fails",
     )
+    parser.add_argument(
+        "--log-file",
+        type=Path,
+        help="Optional log file path for recording pipeline progress",
+    )
     args = parser.parse_args(argv)
 
     if args.count and args.execute:
         parser.error("--execute cannot be combined with --count")
     if args.execute and args.dry_run:
         parser.error("Use only one of --execute or --dry-run")
+
+    handlers: List[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+    if args.log_file:
+        log_path = args.log_file
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(log_path, mode="a", encoding="utf-8"))
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=handlers,
+        force=True,
+    )
+    logger = logging.getLogger(__name__)
 
     selected_stages = [
         f"{stype}_{dset}" for stype in args.stages for dset in args.dataset
@@ -437,15 +456,26 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if run_commands:
         for stage_name, command_strings, parts_list in execution_plan:
+            logger.info("Executing %s (%d commands)", stage_name, len(parts_list))
             print(f"\n[execute] {stage_name}")
             for command_string, parts in zip(command_strings, parts_list):
                 print(f"  → {command_string}")
+                logger.info("Starting command for %s: %s", stage_name, command_string)
                 try:
                     subprocess.run(parts, check=True)
                 except subprocess.CalledProcessError as exc:
+                    logger.error(
+                        "Command failed for %s (return code %s): %s",
+                        stage_name,
+                        exc.returncode,
+                        command_string,
+                    )
                     print(f"    failed with return code {exc.returncode}")
                     if not args.ignore_errors:
                         return exc.returncode or 1
+                    continue
+                logger.info("Completed command for %s: %s", stage_name, command_string)
+            logger.info("Finished %s", stage_name)
 
     return 0
 

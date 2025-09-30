@@ -60,15 +60,22 @@ def get_dataset_file(
     n: int,
     concept_noise: float = 0.0,
     target_accuracy: float = 1.0,
+    blur: dict = None,
     **kwargs
 ) -> Path:
     """Get the file path for the dataset based on its parameters."""
     if data_name == "sudoku":
-        filename = f"sudoku_{data_type}_{n**2}_{kwargs.get('max_corrupt')}_{concept_noise}_{target_accuracy}.data"
+        filename = f"sudoku_{data_type}_{n**2}_{kwargs.get('max_corrupt')}_{concept_noise}_{target_accuracy}"
     elif data_name == "robot":
-        filename = f"robot_{data_type}_{n}_{concept_noise}_{target_accuracy}.data"
+        filename = f"robot_{data_type}_{n}_{concept_noise}_{target_accuracy}"
+        if blur:
+            filename += f"_blur_{'_'.join(blur['parts'])}_{blur['radius']}"
+            if blur.get('expand_mask_px'):
+                filename += f"_expand{blur['expand_mask_px']}"
+            if blur.get('feather_mask_px'):
+                filename += f"_feather{blur['feather_mask_px']}"
 
-    return results_dir / filename
+    return results_dir / f"{filename}.data"
 
 def get_model_file(
     data_name: str,
