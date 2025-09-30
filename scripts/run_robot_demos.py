@@ -167,6 +167,7 @@ def ensure_baseline(seed: int, diff: str, tag: str = "", extra_flags: Optional[L
     if settings.get("redact_splits"):
         argv += ["--redact-splits", str(settings["redact_splits"])]
     if settings.get("generic_enable", 0) == 1:
+        argv += ["--generic-enable", "1"]
         if settings.get("generic_rate") is not None:
             argv += ["--generic-rate", str(settings["generic_rate"])]
         if settings.get("generic_tol") is not None:
@@ -265,8 +266,12 @@ def run():
         "expr": label_expr,
         "templates": settings.get("templates_file") or "",
         "budgets": settings.get("budgets", []),
+        "gen_enable": int(settings.get("generic_enable", 0)),
+        "gen_rate": float(settings.get("generic_rate", 0.0)),
+        "gen_tol": float(settings.get("generic_tol", 0.0)),
     }, sort_keys=True)
     tag_id = (settings.get("run_tag") or hashlib.sha256(sig.encode("utf-8")).hexdigest()[:8])
+
 
     label_flags = [
         "--label-model-type", str(settings.get("label_model_type", "stochastic")),
