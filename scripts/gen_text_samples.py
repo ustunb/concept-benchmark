@@ -75,6 +75,7 @@ settings = {
     "force_rerun": 0,
     "template_difficulty": "medium",
     "test_label_flip": 0.0,
+    "intervention_error_mode": "miss",
 }
 
 
@@ -254,20 +255,26 @@ def _core_vector_from_row(row: dict) -> np.ndarray:
         1.0 if str(row["hand_shape"]).startswith("edgy_") else 0.0,
     ], dtype=np.float32)
 
-def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, variants_per_row: int, seed: int, row_variants: list[int] | None = None):
-    corpus = _load_jsonl(corpus_path)
+def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, variants_per_row: int, seed: int, row_variants: list[int] | None = None, generic_path: Path | None = None, generic_rate: float = 0.5):
+    corpus_spec = _load_jsonl(corpus_path)
+    corpus_gen = _load_jsonl(generic_path) if (generic_path is not None and Path(generic_path).is_file()) else []
     names = _core_concept_names()
     classes = [0, 1]
-    X, C, y, row_index = [], [], [], []
+    X, C, y, row_index, ears_generic = [], [], [], [], []
     for i, sr in catalog_df.iterrows():
         row = {k: sr[k] for k in params["concepts"].keys()}
         repeats = int(row_variants[i]) if row_variants is not None else int(variants_per_row)
         for v in range(repeats):
+            key = f"{seed}:{i}:{v}:ears_generic"
+            h = int(hashlib.sha256(key.encode()).hexdigest(), 16)
+            use_gen = (len(corpus_gen) > 0) and ((h % 1000000) < int(max(0.0, min(1.0, float(generic_rate))) * 1000000))
+            corpus = corpus_gen if use_gen else corpus_spec
             text = _render_from_corpus(row, corpus, seed + v)
             X.append(text)
             C.append(_core_vector_from_row(row))
             y.append(1 if str(sr["label"]) == "glorp" else 0)
             row_index.append(i)
+            ears_generic.append(bool(use_gen))
     X = [str(t) for t in X]
     C = np.stack(C, axis=0).astype(np.float32)
     y = np.asarray(y, dtype=int)
@@ -275,6 +282,7 @@ def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, v
         X=X, C=C, y=y, meta={"concepts": tuple(names), "classes": (0,1), "data_type": "text"}
     )
     setattr(ds, "_full", type("Full", (), {"meta": {"row_index": np.asarray(row_index, dtype=int)}}))
+    ds.ears_generic_mask = np.asarray(ears_generic, dtype=bool)
     return ds
 def _render_from_corpus(row: dict, corpus: list[dict], seed: int) -> str:
     try:
@@ -315,7 +323,20 @@ if psutil.Process(psutil.Process().ppid()).name().lower().startswith("pycharm"):
 else:
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument("--variant", choices=["perfect", "imperfect"], default=settings["variant"])
-    ap.add_argument("--variants-per-row", type=int, default=settings["variants_per_row"])
+    ap.add_argument("--variants-per-row", type=int)
+    ap.add_argument("--variants-per-row-minority", type=int, default=0)
+    ap.add_argument("--variants-per-row-majority", type=int, default=0)
+    ap.add_argument("--minority_mult", type=float, default=1.0)
+    ap.add_argument("--train-balance-enable", type=int, default=0)
+    ap.add_argument("--train-target-pos-frac", type=float, default=0.5)
+    ap.add_argument("--train-target-generic-frac", type=float, default=0.5)
+    ap.add_argument("--train-balance-within-label", type=int, default=1)
+    ap.add_argument("--val-balance-enable", type=int, default=0)
+    ap.add_argument("--val-target-generic-frac", type=float, default=0.5)
+    ap.add_argument("--val-balance-within-label", type=int, default=1)
+    ap.add_argument("--test-balance-enable", type=int, default=0)
+    ap.add_argument("--test-target-generic-frac", type=float, default=0.5)
+    ap.add_argument("--test-balance-within-label", type=int, default=1)
     ap.add_argument("--imperfect-strategy", choices=["missing_concepts", "label_prior_shift"], dest="imperfect_strategy", default=settings["imperfect_strategy"])
     ap.add_argument("--heldout-concepts", type=_csv_list, default=settings["heldout_concepts"])
     ap.add_argument("--mask-p", type=float, default=settings["mask_p"])
@@ -356,6 +377,7 @@ else:
     ap.add_argument("--test-miss", type=str, default="")
     ap.add_argument("--test-miss-rate", type=float, default=0.0)
     ap.add_argument("--test-miss-mode", choices=["drop_cols", "soft0.5", "hard0"], default="soft0.5")
+    ap.add_argument("--intervention-error-mode", choices=["miss","flip","both"], default=settings["intervention_error_mode"])
     ap.add_argument("--reuse-detector", type=int, default=0)
     ap.add_argument("--detector-model", type=str, default="")
     ap.add_argument("--skip-fit", type=int, default=0)
@@ -368,6 +390,9 @@ else:
     ap.add_argument("--concept-label-noise-confusion", type=str, default="")
     ap.add_argument("--redact-concepts", type=str, default="")
     ap.add_argument("--redact-splits", type=str, default="")
+    ap.add_argument("--generic-rate", type=float, default=0.5)
+    ap.add_argument("--generic-tol", type=float, default=0.02)
+    ap.add_argument("--generic-enable", type=int, default=0)
 
     known, _ = ap.parse_known_args()
     merged = dict(settings)
@@ -428,7 +453,9 @@ else:
         "minority_mult": float(getattr(known, "minority_mult", 1.0)),
         "redact_concepts": known.redact_concepts or "",
         "redact_splits": known.redact_splits or "",
-
+        "generic_enable": int(getattr(known, "generic_enable", 0)),
+        "generic_rate": float(getattr(known, "generic_rate", 0.5)),
+        "generic_tol": float(getattr(known, "generic_tol", 0.02)),
     })
     if merged["test_corr"] is not None and merged["test_corr"] >= 0:
         merged["test_break"] = max(0.0, min(1.0, 1.0 - float(merged["test_corr"])))
@@ -464,7 +491,7 @@ params = {
         "mouth_type": ["closed", "open"],
         "hand_shape": ["round_circle","wide_oval","tall_oval","edgy_square","edgy_triangle","edgy_trapezoid"],
     },
-    "model": "'glorp' if (min(int(str(row[\"has_antennae\"]).lower()==\"true\"), int(row[\"body_shape\"]==\"square\")) >= 1) else 'drent'",
+    "model": "'glorp' if (min(int(row[\"ears_shape\"]==\"square\"), int(row[\"body_shape\"]==\"square\")) >= 1) else 'drent'",
 }
 
 if args_obj.label_model_expr:
@@ -823,13 +850,18 @@ def _apply_per_concept_degrade(H: np.ndarray, T: np.ndarray, names: list[str], m
     return out
 
 
-def _apply_human_edit(p_row, truth_row, sel_idxs, names, acc_default, acc_map, rng):
+def _apply_human_edit(p_row, truth_row, sel_idxs, names, acc_default, acc_map, rng, mode="miss"):
     for j in sel_idxs:
         name = names[j]
         base = name.split("=", 1)[0]
         acc = acc_map.get(name, acc_map.get(base, acc_default))
-        if p_row[j] != truth_row[j] and rng.random() < acc:
+        u = rng.random()
+        if u < acc:
             p_row[j] = truth_row[j]
+        else:
+            if mode == "flip":
+                v = int(truth_row[j])
+                p_row[j] = 0 if v == 1 else 1
     return p_row
 
 def _allowed_indices(names, allow_spec):
@@ -934,7 +966,9 @@ if args_obj.templates_file and str(args_obj.templates_file).lower().endswith(".j
     vpr_min = int(args_obj.variants_per_row_minority) if int(args_obj.variants_per_row_minority) > 0 else max(1, int(round(base_vpr * float(args_obj.minority_mult))))
     vpr_maj = int(args_obj.variants_per_row_majority) if int(args_obj.variants_per_row_majority) > 0 else base_vpr
     row_variants = [vpr_min if lab == minority_label else vpr_maj for lab in _lbl]
-    ds = _build_ds_from_corpus(catalog_df, params, Path(args_obj.templates_file), base_vpr, SEED, row_variants=row_variants)
+    base_jsonl = Path(args_obj.templates_file)
+    gen_jsonl = base_jsonl.with_name("HardCorpus_EarsGeneric.jsonl")
+    ds = _build_ds_from_corpus(catalog_df, params, base_jsonl, base_vpr, SEED, row_variants=row_variants, generic_path=(gen_jsonl if (gen_jsonl.is_file() and int(getattr(args_obj, "generic_enable", 0))==1) else None), generic_rate=(float(getattr(args_obj, "generic_rate", 0.5)) if int(getattr(args_obj, "generic_enable", 0))==1 else 0.0))
     setattr(ds, "cvindices", None)
 
 elif args_obj.template_difficulty == "hard":
@@ -948,7 +982,8 @@ elif args_obj.template_difficulty == "hard":
         vpr_min = int(args_obj.variants_per_row_minority) if int(args_obj.variants_per_row_minority) > 0 else max(1, int(round(base_vpr * float(args_obj.minority_mult))))
         vpr_maj = int(args_obj.variants_per_row_majority) if int(args_obj.variants_per_row_majority) > 0 else base_vpr
         row_variants = [vpr_min if lab == minority_label else vpr_maj for lab in _lbl]
-        ds = _build_ds_from_corpus(catalog_df, params, default_jsonl, base_vpr, SEED, row_variants=row_variants)
+        gen_jsonl = default_jsonl.with_name("HardCorpus_EarsGeneric.jsonl")
+        ds = _build_ds_from_corpus(catalog_df, params, default_jsonl, base_vpr, SEED, row_variants=row_variants, generic_path=(gen_jsonl if (gen_jsonl.is_file() and int(getattr(args_obj, "generic_enable", 0))==1) else None), generic_rate=(float(getattr(args_obj, "generic_rate", 0.5)) if int(getattr(args_obj, "generic_enable", 0))==1 else 0.0))
         setattr(ds, "cvindices", None)
 
 
@@ -1088,10 +1123,14 @@ def _manual_by_robot_split(ds_obj, row_index_arr, n_folds=5, seed=0):
         X = [ds_obj.X[i] for i in idx]
         C = ds_obj.C[mask]
         y = ds_obj.y[mask]
-        return ConceptDatasetSample(
+        sub = ConceptDatasetSample(
             X=X, C=C, y=y,
             meta={"concepts": ds_obj.concepts, "classes": ds_obj.classes, "data_type": "text"}
         )
+        gm = getattr(ds_obj, "ears_generic_mask", None)
+        if gm is not None:
+            setattr(sub, "ears_generic_mask", np.asarray(gm)[idx])
+        return sub
 
     val_mask   = (fold_arr == 0)
     test_mask  = (fold_arr == 1)
@@ -1153,6 +1192,12 @@ if hasattr(ds, "split") and need_split:
         ds.cvindices = {}
     ds.cvindices["by_robot"] = fold_arr
     ds.split(fold_id="by_robot", fold_num_validation=0, fold_num_test=1)
+    gm = getattr(ds, "ears_generic_mask", None)
+    if gm is not None:
+        mtr = (fold_arr == 2); mva = (fold_arr == 0); mte = (fold_arr == 1)
+        setattr(ds.training,   "ears_generic_mask", np.asarray(gm)[mtr])
+        setattr(ds.validation, "ears_generic_mask", np.asarray(gm)[mva])
+        setattr(ds.test,       "ears_generic_mask", np.asarray(gm)[mte])
     print(f"Split sizes → train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
 
     yt = np.asarray(ds.training.y, dtype=int)
@@ -1205,15 +1250,176 @@ elif need_split:
     })
 
 
-# Variant: {VARIANT} | Strategy: {IMPERFECT_STRATEGY}
+if int(getattr(args_obj, "train_balance_enable", 0)) == 1 and hasattr(ds.training, "ears_generic_mask"):
+    ytr0 = np.asarray(ds.training.y, dtype=int)
+    gtr0 = np.asarray(ds.training.ears_generic_mask, dtype=bool)
+    idx0 = np.arange(ytr0.shape[0])
+    f_pos = float(getattr(args_obj, "train_target_pos_frac", 0.5))
+    f_gen = float(getattr(args_obj, "train_target_generic_frac", 0.5))
+    within = int(getattr(args_obj, "train_balance_within_label", 1)) == 1
+    rng = np.random.default_rng(int(SEED) + 907)
+    if within:
+        t = {
+            (1,1): f_pos * f_gen,
+            (1,0): f_pos * (1.0 - f_gen),
+            (0,1): (1.0 - f_pos) * f_gen,
+            (0,0): (1.0 - f_pos) * (1.0 - f_gen),
+        }
+        avail = {k: idx0[(ytr0==k[0]) & (gtr0==(k[1]==1))] for k in t}
+        caps = [avail[k].size / v for k, v in t.items() if v > 0]
+        N = int(np.floor(min(caps))) if caps else 0
+        take = []
+        for k, v in t.items():
+            n = int(np.floor(v * N)) if v > 0 else 0
+            n = min(n, avail[k].size)
+            if n > 0:
+                take.append(rng.choice(avail[k], size=n, replace=False))
+        take = np.sort(np.concatenate(take)) if take else np.array([], dtype=int)
+    else:
+        pos_idx = idx0[ytr0 == 1]
+        neg_idx = idx0[ytr0 == 0]
+        N = min(pos_idx.size, neg_idx.size) * 2
+        n_pos = N // 2
+        n_neg = N - n_pos
+        take = np.sort(np.concatenate([
+            rng.choice(pos_idx, size=n_pos, replace=False),
+            rng.choice(neg_idx, size=n_neg, replace=False),
+        ])) if N > 0 else np.array([], dtype=int)
+    if take.size > 0:
+        X = [ds.training.X[i] for i in take]
+        C = ds.training.C[take]
+        y = ds.training.y[take]
+        tr_ds = ConceptDatasetSample(X=X, C=C, y=y, meta=ds.training.meta)
+        setattr(tr_ds, "ears_generic_mask", ds.training.ears_generic_mask[take])
+        ds.training = tr_ds
+
+if int(getattr(args_obj, "val_balance_enable", 0)) == 1 and hasattr(ds.validation, "ears_generic_mask"):
+    yv0 = np.asarray(ds.validation.y, dtype=int)
+    gv0 = np.asarray(ds.validation.ears_generic_mask, dtype=bool)
+    idxv = np.arange(yv0.shape[0])
+    f_gen_v = float(getattr(args_obj, "val_target_generic_frac", 0.5))
+    rngv = np.random.default_rng(int(SEED) + 908)
+    take_v = []
+    for lab in (0,1):
+        lab_idx = idxv[yv0 == lab]
+        if lab_idx.size == 0:
+            continue
+        lab_gen = lab_idx[gv0[lab_idx]]
+        lab_spec = lab_idx[~gv0[lab_idx]]
+        want_gen = int(round(f_gen_v * lab_idx.size))
+        want_spec = lab_idx.size - want_gen
+        sel_gen = rngv.choice(lab_gen, size=min(want_gen, lab_gen.size), replace=False) if lab_gen.size else np.array([], dtype=int)
+        sel_spec = rngv.choice(lab_spec, size=min(want_spec, lab_spec.size), replace=False) if lab_spec.size else np.array([], dtype=int)
+        short_gen = want_gen - sel_gen.size
+        if short_gen > 0 and (lab_spec.size - sel_spec.size) > 0:
+            add = rngv.choice(np.setdiff1d(lab_spec, sel_spec), size=min(short_gen, lab_spec.size - sel_spec.size), replace=False)
+            sel_spec = np.concatenate([sel_spec, add])
+        short_spec = want_spec - sel_spec.size
+        if short_spec > 0 and (lab_gen.size - sel_gen.size) > 0:
+            add = rngv.choice(np.setdiff1d(lab_gen, sel_gen), size=min(short_spec, lab_gen.size - sel_gen.size), replace=False)
+            sel_gen = np.concatenate([sel_gen, add])
+        take_v.append(np.concatenate([sel_gen, sel_spec]))
+    if take_v:
+        take_v = np.sort(np.concatenate(take_v))
+        X = [ds.validation.X[i] for i in take_v]
+        C = ds.validation.C[take_v]
+        y = ds.validation.y[take_v]
+        va_ds = ConceptDatasetSample(X=X, C=C, y=y, meta=ds.validation.meta)
+        setattr(va_ds, "ears_generic_mask", ds.validation.ears_generic_mask[take_v])
+        ds.validation = va_ds
+
+if int(getattr(args_obj, "test_balance_enable", 0)) == 1 and hasattr(ds.test, "ears_generic_mask"):
+    yte0 = np.asarray(ds.test.y, dtype=int)
+    gte0 = np.asarray(ds.test.ears_generic_mask, dtype=bool)
+    idxt = np.arange(yte0.shape[0])
+    f_gen_t = float(getattr(args_obj, "test_target_generic_frac", 0.5))
+    rngt = np.random.default_rng(int(SEED) + 909)
+    take_t = []
+    for lab in (0,1):
+        lab_idx = idxt[yte0 == lab]
+        if lab_idx.size == 0:
+            continue
+        lab_gen = lab_idx[gte0[lab_idx]]
+        lab_spec = lab_idx[~gte0[lab_idx]]
+        want_gen = int(round(f_gen_t * lab_idx.size))
+        want_spec = lab_idx.size - want_gen
+        sel_gen = rngt.choice(lab_gen, size=min(want_gen, lab_gen.size), replace=False) if lab_gen.size else np.array([], dtype=int)
+        sel_spec = rngt.choice(lab_spec, size=min(want_spec, lab_spec.size), replace=False) if lab_spec.size else np.array([], dtype=int)
+        short_gen = want_gen - sel_gen.size
+        if short_gen > 0 and (lab_spec.size - sel_spec.size) > 0:
+            add = rngt.choice(np.setdiff1d(lab_spec, sel_spec), size=min(short_gen, lab_spec.size - sel_spec.size), replace=False)
+            sel_spec = np.concatenate([sel_spec, add])
+        short_spec = want_spec - sel_spec.size
+        if short_spec > 0 and (lab_gen.size - sel_gen.size) > 0:
+            add = rngt.choice(np.setdiff1d(lab_gen, sel_gen), size=min(short_spec, lab_gen.size - sel_gen.size), replace=False)
+            sel_gen = np.concatenate([sel_gen, add])
+        take_t.append(np.concatenate([sel_gen, sel_spec]))
+    if take_t:
+        take_t = np.sort(np.concatenate(take_t))
+        X = [ds.test.X[i] for i in take_t]
+        C = ds.test.C[take_t]
+        y = ds.test.y[take_t]
+        te_ds = ConceptDatasetSample(X=X, C=C, y=y, meta=ds.test.meta)
+        setattr(te_ds, "ears_generic_mask", ds.test.ears_generic_mask[take_t])
+        ds.test = te_ds
+
 train_ds = ds.training
 val_ds = ds.validation
 test_ds = ds.test
+
+pat_shape = re.compile(r"(?i)\b(square|boxy|box|angular|cornered|right-angled|rectilinear|90-degree|triangle|triangular|tri-corner|three-angled|three-point|pointy|pointed|tapered|wedge|spearhead|spear-tip)\b")
+def _leak_sentence_scoped(t):
+    sents = re.split(r"[.!?;:]\s+", str(t).lower())
+    for s in sents:
+        if ("ear" in s) and pat_shape.search(s):
+            return True
+    return False
+
+def _rates(part):
+    gm = getattr(part, "ears_generic_mask", None)
+    if gm is None:
+        return {"overall":"na","y1":"na","y0":"na"}, {"generic_near_ears_shape":"na"}
+    yv = np.asarray(part.y, dtype=int)
+    overall = float(gm.mean()) if gm.size else float("nan")
+    y1 = float(gm[yv==1].mean()) if (yv==1).any() else float("nan")
+    y0 = float(gm[yv==0].mean()) if (yv==0).any() else float("nan")
+    leak = int(sum(_leak_sentence_scoped(t) for t,g in zip(part.X, gm) if g))
+    return {"overall":overall,"y1":y1,"y0":y0}, {"generic_near_ears_shape": leak}
+
+dist = {}; leak = {}
+for name, part in [("train", train_ds), ("val", val_ds), ("test", test_ds)]:
+    d, l = _rates(part)
+    dist[name] = d
+    leak[name] = l
+
+t_train = float(getattr(args_obj, "train_target_generic_frac", getattr(args_obj, "generic_rate", 0.5))) if int(getattr(args_obj, "train_balance_enable", 0))==1 else float(getattr(args_obj, "generic_rate", 0.5))
+t_val   = float(getattr(args_obj, "generic_rate", 0.5))
+t_test  = float(getattr(args_obj, "generic_rate", 0.5))
+tol     = float(getattr(args_obj, "generic_tol", 0.02))
+if int(getattr(args_obj, "generic_enable", 0)) == 1:
+    print(json.dumps({
+        "ears_leak_counts_generic": leak,
+        "ears_generic_rates": dist,
+        "targets": {"train": t_train, "val": t_val, "test": t_test, "tol": tol}
+    }, indent=2))
+
+    if any(v.get("generic_near_ears_shape", 0) not in ("na", 0) for v in leak.values()):
+        raise SystemExit(3)
+    for name, vals in dist.items():
+        if vals["overall"] != "na" and np.isfinite(vals["overall"]):
+            if abs(vals["overall"] - (t_train if name=="train" else t_val if name=="val" else t_test)) > tol:
+                raise SystemExit(4)
+        for k in ("y1","y0"):
+            if vals[k] != "na" and np.isfinite(vals[k]):
+                if abs(vals[k] - (t_train if name=="train" else t_val if name=="val" else t_test)) > tol:
+                    raise SystemExit(4)
+
 
 # Test-only corpus swap (no-antennae) if requested
 _rc = set(t.strip() for t in str(getattr(args_obj, "redact_concepts", "")).split(",") if t.strip())
 _rs = set(t.strip().lower() for t in str(getattr(args_obj, "redact_splits", "")).split(",") if t.strip())
 if ("has_antennae" in _rc) and ("test" in _rs):
+    print("Redacting 'has_antennae' from test set by swapping in no-antennae corpus")
     base_jsonl = Path(args_obj.templates_file) if (args_obj.templates_file and str(args_obj.templates_file).lower().endswith(".jsonl")) else (pkg_dir / "synthetic" / "helper" / "static" / "text_templates" / "HardCorpus.jsonl")
     cand = [
         base_jsonl.with_name(base_jsonl.stem + "_noANT" + base_jsonl.suffix),
@@ -1247,6 +1453,7 @@ import re as _re_chk
 _pat_ant = _re_chk.compile(r"(?i)\bantenna(?:e|s)?\b")
 def _count_mentions(sample):
     return int(sum(1 for x in sample.X if _pat_ant.search(str(x))))
+
 print("Leak check — 'antenna' mentions:", {
     "train": _count_mentions(train_ds),
     "val": _count_mentions(val_ds),
@@ -1391,7 +1598,7 @@ else:
     print("Fitting detector")
     detector.fit(train_ds, val_ds)
 
-cbm = loaded_cbm if (SKIP and loaded_cbm is not None) else ConceptBasedModel(concept_detector=detector, front_end_model=FrontEndModel(), propagate=False)
+cbm = loaded_cbm if (SKIP and loaded_cbm is not None) else ConceptBasedModel(concept_detector=detector, front_end_model=FrontEndModel(), propagate=(args_obj.concept_mode == "soft"))
 
 C_train = train_ds.C
 y_train = train_ds.y
@@ -1409,12 +1616,7 @@ else:
     C_train_used = C_train
 
 noise_mode = merged.get("concept_label_noise_mode", "none")
-if noise_mode == "subjective":
-    rate = float(merged.get("concept_label_noise_rate", 0.20))
-    C_train_used = apply_subjective_noise(C_train_used.astype(int).copy(),
-                                          rate=rate,
-                                          seed=int(merged.get("seed", 0)) + 101)
-elif noise_mode == "machine":
+if noise_mode == "machine":
     confusion_json = merged.get("concept_label_noise_confusion", "")
     confusion = None
     if confusion_json:
@@ -1458,6 +1660,27 @@ roc_macro = float(np.nanmean([d["roc_auc"] for d in per.values()])) if per else 
 
 print("Macro concept metrics:", {"auprc_macro": auprc_macro, "roc_auc_macro": roc_macro})
 print("Sample per-concept metrics (first 5):", {k: per[k] for k in list(per.keys())[:5]})
+
+try:
+    ear_idx = next(i for i,n in enumerate(concept_names) if str(n).lower().startswith("ears_"))
+    oldm = detector.output_mode
+    detector.output_mode = "soft"
+    C_tr = detector.predict(train_ds); C_va = detector.predict(val_ds); C_te = detector.predict(test_ds)
+    detector.output_mode = oldm
+    def _acc(Cp, Ct, gm):
+        yp = (Cp[:, ear_idx] >= 0.5).astype(int); yt = Ct[:, ear_idx].astype(int)
+        return float((yp[~gm]==yt[~gm]).mean()) if (~gm).any() else float("nan"), float((yp[gm]==yt[gm]).mean()) if gm.any() else float("nan")
+    gm_tr = getattr(train_ds,"ears_generic_mask", None); gm_va = getattr(val_ds,"ears_generic_mask", None); gm_te = getattr(test_ds,"ears_generic_mask", None)
+    if (gm_tr is not None) and (gm_va is not None) and (gm_te is not None):
+        a_tr_spec, a_tr_gen = _acc(C_tr, train_ds.C.astype(int), gm_tr)
+        a_va_spec, a_va_gen = _acc(C_va, val_ds.C.astype(int), gm_va)
+        a_te_spec, a_te_gen = _acc(C_te, test_ds.C.astype(int), gm_te)
+        rep = {"train":{"specific":a_tr_spec,"generic":a_tr_gen},
+               "val":{"specific":a_va_spec,"generic":a_va_gen},
+               "test":{"specific":a_te_spec,"generic":a_te_gen}}
+        print("FE ears acc by split:", json.dumps(rep, indent=2))
+except Exception:
+    pass
 
 texts_demo = [str(x) for x in ds.X[:3]]
 dummy_C = np.zeros((len(texts_demo), len(ds.concepts)), dtype=np.float32)
@@ -1758,10 +1981,14 @@ def ensure_split(ds):
             X = [ds_obj.X[i] for i in idx]
             C = ds_obj.C[mask]
             y = ds_obj.y[mask]
-            return ConceptDatasetSample(
+            sub = ConceptDatasetSample(
                 X=X, C=C, y=y,
                 meta={"concepts": ds_obj.concepts, "classes": ds_obj.classes, "data_type": "text"}
             )
+            gm = getattr(ds_obj, "ears_generic_mask", None)
+            if gm is not None:
+                setattr(sub, "ears_generic_mask", np.asarray(gm)[idx])
+            return sub
 
         val_mask   = (fold_arr == 0)
         test_mask  = (fold_arr == 1)
@@ -1895,6 +2122,25 @@ def _choose_source():
         names_vec = list(test_ds.concepts)
         U_full = C_test_scores * (1 - C_test_scores)
         H_base = H_test
+
+        noise_mode = merged.get("concept_label_noise_mode", "none")
+        if noise_mode == "subjective":
+            rate = float(merged.get("concept_label_noise_rate", 0.20))
+            H_base = apply_subjective_noise(H_base.astype(int).copy(),
+                                            rate=rate,
+                                            seed=int(merged.get("seed", 0)) + 555)
+        elif noise_mode == "machine":
+            confusion_json = merged.get("concept_label_noise_confusion", "")
+            confusion = None
+            if confusion_json:
+                try:
+                    confusion = json.loads(confusion_json)
+                except Exception:
+                    confusion = None
+            H_base = apply_machine_noise(H_base.astype(int).copy(),
+                                         confusion=confusion,
+                                         seed=int(merged.get("seed", 0)) + 556)
+
         T_truth = T_test
         fe = cbm.front_end_model
         return names_vec, U_full, H_base, T_truth, fe
@@ -1904,11 +2150,15 @@ def _choose_source():
         H_base = T_test.copy()
         T_truth = T_test
 
-        C_for_fe = train_ds.C.astype(int).copy()
+        fe_gt = FrontEndModel()
+        fe_gt.fit(train_ds.C.astype(int), train_ds.y.astype(int))
+
         noise_mode = merged.get("concept_label_noise_mode", "none")
         if noise_mode == "subjective":
             rate = float(merged.get("concept_label_noise_rate", 0.20))
-            C_for_fe = apply_subjective_noise(C_for_fe, rate=rate, seed=int(merged.get("seed", 0)) + 100)
+            H_base = apply_subjective_noise(H_base.astype(int).copy(),
+                                            rate=rate,
+                                            seed=int(merged.get("seed", 0)) + 100)
         elif noise_mode == "machine":
             confusion_json = merged.get("concept_label_noise_confusion", "")
             confusion = None
@@ -1917,10 +2167,10 @@ def _choose_source():
                     confusion = json.loads(confusion_json)
                 except Exception:
                     confusion = None
-            C_for_fe = apply_machine_noise(C_for_fe, confusion=confusion, seed=int(merged.get("seed", 0)) + 200)
+            H_base = apply_machine_noise(H_base.astype(int).copy(),
+                                         confusion=confusion,
+                                         seed=int(merged.get("seed", 0)) + 200)
 
-        fe_gt = FrontEndModel()
-        fe_gt.fit(C_for_fe, train_ds.y.astype(int))
         return names_vec, U_full, H_base, T_truth, fe_gt
 
     names_vec = names_m
@@ -1966,15 +2216,23 @@ for ta in acc_grid:
     #     except ValueError:
     #         pass
 
-    base_proba = fe_src.predict_proba(H0)
+    tau_val = 0.2 if args_obj.concept_mode == "soft" else 0.5
+    if args_obj.concept_mode == "soft":
+        _old_mode = getattr(detector, "output_mode", None)
+        if hasattr(detector, "output_mode"):
+            detector.output_mode = "soft"
+        base_proba = cbm.predict_proba(test_ds, propagate=True)
+        if hasattr(detector, "output_mode"):
+            detector.output_mode = _old_mode
+    else:
+        base_proba = fe_src.predict_proba(H0)
     base_pred = np.argmax(base_proba, axis=1)
     base_acc = float(accuracy_score(y_test_true, base_pred))
     try:
         cls_index_1 = int(np.where(cbm.front_end_model.model.classes_ == 1)[0][0])
     except Exception:
         cls_index_1 = 1 if base_proba.shape[1] > 1 else 0
-    sel_pre = calc_metric(base_proba[:, cls_index_1], y_test_true, tau=0.5)
-
+    sel_pre = calc_metric(base_proba[:, cls_index_1], y_test_true, tau=tau_val)
 
     if args_obj.concept_source != "gt":
         concept_err_rate = float((H_test_src != T_truth_src).mean())
@@ -1993,11 +2251,17 @@ for ta in acc_grid:
         edit_counts = np.zeros(Hm.shape[0], dtype=int)
         per_concept_edits = np.zeros(Hm.shape[1], dtype=int)
         per_concept_correct = np.zeros(Hm.shape[1], dtype=int)
+        per_concept_attempts = np.zeros(Hm.shape[1], dtype=int)
+        P_work = C_test_scores.copy() if args_obj.concept_mode == "soft" else None
 
         if k > 0:
             cols_all = allow_idxs if allow_idxs.size > 0 else np.arange(Hm.shape[1], dtype=int)
             y0 = fe_src.predict(Hm)
-            for i in range(Hm.shape[0]):
+            if args_obj.concept_mode == "soft":
+                idxs = np.where((base_proba[:, cls_index_1] >= tau_val) & (base_proba[:, cls_index_1] <= 1 - tau_val))[0]
+            else:
+                idxs = np.arange(Hm.shape[0])
+            for i in idxs:
                 x = Hm[i].copy()
                 base = int(y0[i])
                 rem = list(int(c) for c in cols_all)
@@ -2032,10 +2296,18 @@ for ta in acc_grid:
                     picks.append(best_j)
                     x[best_j] = T_truth_src[i, best_j]
                     rem.remove(best_j)
+                    if P_work is not None:
+                        P_work[i, best_j] = T_truth_src[i, best_j]
+
                 if picks:
+                    for j in picks:
+                        per_concept_attempts[j] += 1
                     before = Hm[i, picks].copy()
+                    mode = "miss" if args_obj.intervention_error_mode == "miss" else (
+                        "flip" if args_obj.intervention_error_mode == "flip" else "miss")
                     Hm[i] = _apply_human_edit(Hm[i], T_truth_src[i], picks, names_vec, float(args_obj.human_acc),
-                                              acc_map, rng)
+                                              acc_map, rng, mode=mode)
+
                     after = Hm[i, picks]
                     changed_mask = (after != before)
                     for j, chg in zip(picks, changed_mask):
@@ -2067,7 +2339,10 @@ for ta in acc_grid:
             fe_src_drop.fit(Xtr[:, keep_idx], train_ds.y.astype(int))
             y_proba = fe_src_drop.predict_proba(H_infer)
         else:
-            y_proba = fe_src.predict_proba(H_infer)
+            if args_obj.concept_mode == "soft":
+                y_proba = cbm._propagate_predict_proba(P_work if P_work is not None else C_test_scores)
+            else:
+                y_proba = fe_src.predict_proba(H_infer)
 
         y_pred = np.argmax(y_proba, axis=1)
         acc_k = float(accuracy_score(y_test_true, y_pred))
@@ -2079,7 +2354,7 @@ for ta in acc_grid:
             cls_index_1 = int(np.where(cbm.front_end_model.model.classes_ == 1)[0][0])
         except Exception:
             cls_index_1 = 1 if y_proba.shape[1] > 1 else 0
-        sel_post = calc_metric(y_proba[:, cls_index_1], y_test_true, tau=0.5)
+        sel_post = calc_metric(y_proba[:, cls_index_1], y_test_true, tau=tau_val)
 
         interventions = int(np.sum(edit_counts > 0))
         total_applied_edits = int(edit_counts.sum())
@@ -2101,9 +2376,7 @@ for ta in acc_grid:
             "acc_cbm_pre": base_acc,
             "acc_cbm_intv": acc_k,
             "raw_gain_vs_k0": gain_vs_k0,
-            "gain_acc_human": (acc_k - float(getattr(args_obj, "human_alone", 0.75))) if hasattr(args_obj,
-                                                                                                 "human_alone") else float(
-                "nan"),
+            "gain_acc_human": (acc_k - float(getattr(args_obj, "human_alone", 0.75))) if hasattr(args_obj, "human_alone") else float("nan"),
             "gain_acc_dnn": (acc_k - bb_acc) if bb_acc is not None else float("nan"),
             "delta_vs_blackbox": (acc_k - bb_acc) if bb_acc is not None else float("nan"),
             "concept_checks": concept_checks_total,
@@ -2128,21 +2401,25 @@ for ta in acc_grid:
             "test_miss_mode": args_obj.test_miss_mode,
             "concept_err_rate": float(concept_err_rate) if "concept_err_rate" in locals() else float("nan"),
             "upper_bound_acc": float(acc_upper) if "acc_upper" in locals() else float("nan"),
+            "corrected_edits_total": int(per_concept_correct.sum()),
+            "attempted_edits_total": int(per_concept_attempts.sum()),
         }
 
         rows.append(rec)
 
         con_rows = []
         for j, name in enumerate(names_vec):
-            n_ed = int(per_concept_edits[j])
+            n_att = int(per_concept_attempts[j])
+            n_app = int(per_concept_edits[j])
             n_ok = int(per_concept_correct[j])
             con_rows.append({
                 "target_acc": ta,
                 "budget": k,
                 "concept": name,
-                "interventions": n_ed,
+                "interventions": n_att,
+                "applied": n_app,
                 "correct": n_ok,
-                "correct_rate": (float(n_ok) / float(n_ed)) if n_ed > 0 else float("nan"),
+                "correct_rate": (float(n_ok) / float(n_att)) if n_att > 0 else float("nan"),
             })
         if con_rows:
             dfc = pd.DataFrame(con_rows)
@@ -2192,6 +2469,34 @@ if miss_meta_capture is not None:
 viab = pd.DataFrame(rows)
 viab_path = run_dir / f"viability_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
 viab.to_csv(viab_path, index=False)
+
+# Emit per-mode “check accuracy” CSV
+if str(args_obj.intervention_error_mode) == "miss":
+    v1 = viab.copy()
+    v1["check_accuracy"] = v1["corrected_edits_total"] / v1["concept_checks"].replace(0, np.nan)
+    v1_path = run_dir / f"intervention_accuracy_v1_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+    v1[["target_acc","budget","check_accuracy"]].to_csv(v1_path, index=False)
+    print("Saved check-accuracy (v1):", v1_path)
+elif str(args_obj.intervention_error_mode) == "flip":
+    v2 = viab.copy()
+    v2["check_accuracy"] = v2["corrected_edits_total"] / v2["applied_edits_total"].replace(0, np.nan)
+    v2_path = run_dir / f"intervention_accuracy_v2_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+    v2[["target_acc","budget","check_accuracy"]].to_csv(v2_path, index=False)
+    print("Saved check-accuracy (v2):", v2_path)
+else:
+    # "both" → write both for completeness
+    v1 = viab.copy()
+    v1["check_accuracy"] = v1["corrected_edits_total"] / v1["concept_checks"].replace(0, np.nan)
+    v1_path = run_dir / f"intervention_accuracy_v1_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+    v1[["target_acc","budget","check_accuracy"]].to_csv(v1_path, index=False)
+
+    v2 = viab.copy()
+    v2["check_accuracy"] = v2["corrected_edits_total"] / v2["applied_edits_total"].replace(0, np.nan)
+    v2_path = run_dir / f"intervention_accuracy_v2_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+    v2[["target_acc","budget","check_accuracy"]].to_csv(v2_path, index=False)
+    print("Saved check-accuracy (v1):", v1_path)
+    print("Saved check-accuracy (v2):", v2_path)
+
 print("Saved intervention metrics:", viab_path)
 
 

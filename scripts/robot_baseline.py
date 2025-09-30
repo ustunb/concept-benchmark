@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse, json, time, random, re
+import hashlib
 from pathlib import Path
 from itertools import product
 
@@ -46,7 +47,20 @@ settings = {
     "run_name": "",
     "templates_file": "",
     "template_difficulty": "hard",
+    "generic_rate": 0.5,
+    "generic_tol": 0.02,
+    "train_balance_enable": 0,
+    "train_target_pos_frac": -1.0,
+    "train_target_generic_frac": 0.5,
+    "train_balance_within_label": 1,
+    "val_balance_enable": 0,
+    "val_target_generic_frac": 0.5,
+    "val_balance_within_label": 1,
+    "test_balance_enable": 0,
+    "test_target_generic_frac": 0.5,
+    "test_balance_within_label": 1,
 }
+
 
 def set_seed(s):
     random.seed(s)
@@ -412,6 +426,19 @@ p.add_argument("--templates-file", type=str)
 p.add_argument("--template-difficulty", choices=["easy","medium","hard"])
 p.add_argument("--redact-concepts", type=str)
 p.add_argument("--redact-splits", type=str)
+p.add_argument("--generic-rate", dest="generic_rate", type=float)
+p.add_argument("--generic-tol", dest="generic_tol", type=float)
+p.add_argument("--train-balance-enable", dest="train_balance_enable", type=int)
+p.add_argument("--train-target-pos-frac", dest="train_target_pos_frac", type=float)
+p.add_argument("--train-target-generic-frac", dest="train_target_generic_frac", type=float)
+p.add_argument("--train-balance-within-label", dest="train_balance_within_label", type=int)
+p.add_argument("--val-balance-enable", dest="val_balance_enable", type=int)
+p.add_argument("--val-target-generic-frac", dest="val_target_generic_frac", type=float)
+p.add_argument("--val-balance-within-label", dest="val_balance_within_label", type=int)
+p.add_argument("--test-balance-enable", dest="test_balance_enable", type=int)
+p.add_argument("--test-target-generic-frac", dest="test_target_generic_frac", type=float)
+p.add_argument("--test-balance-within-label", dest="test_balance_within_label", type=int)
+
 args, _ = p.parse_known_args()
 for k, v in vars(args).items():
     if v is not None:
@@ -436,21 +463,29 @@ def build_text_ds_hard(catalog_df: pd.DataFrame,
                        corpus_path: Path,
                        variants_per_row: int,
                        seed: int,
-                       row_variants: list[int] | None = None) -> ConceptDatasetSample:
-    corpus = _load_jsonl(corpus_path)
+                       row_variants: list[int] | None = None,
+                       generic_path: Path | None = None,
+                       generic_rate: float = 0.5) -> ConceptDatasetSample:
+    corpus_spec = _load_jsonl(corpus_path)
+    corpus_gen = _load_jsonl(generic_path) if (generic_path is not None and Path(generic_path).is_file()) else []
     names = _names_from_concepts(concepts)
     classes = [0, 1]
-    X, C, y, row_index = [], [], [], []
+    X, C, y, row_index, ears_generic = [], [], [], [], []
     for i, sr in catalog_df.iterrows():
         row = {k: sr[k] for k in concepts.keys()}
         row["label"] = sr["label"]
         _vpr_i = int(row_variants[i]) if (row_variants is not None and i < len(row_variants)) else int(variants_per_row)
         for v in range(max(1, _vpr_i)):
+            key = f"{seed}:{i}:{v}:ears_generic"
+            h = int(hashlib.sha256(key.encode()).hexdigest(), 16)
+            use_gen = (len(corpus_gen) > 0) and ((h % 1000000) < int(max(0.0, min(1.0, float(generic_rate))) * 1000000))
+            corpus = corpus_gen if use_gen else corpus_spec
             text = _render_from_corpus(row, corpus, seed + v)
             X.append(text)
             C.append(_onehot_for_row(row, concepts, names))
             y.append(1 if str(row["label"]) == "glorp" else 0)
             row_index.append(i)
+            ears_generic.append(bool(use_gen))
     ds = ConceptDatasetSample(
         X=X,
         C=np.asarray(C, dtype=np.float32),
@@ -458,6 +493,7 @@ def build_text_ds_hard(catalog_df: pd.DataFrame,
         meta={"concepts": tuple(names), "classes": tuple(classes), "data_type": "text"}
     )
     setattr(ds, "_full", type("Full", (), {"meta": {"row_index": np.asarray(row_index, dtype=int)}}))
+    ds.ears_generic_mask = np.asarray(ears_generic, dtype=bool)
     return ds
 
 if modality == "text":
@@ -509,6 +545,7 @@ if modality == "text":
         _vpr_min = int(settings.get("variants_per_row_minority") or max(1, int(round(_base_vpr * float(settings.get("minority_mult", 1.0))))))
         _vpr_maj = int(settings.get("variants_per_row_majority") or _base_vpr)
         _row_variants = [(_vpr_min if (lab == _minority_label) else _vpr_maj) for lab in _labels]
+        gen_jsonl = tpl_path.with_name("HardCorpus_EarsGeneric.jsonl") if str(tpl_path).lower().endswith(".jsonl") else None
         ds = build_text_ds_hard(
             catalog_df=catalog_df,
             concepts=concepts,
@@ -516,7 +553,10 @@ if modality == "text":
             variants_per_row=_base_vpr,
             seed=int(settings["seed"]),
             row_variants=_row_variants,
+            generic_path=(gen_jsonl if (gen_jsonl and gen_jsonl.is_file()) else None),
+            generic_rate=float(settings.get("generic_rate", 0.5)),
         )
+
     else:
         with open(tpl_path, "r", encoding="utf-8-sig") as f:
             templates = [ln.strip() for ln in f if ln.strip()]
@@ -558,14 +598,21 @@ if modality == "text":
         tr_end = int(0.70 * n)
         va_end = int(0.85 * n)
         tr, va, te = idx[:tr_end], idx[tr_end:va_end], idx[va_end:]
+
+
     def _subset(ds_obj, take):
         X = [ds_obj.X[i] for i in take]
         C = ds_obj.C[take]
         y = ds_obj.y[take]
-        return ConceptDatasetSample(
+        sub = ConceptDatasetSample(
             X=X, C=C, y=y,
             meta={"concepts": ds_obj.concepts, "classes": ds_obj.classes, "data_type": "text"}
         )
+        if hasattr(ds_obj, "ears_generic_mask"):
+            setattr(sub, "ears_generic_mask", np.asarray(ds_obj.ears_generic_mask)[take])
+        return sub
+
+
     ds.training = _subset(ds, tr)
     ds.validation = _subset(ds, va)
     ds.test = _subset(ds, te)
@@ -612,6 +659,189 @@ if modality == "text":
             ds.training = ConceptDatasetSample(X=_redact(ds.training.X), C=ds.training.C, y=ds.training.y,
                                                meta=ds.training.meta)
 
+    if int(settings.get("train_balance_enable", 0)) == 1 and hasattr(ds.training, "ears_generic_mask"):
+        ytr0 = np.asarray(ds.training.y, dtype=int)
+        gtr0 = np.asarray(ds.training.ears_generic_mask, dtype=bool)
+        idx0 = np.arange(ytr0.shape[0])
+        f_pos = float(settings.get("train_target_pos_frac", -1))
+        if f_pos < 0:
+            f_pos = float((ytr0 == 1).mean())
+        f_gen = float(settings.get("train_target_generic_frac", 0.5))
+        within = int(settings.get("train_balance_within_label", 1)) == 1
+        rng = np.random.default_rng(int(settings["seed"]) + 901)
+        if within:
+            t = {
+                (1, 1): f_pos * f_gen,
+                (1, 0): f_pos * (1.0 - f_gen),
+                (0, 1): (1.0 - f_pos) * f_gen,
+                (0, 0): (1.0 - f_pos) * (1.0 - f_gen),
+            }
+            avail = {k: idx0[(ytr0 == k[0]) & (gtr0 == (k[1] == 1))] for k in t}
+            caps = [avail[k].size / v for k, v in t.items() if v > 0]
+            N = int(np.floor(min(caps))) if caps else 0
+            take = []
+            for k, v in t.items():
+                n = int(np.floor(v * N)) if v > 0 else 0
+                n = min(n, avail[k].size)
+                if n > 0:
+                    take.append(rng.choice(avail[k], size=n, replace=False))
+            take = np.sort(np.concatenate(take)) if take else np.array([], dtype=int)
+        else:
+            pos_idx = idx0[ytr0 == 1]
+            neg_idx = idx0[ytr0 == 0]
+            N = min(pos_idx.size, neg_idx.size) * 2
+            n_pos = N // 2
+            n_neg = N - n_pos
+            take = np.sort(np.concatenate([
+                rng.choice(pos_idx, size=n_pos, replace=False),
+                rng.choice(neg_idx, size=n_neg, replace=False),
+            ])) if N > 0 else np.array([], dtype=int)
+        if take.size > 0:
+            X = [ds.training.X[i] for i in take]
+            C = ds.training.C[take]
+            y = ds.training.y[take]
+            tr_ds = ConceptDatasetSample(X=X, C=C, y=y, meta=ds.training.meta)
+            setattr(tr_ds, "ears_generic_mask", ds.training.ears_generic_mask[take])
+            ds.training = tr_ds
+
+    if int(settings.get("val_balance_enable", 0)) == 1 and hasattr(ds.validation, "ears_generic_mask"):
+        yv0 = np.asarray(ds.validation.y, dtype=int)
+        gv0 = np.asarray(ds.validation.ears_generic_mask, dtype=bool)
+        idxv = np.arange(yv0.shape[0])
+        f_gen_v = float(settings.get("val_target_generic_frac", settings.get("generic_rate", 0.5)))
+        rngv = np.random.default_rng(int(settings["seed"]) + 902)
+        take_v = []
+        for lab in (0, 1):
+            lab_idx = idxv[yv0 == lab]
+            if lab_idx.size == 0:
+                continue
+            lab_gen = lab_idx[gv0[lab_idx]]
+            lab_spec = lab_idx[~gv0[lab_idx]]
+            want_gen = int(round(f_gen_v * lab_idx.size))
+            want_spec = lab_idx.size - want_gen
+            sel_gen = rngv.choice(lab_gen, size=min(want_gen, lab_gen.size),
+                                  replace=False) if lab_gen.size else np.array([], dtype=int)
+            sel_spec = rngv.choice(lab_spec, size=min(want_spec, lab_spec.size),
+                                   replace=False) if lab_spec.size else np.array([], dtype=int)
+            short_gen = want_gen - sel_gen.size
+            if short_gen > 0 and (lab_spec.size - sel_spec.size) > 0:
+                add = rngv.choice(np.setdiff1d(lab_spec, sel_spec), size=min(short_gen, lab_spec.size - sel_spec.size),
+                                  replace=False)
+                sel_spec = np.concatenate([sel_spec, add])
+            short_spec = want_spec - sel_spec.size
+            if short_spec > 0 and (lab_gen.size - sel_gen.size) > 0:
+                add = rngv.choice(np.setdiff1d(lab_gen, sel_gen), size=min(short_spec, lab_gen.size - sel_gen.size),
+                                  replace=False)
+                sel_gen = np.concatenate([sel_gen, add])
+            take_v.append(np.concatenate([sel_gen, sel_spec]))
+        if take_v:
+            take_v = np.sort(np.concatenate(take_v))
+            X = [ds.validation.X[i] for i in take_v]
+            C = ds.validation.C[take_v]
+            y = ds.validation.y[take_v]
+            va_ds = ConceptDatasetSample(X=X, C=C, y=y, meta=ds.validation.meta)
+            setattr(va_ds, "ears_generic_mask", ds.validation.ears_generic_mask[take_v])
+            ds.validation = va_ds
+
+    if int(settings.get("test_balance_enable", 0)) == 1 and hasattr(ds.test, "ears_generic_mask"):
+        yte0 = np.asarray(ds.test.y, dtype=int)
+        gte0 = np.asarray(ds.test.ears_generic_mask, dtype=bool)
+        idxt = np.arange(yte0.shape[0])
+        f_gen_t = float(settings.get("test_target_generic_frac", settings.get("generic_rate", 0.5)))
+        rngt = np.random.default_rng(int(settings["seed"]) + 903)
+        take_t = []
+        for lab in (0, 1):
+            lab_idx = idxt[yte0 == lab]
+            if lab_idx.size == 0:
+                continue
+            lab_gen = lab_idx[gte0[lab_idx]]
+            lab_spec = lab_idx[~gte0[lab_idx]]
+            want_gen = int(round(f_gen_t * lab_idx.size))
+            want_spec = lab_idx.size - want_gen
+            sel_gen = rngt.choice(lab_gen, size=min(want_gen, lab_gen.size),
+                                  replace=False) if lab_gen.size else np.array([], dtype=int)
+            sel_spec = rngt.choice(lab_spec, size=min(want_spec, lab_spec.size),
+                                   replace=False) if lab_spec.size else np.array([], dtype=int)
+            short_gen = want_gen - sel_gen.size
+            if short_gen > 0 and (lab_spec.size - sel_spec.size) > 0:
+                add = rngt.choice(np.setdiff1d(lab_spec, sel_spec), size=min(short_gen, lab_spec.size - sel_spec.size),
+                                  replace=False)
+                sel_spec = np.concatenate([sel_spec, add])
+            short_spec = want_spec - sel_spec.size
+            if short_spec > 0 and (lab_gen.size - sel_gen.size) > 0:
+                add = rngt.choice(np.setdiff1d(lab_gen, sel_gen), size=min(short_spec, lab_gen.size - sel_gen.size),
+                                  replace=False)
+                sel_gen = np.concatenate([sel_gen, add])
+            take_t.append(np.concatenate([sel_gen, sel_spec]))
+        if take_t:
+            take_t = np.sort(np.concatenate(take_t))
+            X = [ds.test.X[i] for i in take_t]
+            C = ds.test.C[take_t]
+            y = ds.test.y[take_t]
+            te_ds = ConceptDatasetSample(X=X, C=C, y=y, meta=ds.test.meta)
+            setattr(te_ds, "ears_generic_mask", ds.test.ears_generic_mask[take_t])
+            ds.test = te_ds
+
+    split_dump = {}
+    for name, part in [("train", ds.training), ("val", ds.validation), ("test", ds.test)]:
+        p = out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_seed{int(settings['seed'])}_split_{name}.csv"
+        pd.DataFrame({"text": list(map(str, part.X)), "label": np.asarray(part.y, dtype=int)}).to_csv(p, index=False)
+        split_dump[name] = str(p)
+
+
+    def _near_ears_shape(txt: str) -> bool:
+        t = str(txt).lower()
+        sents = re.split(r"[.!?;:]\s+", t)
+        pat_ears = re.compile(r"\bears?\b")
+        pat_shape = re.compile(
+            r"\b(square|boxy|box|angular|cornered|right-angled|rectilinear|90-degree|triangle|triangular|tri-corner|three-angled|three-point|pointy|pointed|tapered|wedge|spearhead|spear-tip)\b")
+        for s in sents:
+            if pat_ears.search(s) and pat_shape.search(s):
+                return True
+        return False
+
+    leak = {}
+    dist = {}
+    for name, part in [("train", ds.training), ("val", ds.validation), ("test", ds.test)]:
+        gm = getattr(part, "ears_generic_mask", None)
+        yv = np.asarray(part.y, dtype=int)
+        if gm is None:
+            leak[name] = {"generic_near_ears_shape": "na"}
+            dist[name] = {"overall": "na", "y1": "na", "y0": "na"}
+            continue
+        leak[name] = {"generic_near_ears_shape": int(sum(_near_ears_shape(t) for t, g in zip(part.X, gm) if g))}
+        overall = float(gm.mean()) if gm.size else float("nan")
+        y1 = float(gm[yv == 1].mean()) if (yv == 1).any() else float("nan")
+        y0 = float(gm[yv == 0].mean()) if (yv == 0).any() else float("nan")
+        dist[name] = {"overall": overall, "y1": y1, "y0": y0}
+
+    t_train = float(settings.get("train_target_generic_frac", settings.get("generic_rate", 0.5))) if int(
+        settings.get("train_balance_enable", 0)) == 1 else float(settings.get("generic_rate", 0.5))
+    t_val = float(settings.get("generic_rate", 0.5))
+    t_test = float(settings.get("generic_rate", 0.5))
+    tol = float(settings.get("generic_tol", 0.02))
+    targets = {"train": t_train, "val": t_val, "test": t_test}
+
+    print(json.dumps({
+        "split_sizes": {"train": int(ds.training.n), "val": int(ds.validation.n), "test": int(ds.test.n)},
+        "ears_leak_counts_generic": leak,
+        "ears_generic_rates": dist,
+        "targets": {"train": t_train, "val": t_val, "test": t_test, "tol": tol},
+        "split_files": split_dump,
+        "run_dir": str(out_dir)
+    }, indent=2))
+
+    if any(v.get("generic_near_ears_shape", 0) not in ("na", 0) for v in leak.values()):
+        raise SystemExit(3)
+    for name, vals in dist.items():
+        if vals["overall"] != "na" and np.isfinite(vals["overall"]):
+            if abs(vals["overall"] - targets[name]) > tol:
+                raise SystemExit(4)
+        for k in ("y1", "y0"):
+            if vals[k] != "na" and np.isfinite(vals[k]):
+                if abs(vals[k] - targets[name]) > tol:
+                    raise SystemExit(4)
+
     yt = np.asarray(ds.training.y, dtype=int)
     yv = np.asarray(ds.validation.y, dtype=int)
     yte = np.asarray(ds.test.y, dtype=int)
@@ -634,27 +864,6 @@ if modality == "text":
         "total": int(yte.size),
         "pos_frac": round((yte == 1).mean() if yte.size else 0.0, 4),
     })
-
-    pat_ant = re.compile(r"(?i)\bantenna(?:e|s)?(?:-like)?\b")
-    counts = {
-        "train": int(sum(1 for s in ds.training.X if pat_ant.search(str(s)))),
-        "val": int(sum(1 for s in ds.validation.X if pat_ant.search(str(s)))),
-        "test": int(sum(1 for s in ds.test.X if pat_ant.search(str(s))))
-    }
-    split_dump = {}
-    for name, part in [("train", ds.training), ("val", ds.validation), ("test", ds.test)]:
-        p = out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_seed{int(settings['seed'])}_split_{name}.csv"
-        pd.DataFrame({"text": list(map(str, part.X)), "label": np.asarray(part.y, dtype=int)}).to_csv(p, index=False)
-        split_dump[name] = str(p)
-    print(json.dumps({
-        "split_sizes": {"train": int(ds.training.n), "val": int(ds.validation.n), "test": int(ds.test.n)},
-        "antenna_mentions": counts,
-        "split_files": split_dump,
-        "run_dir": str(out_dir)
-    }, indent=2))
-    if counts["test"] > 0:
-        raise SystemExit(2)
-
     Xtr = ds.training.X
     ytr = ds.training.y.astype(int)
     Xte = ds.test.X
@@ -683,7 +892,7 @@ else:
     imgs_dir = pkg_dir / "synthetic" / "helper" / "static" / "robot_images_small"
     meta = pd.read_csv(imgs_dir / "meta.csv")
     meta = meta.sample(frac=1.0, random_state=int(settings["seed"])).reset_index(drop=True)
-    label_expr = settings["label_model_expr"] or "'glorp' if (min(int(str(row['has_antennae']).lower()=='true'), int(row['body_shape']=='square')) >= 1) else 'drent'"
+    label_expr = settings["label_model_expr"] or "'glorp' if (min(int(row['ears_shape']=='square'), int(row['body_shape']=='square')) >= 1) else 'drent'"
     meta["label"] = compute_label(
         meta,
         label_expr,
