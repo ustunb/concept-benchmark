@@ -83,7 +83,7 @@ settings = {
     "redact_splits": "",
 
     "generic_rate": 0.70,
-    "generic_tol": 0.04,
+    "generic_tol": 0.1,
     "generic_enable": 1,
 
     "train_target_generic_frac": 0.7,
