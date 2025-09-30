@@ -1,6 +1,7 @@
-# scripts/robot_baseline.py  (hard, LLM-free caption path supported)
+from __future__ import annotations
 
-import argparse, json, time, random
+import argparse, json, time, random, re
+import hashlib
 from pathlib import Path
 from itertools import product
 
@@ -15,18 +16,22 @@ from transformers import (
     AutoImageProcessor,
     AutoModelForImageClassification,
 )
+from sklearn.metrics import accuracy_score, f1_score, balanced_accuracy_score, roc_auc_score
+import torch.nn.functional as F
 
 from concept_benchmark.paths import results_dir, pkg_dir
 from concept_benchmark.data import ConceptDatasetSample
 from concept_benchmark.synthetic.helper.textgen import create_synthetic_dataset as make_text_ds
 
-# -------------------- settings --------------------
 settings = {
     "modality": "text",
     "n": 5000,
     "seed": 1337,
     "out_dir": str(results_dir / "robot_baseline"),
     "label_model_expr": "",
+    "label_model_type": "deterministic",
+    "label_model_alpha": 10.0,
+    "label_model_bias": -0.2,
     "corr_pair": "",
     "train_corr": 1.0,
     "test_break": 1.0,
@@ -37,13 +42,25 @@ settings = {
     "image_model": "google/vit-base-patch16-224-in21k",
     "image_size": 224,
     "color_mode": "rgb",
-    "samples_per_instance": 3,   # used as variants_per_row for hard JSONL path
+    "samples_per_instance": 3,
     "draw": 0,
     "run_name": "",
     "templates_file": "",
     "template_difficulty": "hard",
+    "generic_rate": 0.5,
+    "generic_tol": 0.02,
+    "train_balance_enable": 0,
+    "train_target_pos_frac": -1.0,
+    "train_target_generic_frac": 0.5,
+    "train_balance_within_label": 1,
+    "val_balance_enable": 0,
+    "val_target_generic_frac": 0.5,
+    "val_balance_within_label": 1,
+    "test_balance_enable": 0,
+    "test_target_generic_frac": 0.5,
+    "test_balance_within_label": 1,
 }
-# --------------------------------------------------
+
 
 def set_seed(s):
     random.seed(s)
@@ -52,24 +69,183 @@ def set_seed(s):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(s)
 
-def compute_label(df: pd.DataFrame, model_expr: str) -> pd.Series:
-    SAFE_GLOBALS = {"__builtins__": None, "int": int, "str": str, "float": float, "bool": bool, "any": any, "all": all}
+def compute_label(df: pd.DataFrame, model_expr: str,
+                  label_model_type: str = "deterministic",
+                  alpha: float = 10.0, bias: float = -0.2, seed: int = 0) -> pd.Series:
+    SAFE_GLOBALS = {
+        "__builtins__": None,
+        "int": int, "str": str, "float": float, "bool": bool,
+        "any": any, "all": all, "np": np,
+        "min": min, "max": max
+    }
+    rng = np.random.default_rng(int(seed))
+
+    def _cond_to_score(expr: str) -> str | None:
+        m = re.search(r"\bif\s+(?P<cond>.+?)\s+else\b", expr)
+        cond = m.group("cond").strip() if m else expr.strip()
+        m2 = re.search(r"^(?P<lhs>.+?)(?:\s*(?:>=|<=|>|<)\s*[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?)\s*$",
+                       cond, flags=re.IGNORECASE)
+        lhs = m2.group("lhs").strip() if m2 else cond
+        while lhs.startswith("(") and lhs.endswith(")"):
+            lvl = 0; ok = True
+            for ch in lhs:
+                if ch == "(": lvl += 1
+                elif ch == ")":
+                    lvl -= 1
+                    if lvl < 0: ok = False; break
+            if ok and lvl == 0:
+                lhs = lhs[1:-1].strip()
+            else:
+                break
+        return lhs or None
+
+    score_expr = _cond_to_score(model_expr) if label_model_type == "stochastic" else None
+
     def eval_one(sr):
         row = sr.to_dict()
-        return eval(model_expr, SAFE_GLOBALS, {"row": row})
-    return df.apply(eval_one, axis=1)
+        if label_model_type is None or label_model_type == "deterministic":
+            return eval(model_expr, SAFE_GLOBALS, {"row": row})
+        score = None
+        if score_expr:
+            try:
+                score = float(eval(score_expr, SAFE_GLOBALS, {"row": row}))
+            except Exception:
+                score = None
+        if score is None:
+            try:
+                hard = eval(model_expr, SAFE_GLOBALS, {"row": row})
+                score = 1.0 if str(hard).strip().lower() == "glorp" else 0.0
+            except Exception:
+                score = 0.0
+        p = 1.0 / (1.0 + float(np.exp(-float(alpha) * (float(score) - float(bias)))))
+        return "glorp" if rng.random() < p else "drent"
 
-def enumerate_concepts(concepts, shuffle=True, seed=0):
-    cols = list(concepts.keys())
-    grids = [concepts[c] for c in cols]
-    combos = list(product(*grids))
-    df = pd.DataFrame(combos, columns=cols)
-    if shuffle:
-        rng = np.random.default_rng(seed)
-        df = df.iloc[rng.permutation(len(df))].reset_index(drop=True)
-    return df
+    return df.apply(eval_one, axis=1).astype(str)
 
-# -------------------- Torch datasets --------------------
+def _signals_from_row(row: dict) -> dict:
+    head = str(row["head_shape"])
+    body = str(row["body_shape"])
+    return {
+        "head_body_same": (head == body),
+        "has_antennae_bool": (str(row["has_antennae"]).lower() == "true"),
+        "corners_head": (head == "square"),
+        "corners_body": (body == "square"),
+        "rounded_head": (head == "round"),
+        "rounded_body": (body == "round"),
+        "ears_shape": str(row["ears_shape"]),
+        "mouth_type": str(row["mouth_type"]),
+    }
+
+def _nat_from_tokens(row: dict) -> dict:
+    head_nat = {"square": "boxy", "round": "dome-like"}[str(row["head_shape"])]
+    body_nat = {"square": "sharp-cornered", "round": "barrel-smooth"}[str(row["body_shape"])]
+    ears_nat = {"square": "square", "triangle": "pointy"}[str(row["ears_shape"])]
+    mouth_nat = {"closed": "shut", "open": "open"}[str(row["mouth_type"])]
+    hands_nat_map = {
+        "round_circle": "round mitts", "wide_oval": "broad ovals", "tall_oval": "long ovals",
+        "edgy_square": "square claws", "edgy_triangle": "triangular grippers", "edgy_trapezoid": "trapezoid claws",
+    }
+    feet_nat_map = {
+        "flat_4sided": "flat four-sided pads", "flat_5sided": "pentagonal pads", "flat_lshaped": "L-shaped feet",
+        "pointy_3sided": "three-point feet", "pointy_4sided": "four-point feet", "pointy_6sided": "hex-point feet",
+    }
+    hands_nat = hands_nat_map[str(row["hand_shape"])]
+    feet_nat = feet_nat_map[str(row["foot_shape"])]
+    ant_nat = "with antennae" if str(row["has_antennae"]).lower() == "true" else "no antennae"
+    knees_nat = "has knees" if str(row["has_knees"]).lower() == "true" else "no knees"
+    elbows_nat = "has elbows" if str(row["has_elbows"]).lower() == "true" else "no elbows"
+    return {
+        "HEAD_NAT": head_nat, "BODY_NAT": body_nat, "EARS_NAT": ears_nat, "MOUTH_NAT": mouth_nat,
+        "HANDS_NAT": hands_nat, "FEET_NAT": feet_nat, "ANT_NAT": ant_nat,
+        "KNEES_NAT": knees_nat, "ELBOWS_NAT": elbows_nat,
+    }
+
+def _line_matches(sig: dict, cond: dict) -> bool:
+    for k, v in cond.items():
+        if k == "any":
+            continue
+        if k not in sig:
+            return False
+        if isinstance(v, bool):
+            if bool(sig[k]) != v:
+                return False
+        else:
+            if str(sig[k]) != str(v):
+                return False
+    return True
+
+def _load_jsonl(p: Path) -> list[dict]:
+    text = p.read_text(encoding="utf-8-sig").strip()
+    if not text:
+        raise ValueError(f"HardCorpus file is empty: {p}")
+    if text.startswith("["):
+        arr = json.loads(text)
+        if not isinstance(arr, list):
+            raise ValueError("Top-level JSON is not a list")
+        return arr
+    items, plain_lines = [], []
+    for i, ln in enumerate(text.splitlines(), 1):
+        s = ln.strip()
+        if not s or s.startswith("#") or s.startswith("//") or s.startswith("```"):
+            continue
+        try:
+            items.append(json.loads(s))
+        except json.JSONDecodeError:
+            plain_lines.append(s)
+    if items:
+        return items
+    if plain_lines:
+        return [{"id": f"pt_{i:04d}", "when": {"any": True}, "text": s} for i, s in enumerate(plain_lines, 1)]
+    raise ValueError(f"No valid JSON or plain-text lines found in {p}.")
+
+def _render_from_corpus(row: dict, corpus: list[dict], seed: int) -> str:
+    sig = _signals_from_row(row)
+    cand = [it for it in corpus if _line_matches(sig, it.get("when", {}))]
+    if not cand:
+        cand = corpus
+    key = f'{seed}:{row["head_shape"]}:{row["body_shape"]}:{row["foot_shape"]}:{row["ears_shape"]}:{row["mouth_type"]}:{row["hand_shape"]}:{row["has_antennae"]}:{row["has_knees"]}:{row["has_elbows"]}'
+    idx = abs(hash(key)) % len(cand)
+    txt = str(cand[idx]["text"])
+    nat = _nat_from_tokens(row)
+    for k, v in nat.items():
+        ph = "{" + k + "}"
+        if ph in txt:
+            txt = txt.replace(ph, v)
+    raw_map = {
+        "head_shape": str(row["head_shape"]),
+        "body_shape": str(row["body_shape"]),
+        "ears_shape": str(row["ears_shape"]),
+        "mouth_type": str(row["mouth_type"]),
+        "hand_shape": str(row["hand_shape"]),
+        "foot_shape": str(row["foot_shape"]),
+        "has_antennae": str(row["has_antennae"]),
+        "has_knees": str(row["has_knees"]),
+        "has_elbows": str(row["has_elbows"]),
+    }
+    for k, v in raw_map.items():
+        ph = "{" + k + "}"
+        if ph in txt:
+            txt = txt.replace(ph, v)
+    return txt
+
+def _names_from_concepts(concepts: dict) -> list[str]:
+    names = []
+    for k, vals in concepts.items():
+        for v in vals:
+            names.append(f"{k}={v}")
+    return names
+
+def _onehot_for_row(row: dict, concepts: dict, names: list[str]) -> np.ndarray:
+    J = len(names)
+    vec = np.zeros((J,), dtype=np.float32)
+    pos = 0
+    for k, vals in concepts.items():
+        for v in vals:
+            if str(row[k]) == str(v):
+                vec[pos] = 1.0
+            pos += 1
+    return vec
+
 class TextDS(Dataset):
     def __init__(self, X, y, tok, max_length=256):
         self.X = list(map(str, X))
@@ -103,267 +279,14 @@ class ImageDS(Dataset):
         enc = {k: v.squeeze(0) for k, v in enc.items()}
         y = torch.tensor(self.y[i], dtype=torch.long)
         return enc, y
-# --------------------------------------------------------
 
-# -------------------- Hard JSONL corpus helpers --------------------
-def _signals_from_row(row: dict) -> dict:
-    head = str(row["head_shape"])
-    body = str(row["body_shape"])
-    return {
-        "head_body_same": (head == body),
-        "has_antennae_bool": (str(row["has_antennae"]).lower() == "true"),
-        "corners_head": (head == "square"),
-        "corners_body": (body == "square"),
-        "rounded_head": (head == "round"),
-        "rounded_body": (body == "round"),
-        "ears_shape": str(row["ears_shape"]),
-        "mouth_type": str(row["mouth_type"]),
-    }
-
-def _nat_from_tokens(row: dict) -> dict:
-    head_nat = {"square": "boxy", "round": "dome-like"}[str(row["head_shape"])]
-    body_nat = {"square": "sharp-cornered", "round": "barrel-smooth"}[str(row["body_shape"])]
-    ears_nat = {"square": "square", "triangle": "pointy"}[str(row["ears_shape"])]
-    mouth_nat = {"closed": "shut", "open": "open"}[str(row["mouth_type"])]
-    hands_nat_map = {
-        "round_circle":"round mitts","wide_oval":"broad ovals","tall_oval":"long ovals",
-        "edgy_square":"square claws","edgy_triangle":"triangular grippers","edgy_trapezoid":"trapezoid claws",
-    }
-    feet_nat_map = {
-        "flat_4sided":"flat four-sided pads","flat_5sided":"pentagonal pads","flat_lshaped":"L-shaped feet",
-        "pointy_3sided":"three-point feet","pointy_4sided":"four-point feet","pointy_6sided":"hex-point feet",
-    }
-    hands_nat = hands_nat_map[str(row["hand_shape"])]
-    feet_nat = feet_nat_map[str(row["foot_shape"])]
-    ant_nat = "with antennae" if str(row["has_antennae"]).lower() == "true" else "no antennae"
-    knees_nat = "has knees" if str(row["has_knees"]).lower() == "true" else "no knees"
-    elbows_nat = "has elbows" if str(row["has_elbows"]).lower() == "true" else "no elbows"
-    return {
-        "HEAD_NAT": head_nat, "BODY_NAT": body_nat, "EARS_NAT": ears_nat, "MOUTH_NAT": mouth_nat,
-        "HANDS_NAT": hands_nat, "FEET_NAT": feet_nat, "ANT_NAT": ant_nat,
-        "KNEES_NAT": knees_nat, "ELBOWS_NAT": elbows_nat,
-    }
-
-def _line_matches(sig: dict, cond: dict) -> bool:
-    for k, v in cond.items():
-        if k == "any":
-            continue
-        if k not in sig:
-            return False
-        if isinstance(v, bool):
-            if bool(sig[k]) != v:
-                return False
-        else:
-            if str(sig[k]) != str(v):
-                return False
-    return True
-
-
-def _load_jsonl(p: Path) -> list[dict]:
-    # Accept UTF-8 BOM and either JSONL, a JSON array file, or plain-text corpus
-    text = p.read_text(encoding="utf-8-sig").strip()
-    if not text:
-        raise ValueError(f"HardCorpus file is empty: {p}")
-    if text.startswith("["):
-        arr = json.loads(text)
-        if not isinstance(arr, list):
-            raise ValueError("Top-level JSON is not a list")
-        return arr
-    items, plain_lines = [], []
-    for i, ln in enumerate(text.splitlines(), 1):
-        s = ln.strip()
-        if not s or s.startswith("#") or s.startswith("//") or s.startswith("```"):
-            continue
-        try:
-            items.append(json.loads(s))
-        except json.JSONDecodeError:
-            plain_lines.append(s)
-    if items:
-        return items
-    if plain_lines:
-        return [{"id": f"pt_{i:04d}", "when": {"any": True}, "text": s}
-                for i, s in enumerate(plain_lines, 1)]
-    raise ValueError(f"No valid JSON or plain-text lines found in {p}.")
-
-def _nat_from_tokens(row: dict) -> dict:
-    head_nat = {"square": "boxy", "round": "dome-like"}[str(row["head_shape"])]
-    body_nat = {"square": "sharp-cornered", "round": "barrel-smooth"}[str(row["body_shape"])]
-    ears_nat = {"square": "square", "triangle": "pointy"}[str(row["ears_shape"])]
-    mouth_nat = {"closed": "shut", "open": "open"}[str(row["mouth_type"])]
-    hands_nat_map = {
-        "round_circle":"round mitts","wide_oval":"broad ovals","tall_oval":"long ovals",
-        "edgy_square":"square claws","edgy_triangle":"triangular grippers","edgy_trapezoid":"trapezoid claws",
-    }
-    feet_nat_map = {
-        "flat_4sided":"flat four-sided pads","flat_5sided":"pentagonal pads","flat_lshaped":"L-shaped feet",
-        "pointy_3sided":"three-point feet","pointy_4sided":"four-point feet","pointy_6sided":"hex-point feet",
-    }
-    hands_nat = hands_nat_map[str(row["hand_shape"])]
-    feet_nat = feet_nat_map[str(row["foot_shape"])]
-    ant_nat = "with antennae" if str(row["has_antennae"]).lower() == "true" else "no antennae"
-    knees_nat = "has knees" if str(row["has_knees"]).lower() == "true" else "no knees"
-    elbows_nat = "has elbows" if str(row["has_elbows"]).lower() == "true" else "no elbows"
-    return {
-        "HEAD_NAT": head_nat, "BODY_NAT": body_nat, "EARS_NAT": ears_nat, "MOUTH_NAT": mouth_nat,
-        "HANDS_NAT": hands_nat, "FEET_NAT": feet_nat, "ANT_NAT": ant_nat,
-        "KNEES_NAT": knees_nat, "ELBOWS_NAT": elbows_nat,
-    }
-
-def _render_from_corpus(row: dict, corpus: list[dict], seed: int) -> str:
-    # If corpus entries have conditions, you can add a filter here; for now just deterministic pick
-    key = f'{seed}:{row["head_shape"]}:{row["body_shape"]}:{row["foot_shape"]}:{row["ears_shape"]}:{row["mouth_type"]}:{row["hand_shape"]}:{row["has_antennae"]}:{row["has_knees"]}:{row["has_elbows"]}'
-    idx = abs(hash(key)) % len(corpus)
-    txt = str(corpus[idx].get("text", ""))
-
-    # 1) naturalized placeholders
-    nat = _nat_from_tokens(row)
-    for k, v in nat.items():
-        ph = "{" + k + "}"
-        if ph in txt:
-            txt = txt.replace(ph, v)
-
-    # 2) raw placeholders (for plain-text lines)
-    raw_map = {
-        "head_shape": str(row["head_shape"]),
-        "body_shape": str(row["body_shape"]),
-        "ears_shape": str(row["ears_shape"]),
-        "mouth_type": str(row["mouth_type"]),
-        "hand_shape": str(row["hand_shape"]),
-        "foot_shape": str(row["foot_shape"]),
-        "has_antennae": str(row["has_antennae"]),
-        "has_knees": str(row["has_knees"]),
-        "has_elbows": str(row["has_elbows"]),
-    }
-    for k, v in raw_map.items():
-        ph = "{" + k + "}"
-        if ph in txt:
-            txt = txt.replace(ph, v)
-
-    return txt
-
-def _names_from_params(params) -> list[str]:
-    names = []
-    for k, vals in params["concepts"].items():
-        for v in vals:
-            names.append(f"{k}={v}")
-    return names
-
-def _onehot_for_row(row: dict, params, names: list[str]) -> np.ndarray:
-    J = len(names); vec = np.zeros((J,), dtype=np.float32)
-    pos = 0
-    for k, vals in params["concepts"].items():
-        for v in vals:
-            if str(row[k]) == str(v):
-                vec[pos] = 1.0
-            pos += 1
-    return vec
-
-def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, variants_per_row: int, seed: int):
-    corpus = _load_jsonl(corpus_path)
-    names = _names_from_params(params)
-    classes = [0, 1]
-    X, C, y, row_index = [], [], [], []
-    for i, sr in catalog_df.iterrows():
-        row = {k: sr[k] for k in params["concepts"].keys()}
-        for v in range(int(variants_per_row)):
-            text = _render_from_corpus(row, corpus, seed + v)
-            X.append(text)
-            C.append(_onehot_for_row(row, params, names))
-            y.append(1 if str(sr["label"]) == "glorp" else 0)
-            row_index.append(i)
-    X = [str(t) for t in X]
-    C = np.stack(C, axis=0).astype(np.float32)
-    y = np.asarray(y, dtype=int)
-    ds = ConceptDatasetSample(
-        X=X, C=C, y=y, meta={"concepts": tuple(names), "classes": (0,1), "data_type": "text"}
-    )
-    setattr(ds, "_full", type("Full", (), {"meta": {"row_index": np.asarray(row_index, dtype=int)}}))
-    return ds
-
-
-
-def _render_from_corpus(row: dict, corpus: list[dict], seed: int) -> str:
-    sig = _signals_from_row(row)
-    cand = [it for it in corpus if _line_matches(sig, it.get("when", {}))]
-    if not cand:
-        cand = corpus  # fallback
-
-    key = f'{seed}:{row["head_shape"]}:{row["body_shape"]}:{row["foot_shape"]}:{row["ears_shape"]}:{row["mouth_type"]}:{row["hand_shape"]}:{row["has_antennae"]}:{row["has_knees"]}:{row["has_elbows"]}'
-    idx = abs(hash(key)) % len(cand)
-    txt = str(cand[idx]["text"])
-
-    # 1) Naturalized placeholders (HEAD_NAT, BODY_NAT, etc.)
-    nat = _nat_from_tokens(row)
-    for k, v in nat.items():
-        if "{" + k + "}" in txt:
-            txt = txt.replace("{" + k + "}", v)
-
-    # 2) Raw placeholders (head_shape, body_shape, …) — for plain template lines
-    raw_map = {
-        "head_shape": str(row["head_shape"]),
-        "body_shape": str(row["body_shape"]),
-        "ears_shape": str(row["ears_shape"]),
-        "mouth_type": str(row["mouth_type"]),
-        "hand_shape": str(row["hand_shape"]),
-        "foot_shape": str(row["foot_shape"]),
-        "has_antennae": str(row["has_antennae"]),
-        "has_knees": str(row["has_knees"]),
-        "has_elbows": str(row["has_elbows"]),
-    }
-    for k, v in raw_map.items():
-        ph = "{" + k + "}"
-        if ph in txt:
-            txt = txt.replace(ph, v)
-
-    return txt
-
-
-
-def _names_from_concepts(concepts: dict) -> list[str]:
-    names = []
-    for k, vals in concepts.items():
-        for v in vals:
-            names.append(f"{k}={v}")
-    return names
-
-def _onehot_for_row(row: dict, concepts: dict, names: list[str]) -> np.ndarray:
-    J = len(names)
-    vec = np.zeros((J,), dtype=np.float32)
-    pos = 0
-    for k, vals in concepts.items():
-        for v in vals:
-            if str(row[k]) == str(v):
-                vec[pos] = 1.0
-            pos += 1
-    return vec
-
-def build_text_ds_hard(catalog_df: pd.DataFrame, concepts: dict, corpus_path: Path, variants_per_row: int, seed: int) -> ConceptDatasetSample:
-    corpus = _load_jsonl(corpus_path)
-    names = _names_from_concepts(concepts)
-    classes = [0, 1]
-    X, C, y, row_index = [], [], [], []
-    for i, sr in catalog_df.iterrows():
-        row = {k: sr[k] for k in concepts.keys()}
-        row["label"] = sr["label"]
-        for v in range(int(variants_per_row)):
-            text = _render_from_corpus(row, corpus, seed + v)
-            X.append(text)
-            C.append(_onehot_for_row(row, concepts, names))
-            y.append(1 if str(sr["label"]) == "glorp" else 0)
-            row_index.append(i)
-    C = np.stack(C, axis=0).astype(np.float32)
-    y = np.asarray(y, dtype=int)
-    # Make a ConceptDatasetSample so downstream stays identical
-    ds = ConceptDatasetSample(
-        X=X, C=C, y=y,
-        meta={"concepts": tuple(names), "classes": tuple(classes), "data_type": "text"}
-    )
-    # stash row_index so split logic can do "by_robot" if needed elsewhere
-    setattr(ds, "_full", type("Full", (), {"meta": {"row_index": np.asarray(row_index, dtype=int)}}))
-    return ds
-# --------------------------------------------------------------
+def _ensure_binary(y):
+    u = np.unique(y)
+    if u.size < 2:
+        raise ValueError("Training set is single-class")
 
 def train_eval_text(X_tr, y_tr, X_te, y_te, model_id, epochs, batch_size, lr, device):
+    _ensure_binary(y_tr)
     tok = AutoTokenizer.from_pretrained(model_id)
     model = AutoModelForSequenceClassification.from_pretrained(model_id, num_labels=2)
     ds_tr = TextDS(X_tr, y_tr, tok)
@@ -397,6 +320,7 @@ def train_eval_text(X_tr, y_tr, X_te, y_te, model_id, epochs, batch_size, lr, de
     return float(acc), tok, model
 
 def train_eval_image(paths_tr, y_tr, paths_te, y_te, model_id, size, epochs, batch_size, lr, device):
+    _ensure_binary(y_tr)
     proc = AutoImageProcessor.from_pretrained(model_id)
     model = AutoModelForImageClassification.from_pretrained(model_id, num_labels=2, ignore_mismatched_sizes=True)
     ds_tr = ImageDS(paths_tr, y_tr, proc)
@@ -429,13 +353,59 @@ def train_eval_image(paths_tr, y_tr, paths_te, y_te, model_id, size, epochs, bat
     acc = correct / total if total > 0 else 0.0
     return float(acc), proc, model
 
-# -------------------- arg parse --------------------
+def _eval_text_metrics(X, y, tok, model, device):
+    ds = TextDS(X, np.asarray(y, dtype=int), tok)
+    dl = DataLoader(ds, batch_size=64, shuffle=False)
+    model.eval()
+    preds, probs = [], []
+    with torch.no_grad():
+        for xb, yb in dl:
+            xb = {k: v.to(device) for k, v in xb.items()}
+            out = model(**xb)
+            p = out.logits.softmax(dim=-1)
+            preds.append(p.argmax(dim=-1).cpu().numpy())
+            probs.append(p[:, 1].cpu().numpy())
+    y_true = np.asarray(y, dtype=int)
+    y_pred = np.concatenate(preds) if preds else np.zeros_like(y_true)
+    proba1 = np.concatenate(probs) if probs else np.zeros_like(y_true, dtype=float)
+    acc = float((y_pred == y_true).mean()) if y_true.size else 0.0
+    ba = float(balanced_accuracy_score(y_true, y_pred)) if y_true.size else 0.0
+    f1 = float(f1_score(y_true, y_pred, zero_division=0)) if y_true.size else 0.0
+    roc = float(roc_auc_score(y_true, proba1)) if np.unique(y_true).size == 2 else float("nan")
+    return {"accuracy": acc, "balanced_acc": ba, "ber": float(1.0 - ba), "f1": f1, "roc_auc": roc}
+
+def _eval_image_metrics(paths, y, proc, model, device):
+    ds = ImageDS(paths, np.asarray(y, dtype=int), proc)
+    dl = DataLoader(ds, batch_size=32, shuffle=False)
+    model.eval()
+    preds, probs = [], []
+    with torch.no_grad():
+        for xb, yb in dl:
+            xb = {k: v.to(device) for k, v in xb.items()}
+            out = model(**xb)
+            p = out.logits.softmax(dim=-1)
+            preds.append(p.argmax(dim=-1).cpu().numpy())
+            probs.append(p[:, 1].cpu().numpy())
+    y_true = np.asarray(y, dtype=int)
+    y_pred = np.concatenate(preds) if preds else np.zeros_like(y_true)
+    proba1 = np.concatenate(probs) if probs else np.zeros_like(y_true, dtype=float)
+    acc = float((y_pred == y_true).mean()) if y_true.size else 0.0
+    ba = float(balanced_accuracy_score(y_true, y_pred)) if y_true.size else 0.0
+    f1 = float(f1_score(y_true, y_pred, zero_division=0)) if y_true.size else 0.0
+    roc = float(roc_auc_score(y_true, proba1)) if np.unique(y_true).size == 2 else float("nan")
+    return {"accuracy": acc, "balanced_acc": ba, "ber": float(1.0 - ba), "f1": f1, "roc_auc": roc}
+
+
 p = argparse.ArgumentParser(add_help=False)
 p.add_argument("--modality", choices=["text", "image"])
 p.add_argument("--n", type=int)
 p.add_argument("--seed", type=int)
 p.add_argument("--out_dir")
 p.add_argument("--label_model_expr")
+p.add_argument("--label-model-expr", dest="label_model_expr")
+p.add_argument("--label-model-type", dest="label_model_type", choices=["deterministic","stochastic"])
+p.add_argument("--label-model-alpha", dest="label_model_alpha", type=float)
+p.add_argument("--label-model-bias", dest="label_model_bias", type=float)
 p.add_argument("--corr_pair")
 p.add_argument("--train_corr", type=float)
 p.add_argument("--test_break", type=float)
@@ -447,16 +417,33 @@ p.add_argument("--image_model")
 p.add_argument("--image_size", type=int)
 p.add_argument("--color_mode")
 p.add_argument("--samples_per_instance", type=int)
+p.add_argument("--variants-per-row-minority", dest="variants_per_row_minority", type=int)
+p.add_argument("--variants-per-row-majority", dest="variants_per_row_majority", type=int)
+p.add_argument("--minority_mult", dest="minority_mult", type=float)
 p.add_argument("--draw", type=int)
 p.add_argument("--run-name", dest="run_name", type=str)
 p.add_argument("--templates-file", type=str)
 p.add_argument("--template-difficulty", choices=["easy","medium","hard"])
+p.add_argument("--redact-concepts", type=str)
+p.add_argument("--redact-splits", type=str)
+p.add_argument("--generic-rate", dest="generic_rate", type=float)
+p.add_argument("--generic-tol", dest="generic_tol", type=float)
+p.add_argument("--train-balance-enable", dest="train_balance_enable", type=int)
+p.add_argument("--train-target-pos-frac", dest="train_target_pos_frac", type=float)
+p.add_argument("--train-target-generic-frac", dest="train_target_generic_frac", type=float)
+p.add_argument("--train-balance-within-label", dest="train_balance_within_label", type=int)
+p.add_argument("--val-balance-enable", dest="val_balance_enable", type=int)
+p.add_argument("--val-target-generic-frac", dest="val_target_generic_frac", type=float)
+p.add_argument("--val-balance-within-label", dest="val_balance_within_label", type=int)
+p.add_argument("--test-balance-enable", dest="test_balance_enable", type=int)
+p.add_argument("--test-target-generic-frac", dest="test_target_generic_frac", type=float)
+p.add_argument("--test-balance-within-label", dest="test_balance_within_label", type=int)
+
 args, _ = p.parse_known_args()
 for k, v in vars(args).items():
     if v is not None:
         settings[k] = v if k != "draw" else bool(v)
 
-# -------------------- main --------------------
 set_seed(int(settings["seed"]))
 device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"))
 
@@ -471,8 +458,45 @@ run_folder = run_name if run_name else ts
 out_dir = Path(settings["out_dir"]) / modality / run_folder
 out_dir.mkdir(parents=True, exist_ok=True)
 
+def build_text_ds_hard(catalog_df: pd.DataFrame,
+                       concepts: dict,
+                       corpus_path: Path,
+                       variants_per_row: int,
+                       seed: int,
+                       row_variants: list[int] | None = None,
+                       generic_path: Path | None = None,
+                       generic_rate: float = 0.5) -> ConceptDatasetSample:
+    corpus_spec = _load_jsonl(corpus_path)
+    corpus_gen = _load_jsonl(generic_path) if (generic_path is not None and Path(generic_path).is_file()) else []
+    names = _names_from_concepts(concepts)
+    classes = [0, 1]
+    X, C, y, row_index, ears_generic = [], [], [], [], []
+    for i, sr in catalog_df.iterrows():
+        row = {k: sr[k] for k in concepts.keys()}
+        row["label"] = sr["label"]
+        _vpr_i = int(row_variants[i]) if (row_variants is not None and i < len(row_variants)) else int(variants_per_row)
+        for v in range(max(1, _vpr_i)):
+            key = f"{seed}:{i}:{v}:ears_generic"
+            h = int(hashlib.sha256(key.encode()).hexdigest(), 16)
+            use_gen = (len(corpus_gen) > 0) and ((h % 1000000) < int(max(0.0, min(1.0, float(generic_rate))) * 1000000))
+            corpus = corpus_gen if use_gen else corpus_spec
+            text = _render_from_corpus(row, corpus, seed + v)
+            X.append(text)
+            C.append(_onehot_for_row(row, concepts, names))
+            y.append(1 if str(row["label"]) == "glorp" else 0)
+            row_index.append(i)
+            ears_generic.append(bool(use_gen))
+    ds = ConceptDatasetSample(
+        X=X,
+        C=np.asarray(C, dtype=np.float32),
+        y=np.asarray(y, dtype=int),
+        meta={"concepts": tuple(names), "classes": tuple(classes), "data_type": "text"}
+    )
+    setattr(ds, "_full", type("Full", (), {"meta": {"row_index": np.asarray(row_index, dtype=int)}}))
+    ds.ears_generic_mask = np.asarray(ears_generic, dtype=bool)
+    return ds
+
 if modality == "text":
-    # concept space
     concepts = {
         "head_shape": ["square", "round"],
         "body_shape": ["square", "round"],
@@ -486,36 +510,56 @@ if modality == "text":
     }
     cols = list(concepts.keys())
     catalog_df = pd.DataFrame([dict(zip(cols, vals)) for vals in product(*[concepts[c] for c in cols])], columns=cols)
-    label_expr = settings["label_model_expr"] or "'glorp' if (int(row['body_shape']=='square') + int(str(row['foot_shape']).startswith('pointy_')) - 2 >= 0) else 'drent'"
-    catalog_df["label"] = compute_label(catalog_df, label_expr)
-
-    # pick template source
+    label_expr = settings["label_model_expr"] or "'glorp' if (min(int(str(row['has_antennae']).lower()=='true'), int(row['body_shape']=='square')) >= 1) else 'drent'"
+    catalog_df["label"] = compute_label(
+        catalog_df,
+        label_expr,
+        label_model_type=settings.get("label_model_type", "deterministic"),
+        alpha=float(settings.get("label_model_alpha", 10.0)),
+        bias=float(settings.get("label_model_bias", -0.2)),
+        seed=int(settings.get("seed", 0)),
+    )
+    _lbl = catalog_df["label"].astype(str)
+    print("Label distribution (catalog_df):", {
+        "glorp": int((_lbl == "glorp").sum()),
+        "drent": int((_lbl == "drent").sum()),
+        "total": int(len(_lbl)),
+        "pos_frac": round((_lbl == "glorp").mean(), 4),
+    })
     tpl_path = None
     if settings.get("templates_file"):
         tpl_path = Path(settings["templates_file"])
     else:
-        # default files: Templates.txt (medium), Templates_simple.txt (easy), HardCorpus.jsonl (hard)
         if settings.get("template_difficulty","medium") == "hard":
             cand = pkg_dir / "synthetic" / "helper" / "static" / "text_templates" / "HardCorpus.jsonl"
             tpl_path = cand if cand.is_file() else None
         if tpl_path is None:
             template_file_name = "Templates.txt" if settings.get("template_difficulty","medium") == "medium" else "Templates_simple.txt"
             tpl_path = pkg_dir / "synthetic" / "helper" / "static" / "text_templates" / template_file_name
-
-    # build dataset (hard JSONL vs legacy templates)
     is_jsonl = str(tpl_path).lower().endswith(".jsonl")
     if is_jsonl:
+        _base_vpr = int(settings["samples_per_instance"])
+        _labels = catalog_df["label"].astype(str).tolist()
+        _vals, _cnts = np.unique(_labels, return_counts=True)
+        _minority_label = _vals[int(np.argmin(_cnts))] if len(_vals) > 0 else None
+        _vpr_min = int(settings.get("variants_per_row_minority") or max(1, int(round(_base_vpr * float(settings.get("minority_mult", 1.0))))))
+        _vpr_maj = int(settings.get("variants_per_row_majority") or _base_vpr)
+        _row_variants = [(_vpr_min if (lab == _minority_label) else _vpr_maj) for lab in _labels]
+        gen_jsonl = tpl_path.with_name("HardCorpus_EarsGeneric.jsonl") if str(tpl_path).lower().endswith(".jsonl") else None
         ds = build_text_ds_hard(
             catalog_df=catalog_df,
             concepts=concepts,
             corpus_path=tpl_path,
-            variants_per_row=int(settings["samples_per_instance"]),
+            variants_per_row=_base_vpr,
             seed=int(settings["seed"]),
+            row_variants=_row_variants,
+            generic_path=(gen_jsonl if (gen_jsonl and gen_jsonl.is_file()) else None),
+            generic_rate=float(settings.get("generic_rate", 0.5)),
         )
+
     else:
         with open(tpl_path, "r", encoding="utf-8-sig") as f:
             templates = [ln.strip() for ln in f if ln.strip()]
-        # keep legacy textgen for non-hard paths
         ds = make_text_ds(
             source=catalog_df,
             templates=templates,
@@ -530,12 +574,9 @@ if modality == "text":
             llm_model="gemini-1.5-flash",
             llm_user_prompt="Describe the robot based only on attributes.",
         )
-
-    # 70/15/15 split; by-robot if row_index is available, else by-instance
     row_index = getattr(getattr(ds, "_full", None), "meta", {}).get("row_index", None)
-
     if isinstance(row_index, np.ndarray) and len(row_index) == len(ds.X):
-        rng = np.random.default_rng(int(settings["seed"]))
+        rng = np.random.default_rng(0)
         base_ids = np.unique(row_index)
         rng.shuffle(base_ids)
         n_ids = len(base_ids)
@@ -563,16 +604,266 @@ if modality == "text":
         X = [ds_obj.X[i] for i in take]
         C = ds_obj.C[take]
         y = ds_obj.y[take]
-        return ConceptDatasetSample(
+        sub = ConceptDatasetSample(
             X=X, C=C, y=y,
             meta={"concepts": ds_obj.concepts, "classes": ds_obj.classes, "data_type": "text"}
         )
+        if hasattr(ds_obj, "ears_generic_mask"):
+            setattr(sub, "ears_generic_mask", np.asarray(ds_obj.ears_generic_mask)[take])
+        return sub
 
 
     ds.training = _subset(ds, tr)
     ds.validation = _subset(ds, va)
     ds.test = _subset(ds, te)
+    rc = str(settings.get("redact_concepts", "") or "").strip().lower()
+    rs = str(settings.get("redact_splits", "") or "").strip().lower()
+    if rc and ("has_antennae" in {t.strip() for t in rc.split(",") if t.strip()}) and rs:
+        if is_jsonl:
+            base_jsonl = Path(settings.get("templates_file")) if settings.get("templates_file") else (
+                        pkg_dir / "synthetic" / "helper" / "static" / "text_templates" / "HardCorpus.jsonl")
+            cand = [
+                base_jsonl.with_name(base_jsonl.stem + "_noANT" + base_jsonl.suffix),
+                base_jsonl.parent / "HardCorpus_noANT.jsonl",
+            ]
+            tpl_noant = next((c for c in cand if c.is_file()), None)
+            if tpl_noant is not None:
+                corpus_noant = _load_jsonl(tpl_noant)
+                newX = []
+                for j, i_abs in enumerate(te):
+                    rid = int(row_index[i_abs])
+                    row = {k: catalog_df.loc[rid, k] for k in concepts.keys()}
+                    txt = _render_from_corpus(row, corpus_noant, int(settings["seed"]) + j)
+                    newX.append(txt)
+                ds.test = ConceptDatasetSample(X=newX, C=ds.test.C, y=ds.test.y, meta=ds.test.meta)
+        pat = re.compile(r"(?i)\b(?:with|has)\s+antennae\b|\bno\s+antennae\b|\bantenna(?:e|s)?\b")
 
+
+        def _redact(lst):
+            out = []
+            for s in lst:
+                z = re.sub(pat, " ", str(s))
+                z = re.sub(r"\s{2,}", " ", z)
+                z = re.sub(r"\s+([,.;:!?])", r"\1", z).strip()
+                out.append(z)
+            return out
+
+
+        targets = {t.strip() for t in rs.split(",") if t.strip()}
+        if "test" in targets:
+            ds.test = ConceptDatasetSample(X=_redact(ds.test.X), C=ds.test.C, y=ds.test.y, meta=ds.test.meta)
+        if "val" in targets:
+            ds.validation = ConceptDatasetSample(X=_redact(ds.validation.X), C=ds.validation.C, y=ds.validation.y,
+                                                 meta=ds.validation.meta)
+        if "train" in targets:
+            ds.training = ConceptDatasetSample(X=_redact(ds.training.X), C=ds.training.C, y=ds.training.y,
+                                               meta=ds.training.meta)
+
+    if int(settings.get("train_balance_enable", 0)) == 1 and hasattr(ds.training, "ears_generic_mask"):
+        ytr0 = np.asarray(ds.training.y, dtype=int)
+        gtr0 = np.asarray(ds.training.ears_generic_mask, dtype=bool)
+        idx0 = np.arange(ytr0.shape[0])
+        f_pos = float(settings.get("train_target_pos_frac", -1))
+        if f_pos < 0:
+            f_pos = float((ytr0 == 1).mean())
+        f_gen = float(settings.get("train_target_generic_frac", 0.5))
+        within = int(settings.get("train_balance_within_label", 1)) == 1
+        rng = np.random.default_rng(int(settings["seed"]) + 901)
+        if within:
+            t = {
+                (1, 1): f_pos * f_gen,
+                (1, 0): f_pos * (1.0 - f_gen),
+                (0, 1): (1.0 - f_pos) * f_gen,
+                (0, 0): (1.0 - f_pos) * (1.0 - f_gen),
+            }
+            avail = {k: idx0[(ytr0 == k[0]) & (gtr0 == (k[1] == 1))] for k in t}
+            caps = [avail[k].size / v for k, v in t.items() if v > 0]
+            N = int(np.floor(min(caps))) if caps else 0
+            take = []
+            for k, v in t.items():
+                n = int(np.floor(v * N)) if v > 0 else 0
+                n = min(n, avail[k].size)
+                if n > 0:
+                    take.append(rng.choice(avail[k], size=n, replace=False))
+            take = np.sort(np.concatenate(take)) if take else np.array([], dtype=int)
+        else:
+            pos_idx = idx0[ytr0 == 1]
+            neg_idx = idx0[ytr0 == 0]
+            N = min(pos_idx.size, neg_idx.size) * 2
+            n_pos = N // 2
+            n_neg = N - n_pos
+            take = np.sort(np.concatenate([
+                rng.choice(pos_idx, size=n_pos, replace=False),
+                rng.choice(neg_idx, size=n_neg, replace=False),
+            ])) if N > 0 else np.array([], dtype=int)
+        if take.size > 0:
+            X = [ds.training.X[i] for i in take]
+            C = ds.training.C[take]
+            y = ds.training.y[take]
+            tr_ds = ConceptDatasetSample(X=X, C=C, y=y, meta=ds.training.meta)
+            setattr(tr_ds, "ears_generic_mask", ds.training.ears_generic_mask[take])
+            ds.training = tr_ds
+
+    if int(settings.get("val_balance_enable", 0)) == 1 and hasattr(ds.validation, "ears_generic_mask"):
+        yv0 = np.asarray(ds.validation.y, dtype=int)
+        gv0 = np.asarray(ds.validation.ears_generic_mask, dtype=bool)
+        idxv = np.arange(yv0.shape[0])
+        f_gen_v = float(settings.get("val_target_generic_frac", settings.get("generic_rate", 0.5)))
+        rngv = np.random.default_rng(int(settings["seed"]) + 902)
+        take_v = []
+        for lab in (0, 1):
+            lab_idx = idxv[yv0 == lab]
+            if lab_idx.size == 0:
+                continue
+            lab_gen = lab_idx[gv0[lab_idx]]
+            lab_spec = lab_idx[~gv0[lab_idx]]
+            want_gen = int(round(f_gen_v * lab_idx.size))
+            want_spec = lab_idx.size - want_gen
+            sel_gen = rngv.choice(lab_gen, size=min(want_gen, lab_gen.size),
+                                  replace=False) if lab_gen.size else np.array([], dtype=int)
+            sel_spec = rngv.choice(lab_spec, size=min(want_spec, lab_spec.size),
+                                   replace=False) if lab_spec.size else np.array([], dtype=int)
+            short_gen = want_gen - sel_gen.size
+            if short_gen > 0 and (lab_spec.size - sel_spec.size) > 0:
+                add = rngv.choice(np.setdiff1d(lab_spec, sel_spec), size=min(short_gen, lab_spec.size - sel_spec.size),
+                                  replace=False)
+                sel_spec = np.concatenate([sel_spec, add])
+            short_spec = want_spec - sel_spec.size
+            if short_spec > 0 and (lab_gen.size - sel_gen.size) > 0:
+                add = rngv.choice(np.setdiff1d(lab_gen, sel_gen), size=min(short_spec, lab_gen.size - sel_gen.size),
+                                  replace=False)
+                sel_gen = np.concatenate([sel_gen, add])
+            take_v.append(np.concatenate([sel_gen, sel_spec]))
+        if take_v:
+            take_v = np.sort(np.concatenate(take_v))
+            X = [ds.validation.X[i] for i in take_v]
+            C = ds.validation.C[take_v]
+            y = ds.validation.y[take_v]
+            va_ds = ConceptDatasetSample(X=X, C=C, y=y, meta=ds.validation.meta)
+            setattr(va_ds, "ears_generic_mask", ds.validation.ears_generic_mask[take_v])
+            ds.validation = va_ds
+
+    if int(settings.get("test_balance_enable", 0)) == 1 and hasattr(ds.test, "ears_generic_mask"):
+        yte0 = np.asarray(ds.test.y, dtype=int)
+        gte0 = np.asarray(ds.test.ears_generic_mask, dtype=bool)
+        idxt = np.arange(yte0.shape[0])
+        f_gen_t = float(settings.get("test_target_generic_frac", settings.get("generic_rate", 0.5)))
+        rngt = np.random.default_rng(int(settings["seed"]) + 903)
+        take_t = []
+        for lab in (0, 1):
+            lab_idx = idxt[yte0 == lab]
+            if lab_idx.size == 0:
+                continue
+            lab_gen = lab_idx[gte0[lab_idx]]
+            lab_spec = lab_idx[~gte0[lab_idx]]
+            want_gen = int(round(f_gen_t * lab_idx.size))
+            want_spec = lab_idx.size - want_gen
+            sel_gen = rngt.choice(lab_gen, size=min(want_gen, lab_gen.size),
+                                  replace=False) if lab_gen.size else np.array([], dtype=int)
+            sel_spec = rngt.choice(lab_spec, size=min(want_spec, lab_spec.size),
+                                   replace=False) if lab_spec.size else np.array([], dtype=int)
+            short_gen = want_gen - sel_gen.size
+            if short_gen > 0 and (lab_spec.size - sel_spec.size) > 0:
+                add = rngt.choice(np.setdiff1d(lab_spec, sel_spec), size=min(short_gen, lab_spec.size - sel_spec.size),
+                                  replace=False)
+                sel_spec = np.concatenate([sel_spec, add])
+            short_spec = want_spec - sel_spec.size
+            if short_spec > 0 and (lab_gen.size - sel_gen.size) > 0:
+                add = rngt.choice(np.setdiff1d(lab_gen, sel_gen), size=min(short_spec, lab_gen.size - sel_gen.size),
+                                  replace=False)
+                sel_gen = np.concatenate([sel_gen, add])
+            take_t.append(np.concatenate([sel_gen, sel_spec]))
+        if take_t:
+            take_t = np.sort(np.concatenate(take_t))
+            X = [ds.test.X[i] for i in take_t]
+            C = ds.test.C[take_t]
+            y = ds.test.y[take_t]
+            te_ds = ConceptDatasetSample(X=X, C=C, y=y, meta=ds.test.meta)
+            setattr(te_ds, "ears_generic_mask", ds.test.ears_generic_mask[take_t])
+            ds.test = te_ds
+
+    split_dump = {}
+    for name, part in [("train", ds.training), ("val", ds.validation), ("test", ds.test)]:
+        p = out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_seed{int(settings['seed'])}_split_{name}.csv"
+        pd.DataFrame({"text": list(map(str, part.X)), "label": np.asarray(part.y, dtype=int)}).to_csv(p, index=False)
+        split_dump[name] = str(p)
+
+
+    def _near_ears_shape(txt: str) -> bool:
+        t = str(txt).lower()
+        sents = re.split(r"[.!?;:]\s+", t)
+        pat_ears = re.compile(r"\bears?\b")
+        pat_shape = re.compile(
+            r"\b(square|boxy|box|angular|cornered|right-angled|rectilinear|90-degree|triangle|triangular|tri-corner|three-angled|three-point|pointy|pointed|tapered|wedge|spearhead|spear-tip)\b")
+        for s in sents:
+            if pat_ears.search(s) and pat_shape.search(s):
+                return True
+        return False
+
+    leak = {}
+    dist = {}
+    for name, part in [("train", ds.training), ("val", ds.validation), ("test", ds.test)]:
+        gm = getattr(part, "ears_generic_mask", None)
+        yv = np.asarray(part.y, dtype=int)
+        if gm is None:
+            leak[name] = {"generic_near_ears_shape": "na"}
+            dist[name] = {"overall": "na", "y1": "na", "y0": "na"}
+            continue
+        leak[name] = {"generic_near_ears_shape": int(sum(_near_ears_shape(t) for t, g in zip(part.X, gm) if g))}
+        overall = float(gm.mean()) if gm.size else float("nan")
+        y1 = float(gm[yv == 1].mean()) if (yv == 1).any() else float("nan")
+        y0 = float(gm[yv == 0].mean()) if (yv == 0).any() else float("nan")
+        dist[name] = {"overall": overall, "y1": y1, "y0": y0}
+
+    t_train = float(settings.get("train_target_generic_frac", settings.get("generic_rate", 0.5))) if int(
+        settings.get("train_balance_enable", 0)) == 1 else float(settings.get("generic_rate", 0.5))
+    t_val = float(settings.get("generic_rate", 0.5))
+    t_test = float(settings.get("generic_rate", 0.5))
+    tol = float(settings.get("generic_tol", 0.02))
+    targets = {"train": t_train, "val": t_val, "test": t_test}
+
+    print(json.dumps({
+        "split_sizes": {"train": int(ds.training.n), "val": int(ds.validation.n), "test": int(ds.test.n)},
+        "ears_leak_counts_generic": leak,
+        "ears_generic_rates": dist,
+        "targets": {"train": t_train, "val": t_val, "test": t_test, "tol": tol},
+        "split_files": split_dump,
+        "run_dir": str(out_dir)
+    }, indent=2))
+
+    if any(v.get("generic_near_ears_shape", 0) not in ("na", 0) for v in leak.values()):
+        raise SystemExit(3)
+    for name, vals in dist.items():
+        if vals["overall"] != "na" and np.isfinite(vals["overall"]):
+            if abs(vals["overall"] - targets[name]) > tol:
+                raise SystemExit(4)
+        for k in ("y1", "y0"):
+            if vals[k] != "na" and np.isfinite(vals[k]):
+                if abs(vals[k] - targets[name]) > tol:
+                    raise SystemExit(4)
+
+    yt = np.asarray(ds.training.y, dtype=int)
+    yv = np.asarray(ds.validation.y, dtype=int)
+    yte = np.asarray(ds.test.y, dtype=int)
+    print("Split sizes →", {"train": int(ds.training.n), "val": int(ds.validation.n), "test": int(ds.test.n)})
+    print("Label distribution (train):", {
+        "glorp": int((yt == 1).sum()),
+        "drent": int((yt == 0).sum()),
+        "total": int(yt.size),
+        "pos_frac": round((yt == 1).mean() if yt.size else 0.0, 4),
+    })
+    print("Label distribution (val):", {
+        "glorp": int((yv == 1).sum()),
+        "drent": int((yv == 0).sum()),
+        "total": int(yv.size),
+        "pos_frac": round((yv == 1).mean() if yv.size else 0.0, 4),
+    })
+    print("Label distribution (test):", {
+        "glorp": int((yte == 1).sum()),
+        "drent": int((yte == 0).sum()),
+        "total": int(yte.size),
+        "pos_frac": round((yte == 1).mean() if yte.size else 0.0, 4),
+    })
     Xtr = ds.training.X
     ytr = ds.training.y.astype(int)
     Xte = ds.test.X
@@ -585,26 +876,70 @@ if modality == "text":
         lr=float(settings["lr"]),
         device=device,
     )
+    _train_metrics = _eval_text_metrics(Xtr, ytr, tok_or_proc, model, device)
+    _val_metrics = _eval_text_metrics(ds.validation.X, ds.validation.y.astype(int), tok_or_proc, model, device)
+    _test_metrics = _eval_text_metrics(Xte, yte, tok_or_proc, model, device)
+    print("Baseline test metrics:", {
+        "accuracy": round(_test_metrics["accuracy"], 4),
+        "balanced_acc": round(_test_metrics["balanced_acc"], 4),
+        "ber": round(_test_metrics["ber"], 4),
+        "f1": round(_test_metrics["f1"], 4),
+        "roc_auc": (round(_test_metrics["roc_auc"], 4) if not np.isnan(_test_metrics["roc_auc"]) else "nan"),
+    })
+
 
 else:
     imgs_dir = pkg_dir / "synthetic" / "helper" / "static" / "robot_images_small"
     meta = pd.read_csv(imgs_dir / "meta.csv")
     meta = meta.sample(frac=1.0, random_state=int(settings["seed"])).reset_index(drop=True)
-    label_expr = settings["label_model_expr"] or "'glorp' if (int(row['body_shape']=='square') + int(str(row['foot_shape']).startswith('pointy_')) - 2 >= 0) else 'drent'"
-    meta["label"] = compute_label(meta, label_expr)
+    label_expr = settings["label_model_expr"] or "'glorp' if (min(int(row['ears_shape']=='square'), int(row['body_shape']=='square')) >= 1) else 'drent'"
+    meta["label"] = compute_label(
+        meta,
+        label_expr,
+        label_model_type=settings.get("label_model_type", "deterministic"),
+        alpha=float(settings.get("label_model_alpha", 10.0)),
+        bias=float(settings.get("label_model_bias", -0.2)),
+        seed=int(settings.get("seed", 0)),
+    )
+    _lbl_img = meta["label"].astype(str)
+    print("Label distribution (images, full):", {
+        "glorp": int((_lbl_img == "glorp").sum()),
+        "drent": int((_lbl_img == "drent").sum()),
+        "total": int(len(_lbl_img)),
+        "pos_frac": round((_lbl_img == "glorp").mean(), 4),
+    })
     n = min(int(settings["n"]), len(meta))
     meta = meta.iloc[:n].reset_index(drop=True)
     n_tr = int(0.70 * n)
     n_va = int(0.15 * n)
     tr = meta.iloc[:n_tr]
-    va = meta.iloc[n_tr:n_tr + n_va]  # not used by baseline training; held out for consistency
+    va = meta.iloc[n_tr:n_tr + n_va]
     te = meta.iloc[n_tr + n_va:]
-
     paths_tr = [imgs_dir / p for p in tr["path"]]
     ytr = tr["label"].map({"drent": 0, "glorp": 1}).astype(int).values
+    paths_va = [imgs_dir / p for p in va["path"]]
+    yva = va["label"].map({"drent": 0, "glorp": 1}).astype(int).values
     paths_te = [imgs_dir / p for p in te["path"]]
     yte = te["label"].map({"drent": 0, "glorp": 1}).astype(int).values
-
+    print("Split sizes →", {"train": int(len(ytr)), "val": int(len(yva)), "test": int(len(yte))})
+    print("Label distribution (train):", {
+        "glorp": int((ytr == 1).sum()),
+        "drent": int((ytr == 0).sum()),
+        "total": int(ytr.size),
+        "pos_frac": round((ytr == 1).mean() if ytr.size else 0.0, 4),
+    })
+    print("Label distribution (val):", {
+        "glorp": int((yva == 1).sum()),
+        "drent": int((yva == 0).sum()),
+        "total": int(yva.size),
+        "pos_frac": round((yva == 1).mean() if yva.size else 0.0, 4),
+    })
+    print("Label distribution (test):", {
+        "glorp": int((yte == 1).sum()),
+        "drent": int((yte == 0).sum()),
+        "total": int(yte.size),
+        "pos_frac": round((yte == 1).mean() if yte.size else 0.0, 4),
+    })
     acc, tok_or_proc, model = train_eval_image(
         paths_tr, ytr, paths_te, yte,
         model_id=model_id,
@@ -614,10 +949,21 @@ else:
         lr=float(settings["lr"]),
         device=device,
     )
+    _test_metrics = _eval_image_metrics(paths_te, yte, tok_or_proc, model, device)
+    print("Baseline test metrics:", {
+        "accuracy": round(_test_metrics["accuracy"], 4),
+        "balanced_acc": round(_test_metrics["balanced_acc"], 4),
+        "ber": round(_test_metrics["ber"], 4),
+        "f1": round(_test_metrics["f1"], 4),
+        "roc_auc": (round(_test_metrics["roc_auc"], 4) if not np.isnan(_test_metrics["roc_auc"]) else "nan"),
+    })
 
-# -------------------- output --------------------
 metrics = {
     "accuracy": float(acc),
+    "balanced_acc": float(_test_metrics.get("balanced_acc", float("nan"))),
+    "ber": float(_test_metrics.get("ber", float("nan"))),
+    "f1": float(_test_metrics.get("f1", float("nan"))),
+    "roc_auc": float(_test_metrics.get("roc_auc", float("nan"))),
     "seed": int(settings["seed"]),
     "modality": modality,
     "model": model_id,
@@ -625,17 +971,16 @@ metrics = {
 }
 
 processor_or_tok = tok_or_proc
-seed_tag = f"seed{int(settings['seed'])}"
-out_dir = Path(settings["out_dir"]) / modality / (settings.get("run_name", "").strip() or time.strftime("%Y%m%d_%H%M%S"))
+out_dir = Path(settings["out_dir"]) / modality / run_folder
 out_dir.mkdir(parents=True, exist_ok=True)
 
-legacy_metrics = out_dir / f"baseline_metrics_{seed_tag}.json"
+legacy_metrics = out_dir / f"baseline_metrics_seed{int(settings['seed'])}.json"
 legacy_metrics.write_text(json.dumps(metrics, indent=2))
 
-named_metrics = out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_{seed_tag}_metrics.json"
+named_metrics = out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_seed{int(settings['seed'])}_metrics.json"
 named_metrics.write_text(json.dumps(metrics, indent=2))
 
-model_dir = out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_{seed_tag}_model"
+model_dir = out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_seed{int(settings['seed'])}_model"
 model_dir.mkdir(parents=True, exist_ok=True)
 processor_or_tok.save_pretrained(model_dir)
 model.save_pretrained(model_dir)
@@ -646,3 +991,12 @@ print(json.dumps({
     "metrics_named_path": str(named_metrics),
     "model_dir": str(model_dir),
 }, indent=2))
+
+split_files = {
+    "train": out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_seed{int(settings['seed'])}_metrics_train.json",
+    "val":   out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_seed{int(settings['seed'])}_metrics_val.json",
+    "test":  out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_seed{int(settings['seed'])}_metrics_test.json",
+}
+for name, path in split_files.items():
+    m = {"train": _train_metrics, "val": _val_metrics, "test": _test_metrics}[name]
+    path.write_text(json.dumps(m, indent=2))
