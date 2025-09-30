@@ -29,7 +29,7 @@ def generate_color_schemes(shuffle=True, random_seed=123456, include_flipped=Tru
 
     # we want the color schemes for the robot halves to be distinguishable
     schemas = [(pal[i], pal[-1 - i]) for i in range(len(pal)//2)]
-    schemas += [(s, d) for s in pal for d in qal if colordist([s, d]) > 0.175]
+    schemas += [(s, d) for s in pal for d in qal if colordist(s, d) > 0.175]
 
     if include_flipped:
         schemas_flipped = [(b, a) for (a, b) in schemas]
@@ -63,7 +63,8 @@ def unlist0(obj):
 
 def model_to_logistic(model: str):
     """
-    Extracts the arithmetic expression inside the first (...) before a comparison
+    Extracts the arithmetic expression inside the first (...) before a comparison operator and the number after the
+    comparison operator >= then constructs a new expression that subtracts the number from the arithmetic expression
     and returns it wrapped in the logistic function.
     """
     # find whatever is inside (...) before a comparison operator
@@ -71,8 +72,11 @@ def model_to_logistic(model: str):
     if not match:
         raise ValueError("Model string not in expected format.")
 
-    expr = match.group(1).strip()
-    # print(f"Returning: expit({expr})")
+    #extract the number after >=
+    num = re.search(r">=\s*([-\d.]+)", model)
+
+    expr = match.group(1).strip()[:-1]
+    expr += ' - ' + num.group(1)
     return f"expit({expr})"
 
 

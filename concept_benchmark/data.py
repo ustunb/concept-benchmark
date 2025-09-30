@@ -1136,6 +1136,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             if self.transform is not None:
                 image = self.transform(image)
         except (AttributeError, FileNotFoundError, OSError) as e:
+            print(self.base_dir)
             warnings.warn(f"{e}; cannot open image, returning path", RuntimeWarning)
             image = img_path
 

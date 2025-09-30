@@ -1,6 +1,7 @@
 import re
 from collections.abc import Iterable, Sequence
 from pathlib import Path
+import copy
 
 import numpy as np
 import pandas as pd
@@ -15,6 +16,7 @@ from .helper.robot_catalog import (
 )
 from .helper import textgen as text_helper
 from .helper.utils import model_to_logistic, unlist0
+from scipy.special import expit
 
 
 def create_synthetic_dataset(data_type: str = "image", **kwargs) -> ConceptDataset:
@@ -301,7 +303,7 @@ def create_robot_image_dataset(
     drop_irrelevant = extra_params.pop("drop_irrelevant", True)
     _ = (train_concept_detector, epochs)  # parameters accepted for API compatibility
 
-    catalog_df = generate_robot_catalog(
+    catalog_df, new_concepts = generate_robot_catalog(
         concepts=concepts,
         num_robots=total_robots,
         resolution=eff_resolution,
@@ -314,6 +316,7 @@ def create_robot_image_dataset(
         **extra_params,
     )
     catalog_df = catalog_df.copy()
+    print(catalog_df.columns)
     catalog_df[OUTCOME_NAME] = OUTCOME_MISSING
     df = catalog_df
 
@@ -336,20 +339,25 @@ def create_robot_image_dataset(
 
     if verbose:
         print("Catalog DataFrame:")
-        print(catalog_df.to_string(index=False))
+        print(catalog_df.head(20).to_string(index=False))
+        print(catalog_df.tail(20).to_string(index=False))
 
     # X: Image paths (stored as strings)
     image_dir = output_directory
     X = np.array([row["png_filename"] for _, row in catalog_df.iterrows()])
 
+    copy_features = copy.deepcopy(ALL_ROBOT_FEATURES)
+    copy_features.update(new_concepts)
+
     # C: Concept matrix
     feature_names = [
-        feat for feat in catalog_df.columns if feat in ALL_ROBOT_FEATURES
+        feat for feat in catalog_df.columns if feat in copy_features
     ]
     pos_map = {
-        feat: ALL_ROBOT_FEATURES[feat][0].split("_")[0]
+        feat: str(copy_features[feat][1]).split("_")[0]
         for feat in feature_names
     }
+    print(pos_map)
     # Binary encode concepts: 1 if feature equals designated positive value, else 0
     C_cols = []
     for feat in feature_names:
@@ -359,6 +367,7 @@ def create_robot_image_dataset(
             .astype(np.int32)
             .to_numpy()
         )
+        print(f"Feature '{feat}': positive value '{pos_val}' -> column head {col.tolist()[:10]}")
         C_cols.append(col)
     C = np.stack(C_cols, axis=1).astype(np.int8)
 

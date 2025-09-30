@@ -25,7 +25,7 @@ ALL_ROBOT_FEATURES = {
     "head_shape": ("square", "round"),  # no subtypes (could add)
     #
     'has_elbows': ('true', 'false'),  # all round
-    "has_knees": ("true", "false"),
+    "has_knees": ("false", "true"),
     "has_antennae": ["false", "true"],
     "ears_shape": ("square", "triangle"),
     "mouth_type": ("closed", "open"),
@@ -410,7 +410,7 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
     ############################################################################
 
     # antennae
-    if features.get("has_antennae", True):  # default to True if not specified
+    if "has_antennae" in features.keys() and features["has_antennae"] == "true":
         antenna_length = 1.5 * r if head_shape == "round" else 1.75 * r
         antenna_width = 4
 
