@@ -396,15 +396,15 @@ def run():
 
     tag = f"minrule_eval_vpr{int(vpr_min)}_pos{n_pos}neg{n_neg}_{tag_id}_seed{settings['seed']}"
 
-    # run_spec("cs", "best", settings["best_human_acc"], bb, tag, "detected",
-    #          extra_flags=c_flags, detector_model=det_path)
-    # run_spec("cs", "expert", settings["expert_human_acc"], bb, tag, "detected",
-    #          extra_flags=c_flags, detector_model=det_path)
-    # c_flags_noise = c_flags + ["--concept-label-noise-mode", settings.get("subjective_noise_mode", "subjective"),
-    #                            "--concept-label-noise-rate", str(settings.get("subjective_noise_rate", 0.20)),
-    #                            "--skip-fit", "1", "--force-rerun", "1"]
-    # run_spec("cs", "subjective", settings["subjective_human_acc"], bb, tag + "_noise", "detected",
-    #          extra_flags=c_flags_noise, detector_model=det_path)
+    run_spec("cs", "best", settings["best_human_acc"], bb, tag, "detected",
+             extra_flags=c_flags, detector_model=det_path)
+    run_spec("cs", "expert", settings["expert_human_acc"], bb, tag, "detected",
+             extra_flags=c_flags, detector_model=det_path)
+    c_flags_noise = c_flags + ["--concept-label-noise-mode", settings.get("subjective_noise_mode", "subjective"),
+                               "--concept-label-noise-rate", str(settings.get("subjective_noise_rate", 0.20)),
+                               "--skip-fit", "1", "--force-rerun", "1"]
+    run_spec("cs", "subjective", settings["subjective_human_acc"], bb, tag + "_noise", "detected",
+             extra_flags=c_flags_noise, detector_model=det_path)
 
     cbm_anchor_tag = f"cbm_anchor_{tag_id}"
     cbm_anchor_run_v1 = make_run_name("anchor", "anchor", settings["best_human_acc"], f"{cbm_anchor_tag}_v1")
