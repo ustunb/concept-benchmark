@@ -86,9 +86,9 @@ settings = {
     "generic_tol": 0.04,
     "generic_enable": 1,
 
-    "train_target_generic_frac": 0.5,
-    "val_target_generic_frac": 0.5,
-    "test_target_generic_frac": 0.5,
+    "train_target_generic_frac": 0.7,
+    "val_target_generic_frac": 0.7,
+    "test_target_generic_frac": 0.7,
 
     "recompute_only": 0,
 }
