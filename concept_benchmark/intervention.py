@@ -180,10 +180,7 @@ class InterventionResult:
     y_prob_after: np.ndarray
     y_pred_after: np.ndarray
     proposal: StrategyProposal
-    selective_acc_before: Optional[float] = None
-    selective_acc_after: Optional[float] = None
-    coverage_before: Optional[float] = None
-    coverage_after: Optional[float] = None
+    strat_metrics: Dict[str, Any]
 
 
 class InterventionStrategy:
@@ -471,28 +468,9 @@ class ScoreIntervention(InterventionStrategy):
         m = config.max_concepts_per_instance
         threshold = config.score_threshold
 
-        if m is None or m <= 0:
-            details = self._build_details(
-                model=model,
-                mask=mask,
-                batch=batch,
-                p_before=p_before,
-                y_pred_before=y_pred_before,
-                scores=scores,
-                selected=selected,
-                threshold=threshold,
-                m=0,
-            )
-            return StrategyProposal(
-                mask=mask,
-                ordering_used=None,
-                selected_instances=selected,
-                details=details,
-            )
-
-        if m > n_concepts:
+        if (m > n_concepts) or (m is None) or (m <= 0):
             warnings.warn(
-                "max_concepts_per_instance exceeds number of concepts; clipping to n_concepts",
+                "max_concepts_per_instance is None, <= 0, or larger than the number of concepts; defaulting to all concepts.",
                 RuntimeWarning,
                 stacklevel=2,
             )
@@ -710,15 +688,20 @@ class ConceptInterventionRunner:
         y_pred_after = np.argmax(y_prob_after, axis=1)
 
         # Conceptual Safeguards results
-        cs_results = {}
+        strat_metrics = {}
         if isinstance(strategy, ConceptualSafeguardsStrategy):
-            cs_results['selective_acc_before'] = proposal.details.get("selective_acc_before", None)
-            cs_results['coverage_before'] = 1 - (proposal.selected_instances.size / batch.n_samples) if batch.n_samples > 0 else 0.0
+            strat_metrics['selective_acc_before'] = proposal.details.get("selective_acc_before", None)
+            strat_metrics['coverage_before'] = 1 - (proposal.selected_instances.size / batch.n_samples) if batch.n_samples > 0 else 0.0
 
             abstain_post = (y_prob_after[:, 1] >= config.tau) & (y_prob_after[:, 1] <= 1.0 - config.tau)
 
-            cs_results['selective_acc_after'] = (y_pred_after[~abstain_post] == batch.y_true[~abstain_post]).mean() if (~abstain_post).any() else -np.inf
-            cs_results['coverage_after'] = 1 - abstain_post.mean()
+            strat_metrics['selective_acc_after'] = (y_pred_after[~abstain_post] == batch.y_true[~abstain_post]).mean() if (~abstain_post).any() else -np.inf
+            strat_metrics['coverage_after'] = 1 - abstain_post.mean()
+        
+        elif isinstance(strategy, ScoreIntervention):
+            strat_metrics['overall_acc_before'] = proposal.details.get("overall_acc_before", None)
+            strat_metrics['overall_acc_after'] = proposal.details.get("overall_acc_after", None)
+            strat_metrics['acc_non_intervened_before'] = proposal.details.get("acc_non_intervened_before", None)
 
         return InterventionResult(
             C_pred=batch.C_pred,
@@ -728,7 +711,7 @@ class ConceptInterventionRunner:
             y_prob_after=y_prob_after,
             y_pred_after=y_pred_after,
             proposal=proposal,
-            **cs_results,
+            strat_metrics=strat_metrics,
         )
 
     def _build_batch(
