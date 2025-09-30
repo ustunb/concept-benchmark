@@ -71,7 +71,7 @@ settings = {
     "subjective_human_acc": 0.80,
 
     "subjective_noise_mode": "subjective",
-    "subjective_noise_rate": 0.20,
+    "subjective_noise_rate": 0.30,
 
     "label_model_type": "stochastic",
     "label_model_alpha": 100.0,
@@ -408,7 +408,7 @@ def run():
     c_flags_noise = c_flags + ["--concept-label-noise-mode", settings.get("subjective_noise_mode", "subjective"),
                                "--concept-label-noise-rate", str(settings.get("subjective_noise_rate", 0.20)),
                                "--skip-fit", "1", "--force-rerun", "1"]
-    run_spec("cs", "subjective", settings["subjective_human_acc"], bb, tag + "_noise", "detected",
+    run_spec("cs", "subjective", settings["subjective_human_acc"], bb, f"{tag}_noise{int(settings.get('subjective_noise_rate', 0.20)*100):02d}", "detected",
              extra_flags=c_flags_noise, detector_model=det_path)
 
     cbm_anchor_tag = f"cbm_anchor_{tag_id}"
@@ -463,7 +463,7 @@ def run():
     cbm_flags_noise = cbm_flags + ["--concept-label-noise-mode", settings.get("subjective_noise_mode", "subjective"),
                                    "--concept-label-noise-rate", str(settings.get("subjective_noise_rate", 0.20)),
                                    "--skip-fit", "1", "--force-rerun", "1"]
-    run_spec("cbm", "subjective", settings["subjective_human_acc"], bb, tag + "_noise", "detected",
+    run_spec("cbm", "subjective", settings["subjective_human_acc"], bb, f"{tag}_noise{int(settings.get('subjective_noise_rate', 0.20)*100):02d}", "detected",
              extra_flags=cbm_flags_noise, detector_model=cbm_det_path)
 
 
