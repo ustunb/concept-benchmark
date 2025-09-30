@@ -121,6 +121,7 @@ class InterventionConfig:
     per_instance_ordering: bool = True
     allow_repeated: bool = False
     score_threshold: float = 0.2
+    noise: float = 0.0
     _rng: np.random.Generator = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -653,6 +654,11 @@ class ConceptInterventionRunner:
         labels: Optional[np.ndarray] = None,
         instance_ids: Optional[np.ndarray] = None,
     ) -> InterventionResult:
+
+        # TODO: sample noise if config.noise > 0.0 (call parent)
+        if not concept_true and config.noise <= 0.0: 
+                concept_true = dataset.base_concepts
+
         batch = self._build_batch(
             dataset=dataset,
             concept_proba=concept_proba,
