@@ -377,7 +377,7 @@ def run():
     c_flags = [
         "--variants-per-row", "1",
         "--variants-per-row-minority", str(int(vpr_min)),
-        "--skip-fit", "1", "--force-rerun", "1",
+        "--skip-fit", "0", "--force-rerun", "1",
         "--concept-mode", "soft",
     ]
     if settings.get("generic_enable", 0) == 1:
