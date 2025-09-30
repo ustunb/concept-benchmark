@@ -75,14 +75,14 @@ settings = {
 
     "label_model_type": "stochastic",
     "label_model_alpha": 100.0,
-    "label_model_bias": 0.5,
+    "label_model_bias": 0.2,
     "label_model_expr": "'glorp' if (min(int(str(row['ears_shape'])=='triangle'), int(row['body_shape']=='square')) >= 1) else 'drent'",
 
     "templates_file": "",
     "redact_concepts": "",
     "redact_splits": "",
 
-    "generic_rate": 0.5,
+    "generic_rate": 0.70,
     "generic_tol": 0.04,
     "generic_enable": 1,
 
@@ -134,8 +134,12 @@ def run_cmd(label: str, argv: List[str]):
 def ensure_baseline(seed: int, diff: str, tag: str = "", extra_flags: Optional[List[str]] = None) -> Path:
     extra_flags = extra_flags or []
     run_name = f"baseline_text_{diff}_seed{seed}"
+
+    if settings.get("generic_enable", 0) == 1:
+        run_name = f"{run_name}_gen{int(100*float(settings.get('generic_rate', 0.0))):02d}"
     if tag:
         run_name = f"{run_name}_{tag}"
+        
     out_dir = results_dir / "robot_baseline" / "text" / run_name
     metrics = find_metrics_json(out_dir)
     if metrics is not None:
