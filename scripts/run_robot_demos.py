@@ -59,8 +59,8 @@ settings = {
     "seed": 1337,
     "difficulty": "hard",
     "budgets": [0, 1, 2, 5, 10],
-    "force": 0,
-    "reuse_detector": 1,
+    "force": 1,
+    "reuse_detector": 0,
     "run_tag": "unbalanced_pixelated",
 
     "modality": "text",
