@@ -61,7 +61,7 @@ settings = {
     "budgets": [0, 1, 2, 5, 10],
     "force": 1,
     "reuse_detector": 0,
-    "run_tag": "unbalanced_pixelated",
+    "run_tag": "unbalanced_pixelated_fixed",
 
     "modality": "text",
     "text_model": "distilbert-base-uncased",
