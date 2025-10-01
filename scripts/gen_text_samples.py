@@ -1861,12 +1861,12 @@ if not (args_obj.concept_source == "machine" and str(args_obj.machine_method) ==
     H_test = detector.predict(test_ds)
     detector.output_mode = _old2
 else:
-    demo_C_te = np.zeros((len(test_ds.X), len(names_m)), dtype=np.float32)
+    demo_C_te = np.zeros((len(test_ds.X), len(names_all)), dtype=np.float32)
     test_ds_cd = ConceptDatasetSample(
         X=[str(x) for x in test_ds.X],
         C=demo_C_te,
         y=test_ds.y.astype(int),
-        meta={"concepts": tuple(names_m), "classes": test_ds.classes, "data_type": "text"}
+        meta={"concepts": tuple(names_all), "classes": test_ds.classes, "data_type": "text"}
     )
     _old2 = detector.output_mode
     detector.output_mode = "soft"
