@@ -59,7 +59,7 @@ settings = {
     "seed": 1337,
     "difficulty": "hard",
     "budgets": [0, 1, 2, 5, 10],
-    "force": 1,
+    "force": 0,
     "reuse_detector": 0,
     "run_tag": "unbalanced_pixelated_fixed",
 
@@ -67,11 +67,11 @@ settings = {
     "text_model": "distilbert-base-uncased",
 
     "best_human_acc": 1.00,
-    "expert_human_acc": 0.80,
-    "subjective_human_acc": 0.80,
+    "expert_human_accs": [0.70, 0.80],
+    "subjective_human_acc": [0.70, 0.80],
 
     "subjective_noise_mode": "subjective",
-    "subjective_noise_rate": 0.30,
+    "subjective_noise_rates": [0.20, 0.30],
 
     "label_model_type": "stochastic",
     "label_model_alpha": 100.0,
@@ -120,10 +120,16 @@ def parse_cli():
     ap.add_argument("--val_target_generic_frac", type=float)
     ap.add_argument("--test_target_generic_frac", type=float)
     ap.add_argument("--recompute-only", type=int)
+    ap.add_argument("--subjective_noise_rates", type=str)
+    ap.add_argument("--expert_human_accs", type=str)
+    ap.add_argument("--subjective_human_accs", type=str)
     args, _ = ap.parse_known_args()
     d = {k: v for k, v in vars(args).items() if v is not None}
     if "budgets" in d and isinstance(d["budgets"], str):
         d["budgets"] = [int(x) for x in d["budgets"].split(",") if x.strip() != ""]
+    for k in ("subjective_noise_rates","expert_human_accs","subjective_human_accs"):
+        if k in d and isinstance(d[k], str):
+            d[k] = [float(x) for x in d[k].split(",") if x.strip() != ""]
     settings.update(d)
 
 def run_cmd(label: str, argv: List[str]):
@@ -226,24 +232,36 @@ def common_gen_argv(seed: int, diff: str, budgets: List[int]) -> List[str]:
 
 def run_spec(view: str, regime: str, human_acc: float, bb_metrics: Path, tag: str, concept_source: str, extra_flags: Optional[List[str]] = None, detector_model: Optional[Path] = None):
     extra_flags = extra_flags or []
-    modes = [settings.get("intervention_error_mode", "both")]
-    if modes[0] == "both":
-        modes = ["miss", "flip"]
+    mode_setting = str(settings.get("intervention_error_mode", "both"))
+    argv = common_gen_argv(settings["seed"], settings["difficulty"], settings["budgets"])
+    argv += ["--concept-source", concept_source]
+    if detector_model is not None:
+        argv += ["--reuse-detector", "1", "--detector-model", str(detector_model)]
+    argv += ["--human-acc", str(human_acc)]
+    argv += ["--blackbox_metrics", str(bb_metrics)]
 
-    for mode in modes:
-        argv = common_gen_argv(settings["seed"], settings["difficulty"], settings["budgets"])
-        argv += ["--concept-source", concept_source]
-        if detector_model is not None:
-            argv += ["--reuse-detector", "1", "--detector-model", str(detector_model)]
-        argv += ["--human-acc", str(human_acc)]
-        argv += ["--blackbox_metrics", str(bb_metrics)]
-        tag2 = f"{tag}_{'v1' if mode=='miss' else 'v2'}"
-        argv += ["--run-name", make_run_name(view, regime, human_acc, tag2)]
-        argv += ["--intervention-error-mode", mode]
+    rn = make_run_name(view, regime, human_acc, tag)
+    if regime == "subjective" and "_noise20" in rn:
+        cand = rn.replace("_noise20", "_noise")
+        if (results_dir / "robot_text" / cand).exists():
+            rn = cand
+
+    if mode_setting == "both":
+        argv += ["--run-name", rn]
+        argv += ["--intervention-error-mode", "both"]
         argv += list(map(str, extra_flags))
-        run_cmd(f"{view}:{regime}:{mode}", argv)
-
-
+        run_cmd(f"{view}:{regime}:both", argv)
+    else:
+        tag2 = f"{tag}_{'v1' if mode_setting=='miss' else 'v2'}"
+        rn2 = make_run_name(view, regime, human_acc, tag2)
+        if regime == "subjective" and "_noise20" in rn2:
+            cand2 = rn2.replace("_noise20", "_noise")
+            if (results_dir / "robot_text" / cand2).exists():
+                rn2 = cand2
+        argv += ["--run-name", rn2]
+        argv += ["--intervention-error-mode", mode_setting]
+        argv += list(map(str, extra_flags))
+        run_cmd(f"{view}:{regime}:{mode_setting}", argv)
 
 def make_run_name(view: str, regime: str, human_acc: float, tag: str) -> str:
     kset = "_".join(str(k) for k in settings["budgets"])
@@ -255,8 +273,7 @@ def run():
     diff = settings["difficulty"]
 
     import hashlib, json as _json
-    label_expr = settings.get(
-        "label_model_expr") or "'glorp' if (min(int(str(row['has_antennae']).lower()=='true'), int(row['body_shape']=='square')) >= 1) else 'drent'"
+    label_expr = settings.get("label_model_expr") or "'glorp' if (min(int(str(row['has_antennae']).lower()=='true'), int(row['body_shape']=='square')) >= 1) else 'drent'"
     sig = _json.dumps({
         "seed": seed,
         "diff": diff,
@@ -271,7 +288,6 @@ def run():
         "gen_tol": float(settings.get("generic_tol", 0.0)),
     }, sort_keys=True)
     tag_id = (settings.get("run_tag") or hashlib.sha256(sig.encode("utf-8")).hexdigest()[:8])
-
 
     label_flags = [
         "--label-model-type", str(settings.get("label_model_type", "stochastic")),
@@ -321,7 +337,7 @@ def run():
 
     det_path = results_dir / "robot_text" / cs_anchor_run / f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"
     if not det_path.exists():
-        anchor_flags = ["--variants-per-row", "1", "--force-rerun", "1", "--concept-mode", "soft"]
+        anchor_flags = ["--variants-per-row", "1", "--force-rerun", str(int(settings.get("force", 0))), "--concept-mode", "soft"]
         run_spec("anchor", "anchor", settings["best_human_acc"], bb, cs_anchor_tag, "detected",
                  extra_flags=anchor_flags)
         det_path = results_dir / "robot_text" / cs_anchor_run / f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"
@@ -331,7 +347,6 @@ def run():
     patterns = [
         str(results_dir / "robot_text" / cs_anchor_run / f"text_samples_*_seed{settings['seed']}.csv"),
     ]
-
     cands = []
     for pat in patterns:
         cands += glob.glob(pat, recursive=True)
@@ -377,14 +392,15 @@ def run():
     n_maj = max(n_pos, n_neg)
     vpr_min = max(1, math.ceil(n_maj / max(1, n_min)))
     pos_frac_overall = (n_pos / max(1, (n_pos + n_neg)))
-    print("vpr_min", vpr_min)
 
     c_flags = [
         "--variants-per-row", "1",
         "--variants-per-row-minority", str(int(vpr_min)),
-        "--skip-fit", "0", "--force-rerun", "1",
+        "--skip-fit", str(int(settings.get("skip_fit", 0))),
+        "--force-rerun", str(int(settings.get("force", 0))),
         "--concept-mode", "soft",
     ]
+
     if settings.get("generic_enable", 0) == 1:
         c_flags += [
             "--train-balance-enable", "1",
@@ -403,13 +419,27 @@ def run():
 
     run_spec("cs", "best", settings["best_human_acc"], bb, tag, "detected",
              extra_flags=c_flags, detector_model=det_path)
-    run_spec("cs", "expert", settings["expert_human_acc"], bb, tag, "detected",
-             extra_flags=c_flags, detector_model=det_path)
-    c_flags_noise = c_flags + ["--concept-label-noise-mode", settings.get("subjective_noise_mode", "subjective"),
-                               "--concept-label-noise-rate", str(settings.get("subjective_noise_rate", 0.20)),
-                               "--skip-fit", "1", "--force-rerun", "1"]
-    run_spec("cs", "subjective", settings["subjective_human_acc"], bb, f"{tag}_noise{int(settings.get('subjective_noise_rate', 0.20)*100):02d}", "detected",
-             extra_flags=c_flags_noise, detector_model=det_path)
+
+    _expert_accs = settings.get("expert_human_accs") or [settings["expert_human_acc"]]
+    _expert_accs = [float(x) for x in _expert_accs]
+    _subjective_accs = settings.get("subjective_human_accs") or [settings["subjective_human_acc"]]
+    _subjective_accs = [float(x) for x in _subjective_accs]
+    _noise_rates = settings.get("subjective_noise_rates") or [settings.get("subjective_noise_rate", 0.20)]
+    _noise_rates = [float(x) for x in _noise_rates]
+
+    for h in _expert_accs:
+        run_spec("cs", "expert", float(h), bb, tag, "detected",
+                 extra_flags=c_flags, detector_model=det_path)
+
+    for nr in _noise_rates:
+        c_flags_noise = c_flags + ["--concept-label-noise-mode", settings.get("subjective_noise_mode", "subjective"),
+                                   "--concept-label-noise-rate", str(float(nr)),
+                                   "--skip-fit", str(int(settings.get("skip_fit", 0))),
+                                   "--force-rerun", str(int(settings.get("force", 0)))]
+
+        for h in _subjective_accs:
+            run_spec("cs", "subjective", float(h), bb, f"{tag}_noise{int(float(nr)*100):02d}", "detected",
+                     extra_flags=c_flags_noise, detector_model=det_path)
 
     cbm_anchor_tag = f"cbm_anchor_{tag_id}"
     cbm_anchor_run_v1 = make_run_name("anchor", "anchor", settings["best_human_acc"], f"{cbm_anchor_tag}_v1")
@@ -426,7 +456,7 @@ def run():
         cbm_anchor_run = cbm_anchor_run_v1
         cbm_det_path = results_dir / "robot_text" / cbm_anchor_run / f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"
     if not cbm_det_path.exists():
-        cbm_anchor_flags = ["--variants-per-row", "1", "--force-rerun", "1", "--concept-mode", "hard"]
+        cbm_anchor_flags = ["--variants-per-row", "1", "--force-rerun", str(int(settings.get("force", 0))), "--concept-mode", "hard"]
         run_spec("anchor", "anchor", settings["best_human_acc"], bb, cbm_anchor_tag, "detected",
                  extra_flags=cbm_anchor_flags)
         cbm_det_path = results_dir / "robot_text" / cbm_anchor_run_v1 / f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"
@@ -438,7 +468,8 @@ def run():
     cbm_flags = [
         "--variants-per-row", "1",
         "--variants-per-row-minority", str(int(vpr_min)),
-        "--skip-fit", "1", "--force-rerun", "1",
+        "--skip-fit", str(int(settings.get("skip_fit", 1))),
+        "--force-rerun", str(int(settings.get("force", 0))),
         "--concept-mode", "hard",
     ]
 
@@ -458,13 +489,21 @@ def run():
 
     run_spec("cbm", "best", settings["best_human_acc"], bb, tag, "detected",
              extra_flags=cbm_flags, detector_model=cbm_det_path)
-    run_spec("cbm", "expert", settings["expert_human_acc"], bb, tag, "detected",
-             extra_flags=cbm_flags, detector_model=cbm_det_path)
-    cbm_flags_noise = cbm_flags + ["--concept-label-noise-mode", settings.get("subjective_noise_mode", "subjective"),
-                                   "--concept-label-noise-rate", str(settings.get("subjective_noise_rate", 0.20)),
-                                   "--skip-fit", "1", "--force-rerun", "1"]
-    run_spec("cbm", "subjective", settings["subjective_human_acc"], bb, f"{tag}_noise{int(settings.get('subjective_noise_rate', 0.20)*100):02d}", "detected",
-             extra_flags=cbm_flags_noise, detector_model=cbm_det_path)
+
+    for h in _expert_accs:
+        run_spec("cbm", "expert", float(h), bb, tag, "detected",
+                 extra_flags=cbm_flags, detector_model=cbm_det_path)
+
+    for nr in _noise_rates:
+        cbm_flags_noise = cbm_flags + ["--concept-label-noise-mode",
+                                       settings.get("subjective_noise_mode", "subjective"),
+                                       "--concept-label-noise-rate", str(float(nr)),
+                                       "--skip-fit", str(int(settings.get("skip_fit", 1))),
+                                       "--force-rerun", str(int(settings.get("force", 0)))]
+
+        for h in _subjective_accs:
+            run_spec("cbm", "subjective", float(h), bb, f"{tag}_noise{int(float(nr)*100):02d}", "detected",
+                     extra_flags=cbm_flags_noise, detector_model=cbm_det_path)
 
 
 def recompute_metrics():
@@ -516,6 +555,8 @@ def recompute_metrics():
         add_arg("human_acc_concepts", args.get("human_acc_concepts"))
         add_arg("make_plots", args.get("make_plots"))
         add_arg("policy", args.get("policy"))
+        add_arg("concept_label_noise_mode", args.get("concept_label_noise_mode"))
+        add_arg("concept_label_noise_rate", args.get("concept_label_noise_rate"))
         ci = args.get("concept_include")
         ce = args.get("concept_exclude")
         if ci not in (None, "", "[]"): add_arg("concept_include", ci)
@@ -533,17 +574,73 @@ def recompute_metrics():
         det = mobj.get("artifacts", {}).get("model") or args.get("detector_model")
 
         mode = settings.get("intervention_error_mode", "both")
-        argv = list(base_argv)
-        argv += ["--skip-fit", "1"]
-        if det and Path(det).exists():
-            argv += ["--reuse-detector", "1", "--detector-model", det]
+        rn0 = args.get("run_name") or ""
+
+        import re as _re
+        if rn0.startswith("best_") or rn0.startswith("anchor_"):
+            regime = "best"
+        elif rn0.startswith("expert_"):
+            regime = "expert"
+        elif rn0.startswith("subjective_"):
+            regime = "subjective"
         else:
-            print("Warning: missing detector model", det)
-        argv += ["--force-rerun", "1", "--intervention-error-mode", mode]
-        rn = args.get("run_name") or ""
-        if rn:
-            argv += ["--run-name", rn]
-        run_cmd("recompute", argv)
+            regime = "unknown"
+
+        def _listify(v):
+            if isinstance(v, (list, tuple)):
+                return [float(x) for x in v]
+            if isinstance(v, str):
+                return [float(x) for x in v.split(",") if x.strip() != ""]
+            if v is None:
+                return []
+            return [float(v)]
+
+        if regime == "expert":
+            haccs = _listify(settings.get("expert_human_accs")) or _listify(args.get("human_acc"))
+        elif regime == "subjective":
+            haccs = _listify(settings.get("subjective_human_accs")) or _listify(args.get("human_acc"))
+        else:
+            haccs = _listify(args.get("human_acc")) or _listify(settings.get("best_human_acc"))
+
+        if regime == "subjective":
+            rates = _listify(settings.get("subjective_noise_rates"))
+            if not rates:
+                rates = _listify(args.get("concept_label_noise_rate")) or _listify(settings.get("subjective_noise_rate", 0.20))
+        else:
+            rates = [None]
+
+        for ha in haccs:
+            for rate in rates:
+                argv = list(base_argv)
+                argv += ["--skip-fit", str(int(settings.get("skip_fit", 1)))]
+                if det and Path(det).exists():
+                    argv += ["--reuse-detector", "1", "--detector-model", det]
+                else:
+                    print("Warning: missing detector model", det)
+                argv += ["--force-rerun", str(int(settings.get("force", 0))), "--intervention-error-mode", mode]
+
+                argv += ["--human-acc", str(float(ha))]
+                rn = rn0
+                rn = _re.sub(r"_intervene\d+", f"_intervene{int(float(ha)*100)}", rn)
+                if regime == "subjective" and rate is not None:
+                    argv += ["--concept-label-noise-rate", str(float(rate))]
+                    dd = int(round(float(rate)*100))
+                    if dd == 20:
+                        if "_noise20" in rn:
+                            cand = rn.replace("_noise20", "_noise")
+                            if (results_dir / "robot_text" / cand).exists():
+                                rn = cand
+                        elif "_noise" not in rn:
+                            rn = rn + "_noise"
+                    else:
+                        if "_noise" in rn and not _re.search(r"_noise\d{2}", rn):
+                            rn = rn.replace("_noise", f"_noise{dd:02d}")
+                        elif _re.search(r"_noise\d{2}", rn):
+                            rn = _re.sub(r"_noise\d{2}", f"_noise{dd:02d}", rn)
+                        else:
+                            rn = rn + f"_noise{dd:02d}"
+                argv += ["--run-name", rn]
+                run_cmd("recompute", argv)
 
 
 def build_final_accuracy_table():
