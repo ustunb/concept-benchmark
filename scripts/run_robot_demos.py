@@ -422,8 +422,8 @@ def run():
 
     tag = f"minrule_eval_vpr{int(vpr_min)}_pos{n_pos}neg{n_neg}_{tag_id}_seed{settings['seed']}"
 
-    run_spec("cs", "best", settings["best_human_acc"], bb, tag, "detected",
-             extra_flags=c_flags, detector_model=det_path)
+    # run_spec("cs", "best", settings["best_human_acc"], bb, tag, "detected",
+    #          extra_flags=c_flags, detector_model=det_path)
 
         def _float_list(v):
         if v is None:
@@ -452,19 +452,19 @@ def run():
     _subjective_accs = _float_list(settings.get("subjective_human_accs")) or _float_list(settings.get("subjective_human_acc"))
     _noise_rates = _float_list(settings.get("subjective_noise_rates")) or _float_list(settings.get("subjective_noise_rate", 0.20))
 
-    for h in _expert_accs:
-        run_spec("cs", "expert", float(h), bb, tag, "detected",
-                 extra_flags=c_flags, detector_model=det_path)
+    # for h in _expert_accs:
+    #     run_spec("cs", "expert", float(h), bb, tag, "detected",
+    #              extra_flags=c_flags, detector_model=det_path)
 
-    for nr in _noise_rates:
-        c_flags_noise = c_flags + ["--concept-label-noise-mode", settings.get("subjective_noise_mode", "subjective"),
-                                   "--concept-label-noise-rate", str(float(nr)),
-                                   "--skip-fit", str(int(settings.get("skip_fit", 0))),
-                                   "--force-rerun", str(int(settings.get("force", 0)))]
+    # for nr in _noise_rates:
+    #     c_flags_noise = c_flags + ["--concept-label-noise-mode", settings.get("subjective_noise_mode", "subjective"),
+    #                                "--concept-label-noise-rate", str(float(nr)),
+    #                                "--skip-fit", str(int(settings.get("skip_fit", 0))),
+    #                                "--force-rerun", str(int(settings.get("force", 0)))]
 
-        for h in _subjective_accs:
-            run_spec("cs", "subjective", float(h), bb, f"{tag}_noise{int(float(nr)*100):02d}", "detected",
-                     extra_flags=c_flags_noise, detector_model=det_path)
+    #     for h in _subjective_accs:
+    #         run_spec("cs", "subjective", float(h), bb, f"{tag}_noise{int(float(nr)*100):02d}", "detected",
+    #                  extra_flags=c_flags_noise, detector_model=det_path)
 
     cbm_anchor_tag = f"cbm_anchor_{tag_id}"
     cbm_anchor_run_v1 = make_run_name("anchor", "anchor", settings["best_human_acc"], f"{cbm_anchor_tag}_v1")
@@ -512,23 +512,23 @@ def run():
             "--test-balance-within-label", "1",
         ]
 
-    run_spec("cbm", "best", settings["best_human_acc"], bb, tag, "detected",
-             extra_flags=cbm_flags, detector_model=cbm_det_path)
+    # run_spec("cbm", "best", settings["best_human_acc"], bb, tag, "detected",
+    #          extra_flags=cbm_flags, detector_model=cbm_det_path)
 
-    for h in _expert_accs:
-        run_spec("cbm", "expert", float(h), bb, tag, "detected",
-                 extra_flags=cbm_flags, detector_model=cbm_det_path)
+    # for h in _expert_accs:
+    #     run_spec("cbm", "expert", float(h), bb, tag, "detected",
+    #              extra_flags=cbm_flags, detector_model=cbm_det_path)
 
-    for nr in _noise_rates:
-        cbm_flags_noise = cbm_flags + ["--concept-label-noise-mode",
-                                       settings.get("subjective_noise_mode", "subjective"),
-                                       "--concept-label-noise-rate", str(float(nr)),
-                                       "--skip-fit", str(int(settings.get("skip_fit", 1))),
-                                       "--force-rerun", str(int(settings.get("force", 0)))]
+    # for nr in _noise_rates:
+    #     cbm_flags_noise = cbm_flags + ["--concept-label-noise-mode",
+    #                                    settings.get("subjective_noise_mode", "subjective"),
+    #                                    "--concept-label-noise-rate", str(float(nr)),
+    #                                    "--skip-fit", str(int(settings.get("skip_fit", 1))),
+    #                                    "--force-rerun", str(int(settings.get("force", 0)))]
 
-        for h in _subjective_accs:
-            run_spec("cbm", "subjective", float(h), bb, f"{tag}_noise{int(float(nr)*100):02d}", "detected",
-                     extra_flags=cbm_flags_noise, detector_model=cbm_det_path)
+    #     for h in _subjective_accs:
+    #         run_spec("cbm", "subjective", float(h), bb, f"{tag}_noise{int(float(nr)*100):02d}", "detected",
+    #                  extra_flags=cbm_flags_noise, detector_model=cbm_det_path)
 
     lf_flags = [
         "--variants-per-row", "1",
