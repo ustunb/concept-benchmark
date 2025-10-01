@@ -2159,29 +2159,32 @@ if args_obj.concept_source == "machine":
             "lf_device": args_obj.lf_device,
             "lf_batch_size": int(args_obj.lf_batch_size),
         }
-        det_lf = LabelFreeDetector(lf_settings)
+                det_lf = LabelFreeDetector(lf_settings)
         det_lf.fit([str(x) for x in train_ds.X])
         old_mode_lf = det_lf.settings["lf_mode"]
+
         det_lf.settings["lf_mode"] = "soft"
         P_tr_m = det_lf.predict([str(x) for x in train_ds.X]).astype(np.float32)
+        P_val_m = det_lf.predict([str(x) for x in val_ds.X]).astype(np.float32)
         P_te_m = det_lf.predict([str(x) for x in test_ds.X]).astype(np.float32)
+
         det_lf.settings["lf_mode"] = "hard"
         H_tr_m = det_lf.predict([str(x) for x in train_ds.X]).astype(int)
+        H_val_m = det_lf.predict([str(x) for x in val_ds.X]).astype(int)
         H_te_m = det_lf.predict([str(x) for x in test_ds.X]).astype(int)
         det_lf.settings["lf_mode"] = old_mode_lf
+
         names_m = list(det_lf.concept_names)
-        
+        print(f"[lfcbm] concepts={len(names_m)} first5={names_m[:5]}")
+
         if 'fe_src' in locals() and hasattr(fe_src, 'model') and hasattr(fe_src.model, 'n_features_in_'):
-            if int(args_obj.machine_soft):
-                _lf_dim = int(P_tr_m.shape[1])
-            else:
-                _lf_dim = int(H_tr_m.shape[1])
+            _lf_dim = int(P_tr_m.shape[1]) if int(args_obj.machine_soft) else int(H_tr_m.shape[1])
             _fe_dim = int(fe_src.model.n_features_in_)
             if _lf_dim != _fe_dim:
-                raise ValueError(f"lfcbm dimension {_lf_dim} != FE dimension {_fe_dim}. Update concepts_csv to {_fe_dim} names in the FE order, or retrain FE.")
+                raise ValueError(f"lfcbm dimension {_lf_dim} != FE dimension {_fe_dim}. Update concepts_csv to {_fe_dim} names in FE order, or retrain FE.")
+
         truth_map = None
         fe_machine = FrontEndModel()
-
         if int(args_obj.machine_soft):
             fe_machine.fit(P_tr_m, train_ds.y.astype(int))
         else:
