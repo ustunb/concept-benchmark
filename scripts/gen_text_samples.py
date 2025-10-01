@@ -25,6 +25,7 @@ from concept_benchmark.ext.fileutils import load as load_obj
 from concept_benchmark.synthetic.helper.utils import apply_subjective_noise, apply_machine_noise
 from types import SimpleNamespace
 import argparse, psutil
+from scripts.lfcbm_text import LabelFreeDetector
 from itertools import product
 import builtins, functools
 print = functools.partial(builtins.print, end="\n\n")
@@ -65,15 +66,24 @@ settings = {
     "concept_include": "",
     "concept_exclude": "",
     "blackbox_metrics": str(results_dir / "robot_baseline" / "text" / "baseline_text_distilbert_seed1337" / "baseline_dnn_robots_text_distilbert-base-uncased_seed1337_metrics.json"),
-    "concept_source": "detected",
-    "machine_method": "kmeans",
+    "concept_source": "none",
+    "machine_method": "means",
+    "concepts_csv": "data/robot_text/concepts/concepts.csv",
+    "lf_alpha": 0.5,
+    "lf_threshold": 0.5,
+    "lf_mode": "soft",
+    "lf_ridge": False,
+    "lf_ridge_alpha": 1.0,
+    "lf_encoder": "sentence-transformers/all-MiniLM-L6-v2",
+    "lf_device": "cuda" if (lambda: hasattr(__import__("torch"), "cuda") and __import__("torch").cuda.is_available())() else "cpu",
+    "lf_batch_size": 64,
     "machine_k": 16,
     "machine_soft": 1,
     "machine_seed": 0,
     "machine_upper_bound": 0,
     "run_name": "cbm_text_complete_trainDetected_inferDetected_seed1337",
     "force_rerun": 0,
-    "template_difficulty": "medium",
+    "template_difficulty": "hard",
     "test_label_flip": 0.0,
     "intervention_error_mode": "miss",
 }
@@ -363,8 +373,19 @@ else:
     ap.add_argument("--concept-exclude", type=str, default=settings["concept_exclude"])
     ap.add_argument("--blackbox_metrics", type=str, default=settings["blackbox_metrics"])
     ap.add_argument("--human-alone", type=float, default=0.75)
-    ap.add_argument("--concept-source", choices=["detected", "gt", "machine"], default=settings["concept_source"])
-    ap.add_argument("--machine-method", choices=["kmeans"], default=settings["machine_method"])
+    ap.add_argument("--concept-source", type=str, choices=["gt", "detected", "machine", "human", "none"],
+                    default=settings["concept_source"])
+    ap.add_argument("--machine-method", type=str, choices=["means", "lfcbm"],
+                    default=settings["machine_method"])
+    ap.add_argument("--concepts-csv", type=str, default=settings.get("concepts_csv", ""))
+    ap.add_argument("--lf-alpha", type=float, default=settings.get("lf_alpha", 0.0))
+    ap.add_argument("--lf-threshold", type=float, default=settings.get("lf_threshold", 0.0))
+    ap.add_argument("--lf-mode", type=str, choices=["hard", "soft"], default=settings.get("lf_mode", "hard"))
+    ap.add_argument("--lf-ridge", action="store_true", default=settings.get("lf_ridge", False))
+    ap.add_argument("--lf-ridge-alpha", type=float, default=settings.get("lf_ridge_alpha", 0.0))
+    ap.add_argument("--lf-encoder", type=str, default=settings.get("lf_encoder", ""))
+    ap.add_argument("--lf-device", type=str, default=settings.get("lf_device", "cpu"))
+    ap.add_argument("--lf-batch-size", type=int, default=settings.get("lf_batch_size", 32))
     ap.add_argument("--machine-k", type=int, default=settings["machine_k"])
     ap.add_argument("--machine-soft", type=int, default=settings["machine_soft"])
     ap.add_argument("--machine-seed", type=int, default=settings["machine_seed"])
@@ -1603,17 +1624,37 @@ cbm = loaded_cbm if (SKIP and loaded_cbm is not None) else ConceptBasedModel(con
 C_train = train_ds.C
 y_train = train_ds.y
 
-if train_on_detected:
-    old_mode = getattr(detector, "output_mode", None)
-    try:
-        if hasattr(detector, "output_mode"):
-            detector.output_mode = "soft"
-        C_train_used = detector.predict(train_ds)
-    finally:
-        if hasattr(detector, "output_mode") and old_mode is not None:
-            detector.output_mode = old_mode
+if (args_obj.concept_source == "machine") and (str(args_obj.machine_method) == "lfcbm"):
+    lf_settings = {
+        "concepts_csv": args_obj.concepts_csv,
+        "lf_alpha": float(args_obj.lf_alpha),
+        "lf_threshold": float(args_obj.lf_threshold),
+        "lf_mode": "soft",
+        "lf_ridge": bool(args_obj.lf_ridge),
+        "lf_ridge_alpha": float(args_obj.lf_ridge_alpha),
+        "lf_encoder": args_obj.lf_encoder,
+        "lf_device": args_obj.lf_device,
+        "lf_batch_size": int(args_obj.lf_batch_size),
+    }
+    _det_lf = LabelFreeDetector(lf_settings)
+    _det_lf.fit([str(x) for x in train_ds.X])
+    if args_obj.concept_mode == "soft":
+        C_train_used = _det_lf.predict([str(x) for x in train_ds.X]).astype(np.float32)
+    else:
+        _det_lf.settings["lf_mode"] = "hard"
+        C_train_used = _det_lf.predict([str(x) for x in train_ds.X]).astype(int)
 else:
-    C_train_used = C_train
+    if train_on_detected:
+        old_mode = getattr(detector, "output_mode", None)
+        try:
+            if hasattr(detector, "output_mode"):
+                detector.output_mode = "soft"
+            C_train_used = detector.predict(train_ds)
+        finally:
+            if hasattr(detector, "output_mode") and old_mode is not None:
+                detector.output_mode = old_mode
+    else:
+        C_train_used = C_train
 
 noise_mode = merged.get("concept_label_noise_mode", "none")
 if noise_mode == "machine":
@@ -2100,21 +2141,51 @@ H_te_m = None
 names_m = None
 truth_map = None
 if args_obj.concept_source == "machine":
-    vec, Xtr = _tfidf_fit(train_ds.X, int(args_obj.machine_seed) if int(args_obj.machine_seed) > 0 else SEED)
-    Xte = vec.transform([str(t) for t in test_ds.X])
-    km = _kmeans_fit(Xtr, int(args_obj.machine_k), int(args_obj.machine_seed) if int(args_obj.machine_seed) > 0 else SEED+11)
-    P_tr_m = _kmeans_soft(Xtr, km)
-    P_te_m = _kmeans_soft(Xte, km)
-    H_tr_m = np.eye(int(args_obj.machine_k), dtype=int)[np.argmin(km.transform(Xtr), axis=1)]
-    H_te_m = np.eye(int(args_obj.machine_k), dtype=int)[np.argmin(km.transform(Xte), axis=1)]
-    names_m = [f"machine_{j}" for j in range(int(args_obj.machine_k))]
-    if int(args_obj.machine_upper_bound):
-        truth_map = _machine_truth_map(H_tr_m, train_ds.C.astype(int))
-    fe_machine = FrontEndModel()
-    if int(args_obj.machine_soft):
-        fe_machine.fit(P_tr_m, train_ds.y.astype(int))
+    if str(args_obj.machine_method) == "lfcbm":
+        lf_settings = {
+            "concepts_csv": args_obj.concepts_csv,
+            "lf_alpha": float(args_obj.lf_alpha),
+            "lf_threshold": float(args_obj.lf_threshold),
+            "lf_mode": "soft",
+            "lf_ridge": bool(args_obj.lf_ridge),
+            "lf_ridge_alpha": float(args_obj.lf_ridge_alpha),
+            "lf_encoder": args_obj.lf_encoder,
+            "lf_device": args_obj.lf_device,
+            "lf_batch_size": int(args_obj.lf_batch_size),
+        }
+        det_lf = LabelFreeDetector(lf_settings)
+        det_lf.fit([str(x) for x in train_ds.X])
+        old_mode_lf = det_lf.settings["lf_mode"]
+        det_lf.settings["lf_mode"] = "soft"
+        P_tr_m = det_lf.predict([str(x) for x in train_ds.X]).astype(np.float32)
+        P_te_m = det_lf.predict([str(x) for x in test_ds.X]).astype(np.float32)
+        det_lf.settings["lf_mode"] = "hard"
+        H_tr_m = det_lf.predict([str(x) for x in train_ds.X]).astype(int)
+        H_te_m = det_lf.predict([str(x) for x in test_ds.X]).astype(int)
+        det_lf.settings["lf_mode"] = old_mode_lf
+        names_m = list(det_lf.concept_names)
+        truth_map = None
+        fe_machine = FrontEndModel()
+        if int(args_obj.machine_soft):
+            fe_machine.fit(P_tr_m, train_ds.y.astype(int))
+        else:
+            fe_machine.fit(H_tr_m, train_ds.y.astype(int))
     else:
-        fe_machine.fit(H_tr_m, train_ds.y.astype(int))
+        vec, Xtr = _tfidf_fit(train_ds.X, int(args_obj.machine_seed) if int(args_obj.machine_seed) > 0 else SEED)
+        Xte = vec.transform([str(t) for t in test_ds.X])
+        km = _kmeans_fit(Xtr, int(args_obj.machine_k), int(args_obj.machine_seed) if int(args_obj.machine_seed) > 0 else SEED+11)
+        P_tr_m = _kmeans_soft(Xtr, km)
+        P_te_m = _kmeans_soft(Xte, km)
+        H_tr_m = np.eye(int(args_obj.machine_k), dtype=int)[np.argmin(km.transform(Xtr), axis=1)]
+        H_te_m = np.eye(int(args_obj.machine_k), dtype=int)[np.argmin(km.transform(Xte), axis=1)]
+        names_m = [f"machine_{j}" for j in range(int(args_obj.machine_k))]
+        if int(args_obj.machine_upper_bound):
+            truth_map = _machine_truth_map(H_tr_m, train_ds.C.astype(int))
+        fe_machine = FrontEndModel()
+        if int(args_obj.machine_soft):
+            fe_machine.fit(P_tr_m, train_ds.y.astype(int))
+        else:
+            fe_machine.fit(H_tr_m, train_ds.y.astype(int))
 
 acc_map = _csv_kv_float(args_obj.human_acc_concepts)
 rows = []
@@ -2221,14 +2292,18 @@ for ta in acc_grid:
 
     tau_val = 0.2 if args_obj.concept_mode == "soft" else 0.5
     if args_obj.concept_mode == "soft":
-        _old_mode = getattr(detector, "output_mode", None)
-        if hasattr(detector, "output_mode"):
-            detector.output_mode = "soft"
-        base_proba = cbm.predict_proba(test_ds, propagate=True)
-        if hasattr(detector, "output_mode"):
-            detector.output_mode = _old_mode
+        if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm":
+            base_proba = cbm._propagate_predict_proba(P_te_m)
+        else:
+            _old_mode = getattr(detector, "output_mode", None)
+            if hasattr(detector, "output_mode"):
+                detector.output_mode = "soft"
+            base_proba = cbm.predict_proba(test_ds, propagate=True)
+            if hasattr(detector, "output_mode"):
+                detector.output_mode = _old_mode
     else:
         base_proba = fe_src.predict_proba(H0)
+
     base_pred = np.argmax(base_proba, axis=1)
     base_acc = float(accuracy_score(y_test_true, base_pred))
     try:
@@ -2263,7 +2338,7 @@ for ta in acc_grid:
             per_concept_edits = np.zeros(Hm.shape[1], dtype=int)
             per_concept_correct = np.zeros(Hm.shape[1], dtype=int)
             per_concept_attempts = np.zeros(Hm.shape[1], dtype=int)
-            P_work_loc = C_test_scores.copy() if args_obj.concept_mode == "soft" else None
+            P_work_loc = (P_te_m.copy() if (args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm") else C_test_scores.copy()) if args_obj.concept_mode == "soft" else None
 
             if k > 0:
                 cols_all = allow_idxs if allow_idxs.size > 0 else np.arange(Hm.shape[1], dtype=int)
