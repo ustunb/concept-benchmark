@@ -1655,37 +1655,6 @@ if (args_obj.concept_source == "machine") and (str(args_obj.machine_method) == "
         C_val_used = H_val_lf.astype(int)
         det_lf.settings["lf_mode"] = old_mode
 
-    if not (int(args_obj.reuse_detector) and args_obj.detector_model):
-        ds_tr_cd = ConceptDatasetSample(
-            X=[str(x) for x in train_ds.X],
-            C=C_train_used if args_obj.concept_mode == "soft" else C_train_used.astype(np.float32),
-            y=train_ds.y.astype(int),
-            meta={"concepts": tuple(names_all), "classes": train_ds.classes, "data_type": "text"}
-        )
-        ds_val_cd = ConceptDatasetSample(
-            X=[str(x) for x in val_ds.X],
-            C=C_val_used if args_obj.concept_mode == "soft" else C_val_used.astype(np.float32),
-            y=val_ds.y.astype(int),
-            meta={"concepts": tuple(names_all), "classes": val_ds.classes, "data_type": "text"}
-        )
-        print("Fitting detector to lfcbm concepts (CD_lfcbm)")
-        detector.fit(ds_tr_cd, ds_val_cd)
-
-    if not (int(args_obj.reuse_detector) and args_obj.detector_model):
-        ds_tr_cd = ConceptDatasetSample(
-            X=[str(x) for x in train_ds.X],
-            C=C_train_used,
-            y=train_ds.y.astype(int),
-            meta={"concepts": tuple(names_all), "classes": train_ds.classes, "data_type": "text"}
-        )
-        ds_val_cd = ConceptDatasetSample(
-            X=[str(x) for x in val_ds.X],
-            C=C_val_used.astype(int) if args_obj.concept_mode != "soft" else C_val_used.astype(np.float32),
-            y=val_ds.y.astype(int),
-            meta={"concepts": tuple(names_all), "classes": val_ds.classes, "data_type": "text"}
-        )
-        print("Fitting detector to lfcbm concepts (CD_lfcbm)")
-        detector.fit(ds_tr_cd, ds_val_cd)
 
 else:
     if train_on_detected:
@@ -1725,28 +1694,6 @@ if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfc
     C_val_scores = det_lf.predict([str(x) for x in val_ds.X]).astype(np.float32)
     det_lf.settings["lf_mode"] = _old_mode
 
-    if not hasattr(detector, "model"):
-        tr_X = [str(x) for x in train_ds.X]
-        va_X = [str(x) for x in val_ds.X]
-        if args_obj.concept_mode == "soft":
-            tr_C = C_train_used.astype(np.float32)
-            va_C = C_val_scores.astype(np.float32)
-        else:
-            tr_C = C_train_used.astype(int)
-            va_C = H_val_lf.astype(int)
-        train_ds_cd = ConceptDatasetSample(
-            X=tr_X,
-            C=tr_C,
-            y=train_ds.y.astype(int),
-            meta={"concepts": tuple(names_all), "classes": train_ds.classes, "data_type": "text"},
-        )
-        val_ds_cd = ConceptDatasetSample(
-            X=va_X,
-            C=va_C,
-            y=val_ds.y.astype(int),
-            meta={"concepts": tuple(names_all), "classes": val_ds.classes, "data_type": "text"},
-        )
-        detector.fit(train_ds_cd, val_ds_cd)
 else:
     _old = detector.output_mode
     detector.output_mode = "soft"
@@ -1930,39 +1877,41 @@ else:
             H_test = det_lf.predict([str(x) for x in test_ds.X]).astype(int)
             det_lf.settings["lf_mode"] = _lf_old
     else:
-        demo_C_te = np.zeros((len(test_ds.X), len(names_all)), dtype=np.float32)
-        test_ds_cd = ConceptDatasetSample(
-            X=[str(x) for x in test_ds.X],
-            C=demo_C_te,
-            y=test_ds.y.astype(int),
-            meta={"concepts": tuple(names_all), "classes": test_ds.classes, "data_type": "text"}
-        )
-        _old2 = detector.output_mode
-        detector.output_mode = "soft"
-        C_test_scores = detector.predict(test_ds_cd).astype(np.float32)
-        detector.output_mode = "hard"
-        H_test = detector.predict(test_ds_cd).astype(int)
-        detector.output_mode = _old2
+        _lf_old = det_lf.settings.get("lf_mode", "soft")
+        det_lf.settings["lf_mode"] = "soft"
+        C_test_scores = det_lf.predict([str(x) for x in test_ds.X]).astype(np.float32)
+        det_lf.settings["lf_mode"] = "hard"
+        H_test = det_lf.predict([str(x) for x in test_ds.X]).astype(int)
+        det_lf.settings["lf_mode"] = _lf_old
 
 C_test_true = test_ds.C.astype(np.float32)
-sel_covs_t, sel_accs_t, aucs_t, auprcs_t = [], [], [], []
-for j in range(C_test_true.shape[1]):
-    m = calc_metric(C_test_scores[:, j], C_test_true[:, j], tau=0.5)
-    sel_covs_t.append(m["coverage"])
-    sel_accs_t.append(m["selective_accuracy"])
-    try:
-        if len(np.unique(C_test_true[:, j])) == 2:
-            aucs_t.append(roc_auc_score(C_test_true[:, j], C_test_scores[:, j]))
-            auprcs_t.append(average_precision_score(C_test_true[:, j], C_test_scores[:, j]))
-    except Exception:
-        pass
-concept_test_metrics = {
-    "selective_cov_mean": float(np.nanmean(sel_covs_t)) if sel_covs_t else float("nan"),
-    "selective_acc_mean": float(np.nanmean(sel_accs_t)) if sel_accs_t else float("nan"),
-    "auroc_macro": float(np.nanmean(aucs_t)) if aucs_t else float("nan"),
-    "auprc_macro": float(np.nanmean(auprcs_t)) if auprcs_t else float("nan"),
-    "tau": 0.5,
-}
+if (C_test_scores is not None) and (C_test_scores.shape[1] == C_test_true.shape[1]):
+    sel_covs_t, sel_accs_t, aucs_t, auprcs_t = [], [], [], []
+    for j in range(C_test_true.shape[1]):
+        m = calc_metric(C_test_scores[:, j], C_test_true[:, j], tau=0.5)
+        sel_covs_t.append(m["coverage"])
+        sel_accs_t.append(m["selective_accuracy"])
+        try:
+            if len(np.unique(C_test_true[:, j])) == 2:
+                aucs_t.append(roc_auc_score(C_test_true[:, j], C_test_scores[:, j]))
+                auprcs_t.append(average_precision_score(C_test_true[:, j], C_test_scores[:, j]))
+        except Exception:
+            pass
+    concept_test_metrics = {
+        "selective_cov_mean": float(np.nanmean(sel_covs_t)) if sel_covs_t else float("nan"),
+        "selective_acc_mean": float(np.nanmean(sel_accs_t)) if sel_accs_t else float("nan"),
+        "auroc_macro": float(np.nanmean(aucs_t)) if aucs_t else float("nan"),
+        "auprc_macro": float(np.nanmean(auprcs_t)) if auprcs_t else float("nan"),
+        "tau": 0.5,
+    }
+else:
+    concept_test_metrics = {
+        "selective_cov_mean": float("nan"),
+        "selective_acc_mean": float("nan"),
+        "auroc_macro": float("nan"),
+        "auprc_macro": float("nan"),
+        "tau": 0.5,
+    }
 print("Concept metrics (test):", concept_test_metrics)
 
 def _groups(names):
@@ -2310,9 +2259,12 @@ if args_obj.concept_source == "machine":
             y=train_ds.y.astype(int),
             meta={"concepts": tuple(names_m), "classes": train_ds.classes, "data_type": "text"}
         )
+        H_val_fit = H_val_m
+        if not ((H_val_fit.min(axis=0) != H_val_fit.max(axis=0)).any()):
+            H_val_fit = (P_val_m >= 0.5).astype(int)
         val_ds_lf_hard = ConceptDatasetSample(
             X=[str(x) for x in val_ds.X],
-            C=H_val_m.astype(np.float32),
+            C=H_val_fit.astype(np.float32),
             y=val_ds.y.astype(int),
             meta={"concepts": tuple(names_m), "classes": val_ds.classes, "data_type": "text"}
         )
@@ -2862,31 +2814,3 @@ summary_edit = _first_k_at_least()
 summary_path = run_dir / f"viability_summary_edits_to_match_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
 summary_edit.to_csv(summary_path, index=False)
 print("Saved edits-to-match summary:", summary_path)
-
-if int(args_obj.make_plots):
-    for ta in acc_grid:
-        for src in sorted(viab["concept_source"].unique()):
-            sub = viab[(viab["target_acc"] == ta) & (viab["concept_source"] == src)]
-            xs = sub["concept_checks"].values
-            ys = sub["acc_cbm_intv"].values
-            plt.figure()
-            plt.plot(xs, ys, marker="o")
-            plt.xlabel("ConceptChecks")
-            plt.ylabel("Accuracy")
-            plt.title(f"Accuracy vs ConceptChecks (target_acc={ta}) [{src}]")
-            plt.tight_layout()
-            plt.savefig(run_dir / f"acc_vs_checks_{miss_tag}_{seed_tag}_{src}_{str(ta).replace('.','p')}.png")
-            plt.close()
-        if bb_acc is not None:
-            for src in sorted(viab["concept_source"].unique()):
-                sub = viab[(viab["target_acc"] == ta) & (viab["concept_source"] == src)]
-                xs = sub["concept_checks"].values
-                ys = sub["delta_vs_blackbox"].values
-                plt.figure()
-                plt.plot(xs, ys, marker="o")
-                plt.xlabel("ConceptChecks")
-                plt.ylabel("CBM − BlackBox")
-                plt.title(f"Gain vs ConceptChecks (target_acc={ta}) [{src}]")
-                plt.tight_layout()
-                plt.savefig(run_dir / f"gain_vs_checks_{miss_tag}_{seed_tag}_{src}_{str(ta).replace('.','p')}.png")
-                plt.close()
