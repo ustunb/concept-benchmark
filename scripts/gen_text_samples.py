@@ -1658,6 +1658,22 @@ if (args_obj.concept_source == "machine") and (str(args_obj.machine_method) == "
     if not (int(args_obj.reuse_detector) and args_obj.detector_model):
         ds_tr_cd = ConceptDatasetSample(
             X=[str(x) for x in train_ds.X],
+            C=C_train_used if args_obj.concept_mode == "soft" else C_train_used.astype(np.float32),
+            y=train_ds.y.astype(int),
+            meta={"concepts": tuple(names_all), "classes": train_ds.classes, "data_type": "text"}
+        )
+        ds_val_cd = ConceptDatasetSample(
+            X=[str(x) for x in val_ds.X],
+            C=C_val_used if args_obj.concept_mode == "soft" else C_val_used.astype(np.float32),
+            y=val_ds.y.astype(int),
+            meta={"concepts": tuple(names_all), "classes": val_ds.classes, "data_type": "text"}
+        )
+        print("Fitting detector to lfcbm concepts (CD_lfcbm)")
+        detector.fit(ds_tr_cd, ds_val_cd)
+
+    if not (int(args_obj.reuse_detector) and args_obj.detector_model):
+        ds_tr_cd = ConceptDatasetSample(
+            X=[str(x) for x in train_ds.X],
             C=C_train_used,
             y=train_ds.y.astype(int),
             meta={"concepts": tuple(names_all), "classes": train_ds.classes, "data_type": "text"}
