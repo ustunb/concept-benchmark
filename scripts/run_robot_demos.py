@@ -425,12 +425,32 @@ def run():
     run_spec("cs", "best", settings["best_human_acc"], bb, tag, "detected",
              extra_flags=c_flags, detector_model=det_path)
 
-    _expert_accs = settings.get("expert_human_accs") or [settings["expert_human_acc"]]
-    _expert_accs = [float(x) for x in _expert_accs]
-    _subjective_accs = settings.get("subjective_human_accs") or [settings["subjective_human_acc"]]
-    _subjective_accs = [float(x) for x in _subjective_accs]
-    _noise_rates = settings.get("subjective_noise_rates") or [settings.get("subjective_noise_rate", 0.20)]
-    _noise_rates = [float(x) for x in _noise_rates]
+        def _float_list(v):
+        if v is None:
+            return []
+        if isinstance(v, (int, float)):
+            return [float(v)]
+        if isinstance(v, str):
+            s = v.strip()
+            if s.startswith("[") and s.endswith("]"):
+                try:
+                    return [float(x) for x in _json.loads(s)]
+                except Exception:
+                    pass
+            parts = [p.strip() for p in s.split(",") if p.strip()]
+            if parts:
+                return [float(p) for p in parts]
+            return [float(s)]
+        if isinstance(v, (list, tuple)):
+            out = []
+            for x in v:
+                out.extend(_float_list(x))
+            return out
+        return []
+
+    _expert_accs = _float_list(settings.get("expert_human_accs")) or _float_list(settings.get("expert_human_acc"))
+    _subjective_accs = _float_list(settings.get("subjective_human_accs")) or _float_list(settings.get("subjective_human_acc"))
+    _noise_rates = _float_list(settings.get("subjective_noise_rates")) or _float_list(settings.get("subjective_noise_rate", 0.20))
 
     for h in _expert_accs:
         run_spec("cs", "expert", float(h), bb, tag, "detected",
