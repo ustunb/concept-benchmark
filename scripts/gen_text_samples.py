@@ -1819,21 +1819,32 @@ if not (args_obj.concept_source == "machine" and str(args_obj.machine_method) ==
     detector.output_mode = "soft"
     C_train_scores = detector.predict(train_ds)
     detector.output_mode = _old_tr
+
+    _old2 = detector.output_mode
+    detector.output_mode = "soft"
+    C_test_scores = detector.predict(test_ds)
+    detector.output_mode = "hard"
+    H_test = detector.predict(test_ds)
+    detector.output_mode = _old2
 else:
     C_train_scores = None
+    C_test_scores = None
+    H_test = None
 
 C_train_true = train_ds.C.astype(np.float32)
 sel_covs_tr, sel_accs_tr, aucs_tr, auprcs_tr = [], [], [], []
-for j in range(C_train_true.shape[1]):
-    m = calc_metric(C_train_scores[:, j], C_train_true[:, j], tau=0.5)
-    sel_covs_tr.append(m["coverage"])
-    sel_accs_tr.append(m["selective_accuracy"])
-    try:
-        if len(np.unique(C_train_true[:, j])) == 2:
-            aucs_tr.append(roc_auc_score(C_train_true[:, j], C_train_scores[:, j]))
-            auprcs_tr.append(average_precision_score(C_train_true[:, j], C_train_scores[:, j]))
-    except Exception:
-        pass
+if C_train_scores is not None:
+    for j, cname in enumerate(concept_names):
+        m = calc_metric(C_train_scores[:, j], C_train_true[:, j], tau=0.5)
+        sel_covs_tr.append(m["coverage"])
+        sel_accs_tr.append(m["selective_accuracy"])
+        try:
+            if len(np.unique(C_train_true[:, j])) == 2:
+                aucs_tr.append(roc_auc_score(C_train_true[:, j], C_train_scores[:, j]))
+                auprcs_tr.append(average_precision_score(C_train_true[:, j], C_train_scores[:, j]))
+        except Exception:
+            pass
+
 concept_train_metrics = {
     "selective_cov_mean": float(np.nanmean(sel_covs_tr)) if sel_covs_tr else float("nan"),
     "selective_acc_mean": float(np.nanmean(sel_accs_tr)) if sel_accs_tr else float("nan"),
@@ -1850,8 +1861,19 @@ if not (args_obj.concept_source == "machine" and str(args_obj.machine_method) ==
     H_test = detector.predict(test_ds)
     detector.output_mode = _old2
 else:
-    C_test_scores = None
-    H_test = None
+    demo_C_te = np.zeros((len(test_ds.X), len(names_m)), dtype=np.float32)
+    test_ds_cd = ConceptDatasetSample(
+        X=[str(x) for x in test_ds.X],
+        C=demo_C_te,
+        y=test_ds.y.astype(int),
+        meta={"concepts": tuple(names_m), "classes": test_ds.classes, "data_type": "text"}
+    )
+    _old2 = detector.output_mode
+    detector.output_mode = "soft"
+    C_test_scores = detector.predict(test_ds_cd).astype(np.float32)
+    detector.output_mode = "hard"
+    H_test = detector.predict(test_ds_cd).astype(int)
+    detector.output_mode = _old2
 
 C_test_true = test_ds.C.astype(np.float32)
 sel_covs_t, sel_accs_t, aucs_t, auprcs_t = [], [], [], []
@@ -1922,9 +1944,10 @@ def _concept_error_report(split_name, sample):
     print("Worst 5 concepts by acc:", {k: round(v["acc"], 4) for k, v in worst.items()})
     return {"per_concept": per_concept, "per_group": per_group}
 
-_ = _concept_error_report("train", train_ds)
-_ = _concept_error_report("val", val_ds)
-_ = _concept_error_report("test", test_ds)
+if not (args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm"):
+    _ = _concept_error_report("train", train_ds)
+    _ = _concept_error_report("val", val_ds)
+    _ = _concept_error_report("test", test_ds)
 
 all_probs = cbm.predict_proba(ds)
 all_preds = np.argmax(all_probs, axis=1)
@@ -2212,18 +2235,25 @@ if args_obj.concept_source == "machine":
         names_m = list(det_lf.concept_names)
         print(f"[lfcbm] concepts={len(names_m)} first5={names_m[:5]}")
 
-        if 'fe_src' in locals() and hasattr(fe_src, 'model') and hasattr(fe_src.model, 'n_features_in_'):
-            _lf_dim = int(P_tr_m.shape[1]) if int(args_obj.machine_soft) else int(H_tr_m.shape[1])
-            _fe_dim = int(fe_src.model.n_features_in_)
-            if _lf_dim != _fe_dim:
-                raise ValueError(f"lfcbm dimension {_lf_dim} != FE dimension {_fe_dim}. Update concepts_csv to {_fe_dim} names in FE order, or retrain FE.")
+        train_ds_lf_hard = ConceptDatasetSample(
+            X=[str(x) for x in train_ds.X],
+            C=H_tr_m.astype(np.float32),
+            y=train_ds.y.astype(int),
+            meta={"concepts": tuple(names_m), "classes": train_ds.classes, "data_type": "text"}
+        )
+        val_ds_lf_hard = ConceptDatasetSample(
+            X=[str(x) for x in val_ds.X],
+            C=H_val_m.astype(np.float32),
+            y=val_ds.y.astype(int),
+            meta={"concepts": tuple(names_m), "classes": val_ds.classes, "data_type": "text"}
+        )
+        print("Fitting detector (student) on lfcbm HARD targets")
+        detector.fit(train_ds_lf_hard, val_ds_lf_hard)
 
         truth_map = None
         fe_machine = FrontEndModel()
-        if int(args_obj.machine_soft):
-            fe_machine.fit(P_tr_m, train_ds.y.astype(int))
-        else:
-            fe_machine.fit(H_tr_m, train_ds.y.astype(int))
+        fe_machine.fit(H_tr_m, train_ds.y.astype(int))
+
     else:
         vec, Xtr = _tfidf_fit(train_ds.X, int(args_obj.machine_seed) if int(args_obj.machine_seed) > 0 else SEED)
         Xte = vec.transform([str(t) for t in test_ds.X])
@@ -2302,8 +2332,22 @@ def _choose_source():
         return names_vec, U_full, H_base, T_truth, fe_gt
 
     names_vec = names_m
-    U_full = (P_te_m if int(args_obj.machine_soft) else H_te_m.astype(float)) * (1.0 - (P_te_m if int(args_obj.machine_soft) else H_te_m.astype(float)))
-    H_base = (H_te_m if not int(args_obj.machine_soft) else (P_te_m > 0.5).astype(int))
+    demo_C = np.zeros((len(test_ds.X), len(names_vec)), dtype=np.float32)
+    test_ds_cd = ConceptDatasetSample(
+        X=[str(x) for x in test_ds.X],
+        C=demo_C,
+        y=test_ds.y.astype(int),
+        meta={"concepts": tuple(names_vec), "classes": test_ds.classes, "data_type": "text"}
+    )
+    _old_out = detector.output_mode
+    detector.output_mode = "soft"
+    P_te_cd = detector.predict(test_ds_cd).astype(np.float32)
+    detector.output_mode = "hard"
+    H_te_cd = detector.predict(test_ds_cd).astype(int)
+    detector.output_mode = _old_out
+
+    U_full = P_te_cd * (1.0 - P_te_cd)
+    H_base = H_te_cd
     if int(args_obj.machine_upper_bound) and truth_map is not None:
         T_truth = T_test[:, truth_map]
     else:
