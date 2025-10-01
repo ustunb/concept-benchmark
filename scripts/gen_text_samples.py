@@ -2246,193 +2246,276 @@ for ta in acc_grid:
 
     acc_k0 = None
 
-    for k in budgets:
-        Hm = H0.copy()
-        edit_counts = np.zeros(Hm.shape[0], dtype=int)
-        per_concept_edits = np.zeros(Hm.shape[1], dtype=int)
-        per_concept_correct = np.zeros(Hm.shape[1], dtype=int)
-        per_concept_attempts = np.zeros(Hm.shape[1], dtype=int)
-        P_work = C_test_scores.copy() if args_obj.concept_mode == "soft" else None
+    def _simulate_mode(H0_local, mode_name):
+        recs = []
+        conc_recs = []
+        pred0 = None
+        proba10 = None
+        predM = None
+        proba1M = None
+        for k in budgets:
+            Hm = H0_local.copy()
+            edit_counts = np.zeros(Hm.shape[0], dtype=int)
+            per_concept_edits = np.zeros(Hm.shape[1], dtype=int)
+            per_concept_correct = np.zeros(Hm.shape[1], dtype=int)
+            per_concept_attempts = np.zeros(Hm.shape[1], dtype=int)
+            P_work_loc = C_test_scores.copy() if args_obj.concept_mode == "soft" else None
 
-        if k > 0:
-            cols_all = allow_idxs if allow_idxs.size > 0 else np.arange(Hm.shape[1], dtype=int)
-            y0 = fe_src.predict(Hm)
-            if args_obj.concept_mode == "soft":
-                idxs = np.where((base_proba[:, cls_index_1] >= tau_val) & (base_proba[:, cls_index_1] <= 1 - tau_val))[0]
+            if k > 0:
+                cols_all = allow_idxs if allow_idxs.size > 0 else np.arange(Hm.shape[1], dtype=int)
+                y0 = fe_src.predict(Hm)
+                if args_obj.concept_mode == "soft":
+                    idxs = np.where((base_proba[:, cls_index_1] >= tau_val) & (base_proba[:, cls_index_1] <= 1 - tau_val))[0]
+                else:
+                    idxs = np.arange(Hm.shape[0])
+                for i in idxs:
+                    x_sel = Hm[i].copy()
+                    base = int(y0[i])
+                    rem = list(int(c) for c in cols_all)
+                    picks = []
+                    for _ in range(int(k)):
+                        if not rem:
+                            break
+                        proba = fe_src.predict_proba(x_sel.reshape(1, -1))[0]
+                        if _sel_obj == "increase_true":
+                            tgt = int(y_test_true[i])
+                            p0 = float(proba[tgt])
+                            best_j, best_gain = -1, -np.inf
+                            for j in rem:
+                                tmp = x_sel.copy()
+                                tmp[j] = T_truth_src[i, j]
+                                p1 = float(fe_src.predict_proba(tmp.reshape(1, -1))[0, tgt])
+                                gain = p1 - p0
+                                if gain > best_gain:
+                                    best_gain, best_j = gain, j
+                        else:
+                            p0 = float(proba[base])
+                            best_j, best_drop = -1, -np.inf
+                            for j in rem:
+                                tmp = x_sel.copy()
+                                tmp[j] = T_truth_src[i, j]
+                                p1 = float(fe_src.predict_proba(tmp.reshape(1, -1))[0, base])
+                                d = p0 - p1
+                                if d > best_drop:
+                                    best_drop, best_j = d, j
+                        if best_j < 0:
+                            break
+                        picks.append(best_j)
+                        x_sel[best_j] = T_truth_src[i, best_j]
+                        rem.remove(best_j)
+
+                    if picks:
+                        for j in picks:
+                            per_concept_attempts[j] += 1
+                        before = Hm[i, picks].copy()
+                        Hm[i] = _apply_human_edit(Hm[i], T_truth_src[i], picks, names_vec, float(args_obj.human_acc),
+                                                  acc_map, rng, mode=mode_name)
+                        after = Hm[i, picks]
+                        changed_mask = (after != before)
+                        for j, chg in zip(picks, changed_mask):
+                            if chg:
+                                per_concept_edits[j] += 1
+                                if int(Hm[i, j]) == int(T_truth_src[i, j]):
+                                    per_concept_correct[j] += 1
+                        edit_counts[i] = int(changed_mask.sum())
+                        if P_work_loc is not None:
+                            for j in picks:
+                                P_work_loc[i, j] = float(Hm[i, j])
+
+            H_infer = Hm
+            names_infer = list(names_vec)
+            H_infer, names_infer, miss_meta = _apply_test_missing(H_infer, names_infer, args_obj.test_miss,
+                                                                  float(args_obj.test_miss_rate), args_obj.test_miss_mode,
+                                                                  SEED)
+            if miss_meta is not None and miss_meta_capture is None:
+                miss_meta_capture = dict(miss_meta)
+
+            if miss_meta is not None and args_obj.test_miss_mode == "drop_cols":
+                keep_idx = np.array([names_vec.index(n) for n in names_infer], dtype=int)
+                if args_obj.concept_source == "detected":
+                    Xtr = C_train_used if 'C_train_used' in locals() else detector.predict(train_ds)
+                else:
+                    Xtr = train_ds.C
+                fe_src_drop = FrontEndModel()
+                fe_src_drop.fit(Xtr[:, keep_idx], train_ds.y.astype(int))
+                y_proba = fe_src_drop.predict_proba(H_infer)
             else:
-                idxs = np.arange(Hm.shape[0])
-            for i in idxs:
-                x = Hm[i].copy()
-                base = int(y0[i])
-                rem = list(int(c) for c in cols_all)
-                picks = []
-                for _ in range(int(k)):
-                    if not rem:
-                        break
-                    proba = fe_src.predict_proba(x.reshape(1, -1))[0]
-                    if _sel_obj == "increase_true":
-                        tgt = int(y_test_true[i])
-                        p0 = float(proba[tgt])
-                        best_j, best_gain = -1, -np.inf
-                        for j in rem:
-                            tmp = x.copy();
-                            tmp[j] = T_truth_src[i, j]
-                            p1 = float(fe_src.predict_proba(tmp.reshape(1, -1))[0, tgt])
-                            gain = p1 - p0
-                            if gain > best_gain:
-                                best_gain, best_j = gain, j
-                    else:
-                        p0 = float(proba[base])
-                        best_j, best_drop = -1, -np.inf
-                        for j in rem:
-                            tmp = x.copy();
-                            tmp[j] = T_truth_src[i, j]
-                            p1 = float(fe_src.predict_proba(tmp.reshape(1, -1))[0, base])
-                            d = p0 - p1
-                            if d > best_drop:
-                                best_drop, best_j = d, j
-                    if best_j < 0:
-                        break
-                    picks.append(best_j)
-                    x[best_j] = T_truth_src[i, best_j]
-                    rem.remove(best_j)
-                    if P_work is not None:
-                        P_work[i, best_j] = T_truth_src[i, best_j]
+                if args_obj.concept_mode == "soft":
+                    y_proba = cbm._propagate_predict_proba(P_work_loc if P_work_loc is not None else C_test_scores)
+                else:
+                    y_proba = fe_src.predict_proba(H_infer)
 
-                if picks:
-                    for j in picks:
-                        per_concept_attempts[j] += 1
-                    before = Hm[i, picks].copy()
-                    mode = "miss" if args_obj.intervention_error_mode == "miss" else (
-                        "flip" if args_obj.intervention_error_mode == "flip" else "miss")
-                    Hm[i] = _apply_human_edit(Hm[i], T_truth_src[i], picks, names_vec, float(args_obj.human_acc),
-                                              acc_map, rng, mode=mode)
+            y_pred = np.argmax(y_proba, axis=1)
+            acc_k = float(accuracy_score(y_test_true, y_pred))
+            try:
+                cls_i1_tmp = int(np.where(cbm.front_end_model.model.classes_ == 1)[0][0])
+            except Exception:
+                cls_i1_tmp = 1 if y_proba.shape[1] > 1 else 0
+            sel_post = calc_metric(y_proba[:, cls_i1_tmp], y_test_true, tau=tau_val)
 
-                    after = Hm[i, picks]
-                    changed_mask = (after != before)
-                    for j, chg in zip(picks, changed_mask):
-                        if chg:
-                            per_concept_edits[j] += 1
-                            if int(Hm[i, j]) == int(T_truth_src[i, j]):
-                                per_concept_correct[j] += 1
-                    edit_counts[i] = int(changed_mask.sum())
+            interventions = int(np.sum(edit_counts > 0))
+            total_applied_edits = int(edit_counts.sum())
+            avg_edits_per_case = (float(total_applied_edits) / float(Hm.shape[0])) if Hm.shape[0] > 0 else 0.0
+            concepts_per_intervention = float(edit_counts[edit_counts > 0].mean()) if interventions > 0 else 0.0
+            incorrect_after = (y_pred != y_test_true)
+            failed_interventions = int(np.sum((edit_counts > 0) & incorrect_after))
+            failed_interventions_rate = (float(failed_interventions) / float(interventions)) if interventions > 0 else 0.0
 
-        changed_bits = int(np.sum(Hm != H0))
-        changed_rows = int(np.sum((Hm != H0).any(axis=1)))
-        print(f"DBG ta={ta_label} k={k}: changed_bits={changed_bits} changed_rows={changed_rows}")
+            gain_vs_k0 = (acc_k - base_acc) if base_acc is not None else float("nan")
+            concept_checks_total = int(k * Hm.shape[0])
+            edit_effectiveness = (gain_vs_k0 / max(1, k)) if not np.isnan(gain_vs_k0) else float("nan")
+            edit_effectiveness_per_intervention = (gain_vs_k0 / max(1, interventions)) if not np.isnan(gain_vs_k0) else float("nan")
 
-        H_infer = Hm
-        names_infer = list(names_vec)
-        H_infer, names_infer, miss_meta = _apply_test_missing(H_infer, names_infer, args_obj.test_miss,
-                                                              float(args_obj.test_miss_rate), args_obj.test_miss_mode,
-                                                              SEED)
-        if miss_meta is not None and miss_meta_capture is None:
-            miss_meta_capture = dict(miss_meta)
-
-        if miss_meta is not None and args_obj.test_miss_mode == "drop_cols":
-            keep_idx = np.array([names_vec.index(n) for n in names_infer], dtype=int)
-            if args_obj.concept_source == "detected":
-                Xtr = C_train_used if 'C_train_used' in locals() else detector.predict(train_ds)
-            else:
-                Xtr = train_ds.C
-            fe_src_drop = FrontEndModel()
-            fe_src_drop.fit(Xtr[:, keep_idx], train_ds.y.astype(int))
-            y_proba = fe_src_drop.predict_proba(H_infer)
-        else:
-            if args_obj.concept_mode == "soft":
-                y_proba = cbm._propagate_predict_proba(P_work if P_work is not None else C_test_scores)
-            else:
-                y_proba = fe_src.predict_proba(H_infer)
-
-        y_pred = np.argmax(y_proba, axis=1)
-        acc_k = float(accuracy_score(y_test_true, y_pred))
-
-        if k == 0:
-            acc_k0 = acc_k
-
-        try:
-            cls_index_1 = int(np.where(cbm.front_end_model.model.classes_ == 1)[0][0])
-        except Exception:
-            cls_index_1 = 1 if y_proba.shape[1] > 1 else 0
-        sel_post = calc_metric(y_proba[:, cls_index_1], y_test_true, tau=tau_val)
-
-        interventions = int(np.sum(edit_counts > 0))
-        total_applied_edits = int(edit_counts.sum())
-        avg_edits_per_case = (float(total_applied_edits) / float(Hm.shape[0])) if Hm.shape[0] > 0 else 0.0
-        concepts_per_intervention = float(edit_counts[edit_counts > 0].mean()) if interventions > 0 else 0.0
-        incorrect_after = (y_pred != y_test_true)
-        failed_interventions = int(np.sum((edit_counts > 0) & incorrect_after))
-        failed_interventions_rate = (float(failed_interventions) / float(interventions)) if interventions > 0 else 0.0
-
-        gain_vs_k0 = (acc_k - base_acc) if base_acc is not None else float("nan")
-        concept_checks_total = int(k * Hm.shape[0])
-        edit_effectiveness = (gain_vs_k0 / max(1, k)) if not np.isnan(gain_vs_k0) else float("nan")
-        edit_effectiveness_per_intervention = (gain_vs_k0 / max(1, interventions)) if not np.isnan(
-            gain_vs_k0) else float("nan")
-
-        rec = {
-            "target_acc": ta,
-            "budget": k,
-            "acc_cbm_pre": base_acc,
-            "acc_cbm_intv": acc_k,
-            "raw_gain_vs_k0": gain_vs_k0,
-            "gain_acc_human": (acc_k - float(getattr(args_obj, "human_alone", 0.75))) if hasattr(args_obj, "human_alone") else float("nan"),
-            "gain_acc_dnn": (acc_k - bb_acc) if bb_acc is not None else float("nan"),
-            "delta_vs_blackbox": (acc_k - bb_acc) if bb_acc is not None else float("nan"),
-            "concept_checks": concept_checks_total,
-            "confirmation_cost": concept_checks_total,
-            "edit_effectiveness": edit_effectiveness,
-            "edit_effectiveness_per_intervention": edit_effectiveness_per_intervention,
-            "interventions_pct": float(interventions) / float(Hm.shape[0]),
-            "concepts_per_intervention": concepts_per_intervention,
-            "failed_interventions_pct": failed_interventions_rate,
-            "avg_edits_per_case": avg_edits_per_case,
-            "interventions_total": interventions,
-            "applied_edits_total": total_applied_edits,
-            "sel_acc_pre": float(sel_pre.get("selective_accuracy", float("nan"))),
-            "sel_cov_pre": float(sel_pre.get("coverage", float("nan"))),
-            "sel_acc_post": float(sel_post.get("selective_accuracy", float("nan"))),
-            "sel_cov_post": float(sel_post.get("coverage", float("nan"))),
-            "coverage_automated": float(sel_pre.get("coverage", float("nan"))),
-            "coverage_after_confirmation": acc_k,
-            "concept_source": args_obj.concept_source,
-            "test_miss": args_obj.test_miss,
-            "test_miss_rate": float(args_obj.test_miss_rate),
-            "test_miss_mode": args_obj.test_miss_mode,
-            "concept_err_rate": float(concept_err_rate) if "concept_err_rate" in locals() else float("nan"),
-            "upper_bound_acc": float(acc_upper) if "acc_upper" in locals() else float("nan"),
-            "corrected_edits_total": int(per_concept_correct.sum()),
-            "attempted_edits_total": int(per_concept_attempts.sum()),
-        }
-
-        rows.append(rec)
-
-        con_rows = []
-        for j, name in enumerate(names_vec):
-            n_att = int(per_concept_attempts[j])
-            n_app = int(per_concept_edits[j])
-            n_ok = int(per_concept_correct[j])
-            con_rows.append({
+            rec = {
                 "target_acc": ta,
                 "budget": k,
-                "concept": name,
-                "interventions": n_att,
-                "applied": n_app,
-                "correct": n_ok,
-                "correct_rate": (float(n_ok) / float(n_att)) if n_att > 0 else float("nan"),
-            })
-        if con_rows:
-            dfc = pd.DataFrame(con_rows)
-            pcon = run_dir / f"interventions_per_concept_{miss_tag}_{seed_tag}_{args_obj.concept_source}_ta{str(ta_label).replace('.', 'p')}_k{k}.csv"
-            dfc.to_csv(pcon, index=False)
+                "acc_cbm_pre": base_acc,
+                "acc_cbm_intv": acc_k,
+                "raw_gain_vs_k0": gain_vs_k0,
+                "gain_acc_human": (acc_k - float(getattr(args_obj, "human_alone", 0.75))) if hasattr(args_obj, "human_alone") else float("nan"),
+                "gain_acc_dnn": (acc_k - bb_acc) if bb_acc is not None else float("nan"),
+                "delta_vs_blackbox": (acc_k - bb_acc) if bb_acc is not None else float("nan"),
+                "concept_checks": concept_checks_total,
+                "confirmation_cost": concept_checks_total,
+                "edit_effectiveness": edit_effectiveness,
+                "edit_effectiveness_per_intervention": edit_effectiveness_per_intervention,
+                "interventions_pct": float(interventions) / float(Hm.shape[0]),
+                "concepts_per_intervention": concepts_per_intervention,
+                "failed_interventions_pct": failed_interventions_rate,
+                "avg_edits_per_case": avg_edits_per_case,
+                "interventions_total": interventions,
+                "applied_edits_total": total_applied_edits,
+                "sel_acc_pre": float(sel_pre.get("selective_accuracy", float("nan"))),
+                "sel_cov_pre": float(sel_pre.get("coverage", float("nan"))),
+                "sel_acc_post": float(sel_post.get("selective_accuracy", float("nan"))),
+                "sel_cov_post": float(sel_post.get("coverage", float("nan"))),
+                "coverage_automated": float(sel_pre.get("coverage", float("nan"))),
+                "coverage_after_confirmation": acc_k,
+                "concept_source": args_obj.concept_source,
+                "test_miss": args_obj.test_miss,
+                "test_miss_rate": float(args_obj.test_miss_rate),
+                "test_miss_mode": args_obj.test_miss_mode,
+                "concept_err_rate": float(concept_err_rate) if "concept_err_rate" in locals() else float("nan"),
+                "upper_bound_acc": float(acc_upper) if "acc_upper" in locals() else float("nan"),
+                "corrected_edits_total": int(per_concept_correct.sum()),
+                "attempted_edits_total": int(per_concept_attempts.sum()),
+            }
+            recs.append(rec)
 
-        # cache predictions for export
-        if k == budgets[0]:
-            pred_k0 = y_pred.copy()
-            proba1_k0 = y_proba[:, cls_index_1].copy()
-        if k == budgets[-1]:
-            pred_kmax = y_pred.copy()
-            proba1_kmax = y_proba[:, cls_index_1].copy()
+            con_rows = []
+            for j, name in enumerate(names_vec):
+                n_att = int(per_concept_attempts[j])
+                n_app = int(per_concept_edits[j])
+                n_ok = int(per_concept_correct[j])
+                con_rows.append({
+                    "target_acc": ta,
+                    "budget": k,
+                    "concept": name,
+                    "interventions": n_att,
+                    "applied": n_app,
+                    "correct": n_ok,
+                    "correct_rate": (float(n_ok) / float(n_att)) if n_att > 0 else float("nan"),
+                })
+            if con_rows:
+                dfc = pd.DataFrame(con_rows)
+                if mode_name == "miss":
+                    pcon = run_dir / f"interventions_per_concept_{miss_tag}_{seed_tag}_{args_obj.concept_source}_ta{str(ta_label).replace('.', 'p')}_k{k}.csv"
+                else:
+                    pcon = run_dir / f"interventions_per_conceptV2_{miss_tag}_{seed_tag}_{args_obj.concept_source}_ta{str(ta_label).replace('.', 'p')}_k{k}.csv"
+                dfc.to_csv(pcon, index=False)
+
+            if k == budgets[0]:
+                pred0 = y_pred.copy()
+                proba10 = y_proba[:, cls_i1_tmp].copy()
+            if k == budgets[-1]:
+                predM = y_pred.copy()
+                proba1M = y_proba[:, cls_i1_tmp].copy()
+
+        return recs, (pred0, proba10, predM, proba1M)
+
+    if str(args_obj.intervention_error_mode) == "both":
+        rows_v1, preds_v1 = _simulate_mode(H0, "miss")
+        rows_v2, _ = _simulate_mode(H0, "flip")
+
+        try:
+            pred_k0, proba1_k0, pred_kmax, proba1_kmax = preds_v1
+            df_pred = pd.DataFrame({
+                "text": [str(x) for x in test_ds.X],
+                "y_true": y_test_true.astype(int),
+                "pred_k0": pred_k0.astype(int),
+                "proba1_k0": proba1_k0.astype(float),
+                "pred_kmax": pred_kmax.astype(int),
+                "proba1_kmax": proba1_kmax.astype(float),
+            })
+            df_pred.to_csv(run_dir / f"preds_test_k0_k{budgets[-1]}_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv", index=False)
+        except Exception:
+            pass
+
+        viab_v1 = pd.DataFrame(rows_v1)
+        viab_v2 = pd.DataFrame(rows_v2)
+        viab_path = run_dir / f"viability_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+        viab_v1.to_csv(viab_path, index=False)
+        viab2_path = run_dir / f"viability_v2_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+        viab_v2.to_csv(viab2_path, index=False)
+        viab = viab_v1
+    else:
+        rows = []
+        rows, preds = _simulate_mode(H0, ("flip" if str(args_obj.intervention_error_mode) == "flip" else "miss"))
+        try:
+            pred_k0, proba1_k0, pred_kmax, proba1_kmax = preds
+            df_pred = pd.DataFrame({
+                "text": [str(x) for x in test_ds.X],
+                "y_true": y_test_true.astype(int),
+                "pred_k0": pred_k0.astype(int),
+                "proba1_k0": proba1_k0.astype(float),
+                "pred_kmax": pred_kmax.astype(int),
+                "proba1_kmax": proba1_kmax.astype(float),
+            })
+            df_pred.to_csv(run_dir / f"preds_test_k0_k{budgets[-1]}_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv", index=False)
+        except Exception:
+            pass
+        viab = pd.DataFrame(rows)
+        viab_path = run_dir / f"viability_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+        viab.to_csv(viab_path, index=False)
+
+    if miss_meta_capture is not None:
+        run_info["test_missing"] = miss_meta_capture
+        with open(run_dir / f"test_missing_meta_{miss_tag}_{seed_tag}.json", "w", encoding="utf-8") as f:
+            json.dump(miss_meta_capture, f, indent=2)
+        if miss_meta_capture.get("kept_cols"):
+            with open(run_dir / f"kept_columns_{miss_tag}_{seed_tag}.csv", "w", encoding="utf-8") as f:
+                f.write("concept\n")
+                for n in miss_meta_capture["kept_cols"]:
+                    f.write(f"{n}\n")
+        if miss_meta_capture.get("realized"):
+            mask_rows = [{"concept": k, "realized_rate": v} for k, v in miss_meta_capture["realized"].items()]
+            pd.DataFrame(mask_rows).to_csv(run_dir / f"mask_realized_{miss_tag}_{seed_tag}.csv", index=False)
+
+    if str(args_obj.intervention_error_mode) == "miss":
+        v1 = viab.copy()
+        v1["check_accuracy"] = v1["corrected_edits_total"] / v1["concept_checks"].replace(0, np.nan)
+        v1_path = run_dir / f"intervention_accuracy_v1_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+        v1[["target_acc","budget","check_accuracy"]].to_csv(v1_path, index=False)
+        print("Saved check-accuracy (v1):", v1_path)
+    elif str(args_obj.intervention_error_mode) == "flip":
+        v2 = viab.copy()
+        v2["check_accuracy"] = v2["corrected_edits_total"] / v2["applied_edits_total"].replace(0, np.nan)
+        v2_path = run_dir / f"intervention_accuracy_v2_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+        v2[["target_acc","budget","check_accuracy"]].to_csv(v2_path, index=False)
+        print("Saved check-accuracy (v2):", v2_path)
+    else:
+        v1 = viab_v1.copy()
+        v1["check_accuracy"] = v1["corrected_edits_total"] / v1["concept_checks"].replace(0, np.nan)
+        v1_path = run_dir / f"intervention_accuracy_v1_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+        v1[["target_acc","budget","check_accuracy"]].to_csv(v1_path, index=False)
+        v2 = viab_v2.copy()
+        v2["check_accuracy"] = v2["corrected_edits_total"] / v2["applied_edits_total"].replace(0, np.nan)
+        v2_path = run_dir / f"intervention_accuracy_v2_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+        v2[["target_acc","budget","check_accuracy"]].to_csv(v2_path, index=False)
+        print("Saved check-accuracy (v1):", v1_path)
+        print("Saved check-accuracy (v2):", v2_path)
+
+    print("Saved intervention metrics:", viab_path)
 
     # save test sentences + y + k0/kmax predictions
     try:
