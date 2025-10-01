@@ -2246,6 +2246,7 @@ for ta in acc_grid:
 
     acc_k0 = None
 
+
     def _simulate_mode(H0_local, mode_name):
         recs = []
         conc_recs = []
@@ -2265,7 +2266,8 @@ for ta in acc_grid:
                 cols_all = allow_idxs if allow_idxs.size > 0 else np.arange(Hm.shape[1], dtype=int)
                 y0 = fe_src.predict(Hm)
                 if args_obj.concept_mode == "soft":
-                    idxs = np.where((base_proba[:, cls_index_1] >= tau_val) & (base_proba[:, cls_index_1] <= 1 - tau_val))[0]
+                    idxs = \
+                    np.where((base_proba[:, cls_index_1] >= tau_val) & (base_proba[:, cls_index_1] <= 1 - tau_val))[0]
                 else:
                     idxs = np.arange(Hm.shape[0])
                 for i in idxs:
@@ -2282,7 +2284,7 @@ for ta in acc_grid:
                             p0 = float(proba[tgt])
                             best_j, best_gain = -1, -np.inf
                             for j in rem:
-                                tmp = x_sel.copy()
+                                tmp = x_sel.copy();
                                 tmp[j] = T_truth_src[i, j]
                                 p1 = float(fe_src.predict_proba(tmp.reshape(1, -1))[0, tgt])
                                 gain = p1 - p0
@@ -2292,7 +2294,7 @@ for ta in acc_grid:
                             p0 = float(proba[base])
                             best_j, best_drop = -1, -np.inf
                             for j in rem:
-                                tmp = x_sel.copy()
+                                tmp = x_sel.copy();
                                 tmp[j] = T_truth_src[i, j]
                                 p1 = float(fe_src.predict_proba(tmp.reshape(1, -1))[0, base])
                                 d = p0 - p1
@@ -2325,8 +2327,8 @@ for ta in acc_grid:
             H_infer = Hm
             names_infer = list(names_vec)
             H_infer, names_infer, miss_meta = _apply_test_missing(H_infer, names_infer, args_obj.test_miss,
-                                                                  float(args_obj.test_miss_rate), args_obj.test_miss_mode,
-                                                                  SEED)
+                                                                  float(args_obj.test_miss_rate),
+                                                                  args_obj.test_miss_mode, SEED)
             if miss_meta is not None and miss_meta_capture is None:
                 miss_meta_capture = dict(miss_meta)
 
@@ -2359,12 +2361,14 @@ for ta in acc_grid:
             concepts_per_intervention = float(edit_counts[edit_counts > 0].mean()) if interventions > 0 else 0.0
             incorrect_after = (y_pred != y_test_true)
             failed_interventions = int(np.sum((edit_counts > 0) & incorrect_after))
-            failed_interventions_rate = (float(failed_interventions) / float(interventions)) if interventions > 0 else 0.0
+            failed_interventions_rate = (
+                        float(failed_interventions) / float(interventions)) if interventions > 0 else 0.0
 
             gain_vs_k0 = (acc_k - base_acc) if base_acc is not None else float("nan")
             concept_checks_total = int(k * Hm.shape[0])
             edit_effectiveness = (gain_vs_k0 / max(1, k)) if not np.isnan(gain_vs_k0) else float("nan")
-            edit_effectiveness_per_intervention = (gain_vs_k0 / max(1, interventions)) if not np.isnan(gain_vs_k0) else float("nan")
+            edit_effectiveness_per_intervention = (gain_vs_k0 / max(1, interventions)) if not np.isnan(
+                gain_vs_k0) else float("nan")
 
             rec = {
                 "target_acc": ta,
@@ -2372,7 +2376,9 @@ for ta in acc_grid:
                 "acc_cbm_pre": base_acc,
                 "acc_cbm_intv": acc_k,
                 "raw_gain_vs_k0": gain_vs_k0,
-                "gain_acc_human": (acc_k - float(getattr(args_obj, "human_alone", 0.75))) if hasattr(args_obj, "human_alone") else float("nan"),
+                "gain_acc_human": (acc_k - float(getattr(args_obj, "human_alone", 0.75))) if hasattr(args_obj,
+                                                                                                     "human_alone") else float(
+                    "nan"),
                 "gain_acc_dnn": (acc_k - bb_acc) if bb_acc is not None else float("nan"),
                 "delta_vs_blackbox": (acc_k - bb_acc) if bb_acc is not None else float("nan"),
                 "concept_checks": concept_checks_total,
@@ -2433,6 +2439,7 @@ for ta in acc_grid:
 
         return recs, (pred0, proba10, predM, proba1M)
 
+
     if str(args_obj.intervention_error_mode) == "both":
         rows_v1, preds_v1 = _simulate_mode(H0, "miss")
         rows_v2, _ = _simulate_mode(H0, "flip")
@@ -2447,7 +2454,9 @@ for ta in acc_grid:
                 "pred_kmax": pred_kmax.astype(int),
                 "proba1_kmax": proba1_kmax.astype(float),
             })
-            df_pred.to_csv(run_dir / f"preds_test_k0_k{budgets[-1]}_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv", index=False)
+            df_pred.to_csv(
+                run_dir / f"preds_test_k0_k{budgets[-1]}_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv",
+                index=False)
         except Exception:
             pass
 
@@ -2457,21 +2466,26 @@ for ta in acc_grid:
         viab_v1.to_csv(viab_path, index=False)
         viab2_path = run_dir / f"viability_v2_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
         viab_v2.to_csv(viab2_path, index=False)
+
+        v1 = viab_v1.copy()
+        v1["check_accuracy"] = v1["corrected_edits_total"] / v1["concept_checks"].replace(0, np.nan)
+        v1_path = run_dir / f"intervention_accuracy_v1_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+        v1[["target_acc", "budget", "check_accuracy"]].to_csv(v1_path, index=False)
+
+        v2 = viab_v2.copy()
+        v2["check_accuracy"] = v2["corrected_edits_total"] / v2["applied_edits_total"].replace(0, np.nan)
+        v2_path = run_dir / f"intervention_accuracy_v2_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+        v2[["target_acc", "budget", "check_accuracy"]].to_csv(v2_path, index=False)
+
         viab = viab_v1
     else:
-        rows = []
         rows, preds = _simulate_mode(H0, ("flip" if str(args_obj.intervention_error_mode) == "flip" else "miss"))
         try:
             pred_k0, proba1_k0, pred_kmax, proba1_kmax = preds
-            df_pred = pd.DataFrame({
-                "text": [str(x) for x in test_ds.X],
-                "y_true": y_test_true.astype(int),
-                "pred_k0": pred_k0.astype(int),
-                "proba1_k0": proba1_k0.astype(float),
-                "pred_kmax": pred_kmax.astype(int),
-                "proba1_kmax": proba1_kmax.astype(float),
-            })
-            df_pred.to_csv(run_dir / f"preds_test_k0_k{budgets[-1]}_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv", index=False)
+            df_pred = pd.DataFrame({...})
+            df_pred.to_csv(
+                run_dir / f"preds_test_k0_k{budgets[-1]}_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv",
+                index=False)
         except Exception:
             pass
         viab = pd.DataFrame(rows)
