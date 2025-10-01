@@ -535,7 +535,7 @@ def run():
         "--variants-per-row-minority", str(int(vpr_min)),
         "--skip-fit", str(int(settings.get("skip_fit", 1))),
         "--force-rerun", str(int(settings.get("force", 0))),
-        "--concept-mode", "soft",
+        "--concept-mode", "hard",
         "--machine-method", "lfcbm",
         "--concepts-csv", str(settings.get("concepts_csv", "data/robot_text/concepts/concepts.csv")),
         "--lf-alpha", str(float(settings.get("lf_alpha", 0.5))),
