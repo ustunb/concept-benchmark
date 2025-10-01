@@ -2159,7 +2159,7 @@ if args_obj.concept_source == "machine":
             "lf_device": args_obj.lf_device,
             "lf_batch_size": int(args_obj.lf_batch_size),
         }
-                det_lf = LabelFreeDetector(lf_settings)
+        det_lf = LabelFreeDetector(lf_settings)
         det_lf.fit([str(x) for x in train_ds.X])
         old_mode_lf = det_lf.settings["lf_mode"]
 
