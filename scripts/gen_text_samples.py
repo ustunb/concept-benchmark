@@ -1642,6 +1642,8 @@ if (args_obj.concept_source == "machine") and (str(args_obj.machine_method) == "
         }
         _det_lf = LabelFreeDetector(lf_settings)
         _det_lf.fit([str(x) for x in train_ds.X])
+        det_lf = _det_lf
+        
     det_lf = _det_lf
     if args_obj.concept_mode == "soft":
         C_train_used = det_lf.predict([str(x) for x in train_ds.X]).astype(np.float32)
@@ -1686,10 +1688,17 @@ if not SKIP:
 with np.errstate(invalid="ignore"):
     C_val_true = val_ds.C.astype(np.float32)
 
-_old = detector.output_mode
-detector.output_mode = "soft"
-C_val_scores = detector.predict(val_ds)
-detector.output_mode = _old
+if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm":
+    _old_mode = det_lf.settings["lf_mode"]
+    det_lf.settings["lf_mode"] = "soft"
+    C_val_scores = det_lf.predict([str(x) for x in val_ds.X]).astype(np.float32)
+    det_lf.settings["lf_mode"] = _old_mode
+else:
+    _old = detector.output_mode
+    detector.output_mode = "soft"
+    C_val_scores = detector.predict(val_ds)
+    detector.output_mode = _old
+
 
 concept_names = list(ds.concepts)
 per = {}
