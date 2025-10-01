@@ -2259,9 +2259,17 @@ if args_obj.concept_source == "machine":
             y=train_ds.y.astype(int),
             meta={"concepts": tuple(names_m), "classes": train_ds.classes, "data_type": "text"}
         )
-        H_val_fit = H_val_m
-        if not ((H_val_fit.min(axis=0) != H_val_fit.max(axis=0)).any()):
-            H_val_fit = (P_val_m >= 0.5).astype(int)
+        H_val_fit = H_val_m.copy()
+        var = (H_val_fit.min(axis=0) != H_val_fit.max(axis=0))
+        if not var.all():
+            H_val_soft = (P_val_m >= 0.5).astype(int)
+            H_val_fit[:, ~var] = H_val_soft[:, ~var]
+            var = (H_val_fit.min(axis=0) != H_val_fit.max(axis=0))
+            if not var.all():
+                med = np.nanmedian(P_val_m, axis=0)
+                H_val_soft_med = (P_val_m >= med).astype(int)
+                H_val_fit[:, ~var] = H_val_soft_med[:, ~var]
+
         val_ds_lf_hard = ConceptDatasetSample(
             X=[str(x) for x in val_ds.X],
             C=H_val_fit.astype(np.float32),
