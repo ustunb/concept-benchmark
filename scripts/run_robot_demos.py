@@ -647,7 +647,11 @@ def recompute_metrics():
 
 def build_final_accuracy_table():
     import re
-    files = sorted(glob.glob(str(results_dir / "robot_text" / "**" / "viability_robots_text_*_detected.csv"), recursive=True))
+    files_v1 = glob.glob(str(results_dir / "robot_text" / "**" / "viability_robots_text_*_detected.csv"),
+                         recursive=True)
+    files_v2 = glob.glob(str(results_dir / "robot_text" / "**" / "viability_v2_robots_text_*_detected.csv"),
+                         recursive=True)
+    files = sorted(set(files_v1 + files_v2))
     if not files:
         return
 
