@@ -425,7 +425,7 @@ def run():
     # run_spec("cs", "best", settings["best_human_acc"], bb, tag, "detected",
     #          extra_flags=c_flags, detector_model=det_path)
 
-        def _float_list(v):
+    def _float_list(v):
         if v is None:
             return []
         if isinstance(v, (int, float)):
