@@ -2170,8 +2170,18 @@ if args_obj.concept_source == "machine":
         H_te_m = det_lf.predict([str(x) for x in test_ds.X]).astype(int)
         det_lf.settings["lf_mode"] = old_mode_lf
         names_m = list(det_lf.concept_names)
+        
+        if 'fe_src' in locals() and hasattr(fe_src, 'model') and hasattr(fe_src.model, 'n_features_in_'):
+            if int(args_obj.machine_soft):
+                _lf_dim = int(P_tr_m.shape[1])
+            else:
+                _lf_dim = int(H_tr_m.shape[1])
+            _fe_dim = int(fe_src.model.n_features_in_)
+            if _lf_dim != _fe_dim:
+                raise ValueError(f"lfcbm dimension {_lf_dim} != FE dimension {_fe_dim}. Update concepts_csv to {_fe_dim} names in the FE order, or retrain FE.")
         truth_map = None
         fe_machine = FrontEndModel()
+
         if int(args_obj.machine_soft):
             fe_machine.fit(P_tr_m, train_ds.y.astype(int))
         else:
