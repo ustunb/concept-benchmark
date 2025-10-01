@@ -91,6 +91,7 @@ settings = {
     "test_target_generic_frac": 0.7,
 
     "recompute_only": 0,
+    "skip_fit": 1
 }
 
 def parse_cli():
@@ -123,6 +124,7 @@ def parse_cli():
     ap.add_argument("--subjective_noise_rates", type=str)
     ap.add_argument("--expert_human_accs", type=str)
     ap.add_argument("--subjective_human_accs", type=str)
+    ap.add_argument("--skip_fit", type=int)
     args, _ = ap.parse_known_args()
     d = {k: v for k, v in vars(args).items() if v is not None}
     if "budgets" in d and isinstance(d["budgets"], str):
