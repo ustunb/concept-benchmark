@@ -91,7 +91,7 @@ settings = {
     "test_target_generic_frac": 0.7,
 
     "recompute_only": 0,
-    "skip_fit": 1
+    "skip_fit": 1,
 }
 
 def parse_cli():
@@ -423,11 +423,11 @@ def run():
              extra_flags=c_flags, detector_model=det_path)
 
     _expert_accs = settings.get("expert_human_accs") or [settings["expert_human_acc"]]
-    _expert_accs = [float(x) for x in _expert_accs]
+    _expert_accs = [float(y) for x in (_expert_accs if isinstance(_expert_accs, (list, tuple)) else [_expert_accs]) for y in (x if isinstance(x, (list, tuple)) else [x])]
     _subjective_accs = settings.get("subjective_human_accs") or [settings["subjective_human_acc"]]
-    _subjective_accs = [float(x) for x in _subjective_accs]
+    _subjective_accs = [float(y) for x in (_subjective_accs if isinstance(_subjective_accs, (list, tuple)) else [_subjective_accs]) for y in (x if isinstance(x, (list, tuple)) else [x])]
     _noise_rates = settings.get("subjective_noise_rates") or [settings.get("subjective_noise_rate", 0.20)]
-    _noise_rates = [float(x) for x in _noise_rates]
+    _noise_rates = [float(y) for x in (_noise_rates if isinstance(_noise_rates, (list, tuple)) else [_noise_rates]) for y in (x if isinstance(x, (list, tuple)) else [x])]
 
     for h in _expert_accs:
         run_spec("cs", "expert", float(h), bb, tag, "detected",
