@@ -1749,7 +1749,12 @@ texts_demo = [str(x) for x in ds.X[:3]]
 dummy_C = np.zeros((len(texts_demo), len(ds.concepts)), dtype=np.float32)
 dummy_y = np.zeros((len(texts_demo),), dtype=int)
 demo_ds = ConceptDatasetSample(X=texts_demo, C=dummy_C, y=dummy_y, meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text"})
-proba_demo = detector.predict(demo_ds)
+if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm":
+    _old_mode = det_lf.settings["lf_mode"]; det_lf.settings["lf_mode"] = "soft"
+    proba_demo = det_lf.predict([str(x) for x in texts_demo]).astype(np.float32)
+    det_lf.settings["lf_mode"] = _old_mode
+else:
+    proba_demo = detector.predict(demo_ds)
 print("Concept order:", concept_names)
 print(f"Concept outputs (mode={CONCEPT_MODE}) shape:", proba_demo.shape)
 print("First row outputs:", proba_demo[0])
@@ -1809,10 +1814,13 @@ f1_test = f1_score(y_test, y_test_pred, zero_division=0)
 print("Label model metrics (test):", {"accuracy": float(acc_test), "roc_auc": float(roc_test),
                                       "f1": float(f1_test), "balanced_acc": float(ba_test), "ber": float(ber_test)})
 
-_old_tr = detector.output_mode
-detector.output_mode = "soft"
-C_train_scores = detector.predict(train_ds)
-detector.output_mode = _old_tr
+if not (args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm"):
+    _old_tr = detector.output_mode
+    detector.output_mode = "soft"
+    C_train_scores = detector.predict(train_ds)
+    detector.output_mode = _old_tr
+else:
+    C_train_scores = None
 
 C_train_true = train_ds.C.astype(np.float32)
 sel_covs_tr, sel_accs_tr, aucs_tr, auprcs_tr = [], [], [], []
@@ -1834,13 +1842,16 @@ concept_train_metrics = {
     "tau": 0.5,
 }
 print("Concept metrics (train):", concept_train_metrics)
-
-_old2 = detector.output_mode
-detector.output_mode = "soft"
-C_test_scores = detector.predict(test_ds)
-detector.output_mode = "hard"
-H_test = detector.predict(test_ds)
-detector.output_mode = _old2
+if not (args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm"):
+    _old2 = detector.output_mode
+    detector.output_mode = "soft"
+    C_test_scores = detector.predict(test_ds)
+    detector.output_mode = "hard"
+    H_test = detector.predict(test_ds)
+    detector.output_mode = _old2
+else:
+    C_test_scores = None
+    H_test = None
 
 C_test_true = test_ds.C.astype(np.float32)
 sel_covs_t, sel_accs_t, aucs_t, auprcs_t = [], [], [], []
