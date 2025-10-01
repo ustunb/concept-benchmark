@@ -1614,9 +1614,10 @@ if int(args_obj.reuse_detector) and args_obj.detector_model:
     if SKIP and isinstance(obj_det, dict) and "cbm" in obj_det:
         loaded_cbm = obj_det["cbm"]
 else:
-    if SKIP:
+    is_lfcbm_ma = (args_obj.concept_source == "machine") and (str(args_obj.machine_method) == "lfcbm")
+    if SKIP and not is_lfcbm_ma:
         raise ValueError("skip-fit=1 requires --reuse-detector=1 and --detector-model pointing to a saved model.")
-    if not (args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm"):
+    if not is_lfcbm_ma:
         print("Fitting detector")
         detector.fit(train_ds, val_ds)
 
@@ -1626,34 +1627,49 @@ C_train = train_ds.C
 y_train = train_ds.y
 
 if (args_obj.concept_source == "machine") and (str(args_obj.machine_method) == "lfcbm"):
-    if "det_lf" in locals() and det_lf is not None:
-        _det_lf = det_lf
-    else:
-        lf_settings = {
-            "concepts_csv": str(args_obj.concepts_csv),
-            "lf_alpha": float(args_obj.lf_alpha),
-            "lf_threshold": float(args_obj.lf_threshold),
-            "lf_mode": "soft",
-            "lf_ridge": bool(args_obj.lf_ridge),
-            "lf_ridge_alpha": float(args_obj.lf_ridge_alpha),
-            "lf_encoder": str(args_obj.lf_encoder),
-            "lf_device": str(args_obj.lf_device),
-            "lf_batch_size": int(args_obj.lf_batch_size),
-        }
-        _det_lf = LabelFreeDetector(lf_settings)
-        _det_lf.fit([str(x) for x in train_ds.X])
-        det_lf = _det_lf
-        
+    lf_settings = {
+        "concepts_csv": str(args_obj.concepts_csv),
+        "lf_alpha": float(args_obj.lf_alpha),
+        "lf_threshold": float(args_obj.lf_threshold),
+        "lf_mode": "soft",
+        "lf_ridge": bool(args_obj.lf_ridge),
+        "lf_ridge_alpha": float(args_obj.lf_ridge_alpha),
+        "lf_encoder": str(args_obj.lf_encoder),
+        "lf_device": str(args_obj.lf_device),
+        "lf_batch_size": int(args_obj.lf_batch_size),
+    }
+    _det_lf = LabelFreeDetector(lf_settings)
+    _det_lf.fit([str(x) for x in train_ds.X])
+    det_lf = _det_lf
+
     det_lf = _det_lf
     if args_obj.concept_mode == "soft":
         C_train_used = det_lf.predict([str(x) for x in train_ds.X]).astype(np.float32)
+        C_val_used = det_lf.predict([str(x) for x in val_ds.X]).astype(np.float32)
     else:
         old_mode = det_lf.settings["lf_mode"]
         det_lf.settings["lf_mode"] = "hard"
         C_train_used = det_lf.predict([str(x) for x in train_ds.X]).astype(int)
-        H_val_lf  = det_lf.predict([str(x) for x in val_ds.X]).astype(int)
+        H_val_lf = det_lf.predict([str(x) for x in val_ds.X]).astype(int)
         H_test_lf = det_lf.predict([str(x) for x in test_ds.X]).astype(int)
+        C_val_used = H_val_lf.astype(int)
         det_lf.settings["lf_mode"] = old_mode
+
+    if not (int(args_obj.reuse_detector) and args_obj.detector_model):
+        ds_tr_cd = ConceptDatasetSample(
+            X=[str(x) for x in train_ds.X],
+            C=C_train_used,
+            y=train_ds.y.astype(int),
+            meta={"concepts": tuple(names_all), "classes": train_ds.classes, "data_type": "text"}
+        )
+        ds_val_cd = ConceptDatasetSample(
+            X=[str(x) for x in val_ds.X],
+            C=C_val_used.astype(int) if args_obj.concept_mode != "soft" else C_val_used.astype(np.float32),
+            y=val_ds.y.astype(int),
+            meta={"concepts": tuple(names_all), "classes": val_ds.classes, "data_type": "text"}
+        )
+        print("Fitting detector to lfcbm concepts (CD_lfcbm)")
+        detector.fit(ds_tr_cd, ds_val_cd)
 
 else:
     if train_on_detected:
@@ -1681,7 +1697,6 @@ if noise_mode == "machine":
                                        confusion=confusion,
                                        seed=int(merged.get("seed", 0)) + 201)
 
-
 if not SKIP:
     cbm.front_end_model.fit(C_train_used, y_train)
 
@@ -1693,12 +1708,34 @@ if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfc
     det_lf.settings["lf_mode"] = "soft"
     C_val_scores = det_lf.predict([str(x) for x in val_ds.X]).astype(np.float32)
     det_lf.settings["lf_mode"] = _old_mode
+
+    if not hasattr(detector, "model"):
+        tr_X = [str(x) for x in train_ds.X]
+        va_X = [str(x) for x in val_ds.X]
+        if args_obj.concept_mode == "soft":
+            tr_C = C_train_used.astype(np.float32)
+            va_C = C_val_scores.astype(np.float32)
+        else:
+            tr_C = C_train_used.astype(int)
+            va_C = H_val_lf.astype(int)
+        train_ds_cd = ConceptDatasetSample(
+            X=tr_X,
+            C=tr_C,
+            y=train_ds.y.astype(int),
+            meta={"concepts": tuple(names_all), "classes": train_ds.classes, "data_type": "text"},
+        )
+        val_ds_cd = ConceptDatasetSample(
+            X=va_X,
+            C=va_C,
+            y=val_ds.y.astype(int),
+            meta={"concepts": tuple(names_all), "classes": val_ds.classes, "data_type": "text"},
+        )
+        detector.fit(train_ds_cd, val_ds_cd)
 else:
     _old = detector.output_mode
     detector.output_mode = "soft"
     C_val_scores = detector.predict(val_ds)
     detector.output_mode = _old
-
 
 concept_names = list(ds.concepts)
 per = {}
@@ -1861,19 +1898,35 @@ if not (args_obj.concept_source == "machine" and str(args_obj.machine_method) ==
     H_test = detector.predict(test_ds)
     detector.output_mode = _old2
 else:
-    demo_C_te = np.zeros((len(test_ds.X), len(names_all)), dtype=np.float32)
-    test_ds_cd = ConceptDatasetSample(
-        X=[str(x) for x in test_ds.X],
-        C=demo_C_te,
-        y=test_ds.y.astype(int),
-        meta={"concepts": tuple(names_all), "classes": test_ds.classes, "data_type": "text"}
-    )
-    _old2 = detector.output_mode
-    detector.output_mode = "soft"
-    C_test_scores = detector.predict(test_ds_cd).astype(np.float32)
-    detector.output_mode = "hard"
-    H_test = detector.predict(test_ds_cd).astype(int)
-    detector.output_mode = _old2
+    if (args_obj.concept_source == "machine") and (str(args_obj.machine_method) == "lfcbm") and (
+    not hasattr(detector, "model")):
+        if str(args_obj.concept_mode) == "soft":
+            C_test_scores = det_lf.predict([str(x) for x in test_ds.X]).astype(np.float32)
+            _lf_old = det_lf.settings.get("lf_mode", "soft")
+            det_lf.settings["lf_mode"] = "hard"
+            H_test = det_lf.predict([str(x) for x in test_ds.X]).astype(int)
+            det_lf.settings["lf_mode"] = _lf_old
+        else:
+            _lf_old = det_lf.settings.get("lf_mode", "soft")
+            det_lf.settings["lf_mode"] = "soft"
+            C_test_scores = det_lf.predict([str(x) for x in test_ds.X]).astype(np.float32)
+            det_lf.settings["lf_mode"] = "hard"
+            H_test = det_lf.predict([str(x) for x in test_ds.X]).astype(int)
+            det_lf.settings["lf_mode"] = _lf_old
+    else:
+        demo_C_te = np.zeros((len(test_ds.X), len(names_all)), dtype=np.float32)
+        test_ds_cd = ConceptDatasetSample(
+            X=[str(x) for x in test_ds.X],
+            C=demo_C_te,
+            y=test_ds.y.astype(int),
+            meta={"concepts": tuple(names_all), "classes": test_ds.classes, "data_type": "text"}
+        )
+        _old2 = detector.output_mode
+        detector.output_mode = "soft"
+        C_test_scores = detector.predict(test_ds_cd).astype(np.float32)
+        detector.output_mode = "hard"
+        H_test = detector.predict(test_ds_cd).astype(int)
+        detector.output_mode = _old2
 
 C_test_true = test_ds.C.astype(np.float32)
 sel_covs_t, sel_accs_t, aucs_t, auprcs_t = [], [], [], []
