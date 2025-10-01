@@ -1616,8 +1616,9 @@ if int(args_obj.reuse_detector) and args_obj.detector_model:
 else:
     if SKIP:
         raise ValueError("skip-fit=1 requires --reuse-detector=1 and --detector-model pointing to a saved model.")
-    print("Fitting detector")
-    detector.fit(train_ds, val_ds)
+    if not (args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm"):
+        print("Fitting detector")
+        detector.fit(train_ds, val_ds)
 
 cbm = loaded_cbm if (SKIP and loaded_cbm is not None) else ConceptBasedModel(concept_detector=detector, front_end_model=FrontEndModel(), propagate=(args_obj.concept_mode == "soft"))
 
@@ -1641,13 +1642,16 @@ if (args_obj.concept_source == "machine") and (str(args_obj.machine_method) == "
         }
         _det_lf = LabelFreeDetector(lf_settings)
         _det_lf.fit([str(x) for x in train_ds.X])
+    det_lf = _det_lf
     if args_obj.concept_mode == "soft":
-        C_train_used = _det_lf.predict([str(x) for x in train_ds.X]).astype(np.float32)
+        C_train_used = det_lf.predict([str(x) for x in train_ds.X]).astype(np.float32)
     else:
-        old_mode = _det_lf.settings["lf_mode"]
-        _det_lf.settings["lf_mode"] = "hard"
-        C_train_used = _det_lf.predict([str(x) for x in train_ds.X]).astype(int)
-        _det_lf.settings["lf_mode"] = old_mode
+        old_mode = det_lf.settings["lf_mode"]
+        det_lf.settings["lf_mode"] = "hard"
+        C_train_used = det_lf.predict([str(x) for x in train_ds.X]).astype(int)
+        H_val_lf  = det_lf.predict([str(x) for x in val_ds.X]).astype(int)
+        H_test_lf = det_lf.predict([str(x) for x in test_ds.X]).astype(int)
+        det_lf.settings["lf_mode"] = old_mode
 
 else:
     if train_on_detected:
@@ -1742,7 +1746,11 @@ print(f"Concept outputs (mode={CONCEPT_MODE}) shape:", proba_demo.shape)
 print("First row outputs:", proba_demo[0])
 
 y_train_true = train_ds.y.astype(int)
-y_train_proba = cbm.predict_proba(train_ds)
+if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm" and args_obj.concept_mode == "hard":
+    y_train_proba = cbm.front_end_model.predict_proba(C_train_used)
+else:
+    y_train_proba = cbm.predict_proba(train_ds)
+    
 y_train_pred = np.argmax(y_train_proba, axis=1)
 acc_train = accuracy_score(y_train_true, y_train_pred)
 try:
@@ -1754,9 +1762,12 @@ ba_train = balanced_accuracy_score(y_train_true, y_train_pred)
 f1_train = f1_score(y_train_true, y_train_pred, zero_division=0)
 print("Label model metrics (train):", {"accuracy": float(acc_train), "roc_auc": float(roc_train),
                                        "f1": float(f1_train), "balanced_acc": float(ba_train), "ber": float(1.0 - ba_train)})
-
 y_val = val_ds.y.astype(int)
-y_val_proba = cbm.predict_proba(val_ds)
+if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm" and args_obj.concept_mode == "hard":
+    y_val_proba = cbm.front_end_model.predict_proba(H_val_lf)
+else:
+    y_val_proba = cbm.predict_proba(val_ds)
+    
 y_val_pred = np.argmax(y_val_proba, axis=1)
 acc = accuracy_score(y_val, y_val_pred)
 try:
@@ -1771,7 +1782,11 @@ print("Label model metrics (validation):", {"accuracy": float(acc), "roc_auc": f
                                            "f1": float(f1_val), "balanced_acc": float(ba_val), "ber": float(ber_val)})
 
 y_test = test_ds.y.astype(int)
-y_test_proba = cbm.predict_proba(test_ds)
+if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm" and args_obj.concept_mode == "hard":
+    y_test_proba = cbm.front_end_model.predict_proba(H_test_lf)
+else:
+    y_test_proba = cbm.predict_proba(test_ds)
+
 y_test_pred = np.argmax(y_test_proba, axis=1)
 acc_test = accuracy_score(y_test, y_test_pred)
 try:
