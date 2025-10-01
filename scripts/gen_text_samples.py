@@ -1625,24 +1625,30 @@ C_train = train_ds.C
 y_train = train_ds.y
 
 if (args_obj.concept_source == "machine") and (str(args_obj.machine_method) == "lfcbm"):
-    lf_settings = {
-        "concepts_csv": args_obj.concepts_csv,
-        "lf_alpha": float(args_obj.lf_alpha),
-        "lf_threshold": float(args_obj.lf_threshold),
-        "lf_mode": "soft",
-        "lf_ridge": bool(args_obj.lf_ridge),
-        "lf_ridge_alpha": float(args_obj.lf_ridge_alpha),
-        "lf_encoder": args_obj.lf_encoder,
-        "lf_device": args_obj.lf_device,
-        "lf_batch_size": int(args_obj.lf_batch_size),
-    }
-    _det_lf = LabelFreeDetector(lf_settings)
-    _det_lf.fit([str(x) for x in train_ds.X])
+    if "det_lf" in locals() and det_lf is not None:
+        _det_lf = det_lf
+    else:
+        lf_settings = {
+            "concepts_csv": str(args_obj.concepts_csv),
+            "lf_alpha": float(args_obj.lf_alpha),
+            "lf_threshold": float(args_obj.lf_threshold),
+            "lf_mode": "soft",
+            "lf_ridge": bool(args_obj.lf_ridge),
+            "lf_ridge_alpha": float(args_obj.lf_ridge_alpha),
+            "lf_encoder": str(args_obj.lf_encoder),
+            "lf_device": str(args_obj.lf_device),
+            "lf_batch_size": int(args_obj.lf_batch_size),
+        }
+        _det_lf = LabelFreeDetector(lf_settings)
+        _det_lf.fit([str(x) for x in train_ds.X])
     if args_obj.concept_mode == "soft":
         C_train_used = _det_lf.predict([str(x) for x in train_ds.X]).astype(np.float32)
     else:
+        old_mode = _det_lf.settings["lf_mode"]
         _det_lf.settings["lf_mode"] = "hard"
         C_train_used = _det_lf.predict([str(x) for x in train_ds.X]).astype(int)
+        _det_lf.settings["lf_mode"] = old_mode
+
 else:
     if train_on_detected:
         old_mode = getattr(detector, "output_mode", None)
