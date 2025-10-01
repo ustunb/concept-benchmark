@@ -1642,18 +1642,21 @@ detector.output_mode = _old
 
 concept_names = list(ds.concepts)
 per = {}
-for j, name in enumerate(concept_names):
-    yt = C_val_true[:, j]
-    ys = C_val_scores[:, j]
-    try:
-        auprc = average_precision_score(yt, ys)
-    except Exception:
-        auprc = float("nan")
-    try:
-        rocauc = roc_auc_score(yt, ys) if len(np.unique(yt)) == 2 else float("nan")
-    except Exception:
-        rocauc = float("nan")
-    per[name] = {"auprc": float(auprc), "roc_auc": float(rocauc)}
+if C_val_scores.shape[1] == C_val_true.shape[1]:
+    for j, name in enumerate(concept_names):
+        yt = C_val_true[:, j]
+        ys = C_val_scores[:, j]
+        try:
+            auprc = average_precision_score(yt, ys)
+        except Exception:
+            auprc = float("nan")
+        try:
+            rocauc = roc_auc_score(yt, ys) if len(np.unique(yt)) == 2 else float("nan")
+        except Exception:
+            rocauc = float("nan")
+        per[name] = {"auprc": float(auprc), "roc_auc": float(rocauc)}
+else:
+    per = {}
 
 auprc_macro = float(np.nanmean([d["auprc"] for d in per.values()])) if per else float("nan")
 roc_macro = float(np.nanmean([d["roc_auc"] for d in per.values()])) if per else float("nan")
