@@ -7,25 +7,43 @@ import pandas as pd
 
 def _read_concepts(csv_path):
     p = Path(csv_path)
+    if not p.exists():
+        raise FileNotFoundError(f"concepts.csv not found: {p} (cwd={Path.cwd()})")
     df = pd.read_csv(p)
-    if "name" not in df.columns:
-        raise ValueError("concepts.csv missing 'name'")
+    if df.empty:
+        raise ValueError("concepts.csv is empty")
+    lower_map = {c: c for c in df.columns}
+    cols_lower = {c.lower().strip(): c for c in df.columns}
+    name_key = None
+    for k in ["name", "concept", "concept_name", "token"]:
+        if k in cols_lower:
+            name_key = cols_lower[k]
+            break
+    if name_key is None:
+        name_key = df.columns[0]
+    aliases_key = cols_lower.get("aliases") or cols_lower.get("alias") or cols_lower.get("synonyms")
+    regex_key = cols_lower.get("regex") or cols_lower.get("pattern")
     names = []
     aliases = []
     regex = []
     for _, r in df.iterrows():
-        n = str(r["name"]).strip()
+        raw = r[name_key]
+        n = str(raw).strip() if pd.notna(raw) else ""
         if not n:
             continue
-        a = []
-        if "aliases" in df.columns and isinstance(r["aliases"], str):
-            a = [t.strip() for t in r["aliases"].split(";") if t.strip()]
-        rgx = None
-        if "regex" in df.columns and isinstance(r["regex"], str) and r["regex"].strip():
-            rgx = r["regex"].strip()
+        if aliases_key is not None and aliases_key in r and isinstance(r[aliases_key], str):
+            a = [t.strip() for t in str(r[aliases_key]).split(";") if t.strip()]
+        else:
+            a = []
+        if regex_key is not None and regex_key in r and isinstance(r[regex_key], str) and str(r[regex_key]).strip():
+            rgx = str(r[regex_key]).strip()
+        else:
+            rgx = None
         names.append(n)
         aliases.append(a)
         regex.append(rgx)
+    if not names:
+        raise ValueError("concepts.csv did not yield any concept names")
     return names, aliases, regex
 
 def _compile_regex(patterns):
@@ -241,3 +259,4 @@ _parser.add_argument("--lf-device", type=str, default=settings["lf_device"])
 _parser.add_argument("--lf-batch-size", type=int, default=settings["lf_batch_size"])
 _args, _unknown = _parser.parse_known_args()
 settings.update(vars(_args))
+
