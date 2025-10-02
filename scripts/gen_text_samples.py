@@ -2922,6 +2922,7 @@ if miss_meta_capture is not None:
 
 _rows_for_write = rows_all if rows_all else rows
 if _rows_for_write:
+    print("Rows found")
     viab = pd.DataFrame(_rows_for_write)
     viab_path = run_dir / f"viability_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
     viab.to_csv(viab_path, index=False)
