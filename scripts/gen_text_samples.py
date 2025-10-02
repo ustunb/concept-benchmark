@@ -2852,17 +2852,17 @@ for ta in acc_grid:
         viab.to_csv(viab_path, index=False)
 
 if miss_meta_capture is not None:
-        run_info["test_missing"] = miss_meta_capture
-        with open(run_dir / f"test_missing_meta_{miss_tag}_{seed_tag}.json", "w", encoding="utf-8") as f:
-            json.dump(miss_meta_capture, f, indent=2)
-        if miss_meta_capture.get("kept_cols"):
-            with open(run_dir / f"kept_columns_{miss_tag}_{seed_tag}.csv", "w", encoding="utf-8") as f:
-                f.write("concept\n")
-                for n in miss_meta_capture["kept_cols"]:
-                    f.write(f"{n}\n")
-        if miss_meta_capture.get("realized"):
-            mask_rows = [{"concept": k, "realized_rate": v} for k, v in miss_meta_capture["realized"].items()]
-            pd.DataFrame(mask_rows).to_csv(run_dir / f"mask_realized_{miss_tag}_{seed_tag}.csv", index=False)
+    run_info["test_missing"] = miss_meta_capture
+    with open(run_dir / f"test_missing_meta_{miss_tag}_{seed_tag}.json", "w", encoding="utf-8") as f:
+        json.dump(miss_meta_capture, f, indent=2)
+    if miss_meta_capture.get("kept_cols"):
+        with open(run_dir / f"kept_columns_{miss_tag}_{seed_tag}.csv", "w", encoding="utf-8") as f:
+            f.write("concept\n")
+            for n in miss_meta_capture["kept_cols"]:
+                f.write(f"{n}\n")
+    if miss_meta_capture.get("realized"):
+        mask_rows = [{"concept": k, "realized_rate": v} for k, v in miss_meta_capture["realized"].items()]
+        pd.DataFrame(mask_rows).to_csv(run_dir / f"mask_realized_{miss_tag}_{seed_tag}.csv", index=False)
 
     if str(args_obj.intervention_error_mode) == "miss":
         v1 = viab.copy()
@@ -2885,27 +2885,24 @@ if miss_meta_capture is not None:
         v2["check_accuracy"] = v2["corrected_edits_total"] / v2["applied_edits_total"].replace(0, np.nan)
         v2_path = run_dir / f"intervention_accuracy_v2_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
         v2[["target_acc", "budget", "check_accuracy"]].to_csv(v2_path, index=False)
-        
+
         print("Saved check-accuracy (v1):", v1_path)
         print("Saved check-accuracy (v2):", v2_path)
-        print("Saved intervention metrics:", viab_path)
 
     # save test sentences + y + k0/kmax predictions
-    try:
-        import pandas as pd
+    import pandas as pd
 
-        df_pred = pd.DataFrame({
-            "text": [str(x) for x in test_ds.X],
-            "y_true": y_test_true.astype(int),
-            "pred_k0": pred_k0.astype(int),
-            "proba1_k0": proba1_k0.astype(float),
-            "pred_kmax": pred_kmax.astype(int),
-            "proba1_kmax": proba1_kmax.astype(float),
-        })
-        df_pred.to_csv(run_dir / f"preds_test_k0_k{budgets[-1]}_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv",
-                       index=False)
-    except Exception as _:
-        pass
+    df_pred = pd.DataFrame({
+        "text": [str(x) for x in test_ds.X],
+        "y_true": y_test_true.astype(int),
+        "pred_k0": pred_k0.astype(int),
+        "proba1_k0": proba1_k0.astype(float),
+        "pred_kmax": pred_kmax.astype(int),
+        "proba1_kmax": proba1_kmax.astype(float),
+    })
+    df_pred.to_csv(run_dir / f"preds_test_k0_k{budgets[-1]}_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv", index=False)
+    # except Exception as _:
+    #     pass
 
 if miss_meta_capture is not None:
     run_info["test_missing"] = miss_meta_capture
