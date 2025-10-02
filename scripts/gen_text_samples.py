@@ -2926,6 +2926,9 @@ if _rows_for_write:
     viab_path = run_dir / f"viability_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
     viab.to_csv(viab_path, index=False)
     print("Saved intervention metrics:", viab_path)
+else:
+    print("No rows!)
+    print(_rows_for_write)
 
 def _first_k_at_least():
     ks = viab.sort_values(["target_acc", "budget"])
