@@ -2793,6 +2793,7 @@ for ta in acc_grid:
         rows_v1, preds_v1 = _simulate_mode(H0, "miss")
         rows_v2, _ = _simulate_mode(H0, "flip")
         rows_all.extend(rows_v1)
+        rows = rows_v1
 
         try:
             pred_k0, proba1_k0, pred_kmax, proba1_kmax = preds_v1
@@ -2919,10 +2920,12 @@ if miss_meta_capture is not None:
         mask_rows = [{"concept": k, "realized_rate": v} for k, v in miss_meta_capture["realized"].items()]
         pd.DataFrame(mask_rows).to_csv(run_dir / f"mask_realized_{miss_tag}_{seed_tag}.csv", index=False)
 
-if rows:
-    viab = pd.DataFrame(rows)
+_rows_for_write = rows_all if rows_all else rows
+if _rows_for_write:
+    viab = pd.DataFrame(_rows_for_write)
     viab_path = run_dir / f"viability_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
     viab.to_csv(viab_path, index=False)
+    print("Saved intervention metrics:", viab_path)
 
 def _first_k_at_least():
     ks = viab.sort_values(["target_acc", "budget"])
