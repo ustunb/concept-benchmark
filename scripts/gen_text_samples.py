@@ -2531,7 +2531,7 @@ def _choose_source():
     if int(args_obj.machine_upper_bound) and truth_map is not None:
         T_truth = T_test[:, truth_map]
     else:
-        T_truth = H_base.copy()
+        T_truth = H_te_m.copy()
     fe = fe_machine
     return names_vec, U_full, H_base, T_truth, fe
 
