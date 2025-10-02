@@ -11,7 +11,7 @@ from transformers import (
     AutoImageProcessor,
     AutoModelForImageClassification,
 )
-from concept_benchmark.models import ConceptDetector, FrontEndModel
+from concept_benchmark.models import ConceptDetector, FrontEndModel, RobotConceptClassifier
 from concept_benchmark.paths import results_dir
 from concept_benchmark.synthetic.robot import create_synthetic_dataset
 
@@ -51,9 +51,9 @@ settings = {
     "intervention_accuracy": 0.9,
     "epochs": 5,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "bias_antenna_largeimage",
-    "load_detector": str(Path(results_dir / "robots" / "bias_antenna_largeimage" / "detector_dnn_vitb16_robots_image_deterministic_complete__skewint-acc90_seed42.pt")),
-    "load_frontend": str(Path(results_dir / "robots" / "bias_antenna_largeimage" / "frontend_logreg_robots_image_deterministic_complete__skewint-acc90_seed42.pkl")),
+    "run_name": "bias_antenna_largeimage_vanillaCD",
+    "load_detector": "",#str(Path(results_dir / "robots" / "bias_antenna_largeimage" / "detector_dnn_vitb16_robots_image_deterministic_complete__skewint-acc90_seed42.pt")),
+    "load_frontend": "",#str(Path(results_dir / "robots" / "bias_antenna_largeimage" / "frontend_logreg_robots_image_deterministic_complete__skewint-acc90_seed42.pkl")),
 }
 
 class ImageDS(Dataset):
@@ -363,6 +363,15 @@ class ViTWrapper(torch.nn.Module):
         return o.last_hidden_state[:, 0, :]
 
 
+class CNNWrapper(torch.nn.Module):
+    def __init__(self, cnn_model):
+        super().__init__()
+        self.cnn = cnn_model
+
+    def forward(self, x):
+        return self.cnn.backbone(x).flatten(1)
+
+
 def _rate_tag(r):
     v = int(round(float(r) * 100))
     return f"{v:03d}"
@@ -509,8 +518,8 @@ def main():
         train = train.__class__(parent=train.parent, X=train.X, C=Ctr, y=train.y, meta=train.meta, transform=train.transform, concept_transform=train.concept_transform, target_transform=train.target_transform, base_dir=train.base_dir)
 
     device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
-    cd = ConceptDetector(embedding_model=ViTWrapper())
-    det_name = f"detector_dnn_vitb16_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
+    cd = ConceptDetector(embedding_model=CNNWrapper(RobotConceptClassifier(num_concepts=train.n_concepts)))
+    det_name = f"detector_dnn_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
     if S["load_detector"]:
         mini_train = train.filter(np.array([True] + [False] * (len(train.C) - 1)))
         mini_valid = valid.filter(np.array([True] + [False] * (len(valid.C) - 1)))

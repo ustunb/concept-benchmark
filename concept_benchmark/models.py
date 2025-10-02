@@ -4,6 +4,7 @@ from typing import List, Optional
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from sklearn.linear_model import LogisticRegression
 from tqdm import tqdm
 
@@ -11,6 +12,59 @@ from concept_benchmark.data import ConceptDatasetSample
 from concept_benchmark.train import (
     train_concept_heads,
 )
+
+
+class RobotConceptClassifier(nn.Module):
+    def __init__(self, num_concepts: int):
+        super(RobotConceptClassifier, self).__init__()
+
+        # 1) Shared CNN Backbone
+        self.backbone = nn.Sequential(
+            nn.Conv2d(3, 16, kernel_size=3, padding=1), nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            nn.Conv2d(16, 32, kernel_size=3, padding=1), nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1), nn.ReLU(),
+            nn.MaxPool2d(2, 2)
+        )
+
+        # 224 -> 112 -> 56 -> 28 after 3 MaxPool(2,2)
+        feature_size = 64 * 28 * 28
+
+        # 2) One head per concept (order matches input labels), wrapped in nn.Sequential
+        self.heads = nn.ModuleList([
+            nn.Linear(feature_size, 1)
+            for _ in range(num_concepts)
+        ])
+
+    def forward(self, x):
+        features = self.backbone(x)
+        features = torch.flatten(features, 1)
+        # Concatenate per-concept logits into shape (N, num_concepts)
+        logits = torch.cat([head(features) for head in self.heads], dim=1)
+        return logits
+
+
+class RobotViTConceptClassifier(nn.Module):
+    def __init__(self, num_concepts: int):
+        super(RobotViTConceptClassifier, self).__init__()
+        from transformers import ViTModel
+        self.vit = ViTModel.from_pretrained("google/vit-base-patch16-224")
+
+        feature_size = 768  # ViT base model feature size
+
+        # 2) One head per concept (order matches input labels), wrapped in nn.Sequential
+        self.heads = nn.ModuleList([
+            nn.Linear(feature_size, 1)
+            for _ in range(num_concepts)
+        ])
+
+    def forward(self, x):
+        vit_outputs = self.vit(pixel_values=x)
+        features = vit_outputs.last_hidden_state[:, 0, :]  # (N, 768)
+        # Concatenate per-concept logits into shape (N, num_concepts)
+        logits = torch.cat([head(features) for head in self.heads], dim=1)  # (N, num_concepts)
+        return logits
 
 
 class ConceptDetector(object):
