@@ -2792,6 +2792,7 @@ for ta in acc_grid:
     if str(args_obj.intervention_error_mode) == "both":
         rows_v1, preds_v1 = _simulate_mode(H0, "miss")
         rows_v2, _ = _simulate_mode(H0, "flip")
+        rows = rows_v1
 
         try:
             pred_k0, proba1_k0, pred_kmax, proba1_kmax = preds_v1
@@ -2912,38 +2913,39 @@ if miss_meta_capture is not None:
         mask_rows = [{"concept": k, "realized_rate": v} for k, v in miss_meta_capture["realized"].items()]
         pd.DataFrame(mask_rows).to_csv(run_dir / f"mask_realized_{miss_tag}_{seed_tag}.csv", index=False)
 
-viab = pd.DataFrame(rows)
-viab_path = run_dir / f"viability_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
-viab.to_csv(viab_path, index=False)
+if rows:
+    viab = pd.DataFrame(rows)
+    viab_path = run_dir / f"viability_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+    viab.to_csv(viab_path, index=False)
 
 # Emit per-mode “check accuracy” CSV
-if str(args_obj.intervention_error_mode) == "miss":
-    v1 = viab.copy()
-    v1["check_accuracy"] = v1["corrected_edits_total"] / v1["concept_checks"].replace(0, np.nan)
-    v1_path = run_dir / f"intervention_accuracy_v1_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
-    v1[["target_acc", "budget", "check_accuracy"]].to_csv(v1_path, index=False)
-    print("Saved check-accuracy (v1):", v1_path)
-elif str(args_obj.intervention_error_mode) == "flip":
-    v2 = viab.copy()
-    v2["check_accuracy"] = v2["corrected_edits_total"] / v2["applied_edits_total"].replace(0, np.nan)
-    v2_path = run_dir / f"intervention_accuracy_v2_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
-    v2[["target_acc", "budget", "check_accuracy"]].to_csv(v2_path, index=False)
-    print("Saved check-accuracy (v2):", v2_path)
-else:
-    # "both" → write both for completeness
-    v1 = viab.copy()
-    v1["check_accuracy"] = v1["corrected_edits_total"] / v1["concept_checks"].replace(0, np.nan)
-    v1_path = run_dir / f"intervention_accuracy_v1_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
-    v1[["target_acc", "budget", "check_accuracy"]].to_csv(v1_path, index=False)
+    if str(args_obj.intervention_error_mode) == "miss":
+        v1 = viab.copy()
+        v1["check_accuracy"] = v1["corrected_edits_total"] / v1["concept_checks"].replace(0, np.nan)
+        v1_path = run_dir / f"intervention_accuracy_v1_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+        v1[["target_acc", "budget", "check_accuracy"]].to_csv(v1_path, index=False)
+        print("Saved check-accuracy (v1):", v1_path)
+    elif str(args_obj.intervention_error_mode) == "flip":
+        v2 = viab.copy()
+        v2["check_accuracy"] = v2["corrected_edits_total"] / v2["applied_edits_total"].replace(0, np.nan)
+        v2_path = run_dir / f"intervention_accuracy_v2_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+        v2[["target_acc", "budget", "check_accuracy"]].to_csv(v2_path, index=False)
+        print("Saved check-accuracy (v2):", v2_path)
+    else:
+        # "both" → write both for completeness
+        v1 = viab.copy()
+        v1["check_accuracy"] = v1["corrected_edits_total"] / v1["concept_checks"].replace(0, np.nan)
+        v1_path = run_dir / f"intervention_accuracy_v1_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+        v1[["target_acc", "budget", "check_accuracy"]].to_csv(v1_path, index=False)
 
-    v2 = viab.copy()
-    v2["check_accuracy"] = v2["corrected_edits_total"] / v2["applied_edits_total"].replace(0, np.nan)
-    v2_path = run_dir / f"intervention_accuracy_v2_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
-    v2[["target_acc", "budget", "check_accuracy"]].to_csv(v2_path, index=False)
-    print("Saved check-accuracy (v1):", v1_path)
-    print("Saved check-accuracy (v2):", v2_path)
+        v2 = viab.copy()
+        v2["check_accuracy"] = v2["corrected_edits_total"] / v2["applied_edits_total"].replace(0, np.nan)
+        v2_path = run_dir / f"intervention_accuracy_v2_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+        v2[["target_acc", "budget", "check_accuracy"]].to_csv(v2_path, index=False)
+        print("Saved check-accuracy (v1):", v1_path)
+        print("Saved check-accuracy (v2):", v2_path)
 
-print("Saved intervention metrics:", viab_path)
+    print("Saved intervention metrics:", viab_path)
 
 
 def _first_k_at_least():
