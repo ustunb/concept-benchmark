@@ -27,7 +27,7 @@ settings = {
     "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy') + int(row['body_shape']=='square'))>= 2 else 'drent'",
     'dataset_characterization': "",
     "knows_concepts": True,
-    "human_alignment": {"foot_shape": -4.0377, "body_shape": -7.5442, "mouth_type": -7.5442, "bias": 11.4547}, # OR of ANDs model's logic
+    "human_alignment": {"foot_shape": -1, "body_shape": -1, "mouth_type": -1, "bias": 2}, # OR of ANDs model's logic
     "model_type": "deterministic",
     "label_noise_rate": 0.0,
     "missingness": "complete",
@@ -49,9 +49,9 @@ settings = {
                     # ],
     "budget": [9],
     "intervention_accuracy": 0.9,
-    "epochs": 5,
+    "epochs": 10,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "bias_antenna_largeimage_vanillaCD",
+    "run_name": "bias_antenna_largeimage_vanillaCD2",
     "load_detector": "",#str(Path(results_dir / "robots" / "bias_antenna_largeimage" / "detector_dnn_vitb16_robots_image_deterministic_complete__skewint-acc90_seed42.pt")),
     "load_frontend": "",#str(Path(results_dir / "robots" / "bias_antenna_largeimage" / "frontend_logreg_robots_image_deterministic_complete__skewint-acc90_seed42.pkl")),
 }
@@ -530,7 +530,8 @@ def main():
         cd.concept_layers.load_state_dict(state)
         det_path = Path(S["load_detector"])
     else:
-        cd.fit(train, valid, freeze=True, embed_params={"device": device}, fit_params={"epochs": int(S["epochs"]), "device": "cpu"})
+        cd.fit(train, valid, freeze=True, embed_params={"device": device}, fit_params={"epochs": 50, "patience": 10,
+                                                                                       "device": device})
         det_path = run_dir / det_name
         torch.save(cd.concept_layers.state_dict(), det_path)
 
