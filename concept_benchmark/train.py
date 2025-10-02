@@ -33,7 +33,7 @@ def train_concept_heads(
     params = {
         "epochs": 10,
         "batch_size": 64,
-        "lr_encoder": 1e-5,
+        "lr_encoder": 1e-3,
         "lr_heads": 1e-3,
         "min_delta": 0.001,
         "patience": 5,
@@ -81,9 +81,7 @@ def train_concept_heads(
     # Heads: independent per-concept MLPs
     heads = nn.ModuleList(
         [
-            nn.Sequential(
-                nn.Linear(input_dim, l1_size), nn.ReLU(), nn.Linear(l1_size, 1)
-            )
+            nn.Linear(input_dim, 1)
             for _ in range(num_concepts)
         ]
     )
