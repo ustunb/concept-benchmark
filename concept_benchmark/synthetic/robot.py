@@ -297,7 +297,7 @@ def create_robot_image_dataset(
 
     num_combinations = int(np.prod([len(v) for v in concepts.values()]))
     total_robots = num_robots or num_combinations * samples_per_instance
-    eff_resolution = resolution if resolution is not None else (600 if size == "large" else 36)
+    eff_resolution = resolution if resolution is not None else (600 if size == "large" else 32)
     spurious = list(spurious_features or [])
     irrelevant = list(irrelevant_features) if irrelevant_features is not None else spurious
     drop_irrelevant = extra_params.pop("drop_irrelevant", True)
@@ -336,6 +336,12 @@ def create_robot_image_dataset(
         catalog_df[OUTCOME_NAME] = catalog_df[OUTCOME_NAME].apply(
             lambda x: 1 if x == "glorp" else 0
         )
+    else:
+        # apply probabilistic thresholding
+        rng = np.random.default_rng(extra_params.get("rng_seed", 12345))
+        probs = catalog_df[OUTCOME_NAME].to_numpy(dtype=float)
+        random_vals = rng.random(size=probs.shape)
+        catalog_df[OUTCOME_NAME] = (random_vals < probs).astype(np.int32)
 
     if verbose:
         print("Catalog DataFrame:")

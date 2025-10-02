@@ -18,36 +18,42 @@ from concept_benchmark.synthetic.robot import create_synthetic_dataset
 settings = {
     "samples_per_instance": 1,
     "draw": 0,
+    "CBM_type": "joint", #"sequential"
     "image_dir": "./data/robot_images",
-    "image_size": "small",
-    "color_mode": "color",
-    "train_dnn": True,
+    "image_size": "large",
+    "color_mode": "greyscale",
+    "train_dnn": 0,
     "seed": 42,
-    "model": "'glorp' if (3*int(row['body_shape']=='square') + int(row['foot_shape_pointy_3sided']=='True') + int(row['foot_shape_pointy_4sided']=='True') + int(row['foot_shape_pointy_6sided']=='True'))>= 4 else 'drent'",
+    "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy') + int(row['body_shape']=='square'))>= 2 else 'drent'",
     'dataset_characterization': "",
-    "knows_concepts": False,
-    "human_alignment": {"foot_shape_pointy_3sided": 1.0, "foot_shape_pointy_4sided": 1.0, "body_shape": -2.0, "bias": -1.0}, # OR of ANDs model's logic
-    "model_type": "stochastic",
+    "knows_concepts": True,
+    "human_alignment": {"foot_shape": -4.0377, "body_shape": -7.5442, "mouth_type": -7.5442, "bias": 11.4547}, # OR of ANDs model's logic
+    "model_type": "deterministic",
     "label_noise_rate": 0.0,
     "missingness": "complete",
     "missing_rate": 1.0,
     "impute_missing": 0,
-    "skew_concept": [{'concepts': {'body_shape': 0, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.13},
-                     {'concepts': {'body_shape': 0, 'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.13},
-                     {'concepts': {'body_shape': 1, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.13},
-                     {'concepts': {'body_shape': 1, 'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.13},
-                     {'concepts': {'body_shape': 1, 'foot_shape_flat_lshaped': 1}, 'min_fraction': 0.13},
-                     {'concepts': {'body_shape': 1, 'foot_shape_flat_4sided': 1}, 'min_fraction': 0.13},
-                     {'concepts': {'body_shape': 0, 'foot_shape_flat_lshaped': 1}, 'min_fraction': 0.13},
-                     {'concepts': {'body_shape': 0, 'foot_shape_flat_4sided': 1}, 'min_fraction': 0.13}
-                     ],
+    "skew_concept": [{'concepts': {'body_shape': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.3},
+                     {'concepts': {'mouth_type': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.3},
+                     {'concepts': {'body_shape': 0, 'mouth_type': 0, 'has_antennae': 1}, 'min_fraction': 0.3},
+                     {'concepts': {'body_shape': 1, 'mouth_type': 1, 'has_antennae': 0}, 'min_fraction': 0.3},
+                     {'concepts': {'body_shape': 1, 'foot_shape': 0, 'has_antennae': 0}, 'min_fraction': 0.3},
+                     {'concepts': {'foot_shape': 0, 'mouth_type': 1, 'has_antennae': 0}, 'min_fraction': 0.3}],#[{'concepts': {'mouth_type': 0, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.13},
+                    # {'concepts': {'mouth_type': 0, 'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.13},
+                    # {'concepts': {'mouth_type': 1, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.13},
+                    # {'concepts': {'mouth_type': 1, 'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.13},
+                    # {'concepts': {'mouth_type': 1, 'foot_shape_flat_lshaped': 1}, 'min_fraction': 0.13},
+                    # {'concepts': {'mouth_type': 1, 'foot_shape_flat_4sided': 1}, 'min_fraction': 0.13},
+                    # {'concepts': {'mouth_type': 0, 'foot_shape_flat_lshaped': 1}, 'min_fraction': 0.13},
+                    # {'concepts': {'mouth_type': 0, 'foot_shape_flat_4sided': 1}, 'min_fraction': 0.13}
+                    # ],
     "budget": [9],
     "intervention_accuracy": 0.9,
-    "epochs": 10,
+    "epochs": 5,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "trial3",
-    "load_detector": "",#str(Path(results_dir / "robots" / "trial2" / "detector_dnn_vitb16_robots_image_stochastic_complete_label-noise__skewint-acc90_seed42.pt")),
-    "load_frontend": "",#str(Path(results_dir / "robots" / "trial2" / "frontend_logreg_robots_image_stochastic_complete_label-noise__skewint-acc90_seed42.pkl")),
+    "run_name": "bias_antenna_largeimage",
+    "load_detector": str(Path(results_dir / "robots" / "bias_antenna_largeimage" / "detector_dnn_vitb16_robots_image_deterministic_complete__skewint-acc90_seed42.pt")),
+    "load_frontend": str(Path(results_dir / "robots" / "bias_antenna_largeimage" / "frontend_logreg_robots_image_deterministic_complete__skewint-acc90_seed42.pkl")),
 }
 
 class ImageDS(Dataset):
@@ -87,7 +93,7 @@ def _apply_missing(C, mode, rate, rng, y=None):
     return C
 
 
-def train_eval_image(paths_tr, y_tr, paths_te, y_te, model_id, size, epochs, batch_size, lr, device):
+def train_eval_image(paths_tr, y_tr, paths_te, y_te, model_id, epochs, batch_size, lr, device):
     proc = AutoImageProcessor.from_pretrained(model_id)
     model = AutoModelForImageClassification.from_pretrained(model_id, num_labels=2, ignore_mismatched_sizes=True)
     ds_tr = ImageDS(paths_tr, y_tr, proc)
@@ -141,7 +147,7 @@ def create_sample(size, indices, dataset):
     return dataset._full.filter(mask)
 
 
-def create_skewed_splits(dataset, skew_specs, train_fraction=0.6, val_fraction=0.2, test_fraction=0.2, rng=None):
+def create_skewed_splits(dataset, skew_specs, train_fraction=0.5, val_fraction=0.25, test_fraction=0.25, rng=None):
     """
     Skew training by ensuring minimum representation of specific concept patterns.
 
@@ -162,6 +168,7 @@ def create_skewed_splits(dataset, skew_specs, train_fraction=0.6, val_fraction=0
 
     total_size = len(dataset.C)
     desired_train_size = int(total_size * train_fraction)
+    print("Desired training size:", desired_train_size)
 
     # Find indices matching each specification
     spec_indices = []
@@ -256,7 +263,7 @@ def align_frontend_weights(frontend_model, concept_names, weight_dict):
     return frontend_model
 
 
-def filter_training_by_string(dataset, string, train_fraction=0.7, val_fraction=0.15, test_fraction=0.15, rng=None):
+def filter_training_by_string(dataset, string, train_fraction=0.6, val_fraction=0.2, test_fraction=0.2, rng=None):
     """
     Filter robots for training set based on model string, put rest in val/test.
 
@@ -464,6 +471,7 @@ def main():
         "train_concept_detector": True,
         "epochs": int(S["epochs"]),
         "verbose": True,
+        "rng_seed": S['seed'],
     }
 
     data = create_synthetic_dataset(**params)
@@ -490,22 +498,6 @@ def main():
     else:
         data.split("K05N01", fold_num_validation=4, fold_num_test=5)
         train = data.training; valid = data.validation; test = data.test
-
-    flat_5_idx = test.concepts.index('foot_shape_flat_5sided')
-    print(f"Test samples with flat_5sided=True: {(test.C[:, flat_5_idx] == 1).sum()}")
-    print(f"Test samples with flat_5sided=False: {(test.C[:, flat_5_idx] == 0).sum()}")
-    pointy_6_idx = test.concepts.index('foot_shape_pointy_6sided')
-    print(f"Test samples with pointy_6sided=True: {(test.C[:, pointy_6_idx] == 1).sum()}")
-    print(f"Test samples with pointy_6sided=False: {(test.C[:, pointy_6_idx] == 0).sum()}")
-    train_flat_5_idx = train.concepts.index('foot_shape_flat_5sided')
-    print(f"Train samples with flat_5sided=True: {(train.C[:, train_flat_5_idx] == 1).sum()}")
-    print(f"Train samples with flat_5sided=False: {(train.C[:, train_flat_5_idx] == 0).sum()}")
-    train_pointy_6_idx = train.concepts.index('foot_shape_pointy_6sided')
-    print(f"Train samples with pointy_6sided=True: {(train.C[:, train_pointy_6_idx] == 1).sum()}")
-    print(f"Train samples with pointy_6sided=False: {(train.C[:, train_pointy_6_idx] == 0).sum()}")
-    train_glorp = train.filter(train.y == 1)
-    train_drent = train.filter(train.y == 0)
-    print(f"Train glorp samples: {len(train_glorp)}")
 
     if S.get("label_noise_rate", 0.0) > 0:
         train = _apply_label_noise(train, S["label_noise_rate"], seed=int(S["seed"]))
@@ -569,8 +561,11 @@ def main():
             Cin[m] = P_tr[m]
             fe.fit(Cin, train.y.astype(int))
         else:
-            keep = np.all(Ctr >= 0, axis=1)
-            fe.fit(H_tr[keep], train.y[keep].astype(int))
+            if S.get("CBM_type", "joint") == "sequential":
+                keep = np.all(Ctr >= 0, axis=1)
+                fe.fit(H_tr[keep], train.y[keep].astype(int))
+            else:
+                fe.fit(Ctr, train.y.astype(int))
         fe_path = run_dir / fe_name
         with open(fe_path, "wb") as f:
             pickle.dump(fe, f)
@@ -581,6 +576,72 @@ def main():
     acc_gt = float((y_pred_gt.argmax(1) == test.y.astype(int)).mean())
     concept_acc_mean = float((H_te == test.C).mean())
 
+    # Add this after computing frontend predictions
+
+    print("\n=== Analyzing test samples with GT concepts ===")
+
+    # Get frontend scores (before sigmoid)
+    def get_raw_scores(frontend, concepts):
+        """Get raw logistic regression scores before sigmoid"""
+        return frontend.model.decision_function(concepts)
+
+    gt_scores = get_raw_scores(fe, test.C.astype(np.float32))
+    det_scores = get_raw_scores(fe, H_te)
+    gt_preds = fe.predict(test.C)
+
+    # Create a dataframe for analysis
+    import pandas as pd
+
+    analysis_data = []
+    for i in range(len(test.y)):
+        row_data = {
+            'sample_idx': i,
+            'true_label': int(test.y[i]),
+            'gt_pred': int(gt_preds[i]),
+            'gt_score': float(gt_scores[i]),
+            "det_score": float(det_scores[i]),
+            'correct': int(gt_preds[i] == test.y[i]),
+        }
+
+        # Add all concept values
+        for j, concept_name in enumerate(test.concepts):
+            row_data[concept_name] = int(test.C[i, j])
+
+        analysis_data.append(row_data)
+
+    df_analysis = pd.DataFrame(analysis_data)
+
+    # Sort by score to see what's happening
+    df_sorted = df_analysis.sort_values('gt_score', ascending=False)
+
+    print("\n=== Top 20 samples by GT score (should predict glorp) ===")
+    print(df_sorted[['sample_idx', 'true_label', 'gt_pred', 'gt_score', 'correct',
+                     'mouth_type', 'foot_shape', 'body_shape', 'has_antennae']].head(
+        20).to_string(index=False))
+
+    print("\n=== Bottom 20 samples by GT score (should predict drent) ===")
+    print(df_sorted[['sample_idx', 'true_label', 'gt_pred', 'gt_score', 'det_score', 'correct',
+                     'mouth_type', 'foot_shape', 'body_shape', 'has_antennae']].tail(
+        20).to_string(index=False))
+
+    print("\n=== Glorp samples (true_label=1) that were predicted as drent ===")
+    wrong_glorps = df_analysis[(df_analysis['true_label'] == 1) & (df_analysis['gt_pred'] == 0)]
+    print(f"Total: {len(wrong_glorps)}")
+    print(wrong_glorps[['sample_idx', 'gt_score', 'det_score', 'mouth_type', 'foot_shape', 'body_shape', 'has_antennae']].head(30).to_string(index=False))
+
+    # Check the decision boundary
+    print(f"\n=== Decision boundary analysis ===")
+    print(f"Min score for correct glorp prediction: {df_analysis[df_analysis['gt_pred'] == 1]['gt_score'].min():.4f}")
+    print(f"Max score for correct drent prediction: {df_analysis[df_analysis['gt_pred'] == 0]['gt_score'].max():.4f}")
+    print(
+        f"Score distribution for true glorps: mean={df_analysis[df_analysis['true_label'] == 1]['gt_score'].mean():.4f}, median={df_analysis[df_analysis['true_label'] == 1]['gt_score'].median():.4f}")
+    print(
+        f"Score distribution for true drents: mean={df_analysis[df_analysis['true_label'] == 0]['gt_score'].mean():.4f}, median={df_analysis[df_analysis['true_label'] == 0]['gt_score'].median():.4f}")
+
+    print("\n=== Learned Frontend Weights ===")
+    for i, concept in enumerate(test.concepts):
+        print(f"  {concept}: {fe.model.coef_[0, i]:.4f}")
+    print(f"  bias: {fe.model.intercept_[0]:.4f}")
 
     # BASELINE
     dnn_stats = {}
@@ -596,7 +657,6 @@ def main():
         dnn_acc, proc, dnn_model = train_eval_image(
             paths_tr, ytr, paths_te, yte,
             model_id=S.get("image_model", "google/vit-base-patch16-224"),
-            size=224 if S["image_size"] == "large" else 40,
             epochs=int(S["epochs"]),
             batch_size=16,
             lr=5e-5,
@@ -604,7 +664,7 @@ def main():
         )
 
         dnn_stats = {"dnn_accuracy": float(dnn_acc)}
-        print(f"DNN accuracy: {dnn_acc:.4f}")
+        print(f"DNN accuracy: {float(dnn_acc)}")
 
         dnn_name = f"dnn_vitb16_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
         dnn_path = run_dir / dnn_name
