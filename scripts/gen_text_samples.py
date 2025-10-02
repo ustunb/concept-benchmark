@@ -2339,8 +2339,8 @@ def run(name):
     print("FP examples:", ex["FP"][:3])
 
 
-run("val");
-run("test")
+if not (args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm"):
+    run("val"); run("test") #temporary
 
 _old = detector.output_mode
 detector.output_mode = "soft"
