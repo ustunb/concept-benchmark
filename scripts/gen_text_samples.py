@@ -2927,7 +2927,7 @@ if _rows_for_write:
     viab.to_csv(viab_path, index=False)
     print("Saved intervention metrics:", viab_path)
 else:
-    print("No rows!)
+    print("No rows!")
     print(_rows_for_write)
 
 def _first_k_at_least():
