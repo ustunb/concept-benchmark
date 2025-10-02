@@ -2340,14 +2340,23 @@ def run(name):
 
 
 if not (args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm"):
-    run("val"); run("test") #temporary
+    run("val"); run("test")
 
-_old = detector.output_mode
-detector.output_mode = "soft"
-C_test_scores = detector.predict(test_ds).astype(float)
-detector.output_mode = "hard"
-H_test = detector.predict(test_ds).astype(int)
-detector.output_mode = _old
+if not (args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm"):
+    _old = detector.output_mode
+    detector.output_mode = "soft"
+    C_test_scores = detector.predict(test_ds).astype(float)
+    detector.output_mode = "hard"
+    H_test = detector.predict(test_ds).astype(int)
+    detector.output_mode = _old
+else:
+    _lf_old = det_lf.settings.get("lf_mode", "soft")
+    det_lf.settings["lf_mode"] = "soft"
+    C_test_scores = det_lf.predict([str(x) for x in test_ds.X]).astype(np.float32)
+    det_lf.settings["lf_mode"] = "hard"
+    H_test = det_lf.predict([str(x) for x in test_ds.X]).astype(int)
+    det_lf.settings["lf_mode"] = _lf_old
+
 
 T_test = test_ds.C.astype(int)
 y_test_true = test_ds.y.astype(int)
@@ -2922,14 +2931,10 @@ if miss_meta_capture is not None:
 
 _rows_for_write = rows_all if rows_all else rows
 if _rows_for_write:
-    print("Rows found")
     viab = pd.DataFrame(_rows_for_write)
     viab_path = run_dir / f"viability_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
     viab.to_csv(viab_path, index=False)
     print("Saved intervention metrics:", viab_path)
-else:
-    print("No rows!")
-    print(_rows_for_write)
 
 def _first_k_at_least():
     ks = viab.sort_values(["target_acc", "budget"])
