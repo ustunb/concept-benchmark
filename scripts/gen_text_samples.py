@@ -2888,8 +2888,7 @@ if miss_meta_capture is not None:
         
         print("Saved check-accuracy (v1):", v1_path)
         print("Saved check-accuracy (v2):", v2_path)
-
-    print("Saved intervention metrics:", viab_path)
+        print("Saved intervention metrics:", viab_path)
 
     # save test sentences + y + k0/kmax predictions
     try:
