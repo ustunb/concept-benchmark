@@ -619,6 +619,16 @@ def recompute_metrics():
         ccsv = settings.get("concepts_csv") or args.get("concepts_csv")
         add_arg("concepts_csv", ccsv)
 
+        add_arg("generic_enable", args.get("generic_enable"))
+        add_arg("generic_rate", args.get("generic_rate"))
+        add_arg("generic_tol", args.get("generic_tol"))
+        for _k in [
+            "train_balance_enable","train_target_pos_frac","train_target_generic_frac","train_balance_within_label",
+            "val_balance_enable","val_target_generic_frac","val_balance_within_label",
+            "test_balance_enable","test_target_generic_frac","test_balance_within_label",
+        ]:
+            add_arg(_k, args.get(_k))
+
         mobj = json.loads(Path(mp).read_text())
         det = mobj.get("artifacts", {}).get("model") or args.get("detector_model")
 
