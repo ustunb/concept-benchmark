@@ -45,6 +45,10 @@ settings = {
 
     "concepts_csv": str(ROOT / "data" / "robot_text" / "concepts" / "concepts.csv"),
     "run_name_sub": "",
+
+    "generic_enable": 1,
+    "generic_rate": 0.7,
+    "generic_tol": 0.02,
 }
 
 def parse_cli():
@@ -139,6 +143,9 @@ def run():
             "--concept-label-noise-rate", "0.2",
             "--blackbox-metrics", blackbox_metrics,
             "--concepts-csv", settings.get("concepts_csv", ""),
+            "--generic-enable", str(int(settings.get("generic_enable", 1))),
+            "--generic-rate", str(float(settings.get("generic_rate", 0.7))),
+            "--generic-tol", str(float(settings.get("generic_tol", 0.02))),
             "--concept-source", concept_source,
             "--skip-fit", str(int(settings.get("skip_fit", 1))),
             "--force-rerun", str(force),
@@ -204,6 +211,9 @@ def recompute_metrics():
         add_arg("policy", args.get("policy"))
         add_arg("concept_label_noise_mode", args.get("concept_label_noise_mode"))
         add_arg("concept_label_noise_rate", args.get("concept_label_noise_rate"))
+        add_arg("generic_enable", args.get("generic_enable", settings.get("generic_enable")))
+        add_arg("generic_rate", args.get("generic_rate", settings.get("generic_rate")))
+        add_arg("generic_tol", args.get("generic_tol", settings.get("generic_tol")))
         ci = args.get("concept_include")
         ce = args.get("concept_exclude")
         if ci not in (None, "", "[]"): add_arg("concept_include", ci)
