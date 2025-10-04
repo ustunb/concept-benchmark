@@ -44,6 +44,7 @@ settings = {
     "redact_splits": "",
 
     "concepts_csv": str(ROOT / "data" / "robot_text" / "concepts" / "concepts.csv"),
+    "run_name_sub": "",
 }
 
 def parse_cli():
@@ -67,6 +68,7 @@ def parse_cli():
     p.add_argument("--redact-splits")
     p.add_argument("--concepts-csv")
     p.add_argument("--force-rerun", type=int)
+    p.add_argument("--run-name-sub")
     args, _ = p.parse_known_args()
     for k, v in vars(args).items():
         if v is None:
@@ -304,6 +306,21 @@ def recompute_metrics():
                             rn = _re.sub(r"_noise\d{2}", f"_noise{dd:02d}", rn)
                         else:
                             rn = rn + f"_noise{dd:02d}"
+                subs = str(settings.get("run_name_sub", "")).strip()
+                if subs:
+                    for part in subs.split(";"):
+                        part = part.strip()
+                        if not part:
+                            continue
+                        if "->" in part:
+                            a, b = part.split("->", 1)
+                        elif ":" in part:
+                            a, b = part.split(":", 1)
+                        elif "," in part:
+                            a, b = part.split(",", 1)
+                        else:
+                            continue
+                        rn = rn.replace(a.strip(), b.strip())
                 argv += ["--run-name", rn]
                 run_cmd("recompute", argv)
 
