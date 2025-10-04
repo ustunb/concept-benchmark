@@ -505,13 +505,6 @@ else:
     if merged["test_corr"] is not None and merged["test_corr"] >= 0:
         merged["test_break"] = max(0.0, min(1.0, 1.0 - float(merged["test_corr"])))
     args_obj = SimpleNamespace(**merged)
-    if getattr(args_obj, "concept_source", "none") not in {"gt", "detected", "machine"}:
-        if int(getattr(args_obj, "reuse_detector", 0)) == 1 or getattr(args_obj, "detector_model", ""):
-            args_obj.concept_source = "detected"
-        elif str(getattr(args_obj, "machine_method", "means")) in {"lfcbm", "means"}:
-            args_obj.concept_source = "machine"
-        else:
-            args_obj.concept_source = "detected"
 
 template_file_name = "Templates.txt" if args_obj.template_difficulty == "medium" else "Templates_simple.txt"
 tpl_path = pkg_dir / "synthetic" / "helper" / "static" / "text_templates" / template_file_name
@@ -1800,7 +1793,10 @@ if noise_mode == "machine":
 
 if not SKIP:
     cbm.front_end_model.fit(C_train_used, y_train)
-
+else:
+    _fe_n_in = getattr(getattr(cbm.front_end_model, "model", None), "n_features_in_", None)
+    if (_fe_n_in is None) or (int(_fe_n_in) != int(getattr(C_train_used, "shape", [None, 0])[1])):
+        cbm.front_end_model.fit(C_train_used, y_train)
 with np.errstate(invalid="ignore"):
     C_val_true = val_ds.C.astype(np.float32)
 
@@ -2522,30 +2518,14 @@ def _choose_source():
     names_vec = names_m
     if names_vec is None:
         raise ValueError(f"Unsupported or missing concept_source={args_obj.concept_source}. Pass --concept-source in {'gt','detected','machine'}.")
-    demo_C = np.zeros((len(test_ds.X), len(names_vec)), dtype=np.float32)
-    test_ds_cd = ConceptDatasetSample(
-        X=[str(x) for x in test_ds.X],
-        C=demo_C,
-        y=test_ds.y.astype(int),
-        meta={"concepts": tuple(names_vec), "classes": test_ds.classes, "data_type": "text"}
-    )
-    _old_out = detector.output_mode
-    detector.output_mode = "soft"
-    P_te_cd = detector.predict(test_ds_cd).astype(np.float32)
-    detector.output_mode = "hard"
-    H_te_cd = detector.predict(test_ds_cd).astype(int)
-    detector.output_mode = _old_out
-
-    U_full = P_te_cd * (1.0 - P_te_cd)
-    H_base = H_te_cd
+    U_full = P_te_m * (1.0 - P_te_m)
+    H_base = H_te_m
     if int(args_obj.machine_upper_bound) and truth_map is not None:
         T_truth = T_test[:, truth_map]
     else:
         T_truth = H_te_m.copy()
     fe = fe_machine
     return names_vec, U_full, H_base, T_truth, fe
-
-
 names_vec, U_full_src, H_test_src, T_truth_src, fe_src = _choose_source()
 allow_idxs = _allowed_indices(names_vec, args_obj.intervene_allow)
 
@@ -2580,7 +2560,7 @@ for ta in acc_grid:
 
     tau_val = 0.2 if args_obj.concept_mode == "soft" else 0.5
     if args_obj.concept_mode == "soft":
-        if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm":
+        if args_obj.concept_source == "machine":
             base_proba = cbm._propagate_predict_proba(P_te_m)
         else:
             _old_mode = getattr(detector, "output_mode", None)
@@ -2626,8 +2606,7 @@ for ta in acc_grid:
             per_concept_edits = np.zeros(Hm.shape[1], dtype=int)
             per_concept_correct = np.zeros(Hm.shape[1], dtype=int)
             per_concept_attempts = np.zeros(Hm.shape[1], dtype=int)
-            P_work_loc = (P_te_m.copy() if (args_obj.concept_source == "machine" and str(
-                args_obj.machine_method) == "lfcbm") else C_test_scores.copy()) if args_obj.concept_mode == "soft" else None
+            P_work_loc = (P_te_m.copy() if (args_obj.concept_source == "machine") else C_test_scores.copy()) if args_obj.concept_mode == "soft" else None
 
             if k > 0:
                 cols_all = allow_idxs if allow_idxs.size > 0 else np.arange(Hm.shape[1], dtype=int)
@@ -2704,6 +2683,8 @@ for ta in acc_grid:
                 keep_idx = np.array([names_vec.index(n) for n in names_infer], dtype=int)
                 if args_obj.concept_source == "detected":
                     Xtr = C_train_used if 'C_train_used' in locals() else detector.predict(train_ds)
+                elif args_obj.concept_source == "machine":
+                    Xtr = (P_tr_m if int(args_obj.machine_soft) else H_tr_m)
                 else:
                     Xtr = train_ds.C
                 fe_src_drop = FrontEndModel()
