@@ -551,7 +551,7 @@ def run():
     ]
     if settings.get("lf_ridge", False):
         lf_flags += ["--lf-ridge", "--lf-ridge-alpha", str(float(settings.get("lf_ridge_alpha", 1.0)))]
-    Cf"{tag}_lfcbm"
+    tag_lf = f"{tag}_lfcbm"
     run_spec("cbm", "best", settings["best_human_acc"], bb, tag_lf, "machine",
              extra_flags=lf_flags, detector_model=None)
 
