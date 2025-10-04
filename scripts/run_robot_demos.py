@@ -576,9 +576,6 @@ def recompute_metrics():
                 return
             base_argv.extend([f"--{k.replace('_', '-')}", str(v)])
 
-        mobj = json.loads(Path(mp).read_text())
-        det = mobj.get("artifacts", {}).get("model") or args.get("detector_model")
-
         add_arg("variant", args.get("variant"))
         add_arg("variants_per_row", args.get("variants_per_row"))
         add_arg("imperfect_strategy", args.get("imperfect_strategy"))
@@ -623,6 +620,9 @@ def recompute_metrics():
             add_arg("blackbox_metrics", bm)
         ccsv = settings.get("concepts_csv") or args.get("concepts_csv")
         add_arg("concepts_csv", ccsv)
+
+        mobj = json.loads(Path(mp).read_text())
+        det = mobj.get("artifacts", {}).get("model") or args.get("detector_model")
 
         cs = args.get("concept_source")
         if not cs:
