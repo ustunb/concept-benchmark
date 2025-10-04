@@ -2452,7 +2452,8 @@ if args_obj.concept_source == "machine":
 
 acc_map = _csv_kv_float(args_obj.human_acc_concepts)
 rows = []
-rows_all = []
+rows_all_v1 = []
+rows_all_v2 = []
 rng = np.random.default_rng(SEED)
 
 def _choose_source():
@@ -2801,7 +2802,8 @@ for ta in acc_grid:
     if str(args_obj.intervention_error_mode) == "both":
         rows_v1, preds_v1 = _simulate_mode(H0, "miss")
         rows_v2, _ = _simulate_mode(H0, "flip")
-        rows_all.extend(rows_v1)
+        rows_all_v1.extend(rows_v1)
+        rows_all_v2.extend(rows_v2)
         rows = rows_v1
 
         try:
@@ -2838,10 +2840,8 @@ for ta in acc_grid:
         v2[["target_acc", "budget", "check_accuracy"]].to_csv(v2_path, index=False)
 
         viab = viab_v1
-
     else:
         rows, preds = _simulate_mode(H0, ("flip" if str(args_obj.intervention_error_mode) == "flip" else "miss"))
-        rows_all.extend(rows)
         try:
             pred_k0, proba1_k0, pred_kmax, proba1_kmax = preds
             df_pred = pd.DataFrame({
@@ -2858,7 +2858,8 @@ for ta in acc_grid:
         except Exception:
             pass
         viab = pd.DataFrame(rows)
-        viab_path = run_dir / f"viability_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+        viab_path = run_dir / (f"viability_v2_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv" if str(
+            args_obj.intervention_error_mode) == "flip" else f"viability_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv")
         viab.to_csv(viab_path, index=False)
 
 if miss_meta_capture is not None:
@@ -2929,12 +2930,16 @@ if miss_meta_capture is not None:
         mask_rows = [{"concept": k, "realized_rate": v} for k, v in miss_meta_capture["realized"].items()]
         pd.DataFrame(mask_rows).to_csv(run_dir / f"mask_realized_{miss_tag}_{seed_tag}.csv", index=False)
 
-_rows_for_write = rows_all if rows_all else rows
-if _rows_for_write:
-    viab = pd.DataFrame(_rows_for_write)
+if rows_all_v1:
+    viab = pd.DataFrame(rows_all_v1)
     viab_path = run_dir / f"viability_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
     viab.to_csv(viab_path, index=False)
     print("Saved intervention metrics:", viab_path)
+if rows_all_v2:
+    viab2 = pd.DataFrame(rows_all_v2)
+    viab2_path = run_dir / f"viability_v2_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+    viab2.to_csv(viab2_path, index=False)
+    print("Saved intervention metrics:", viab2_path)
 
 def _first_k_at_least():
     ks = viab.sort_values(["target_acc", "budget"])
