@@ -551,7 +551,7 @@ def run():
     ]
     if settings.get("lf_ridge", False):
         lf_flags += ["--lf-ridge", "--lf-ridge-alpha", str(float(settings.get("lf_ridge_alpha", 1.0)))]
-    tag_lf = f"{tag}_lfcbm"
+    tag_lf = f"{tag}_lfcbm}"
     run_spec("cbm", "best", settings["best_human_acc"], bb, tag_lf, "machine",
              extra_flags=lf_flags, detector_model=None)
 
@@ -575,6 +575,9 @@ def recompute_metrics():
             if v is None:
                 return
             base_argv.extend([f"--{k.replace('_', '-')}", str(v)])
+
+        mobj = json.loads(Path(mp).read_text())
+        det = mobj.get("artifacts", {}).get("model") or args.get("detector_model")
 
         add_arg("variant", args.get("variant"))
         add_arg("variants_per_row", args.get("variants_per_row"))
@@ -620,12 +623,13 @@ def recompute_metrics():
             add_arg("blackbox_metrics", bm)
         ccsv = settings.get("concepts_csv") or args.get("concepts_csv")
         add_arg("concepts_csv", ccsv)
+
         cs = args.get("concept_source")
         if not cs:
             machine_keys = ["machine_method","machine_k","machine_soft","machine_seed","machine_upper_bound","lf_alpha","lf_threshold","lf_mode","lf_ridge","lf_ridge_alpha","lf_encoder","lf_device","lf_batch_size"]
             if any(args.get(k) for k in machine_keys):
                 cs = "machine"
-            elif args.get("detector_model"):
+            elif det:
                 cs = "detected"
             elif args.get("use_gt_concepts") in [1, "1", True, "true"]:
                 cs = "gt"
@@ -634,13 +638,6 @@ def recompute_metrics():
         if cs == "machine":
             for k in ["machine_method","machine_k","machine_soft","machine_seed","machine_upper_bound","lf_alpha","lf_threshold","lf_mode","lf_ridge","lf_ridge_alpha","lf_encoder","lf_device","lf_batch_size"]:
                 add_arg(k, args.get(k))
-        add_arg("concept_source", args.get("concept_source"))
-        if (args.get("concept_source") or "").strip() == "machine":
-            for k in ["machine_method","machine_k","machine_soft","machine_seed","machine_upper_bound","lf_alpha","lf_threshold","lf_mode","lf_ridge","lf_ridge_alpha","lf_encoder","lf_device","lf_batch_size"]:
-                add_arg(k, args.get(k))
-
-        mobj = json.loads(Path(mp).read_text())
-        det = mobj.get("artifacts", {}).get("model") or args.get("detector_model")
 
         mode = "both"
         rn0 = args.get("run_name") or ""
