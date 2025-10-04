@@ -620,6 +620,10 @@ def recompute_metrics():
             add_arg("blackbox_metrics", bm)
         ccsv = settings.get("concepts_csv") or args.get("concepts_csv")
         add_arg("concepts_csv", ccsv)
+        add_arg("concept_source", args.get("concept_source"))
+        if (args.get("concept_source") or "").strip() == "machine":
+            for k in ["machine_method","machine_k","machine_soft","machine_seed","machine_upper_bound","lf_alpha","lf_threshold","lf_mode","lf_ridge","lf_ridge_alpha","lf_encoder","lf_device","lf_batch_size"]:
+                add_arg(k, args.get(k))
 
         mobj = json.loads(Path(mp).read_text())
         det = mobj.get("artifacts", {}).get("model") or args.get("detector_model")
