@@ -96,7 +96,8 @@ settings = {
     "lf_ridge": False,
     "lf_ridge_alpha": 1.0,
     "lf_encoder": "sentence-transformers/all-MiniLM-L6-v2",
-    "lf_device": "cuda" if (lambda: hasattr(__import__('torch'), 'cuda') and __import__('torch').cuda.is_available())() else "cpu",
+    "lf_device": "cuda" if (
+        lambda: hasattr(__import__('torch'), 'cuda') and __import__('torch').cuda.is_available())() else "cpu",
     "lf_batch_size": 64,
 }
 
@@ -136,25 +137,27 @@ def parse_cli():
     d = {k: v for k, v in vars(args).items() if v is not None}
     if "budgets" in d and isinstance(d["budgets"], str):
         d["budgets"] = [int(x) for x in d["budgets"].split(",") if x.strip() != ""]
-    for k in ("subjective_noise_rates","expert_human_accs","subjective_human_accs"):
+    for k in ("subjective_noise_rates", "expert_human_accs", "subjective_human_accs"):
         if k in d and isinstance(d[k], str):
             d[k] = [float(x) for x in d[k].split(",") if x.strip() != ""]
     settings.update(d)
+
 
 def run_cmd(label: str, argv: List[str]):
     cmd = [str(PY), *map(str, argv)]
     print(f"[RUN] {label}\n$ {' '.join(shlex.quote(c) for c in cmd)}")
     subprocess.run(cmd, check=True, env=ENV)
 
+
 def ensure_baseline(seed: int, diff: str, tag: str = "", extra_flags: Optional[List[str]] = None) -> Path:
     extra_flags = extra_flags or []
     run_name = f"baseline_text_{diff}_seed{seed}"
 
     if settings.get("generic_enable", 0) == 1:
-        run_name = f"{run_name}_gen{int(100*float(settings.get('generic_rate', 0.0))):02d}"
+        run_name = f"{run_name}_gen{int(100 * float(settings.get('generic_rate', 0.0))):02d}"
     if tag:
         run_name = f"{run_name}_{tag}"
-        
+
     out_dir = results_dir / "robot_baseline" / "text" / run_name
     metrics = find_metrics_json(out_dir)
     if metrics is not None:
@@ -195,6 +198,7 @@ def ensure_baseline(seed: int, diff: str, tag: str = "", extra_flags: Optional[L
         raise FileNotFoundError(f"Could not find baseline metrics json in {out_dir}")
     return metrics
 
+
 def find_metrics_json(run_dir: Path) -> Optional[Path]:
     if not run_dir.exists():
         return None
@@ -203,6 +207,7 @@ def find_metrics_json(run_dir: Path) -> Optional[Path]:
         return named[0]
     generic = sorted(run_dir.rglob("*metrics*.json"))
     return generic[0] if generic else None
+
 
 def common_gen_argv(seed: int, diff: str, budgets: List[int]) -> List[str]:
     argv = [
@@ -239,7 +244,9 @@ def common_gen_argv(seed: int, diff: str, budgets: List[int]) -> List[str]:
         argv += ["--generic-tol", str(settings["generic_tol"])]
     return argv
 
-def run_spec(view: str, regime: str, human_acc: float, bb_metrics: Path, tag: str, concept_source: str, extra_flags: Optional[List[str]] = None, detector_model: Optional[Path] = None):
+
+def run_spec(view: str, regime: str, human_acc: float, bb_metrics: Path, tag: str, concept_source: str,
+             extra_flags: Optional[List[str]] = None, detector_model: Optional[Path] = None):
     extra_flags = extra_flags or []
     mode_setting = str(settings.get("intervention_error_mode", "both"))
     argv = common_gen_argv(settings["seed"], settings["difficulty"], settings["budgets"])
@@ -261,7 +268,7 @@ def run_spec(view: str, regime: str, human_acc: float, bb_metrics: Path, tag: st
         argv += list(map(str, extra_flags))
         run_cmd(f"{view}:{regime}:both", argv)
     else:
-        tag2 = f"{tag}_{'v1' if mode_setting=='miss' else 'v2'}"
+        tag2 = f"{tag}_{'v1' if mode_setting == 'miss' else 'v2'}"
         rn2 = make_run_name(view, regime, human_acc, tag2)
         if regime == "subjective" and "_noise20" in rn2:
             cand2 = rn2.replace("_noise20", "_noise")
@@ -272,9 +279,11 @@ def run_spec(view: str, regime: str, human_acc: float, bb_metrics: Path, tag: st
         argv += list(map(str, extra_flags))
         run_cmd(f"{view}:{regime}:{mode_setting}", argv)
 
+
 def make_run_name(view: str, regime: str, human_acc: float, tag: str) -> str:
     kset = "_".join(str(k) for k in settings["budgets"])
-    return f"{regime}_{view}_{tag}_intervene{int(human_acc*100)}_kset-{kset}_{settings['difficulty']}_seed{settings['seed']}"
+    return f"{regime}_{view}_{tag}_intervene{int(human_acc * 100)}_kset-{kset}_{settings['difficulty']}_seed{settings['seed']}"
+
 
 def run():
     parse_cli()
@@ -282,7 +291,8 @@ def run():
     diff = settings["difficulty"]
 
     import hashlib, json as _json
-    label_expr = settings.get("label_model_expr") or "'glorp' if (min(int(str(row['has_antennae']).lower()=='true'), int(row['body_shape']=='square')) >= 1) else 'drent'"
+    label_expr = settings.get(
+        "label_model_expr") or "'glorp' if (min(int(str(row['has_antennae']).lower()=='true'), int(row['body_shape']=='square')) >= 1) else 'drent'"
     sig = _json.dumps({
         "seed": seed,
         "diff": diff,
@@ -346,7 +356,8 @@ def run():
 
     det_path = results_dir / "robot_text" / cs_anchor_run / f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"
     if not det_path.exists():
-        anchor_flags = ["--variants-per-row", "1", "--force-rerun", str(int(settings.get("force", 0))), "--concept-mode", "soft"]
+        anchor_flags = ["--variants-per-row", "1", "--force-rerun", str(int(settings.get("force", 0))),
+                        "--concept-mode", "soft"]
         run_spec("anchor", "anchor", settings["best_human_acc"], bb, cs_anchor_tag, "detected",
                  extra_flags=anchor_flags)
         det_path = results_dir / "robot_text" / cs_anchor_run / f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"
@@ -383,7 +394,8 @@ def run():
             break
         if {"ears_shape", "body_shape"}.issubset(_df.columns):
             ser = _df.apply(
-                lambda r: "glorp" if (str(r["ears_shape"]) == "square" and str(r["body_shape"]) == "square") else "drent",
+                lambda r: "glorp" if (
+                            str(r["ears_shape"]) == "square" and str(r["body_shape"]) == "square") else "drent",
                 axis=1
             )
             labels_series = ser.astype(str)
@@ -453,8 +465,10 @@ def run():
         return []
 
     _expert_accs = _float_list(settings.get("expert_human_accs")) or _float_list(settings.get("expert_human_acc"))
-    _subjective_accs = _float_list(settings.get("subjective_human_accs")) or _float_list(settings.get("subjective_human_acc"))
-    _noise_rates = _float_list(settings.get("subjective_noise_rates")) or _float_list(settings.get("subjective_noise_rate", 0.20))
+    _subjective_accs = _float_list(settings.get("subjective_human_accs")) or _float_list(
+        settings.get("subjective_human_acc"))
+    _noise_rates = _float_list(settings.get("subjective_noise_rates")) or _float_list(
+        settings.get("subjective_noise_rate", 0.20))
 
     # for h in _expert_accs:
     #     run_spec("cs", "expert", float(h), bb, tag, "detected",
@@ -485,7 +499,8 @@ def run():
         cbm_anchor_run = cbm_anchor_run_v1
         cbm_det_path = results_dir / "robot_text" / cbm_anchor_run / f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"
     if not cbm_det_path.exists():
-        cbm_anchor_flags = ["--variants-per-row", "1", "--force-rerun", str(int(settings.get("force", 0))), "--concept-mode", "hard"]
+        cbm_anchor_flags = ["--variants-per-row", "1", "--force-rerun", str(int(settings.get("force", 0))),
+                            "--concept-mode", "hard"]
         run_spec("anchor", "anchor", settings["best_human_acc"], bb, cbm_anchor_tag, "detected",
                  extra_flags=cbm_anchor_flags)
         cbm_det_path = results_dir / "robot_text" / cbm_anchor_run_v1 / f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"
@@ -555,6 +570,7 @@ def run():
     run_spec("cbm", "best", settings["best_human_acc"], bb, tag_lf, "machine",
              extra_flags=lf_flags, detector_model=None)
 
+
 def recompute_metrics():
     seed = int(settings.get("seed", 0))
     base = results_dir / "robot_text"
@@ -571,10 +587,32 @@ def recompute_metrics():
             continue
         base_argv = [str(GEN)]
 
+        def _as_cli(v):
+            if v is None:
+                return None
+            if isinstance(v, (list, tuple)):
+                return ",".join(str(x) for x in v)
+            return str(v)
+
+        _BOOL_FLAGS = {
+            "lf_ridge",
+            "train_on_detected",
+            "train_balance_enable", "train_balance_within_label",
+            "val_balance_enable", "val_balance_within_label",
+            "test_balance_enable", "test_balance_within_label",
+        }
+
         def add_arg(k, v):
             if v is None:
                 return
-            base_argv.extend([f"--{k.replace('_', '-')}", str(v)])
+            if k in _BOOL_FLAGS:
+                if bool(v):
+                    base_argv.append(f"--{k.replace('_','-')}")
+                return
+            val = _as_cli(v)
+            if val in ("", None):
+                return
+            base_argv.extend([f"--{k.replace('_','-')}", val])
 
         add_arg("variant", args.get("variant"))
         add_arg("variants_per_row", args.get("variants_per_row"))
@@ -625,18 +663,21 @@ def recompute_metrics():
         det = mobj.get("artifacts", {}).get("model") or args.get("detector_model")
 
         cs = args.get("concept_source")
-        if not cs:
-            machine_keys = ["machine_method","machine_k","machine_soft","machine_seed","machine_upper_bound","lf_alpha","lf_threshold","lf_mode","lf_ridge","lf_ridge_alpha","lf_encoder","lf_device","lf_batch_size"]
+        if cs in (None, "", "none", "human"):
+            machine_keys = ["machine_method", "machine_k", "machine_soft", "machine_seed", "machine_upper_bound",
+                            "lf_alpha", "lf_threshold", "lf_mode", "lf_ridge", "lf_ridge_alpha", "lf_encoder",
+                            "lf_device", "lf_batch_size"]
             if any(args.get(k) for k in machine_keys):
                 cs = "machine"
             elif det:
                 cs = "detected"
             elif args.get("use_gt_concepts") in [1, "1", True, "true"]:
                 cs = "gt"
-        if cs:
-            add_arg("concept_source", cs)
+        add_arg("concept_source", cs)
         if cs == "machine":
-            for k in ["machine_method","machine_k","machine_soft","machine_seed","machine_upper_bound","lf_alpha","lf_threshold","lf_mode","lf_ridge","lf_ridge_alpha","lf_encoder","lf_device","lf_batch_size"]:
+            for k in ["machine_method", "machine_k", "machine_soft", "machine_seed", "machine_upper_bound", "lf_alpha",
+                      "lf_threshold", "lf_mode", "lf_ridge", "lf_ridge_alpha", "lf_encoder", "lf_device",
+                      "lf_batch_size"]:
                 add_arg(k, args.get(k))
 
         mode = "both"
@@ -671,26 +712,28 @@ def recompute_metrics():
         if regime == "subjective":
             rates = _listify(settings.get("subjective_noise_rates"))
             if not rates:
-                rates = _listify(args.get("concept_label_noise_rate")) or _listify(settings.get("subjective_noise_rate", 0.20))
+                rates = _listify(args.get("concept_label_noise_rate")) or _listify(
+                    settings.get("subjective_noise_rate", 0.20))
         else:
             rates = [None]
 
         for ha in haccs:
             for rate in rates:
                 argv = list(base_argv)
-                argv += ["--skip-fit", str(int(settings.get("skip_fit", 1)))]
+                skip = int(settings.get("skip_fit", 1))
+                if skip == 1 and not (det and Path(det).exists()):
+                    raise RuntimeError(f"skip_fit=1 but detector missing: {det}")
+                argv += ["--skip-fit", str(skip)]
                 if det and Path(det).exists():
                     argv += ["--reuse-detector", "1", "--detector-model", det]
-                else:
-                    print("Warning: missing detector model", det)
                 argv += ["--force-rerun", str(int(settings.get("force", 0))), "--intervention-error-mode", mode]
 
                 argv += ["--human-acc", str(float(ha))]
                 rn = rn0
-                rn = _re.sub(r"_intervene\d+", f"_intervene{int(float(ha)*100)}", rn)
+                rn = _re.sub(r"_intervene\d+", f"_intervene{int(float(ha) * 100)}", rn)
                 if regime == "subjective" and rate is not None:
                     argv += ["--concept-label-noise-rate", str(float(rate))]
-                    dd = int(round(float(rate)*100))
+                    dd = int(round(float(rate) * 100))
                     if dd == 20:
                         if "_noise20" in rn:
                             cand = rn.replace("_noise20", "_noise")
@@ -730,13 +773,14 @@ def build_final_accuracy_table():
         if m:
             regime, view = m.group(1), m.group(2)
         else:
-            regime = "best" if "best" in run_name else ("expert" if "expert" in run_name else ("subjective" if "subjective" in run_name else "unknown"))
+            regime = "best" if "best" in run_name else (
+                "expert" if "expert" in run_name else ("subjective" if "subjective" in run_name else "unknown"))
             view = "cs" if "_cs_" in run_name else ("cbm" if "_cbm_" in run_name else "unknown")
         df = pd.read_csv(f)
         if "acc_cbm_intv" not in df.columns:
             continue
         if "budget" not in df.columns and "k" in df.columns:
-            df = df.rename(columns={"k":"budget"})
+            df = df.rename(columns={"k": "budget"})
         sub = df[df["budget"].isin(settings["budgets"])]
         if sub.empty:
             continue
@@ -772,10 +816,11 @@ def build_final_accuracy_table():
 
     tidy = pd.DataFrame(recs)
     tidy["method"] = tidy["method"].replace({"ANCHOR": "DNN"})
-    tidy = tidy.groupby(["regime","budget","method"], as_index=False)["accuracy"].mean()
-    tidy["method"] = tidy["method"].astype(pd.CategoricalDtype(categories=["DNN","CBM","CS"], ordered=True))
+    tidy = tidy.groupby(["regime", "budget", "method"], as_index=False)["accuracy"].mean()
+    tidy["method"] = tidy["method"].astype(pd.CategoricalDtype(categories=["DNN", "CBM", "CS"], ordered=True))
     tidy = tidy[tidy["method"].notna()]
-    pivot = tidy.pivot_table(index=["budget","method"], columns="regime", values="accuracy", aggfunc="mean").sort_index(level=[0,1])
+    pivot = tidy.pivot_table(index=["budget", "method"], columns="regime", values="accuracy",
+                             aggfunc="mean").sort_index(level=[0, 1])
     if "unknown" in pivot.columns:
         pivot = pivot.drop(columns=["unknown"])
     pivot = pivot.round(4)
@@ -801,7 +846,8 @@ def build_final_accuracy_table():
         if m:
             regime, view = m.group(1), m.group(2)
         else:
-            regime = "best" if "best" in run_name else ("expert" if "expert" in run_name else ("subjective" if "subjective" in run_name else "unknown"))
+            regime = "best" if "best" in run_name else (
+                "expert" if "expert" in run_name else ("subjective" if "subjective" in run_name else "unknown"))
             view = "cs" if "_cs_" in run_name else ("cbm" if "_cbm_" in run_name else "unknown")
 
         dfv = pd.read_csv(f)
@@ -874,14 +920,17 @@ def build_final_accuracy_table():
             for p in conc_files:
                 dfc = pd.read_csv(p)
                 if "budget" not in dfc.columns and "k" in dfc.columns:
-                    dfc = dfc.rename(columns={"k":"budget"})
+                    dfc = dfc.rename(columns={"k": "budget"})
                 if "budget" in dfc.columns:
                     parts.append(dfc[dfc["budget"].isin(settings["budgets"])])
             if parts:
                 dfc = pd.concat(parts, ignore_index=True)
                 if not dfc.empty:
-                    g2 = dfc.groupby(["budget","concept"], as_index=False).agg({"interventions":"sum","correct":"sum"})
-                    g2["correct_rate"] = g2.apply(lambda x: (x["correct"]/x["interventions"]) if x["interventions"]>0 else float("nan"), axis=1)
+                    g2 = dfc.groupby(["budget", "concept"], as_index=False).agg(
+                        {"interventions": "sum", "correct": "sum"})
+                    g2["correct_rate"] = g2.apply(
+                        lambda x: (x["correct"] / x["interventions"]) if x["interventions"] > 0 else float("nan"),
+                        axis=1)
                     g2["regime"] = regime
                     g2["method"] = view.upper()
                     concept_recs.append(g2)
@@ -899,6 +948,7 @@ def build_final_accuracy_table():
         c_path = outdir / f"intervention_effectiveness_per_concept_seed{settings['seed']}.csv"
         cdf.to_csv(c_path, index=False)
         print("Wrote", c_path)
+
 
 parse_cli()
 if int(settings.get("recompute_only", 0)) == 1:
