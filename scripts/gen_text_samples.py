@@ -505,6 +505,13 @@ else:
     if merged["test_corr"] is not None and merged["test_corr"] >= 0:
         merged["test_break"] = max(0.0, min(1.0, 1.0 - float(merged["test_corr"])))
     args_obj = SimpleNamespace(**merged)
+    if getattr(args_obj, "concept_source", "none") not in {"gt", "detected", "machine"}:
+        if int(getattr(args_obj, "reuse_detector", 0)) == 1 or getattr(args_obj, "detector_model", ""):
+            args_obj.concept_source = "detected"
+        elif str(getattr(args_obj, "machine_method", "means")) in {"lfcbm", "means"}:
+            args_obj.concept_source = "machine"
+        else:
+            args_obj.concept_source = "detected"
 
 template_file_name = "Templates.txt" if args_obj.template_difficulty == "medium" else "Templates_simple.txt"
 tpl_path = pkg_dir / "synthetic" / "helper" / "static" / "text_templates" / template_file_name
