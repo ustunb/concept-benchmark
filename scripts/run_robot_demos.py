@@ -59,19 +59,20 @@ settings = {
     "difficulty": "hard",
     "budgets": [0, 1, 2, 5, 10],
     "force": 0,
-    "reuse_detector": 0,
+    "reuse_detector": 1,
     "run_tag": "unbalanced_pixelated_fixed",
     "modality": "text",
     "text_model": "distilbert-base-uncased",
     "best_human_acc": 1.00,
-    "expert_human_accs": [0.70, 0.80],
-    "subjective_human_acc": [0.70, 0.80],
+    "expert_human_accs": [],
+    "subjective_human_acc": [],
+    "subjective_human_accs": [],
     "subjective_noise_mode": "subjective",
-    "subjective_noise_rates": [0.20, 0.30],
+    "subjective_noise_rates": [],
     "label_model_type": "stochastic",
     "label_model_alpha": 100.0,
     "label_model_bias": 0.2,
-    "label_model_expr": "'glorp' if (min(int(str(row['ears_shape'])=='triangle'), int(row['body_shape']=='square')) >= 1) else 'drent'",
+    "label_model_expr": "",
     "templates_file": "",
     "redact_concepts": "",
     "redact_splits": "",
@@ -84,8 +85,10 @@ settings = {
     "val_target_generic_frac": 0.7,
     "test_target_generic_frac": 0.7,
 
-    "recompute_only": 0,
+    "recompute_only": 1,
     "skip_fit": 1,
+    "intervention_error_mode": "both",
+
     "concepts_csv": "data/robot_text/concepts/concepts.csv",
     "lf_alpha": 0.5,
     "lf_threshold": 0.5,
@@ -96,6 +99,7 @@ settings = {
     "lf_device": "cuda" if (lambda: hasattr(__import__('torch'), 'cuda') and __import__('torch').cuda.is_available())() else "cpu",
     "lf_batch_size": 64,
 }
+
 
 def parse_cli():
     ap = argparse.ArgumentParser(add_help=False)
@@ -618,7 +622,7 @@ def recompute_metrics():
         mobj = json.loads(Path(mp).read_text())
         det = mobj.get("artifacts", {}).get("model") or args.get("detector_model")
 
-        mode = settings.get("intervention_error_mode", "both")
+        mode = "both"
         rn0 = args.get("run_name") or ""
 
         import re as _re
