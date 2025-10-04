@@ -44,6 +44,7 @@ settings = {
     "redact_splits": "",
 
     "concepts_csv": str(ROOT / "data" / "robot_text" / "concepts" / "concepts.csv"),
+    "run_name": "",
     "run_name_sub": "",
 
     "generic_enable": 1,
@@ -72,6 +73,7 @@ def parse_cli():
     p.add_argument("--redact-splits")
     p.add_argument("--concepts-csv")
     p.add_argument("--force-rerun", type=int)
+    p.add_argument("--run-name")
     p.add_argument("--run-name-sub")
     args, _ = p.parse_known_args()
     for k, v in vars(args).items():
@@ -113,6 +115,11 @@ def run():
 
     def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, tag_suffix: str, concept_source: str, extra_flags: Optional[List[str]] = None, detector_model: Optional[str] = None):
         rn = f"{prefix}_{regime}_minrule_eval_vpr3_pos1152neg3456_unbalanced_pixelated_fixed_seed{seed}_v1_intervene{int(human_acc*100)}_kset-0_1_2_5_10_{settings.get('difficulty','hard')}_seed{seed}"
+        rn_base = rn
+        override = str(settings.get("run_name", "")).strip()
+        if override:
+            rn_base = override
+        rn_final = rn_base if not tag_suffix else f"{tag_suffix}_{rn_base}"
         argv = [
             "--variant", "perfect",
             "--variants-per-row", "1",
@@ -150,7 +157,7 @@ def run():
             "--skip-fit", str(int(settings.get("skip_fit", 1))),
             "--force-rerun", str(force),
             "--intervention-error-mode", "both",
-            "--run-name", rn if not tag_suffix else f"{tag_suffix}_{rn}",
+            "--run-name", rn_final,
         ]
         if int(settings.get("reuse_detector", 1)) and detector_model:
             argv += ["--reuse-detector", "1", "--detector-model", detector_model]
@@ -316,6 +323,9 @@ def recompute_metrics():
                             rn = _re.sub(r"_noise\d{2}", f"_noise{dd:02d}", rn)
                         else:
                             rn = rn + f"_noise{dd:02d}"
+                override = str(settings.get("run_name", "")).strip()
+                if override:
+                    rn = override
                 subs = str(settings.get("run_name_sub", "")).strip()
                 if subs:
                     for part in subs.split(";"):
@@ -392,11 +402,10 @@ def build_final_accuracy_table():
             f.write(" & ".join(_fmt(row[c]) for c in cols) + " \\\\\n")
         f.write("\\end{tabular}\n")
 
-if __name__ == "__main__":
-    parse_cli()
-    if int(settings.get("recompute_only", 0)) == 1:
-        recompute_metrics()
-        build_final_accuracy_table()
-    else:
-        run()
-        build_final_accuracy_table()
+parse_cli()
+if int(settings.get("recompute_only", 0)) == 1:
+    recompute_metrics()
+    build_final_accuracy_table()
+else:
+    run()
+    build_final_accuracy_table()
