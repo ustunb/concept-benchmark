@@ -104,6 +104,7 @@ def generate_robot_catalog(
     color_mode: str = "color",
     blur: dict | None = None,
     drop_irrelevant: bool = True,
+    collapse: bool = True,
     irrelevant_features: Sequence[str] | None = None,
     verbose: bool = False,
     **unused,
@@ -138,10 +139,12 @@ def generate_robot_catalog(
         ]
         if existing_irrelevant_features:
             catalog_df.drop(columns=existing_irrelevant_features, inplace=True)
+    
+    if collapse:
+        catalog_df = collapse_robot_subtypes(
+            df=catalog_df, robot_features=list(concepts.keys())
+        )
 
-    catalog_df = collapse_robot_subtypes(
-        df=catalog_df, robot_features=list(concepts.keys())
-    )
     constant_cols = [
         col
         for col in catalog_df.columns

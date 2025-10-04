@@ -481,6 +481,7 @@ def create_robot_image_dataset(
     draw: bool = False,
     model: str = "",
     model_type: str = "deterministic",
+    collapse: bool = True,
     target_accuracy: float | None = None,
     concept_noise: float | None = None,
     rng_seed: int | None = 0,
@@ -545,6 +546,7 @@ def create_robot_image_dataset(
         draw=draw,
         color_mode=color_mode,
         blur=blur,
+        collapse=collapse,
         drop_irrelevant=drop_irrelevant,
         irrelevant_features=irrelevant,
         verbose=verbose,
@@ -596,17 +598,30 @@ def create_robot_image_dataset(
     image_dir = output_directory
     X = np.array([row["png_filename"] for _, row in catalog_df.iterrows()])
 
-    # C: Concept matrix
     feature_names = [
         feat for feat in catalog_df.columns if feat in ALL_ROBOT_FEATURES
     ]
-    pos_map = {
-        feat: ALL_ROBOT_FEATURES[feat][0].split("_")[0] \
-        if isinstance(ALL_ROBOT_FEATURES[feat][0], str) \
-        else ALL_ROBOT_FEATURES[feat][0]
-        for feat in feature_names
-    }
-    C = (catalog_df[pos_map.keys()] == pos_map.values()).to_numpy().astype(np.int8)
+    # C: Concept matrix
+    if collapse:
+        pos_map = {
+            feat: ALL_ROBOT_FEATURES[feat][0].split("_")[0] \
+            if isinstance(ALL_ROBOT_FEATURES[feat][0], str) \
+            else ALL_ROBOT_FEATURES[feat][0]
+            for feat in feature_names
+        }
+        C = (catalog_df[pos_map.keys()] == pos_map.values()).to_numpy().astype(np.int8)
+    else:
+        # TODO: decide whether n_concpet should be number of binary features or original features
+        cols = []
+        for feat in feature_names:
+                col = pd.get_dummies(catalog_df[feat])
+                col.columns = [f"{feat}_{v}" for v in col.columns]
+                if len(col.columns) == 2:
+                    col = col.iloc[:, 1]  # keep only positive class for binary
+                cols.append(col)
+        C = pd.concat(cols, axis=1)
+        feature_names = C.columns.tolist()
+        C = C.to_numpy().astype(np.int8)
 
     # y: Labels pr P(y=1|x)
     y = catalog_df[OUTCOME_NAME].values
