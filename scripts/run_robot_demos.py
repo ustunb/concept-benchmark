@@ -247,7 +247,7 @@ def run_spec(view: str, regime: str, human_acc: float, bb_metrics: Path, tag: st
     if detector_model is not None:
         argv += ["--reuse-detector", "1", "--detector-model", str(detector_model)]
     argv += ["--human-acc", str(human_acc)]
-    argv += ["--blackbox_metrics", str(bb_metrics)]
+    argv += ["--blackbox-metrics", str(bb_metrics)]
 
     rn = make_run_name(view, regime, human_acc, tag)
     if regime == "subjective" and "_noise20" in rn:
@@ -618,6 +618,8 @@ def recompute_metrics():
                 bm = str(cand[-1])
         if bm:
             add_arg("blackbox_metrics", bm)
+        ccsv = settings.get("concepts_csv") or args.get("concepts_csv")
+        add_arg("concepts_csv", ccsv)
 
         mobj = json.loads(Path(mp).read_text())
         det = mobj.get("artifacts", {}).get("model") or args.get("detector_model")
