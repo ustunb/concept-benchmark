@@ -2513,6 +2513,8 @@ def _choose_source():
         return names_vec, U_full, H_base, T_truth, fe_gt
 
     names_vec = names_m
+    if names_vec is None:
+        raise ValueError(f"Unsupported or missing concept_source={args_obj.concept_source}. Pass --concept-source in {'gt','detected','machine'}.")
     demo_C = np.zeros((len(test_ds.X), len(names_vec)), dtype=np.float32)
     test_ds_cd = ConceptDatasetSample(
         X=[str(x) for x in test_ds.X],
