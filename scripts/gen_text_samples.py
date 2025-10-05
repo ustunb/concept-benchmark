@@ -1057,8 +1057,7 @@ elif args_obj.template_difficulty == "hard":
     print(f"Using hard corpus: {default_jsonl}")
     if default_jsonl.is_file():
         _lbl = catalog_df["label"].astype(str)
-        n_pos = int((_lbl == "glorp").sum());
-        n_neg = int((_lbl == "drent").sum())
+        n_pos = int((_lbl == "glorp").sum()); n_neg = int((_lbl == "drent").sum())
         minority_label = "glorp" if n_pos < n_neg else ("drent" if n_neg < n_pos else "glorp")
         base_vpr = int(args_obj.variants_per_row)
         vpr_min = int(args_obj.variants_per_row_minority) if int(args_obj.variants_per_row_minority) > 0 else max(1,
@@ -1068,11 +1067,15 @@ elif args_obj.template_difficulty == "hard":
         vpr_maj = int(args_obj.variants_per_row_majority) if int(args_obj.variants_per_row_majority) > 0 else base_vpr
         row_variants = [vpr_min if lab == minority_label else vpr_maj for lab in _lbl]
         gen_jsonl = default_jsonl.with_name("HardCorpus_EarsGeneric.jsonl")
-        ds = _build_ds_from_corpus(catalog_df, params, default_jsonl, base_vpr, SEED, row_variants=row_variants,
-                                   generic_path=(gen_jsonl if (gen_jsonl.is_file() and int(
-                                       getattr(args_obj, "generic_enable", 0)) == 1) else None), generic_rate=(
-                float(getattr(args_obj, "generic_rate", 0.5)) if int(
-                    getattr(args_obj, "generic_enable", 0)) == 1 else 0.0))
+
+        # fail fast if genericization requested but the generic corpus isn't present
+        if int(getattr(args_obj, "generic_enable", 0)) == 1 and not gen_jsonl.is_file():
+            raise SystemExit(f"generic_enable=1 but missing generic corpus: {gen_jsonl}")
+
+        ds = _build_ds_from_corpus(catalog_df, params, default_jsonl, base_vpr, SEED,
+                                   row_variants=row_variants,
+                                   generic_path=(gen_jsonl if (gen_jsonl.is_file() and int(getattr(args_obj, "generic_enable", 0)) == 1) else None),
+                                   generic_rate=(float(getattr(args_obj, "generic_rate", 0.5)) if int(getattr(args_obj, "generic_enable", 0)) == 1 else 0.0))
         setattr(ds, "cvindices", None)
 
     # Fallback to legacy template mechanism if not using hard-corpus
