@@ -36,6 +36,7 @@ dependencies = [
     "pycairo>=1.28.0",
     "transformers>=4.55.2",
     "wand>=0.6.13",
+    "opencv-python>=4.11.0.86",
 ]
 
 [dependency-groups]

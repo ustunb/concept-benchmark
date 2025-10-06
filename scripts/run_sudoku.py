@@ -57,7 +57,6 @@ def make_image_transform(args):
             cell_px=args.cell_px,
             margin_px=args.margin_px,
             line_px=args.line_px,
-            bold_px=args.bold_px,
             font_size=args.font_size,
             standardize=(not args.no_standardize),
             font_path=args.font_path,
@@ -102,28 +101,28 @@ def save_non_image(ds, meta_like, save_dir: Path, save_format: str):
 def main():
     ap = argparse.ArgumentParser(description="Generate a Sudoku ConceptDataset.")
     ap.add_argument("--n", type=int, default=3)
-    ap.add_argument("--n-samples", type=int, default=1000)
+    ap.add_argument("--n-samples", type=int, default=250)
     ap.add_argument("--valid-ratio", type=float, default=0.5)
     ap.add_argument("--max-corrupt", type=int, default=3)
     ap.add_argument("--data-type", choices=["tabular", "image"], default="image")
-    ap.add_argument("--transform", choices=["auto", "default", "onehot", "histogram", "image"], default="auto")
+    ap.add_argument("--transform", choices=["auto", "default", "onehot", "histogram", "image"], default="image")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--dataset_name", type=str, default=None)
     ap.add_argument("--save-dir", type=Path, default=None)
     ap.add_argument("--save-format", choices=["npz", "pt"], default="npz")
     ap.add_argument("--progress", action="store_true", help="Show a progress bar during generation.")
     # image knobs
-    ap.add_argument("--cell-px", type=int, default=16)
-    ap.add_argument("--margin-px", type=int, default=3)
-    ap.add_argument("--line-px", type=int, default=1)
-    ap.add_argument("--bold-px", type=int, default=1)
-    ap.add_argument("--font-size", type=int, default=10)
+    ap.add_argument("--cell-px", type=int, default=50)
+    ap.add_argument("--margin-px", type=int, default=2)
+    ap.add_argument("--line-px", type=int, default=2)
+    ap.add_argument("--bold-px", type=int, default=5)
+    ap.add_argument("--font-size", type=int, default=25)
     ap.add_argument("--no-standardize", action="store_true")
     ap.add_argument("--font-path", type=str, default=None)
-    ap.add_argument("--handwriting", type=bool, default=False)
-    ap.add_argument("--radius", type=float, default=0)
-    ap.add_argument("--sigma", type=float, default=12)
-    ap.add_argument("--angle", type=float, default=140)
+    ap.add_argument("--handwriting", type=bool, default=True)
+    ap.add_argument("--radius", type=float, default=0.5)
+    ap.add_argument("--sigma", type=float, default=0.0)
+    ap.add_argument("--angle", type=float, default=98)
     args = ap.parse_args()
 
     # choose transform
@@ -150,7 +149,7 @@ def main():
         data_type=args.data_type,
         seed=args.seed,
         transform=transform,
-        ds_name=args.dataset_name,
+        dataset_name=args.dataset_name,
     )
 
     # -------- summary WITHOUT touching ds.meta ----------

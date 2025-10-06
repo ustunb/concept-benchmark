@@ -3,7 +3,7 @@ import dill
 import pandas as pd
 
 
-def save(obj, path, msg=True, overwrite=False, check_save=False, mkdir=True):
+def save(obj, path, msg=False, overwrite=False, check_save=False, mkdir=True):
     """
     saves data as a pickle file on disk
     :param obj: object to save to disk
