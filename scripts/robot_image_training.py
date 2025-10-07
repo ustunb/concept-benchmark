@@ -7,7 +7,6 @@ from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from transformers import (
-    ViTModel,
     AutoImageProcessor,
     AutoModelForImageClassification,
 )
@@ -23,37 +22,40 @@ settings = {
     "image_size": "large",
     "color_mode": "greyscale",
     "train_dnn": 0,
-    "seed": 42,
-    "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy') + int(row['body_shape']=='square'))>= 2 else 'drent'",
+    "seed": 555,
+    "model": "'glorp' if (int(row['mouth_type']=='closed') +  int(row['foot_shape']=='pointy'))>= 2 else 'drent'",
     'dataset_characterization': "",
     "knows_concepts": True,
-    "human_alignment": {"foot_shape": -1, "body_shape": -1, "mouth_type": -1, "bias": 2}, # OR of ANDs model's logic
+    "human_alignment": {"foot_shape": 1, "mouth_type": -1, "bias": -0.01}, # OR of ANDs model's logic
     "model_type": "deterministic",
-    "label_noise_rate": 0.0,
+    "label_noise_rate": 0.15,
     "missingness": "complete",
     "missing_rate": 1.0,
     "impute_missing": 0,
-    "skew_concept": [{'concepts': {'body_shape': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.3},
-                     {'concepts': {'mouth_type': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.3},
-                     {'concepts': {'body_shape': 0, 'mouth_type': 0, 'has_antennae': 1}, 'min_fraction': 0.3},
-                     {'concepts': {'body_shape': 1, 'mouth_type': 1, 'has_antennae': 0}, 'min_fraction': 0.3},
-                     {'concepts': {'body_shape': 1, 'foot_shape': 0, 'has_antennae': 0}, 'min_fraction': 0.3},
-                     {'concepts': {'foot_shape': 0, 'mouth_type': 1, 'has_antennae': 0}, 'min_fraction': 0.3}],#[{'concepts': {'mouth_type': 0, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.13},
-                    # {'concepts': {'mouth_type': 0, 'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.13},
-                    # {'concepts': {'mouth_type': 1, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.13},
-                    # {'concepts': {'mouth_type': 1, 'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.13},
-                    # {'concepts': {'mouth_type': 1, 'foot_shape_flat_lshaped': 1}, 'min_fraction': 0.13},
-                    # {'concepts': {'mouth_type': 1, 'foot_shape_flat_4sided': 1}, 'min_fraction': 0.13},
-                    # {'concepts': {'mouth_type': 0, 'foot_shape_flat_lshaped': 1}, 'min_fraction': 0.13},
-                    # {'concepts': {'mouth_type': 0, 'foot_shape_flat_4sided': 1}, 'min_fraction': 0.13}
-                    # ],
+    "skew_concept": [],# [{'concepts': {'mouth_type': 0, 'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.15},
+                    # {'concepts': {'mouth_type': 0, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.16},
+                    # #{'concepts': {'mouth_type': 0, 'foot_shape_pointy_6sided': 1}, 'min_fraction': 0.005},
+                    # {'concepts': {'mouth_type': 1, 'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.1},
+                    # {'concepts': {'mouth_type': 1, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.16},
+                    # {'concepts': {'mouth_type': 1, 'foot_shape_flat_lshaped': 1}, 'min_fraction': 0.08},
+                    # {'concepts': {'mouth_type': 1, 'foot_shape_flat_4sided': 1}, 'min_fraction': 0.08},
+                    # {'concepts': {'mouth_type': 1, 'foot_shape_flat_5sided': 1}, 'min_fraction': 0.08},
+                    # {'concepts': {'mouth_type': 0, 'foot_shape_flat_lshaped': 1}, 'min_fraction': 0.08},
+                    # {'concepts': {'mouth_type': 0, 'foot_shape_flat_4sided': 1}, 'min_fraction': 0.08},
+                    # {'concepts': {'mouth_type': 0, 'foot_shape_flat_5sided': 1}, 'min_fraction': 0.08},
+                    # ], #[{'concepts': {'body_shape': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.243},
+                     # {'concepts': {'mouth_type': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.2},
+                     # {'concepts': {'body_shape': 0, 'mouth_type': 0, 'has_antennae': 1}, 'min_fraction': 0.15},
+                     # {'concepts': {'body_shape': 1, 'mouth_type': 1, 'has_antennae': 0}, 'min_fraction': 0.235},
+                     # {'concepts': {'body_shape': 1, 'foot_shape': 0, 'has_antennae': 0}, 'min_fraction': 0.2},
+                     # {'concepts': {'foot_shape': 0, 'mouth_type': 1, 'has_antennae': 0}, 'min_fraction': 0.15}],#[{'concepts': {'mouth_type': 0, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.13},
     "budget": [9],
     "intervention_accuracy": 0.9,
     "epochs": 10,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "bias_antenna_largeimage_vanillaCD2",
-    "load_detector": "",#str(Path(results_dir / "robots" / "bias_antenna_largeimage" / "detector_dnn_vitb16_robots_image_deterministic_complete__skewint-acc90_seed42.pt")),
-    "load_frontend": "",#str(Path(results_dir / "robots" / "bias_antenna_largeimage" / "frontend_logreg_robots_image_deterministic_complete__skewint-acc90_seed42.pkl")),
+    "run_name": "noise",
+    "load_detector": "",#str(Path(results_dir / "robots" / "bias_footshape_subtype4" / "detector_dnn_robots_image_deterministic_complete__skewint-acc90_seed555.pt")),
+    "load_frontend": "",#str(Path(results_dir / "robots" / "bias_footshape_subtype4" / "frontend_logreg_robots_image_deterministic_complete__skewint-acc90_seed555.pkl")),
 }
 
 class ImageDS(Dataset):
@@ -354,24 +356,6 @@ def filter_training_by_string(dataset, string, train_fraction=0.6, val_fraction=
     return dataset.training, dataset.validation, dataset.test
 
 
-class ViTWrapper(torch.nn.Module):
-    def __init__(self, model=None):
-        super().__init__()
-        self.vit = model if model else ViTModel.from_pretrained("google/vit-base-patch16-224")
-    def forward(self, x):
-        o = self.vit(pixel_values=x)
-        return o.last_hidden_state[:, 0, :]
-
-
-class CNNWrapper(torch.nn.Module):
-    def __init__(self, cnn_model):
-        super().__init__()
-        self.cnn = cnn_model
-
-    def forward(self, x):
-        return self.cnn.backbone(x).flatten(1)
-
-
 def _rate_tag(r):
     v = int(round(float(r) * 100))
     return f"{v:03d}"
@@ -518,7 +502,13 @@ def main():
         train = train.__class__(parent=train.parent, X=train.X, C=Ctr, y=train.y, meta=train.meta, transform=train.transform, concept_transform=train.concept_transform, target_transform=train.target_transform, base_dir=train.base_dir)
 
     device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
-    cd = ConceptDetector(embedding_model=CNNWrapper(RobotConceptClassifier(num_concepts=train.n_concepts)))
+    config = {
+        'device': device,
+        'batch_size': 32,
+        'num_workers': 0 if device == 'mps' else 12,
+        'pin_memory': False if device == 'mps' else True,
+    }
+    cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=train.n_concepts))
     det_name = f"detector_dnn_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
     if S["load_detector"]:
         mini_train = train.filter(np.array([True] + [False] * (len(train.C) - 1)))
@@ -526,14 +516,13 @@ def main():
 
         cd.fit(mini_train, mini_valid, freeze=True, embed_params={"device": device},
                fit_params={"epochs": 1, "device": "cpu"})
-        state = torch.load(S["load_detector"], map_location="cpu")
-        cd.concept_layers.load_state_dict(state)
+        state = torch.load(S["load_detector"], weights_only=False, map_location="cpu")
+        cd.load_state_dict(state)
         det_path = Path(S["load_detector"])
     else:
-        cd.fit(train, valid, freeze=True, embed_params={"device": device}, fit_params={"epochs": 50, "patience": 10,
-                                                                                       "device": device})
+        cd.fit(train, valid, embed_params={'shuffle': False, **config}, fit_params={"epochs": 50, 'lr': 1e-3, "patience": 10, **config})
         det_path = run_dir / det_name
-        torch.save(cd.concept_layers.state_dict(), det_path)
+        torch.save(cd.state_dict(), det_path)
 
     P_tr = cd.predict(train, embed_params={"device": device})
     P_te = cd.predict(test, embed_params={"device": device})
@@ -623,21 +612,6 @@ def main():
 
     # Sort by score to see what's happening
     df_sorted = df_analysis.sort_values('gt_score', ascending=False)
-
-    print("\n=== Top 20 samples by GT score (should predict glorp) ===")
-    print(df_sorted[['sample_idx', 'true_label', 'gt_pred', 'gt_score', 'correct',
-                     'mouth_type', 'foot_shape', 'body_shape', 'has_antennae']].head(
-        20).to_string(index=False))
-
-    print("\n=== Bottom 20 samples by GT score (should predict drent) ===")
-    print(df_sorted[['sample_idx', 'true_label', 'gt_pred', 'gt_score', 'det_score', 'correct',
-                     'mouth_type', 'foot_shape', 'body_shape', 'has_antennae']].tail(
-        20).to_string(index=False))
-
-    print("\n=== Glorp samples (true_label=1) that were predicted as drent ===")
-    wrong_glorps = df_analysis[(df_analysis['true_label'] == 1) & (df_analysis['gt_pred'] == 0)]
-    print(f"Total: {len(wrong_glorps)}")
-    print(wrong_glorps[['sample_idx', 'gt_score', 'det_score', 'mouth_type', 'foot_shape', 'body_shape', 'has_antennae']].head(30).to_string(index=False))
 
     # Check the decision boundary
     print(f"\n=== Decision boundary analysis ===")
@@ -832,6 +806,70 @@ def main():
 
         original_acc = (original_preds == test_labels).mean()
         aligned_acc = (aligned_preds == test_labels).mean()
+
+        print("\n=== Aligned Frontend Weights ===")
+        for i, concept in enumerate(test.concepts):
+            print(f"  {concept}: {aligned_frontend.model.coef_[0, i]:.4f}")
+        print(f"  bias: {aligned_frontend.model.intercept_[0]:.4f}")
+
+        # Use the model's predict_proba method (returns probabilities for both classes)
+        aligned_probs_both = aligned_frontend.predict_proba(H_te)  # Shape: (n_samples, 2)
+        aligned_probs_glorp = aligned_probs_both[:, 1]  # Probability of class 1 (Glorp)
+
+        # Use the model's predict method (applies >= 0.5 threshold internally)
+        aligned_preds = aligned_frontend.predict(H_te)
+
+        # Get raw decision function scores
+        aligned_scores = aligned_frontend.model.decision_function(H_te)
+
+        # Create analysis dataframe
+        import pandas as pd
+
+        misclassified_data = []
+        for i in range(len(test.y)):
+            true_label = int(test.y[i])
+            pred_label = int(aligned_preds[i])
+
+            # Only include misclassified samples
+            if pred_label != true_label:
+                body_idx = test.concepts.index('body_shape')
+                mouth_idx = test.concepts.index('mouth_type')
+                try:
+                    foot_idx = test.concepts.index('foot_shape')
+                except ValueError:
+                    foot_idx1 = test.concepts.index('foot_shape_pointy_3sided')
+                    foot_idx2 = test.concepts.index('foot_shape_pointy_4sided')
+                    foot_idx3 = test.concepts.index('foot_shape_flat_5sided')
+                    foot_idx4 = test.concepts.index('foot_shape_pointy_6sided')
+                    foot_idx5 = test.concepts.index('foot_shape_flat_lshaped')
+                    foot_idx6 = test.concepts.index('foot_shape_flat_4sided')
+                    # foot_idx in the index where there is 1 or any index, if all are 0, take the first index
+                    foot_idx = next((idx for idx in [foot_idx1, foot_idx2, foot_idx3, foot_idx4, foot_idx5, foot_idx6] if H_te[i, idx] == 1), foot_idx1)
+
+                antenna_idx = test.concepts.index('has_antennae')
+
+                row_data = {
+                    'sample_idx': i,
+                    'body_shape_pred': int(H_te[i, body_idx]),
+                    'mouth_type_pred': int(H_te[i, mouth_idx]),
+                    'foot_shape_pred': int(H_te[i, foot_idx]),
+                    'has_antenna_pred': int(H_te[i, antenna_idx]),
+                    'body_shape': int(test.C[i, body_idx]),
+                    'mouth_type': int(test.C[i, mouth_idx]),
+                    'foot_shape': int(test.C[i, foot_idx]),
+                    'has_antenna': int(test.C[i, antenna_idx]),
+                    'score': float(aligned_scores[i]),
+                    'prob_glorp': float(aligned_probs_glorp[i]),
+                    'predicted': pred_label,
+                    'true_label': true_label,
+                }
+                misclassified_data.append(row_data)
+
+        df_misclassified = pd.DataFrame(misclassified_data)
+
+        print(f"\n=== Total Misclassified by Aligned Model: {len(df_misclassified)} / {len(test.y)} ===")
+        print("\nMisclassified samples:")
+        print(df_misclassified.to_string(index=False))
 
         alignment_stats = {
             'original_accuracy': float(original_acc),

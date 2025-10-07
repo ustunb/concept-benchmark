@@ -345,22 +345,23 @@ def create_robot_image_dataset(
 
     if verbose:
         print("Catalog DataFrame:")
-        print(catalog_df.head(20).to_string(index=False))
-        print(catalog_df.tail(20).to_string(index=False))
+        print(catalog_df.to_string(index=False))
 
     # X: Image paths (stored as strings)
     image_dir = output_directory
     X = np.array([row["png_filename"] for _, row in catalog_df.iterrows()])
 
     copy_features = copy.deepcopy(ALL_ROBOT_FEATURES)
+    print(copy_features)
     copy_features.update(new_concepts)
+    print(copy_features)
 
     # C: Concept matrix
     feature_names = [
         feat for feat in catalog_df.columns if feat in copy_features
     ]
     pos_map = {
-        feat: str(copy_features[feat][1]).split("_")[0]
+        feat: list(dict.fromkeys([str(f).split("_")[0] for f in copy_features[feat]]))[1]
         for feat in feature_names
     }
     print(pos_map)
@@ -383,8 +384,20 @@ def create_robot_image_dataset(
     if verbose:
         print("Dataset for Training:")
         print(X)
-        print(C)
-        print(y)
+        # print out the same dataframe but with values being side to side with their categorical meanings
+        print("Concept meanings:")
+        meaning_df = pd.DataFrame()
+        for i, feat in enumerate(feature_names):
+            pos_val = pos_map.get(feat)
+            meaning_df[feat] = C[:, i].astype(str)
+            # AttributeError: 'numpy.ndarray' object has no attribute 'replace'
+            meaning_df[feat] = meaning_df[feat].replace({"1": pos_val, "0": f"not_{pos_val}"})
+            # make the entry in the dataframe to be "numerical (categorical)"
+            meaning_df[feat] = meaning_df[feat] + " (" + C[:, i].astype(str) + ")"
+        meaning_df["label"] = pd.Series(y).replace({1: "glorp", 0: "drent"})
+        meaning_df["label"] = meaning_df["label"] + " (" + pd.Series(y).astype(str) + ")"
+        print(meaning_df.to_string())
+
 
     # colors to string (colors don't play well with pickle)
     catalog_df['color_left'] = catalog_df['color_left'].astype(str)
