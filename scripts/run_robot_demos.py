@@ -18,538 +18,147 @@ ENV = os.environ.copy()
 ENV["PYTHONPATH"] = str(ROOT) + (os.pathsep + ENV.get("PYTHONPATH", ""))
 #
 # settings = {
-#     "seed": 1337,
-#     "difficulty": "hard",
-#     "budgets": [0, 1, 2, 5, 10],
-#     "force": 0,
-#     "reuse_detector": 1,
-#     "run_tag": "newwer_run",
 #
-#     "modality": "text",
-#     "text_model": "distilbert-base-uncased",
-#
-#     "best_human_acc": 1.00,
-#     "expert_human_acc": 0.80,
-#     "subjective_human_acc": 0.80,
-#
-#     "subjective_noise_mode": "subjective",
-#     "subjective_noise_rate": 0.20,
-#
-#     "label_model_type": "stochastic",
-#     "label_model_alpha": 100.0,
-#     "label_model_bias": 0.5,
-#     "label_model_expr": "",
-#
-#     "templates_file": "",
-#     "redact_concepts": "has_antennae",
-#     "redact_splits": "test",
-#
-#     "generic_rate": 0.5,
-#     "generic_tol": 0.04,
-#     "generic_enable": 0,
-#
-#     "train_target_generic_frac": 0.0,
-#     "val_target_generic_frac": 0.0,
-#     "test_target_generic_frac": 0.0,
-#
-#     "recompute_only": 0,
 # }
+
 settings = {
     "seed": 1337,
     "difficulty": "hard",
     "budgets": [0, 1, 2, 5, 10],
     "force": 0,
-    "reuse_detector": 0,
-    "run_tag": "unbalanced_pixelated_fixed",
+    "reuse_detector": 1,
+    "run_tag": "",
+
     "modality": "text",
     "text_model": "distilbert-base-uncased",
+
     "best_human_acc": 1.00,
-    "expert_human_accs": [0.70, 0.80],
-    "subjective_human_acc": [0.70, 0.80],
-    "subjective_noise_mode": "subjective",
-    "subjective_noise_rates": [0.20, 0.30],
-    "label_model_type": "stochastic",
-    "label_model_alpha": 100.0,
-    "label_model_bias": 0.2,
-    "label_model_expr": "'glorp' if (min(int(str(row['ears_shape'])=='triangle'), int(row['body_shape']=='square')) >= 1) else 'drent'",
-    "templates_file": "",
+    "expert_human_accs": [0.80, 1.00],
+    "subjective_human_accs": [1.00],
+    "subjective_noise_rates": [0.20],
+
+    "skip_fit": 1,
+    "make_plots": 0,
+
     "redact_concepts": "",
     "redact_splits": "",
 
-    "generic_rate": 0.70,
-    "generic_tol": 0.1,
+    "concepts_csv": str(ROOT / "data" / "robot_text" / "concepts" / "concepts.csv"),
+    "run_name_sub": "",
+
     "generic_enable": 1,
-
-    "train_target_generic_frac": 0.7,
-    "val_target_generic_frac": 0.7,
-    "test_target_generic_frac": 0.7,
-
-    "recompute_only": 0,
-    "skip_fit": 1,
-    "concepts_csv": "data/robot_text/concepts/concepts.csv",
-    "lf_alpha": 0.5,
-    "lf_threshold": 0.5,
-    "lf_mode": "soft",
-    "lf_ridge": False,
-    "lf_ridge_alpha": 1.0,
-    "lf_encoder": "sentence-transformers/all-MiniLM-L6-v2",
-    "lf_device": "cuda" if (lambda: hasattr(__import__('torch'), 'cuda') and __import__('torch').cuda.is_available())() else "cpu",
-    "lf_batch_size": 64,
+    "generic_rate": 0.7,
+    "generic_tol": 0.02,
 }
 
 def parse_cli():
-    ap = argparse.ArgumentParser(add_help=False)
-    ap.add_argument("--seed", type=int)
-    ap.add_argument("--difficulty", type=str)
-    ap.add_argument("--budgets", type=str)
-    ap.add_argument("--force", type=int)
-    ap.add_argument("--reuse_detector", type=int)
-    ap.add_argument("--run_tag", type=str)
-    ap.add_argument("--best_human_acc", type=float)
-    ap.add_argument("--expert_human_acc", type=float)
-    ap.add_argument("--subjective_human_acc", type=float)
-    ap.add_argument("--subjective_noise_rate", type=float)
-    ap.add_argument("--label_model_type", type=str)
-    ap.add_argument("--label_model_alpha", type=float)
-    ap.add_argument("--label_model_bias", type=float)
-    ap.add_argument("--label_model_expr", type=str)
-    ap.add_argument("--templates_file", type=str)
-    ap.add_argument("--redact_concepts", type=str)
-    ap.add_argument("--redact_splits", type=str)
-    ap.add_argument("--concept_mode", type=str)
-    ap.add_argument("--generic_rate", type=float)
-    ap.add_argument("--generic_tol", type=float)
-    ap.add_argument("--generic_enable", type=int)
-    ap.add_argument("--train_target_generic_frac", type=float)
-    ap.add_argument("--val_target_generic_frac", type=float)
-    ap.add_argument("--test_target_generic_frac", type=float)
-    ap.add_argument("--recompute-only", type=int)
-    ap.add_argument("--subjective_noise_rates", type=str)
-    ap.add_argument("--expert_human_accs", type=str)
-    ap.add_argument("--subjective_human_accs", type=str)
-    ap.add_argument("--skip_fit", type=int)
-    args, _ = ap.parse_known_args()
-    d = {k: v for k, v in vars(args).items() if v is not None}
-    if "budgets" in d and isinstance(d["budgets"], str):
-        d["budgets"] = [int(x) for x in d["budgets"].split(",") if x.strip() != ""]
-    for k in ("subjective_noise_rates","expert_human_accs","subjective_human_accs"):
-        if k in d and isinstance(d[k], str):
-            d[k] = [float(x) for x in d[k].split(",") if x.strip() != ""]
-    settings.update(d)
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("--seed", type=int)
+    p.add_argument("--difficulty")
+    p.add_argument("--budgets")
+    p.add_argument("--force", type=int)
+    p.add_argument("--reuse-detector", type=int)
+    p.add_argument("--run-tag")
+    p.add_argument("--modality")
+    p.add_argument("--text-model")
+    p.add_argument("--best-human-acc", type=float)
+    p.add_argument("--expert-human-accs")
+    p.add_argument("--subjective-human-accs")
+    p.add_argument("--subjective-noise-rates")
+    p.add_argument("--skip-fit", type=int)
+    p.add_argument("--make-plots", type=int)
+    p.add_argument("--recompute-only", type=int)
+    p.add_argument("--redact-concepts")
+    p.add_argument("--redact-splits")
+    p.add_argument("--concepts-csv")
+    p.add_argument("--force-rerun", type=int)
+    p.add_argument("--run-name-sub")
+    args, _ = p.parse_known_args()
+    for k, v in vars(args).items():
+        if v is None:
+            continue
+        if k in {"budgets", "expert_human_accs", "subjective_human_accs", "subjective_noise_rates"}:
+            if isinstance(v, str):
+                vals = [x for x in v.split(",") if x.strip() != ""]
+                if k in {"budgets"}:
+                    settings[k] = [int(float(x)) for x in vals]
+                else:
+                    settings[k] = [float(x) for x in vals]
+            else:
+                settings[k] = v
+        else:
+            kk = k.replace("-", "_")
+            settings[kk] = v
 
-def run_cmd(label: str, argv: List[str]):
-    cmd = [str(PY), *map(str, argv)]
-    print(f"[RUN] {label}\n$ {' '.join(shlex.quote(c) for c in cmd)}")
+def run_cmd(tag: str, argv: List[str], cwd: Optional[Path] = None):
+    cmd = [str(PY), str(GEN)] + argv
     subprocess.run(cmd, check=True, env=ENV)
 
-def ensure_baseline(seed: int, diff: str, tag: str = "", extra_flags: Optional[List[str]] = None) -> Path:
-    extra_flags = extra_flags or []
-    run_name = f"baseline_text_{diff}_seed{seed}"
-
-    if settings.get("generic_enable", 0) == 1:
-        run_name = f"{run_name}_gen{int(100*float(settings.get('generic_rate', 0.0))):02d}"
-    if tag:
-        run_name = f"{run_name}_{tag}"
-        
-    out_dir = results_dir / "robot_baseline" / "text" / run_name
-    metrics = find_metrics_json(out_dir)
-    if metrics is not None:
-        return metrics
-    argv = [
-        str(DNN),
-        "--modality", settings["modality"],
-        "--seed", str(seed),
-        "--template-difficulty", diff,
-        "--run-name", run_name,
-        "--text_model", settings.get("text_model", "distilbert-base-uncased"),
-    ]
-    if settings.get("templates_file"):
-        argv += ["--templates-file", settings["templates_file"]]
-    if settings.get("label_model_type"):
-        argv += ["--label-model-type", str(settings["label_model_type"])]
-    if settings.get("label_model_alpha") is not None:
-        argv += ["--label-model-alpha", str(settings["label_model_alpha"])]
-    if settings.get("label_model_bias") is not None:
-        argv += ["--label-model-bias", str(settings["label_model_bias"])]
-    if settings.get("label_model_expr"):
-        argv += ["--label-model-expr", str(settings["label_model_expr"])]
-    if settings.get("redact_concepts"):
-        argv += ["--redact-concepts", str(settings["redact_concepts"])]
-    if settings.get("redact_splits"):
-        argv += ["--redact-splits", str(settings["redact_splits"])]
-    if settings.get("generic_enable", 0) == 1:
-        argv += ["--generic-enable", "1"]
-        if settings.get("generic_rate") is not None:
-            argv += ["--generic-rate", str(settings["generic_rate"])]
-        if settings.get("generic_tol") is not None:
-            argv += ["--generic-tol", str(settings["generic_tol"])]
-    if extra_flags:
-        argv += list(map(str, extra_flags))
-    run_cmd(f"baseline ({run_name})", argv)
-    metrics = find_metrics_json(out_dir)
-    if metrics is None:
-        raise FileNotFoundError(f"Could not find baseline metrics json in {out_dir}")
-    return metrics
-
-def find_metrics_json(run_dir: Path) -> Optional[Path]:
-    if not run_dir.exists():
-        return None
-    named = sorted(run_dir.rglob("baseline_dnn_robots_*_metrics.json"))
-    if named:
-        return named[0]
-    generic = sorted(run_dir.rglob("*metrics*.json"))
-    return generic[0] if generic else None
-
-def common_gen_argv(seed: int, diff: str, budgets: List[int]) -> List[str]:
-    argv = [
-        str(GEN),
-        "--variant", "perfect",
-        "--seed", str(seed),
-        "--template-difficulty", diff,
-        "--policy", "uncertainty",
-        "--budgets", ",".join(str(k) for k in budgets),
-    ]
-    if settings.get("concept_mode"):
-        argv += ["--concept-mode", settings["concept_mode"]]
-    if settings.get("templates_file"):
-        argv += ["--templates-file", settings["templates_file"]]
-    if settings.get("label_model_type"):
-        argv += ["--label-model-type", str(settings["label_model_type"])]
-    if settings.get("label_model_alpha") is not None:
-        argv += ["--label-model-alpha", str(settings["label_model_alpha"])]
-    if settings.get("label_model_bias") is not None:
-        argv += ["--label-model-bias", str(settings["label_model_bias"])]
-    if settings.get("label_model_expr"):
-        argv += ["--label-model-expr", str(settings["label_model_expr"])]
-    if settings.get("redact_concepts"):
-        argv += ["--redact-concepts", settings["redact_concepts"]]
-    if settings.get("redact_splits"):
-        argv += ["--redact-splits", settings["redact_splits"]]
-    if settings.get("reuse_detector") is not None:
-        argv += ["--reuse-detector", str(int(settings["reuse_detector"]))]
-    if settings.get("force"):
-        argv += ["--force-rerun", str(int(settings["force"]))]
-    if settings.get("generic_rate") is not None:
-        argv += ["--generic-rate", str(settings["generic_rate"])]
-    if settings.get("generic_tol") is not None:
-        argv += ["--generic-tol", str(settings["generic_tol"])]
-    return argv
-
-def run_spec(view: str, regime: str, human_acc: float, bb_metrics: Path, tag: str, concept_source: str, extra_flags: Optional[List[str]] = None, detector_model: Optional[Path] = None):
-    extra_flags = extra_flags or []
-    mode_setting = str(settings.get("intervention_error_mode", "both"))
-    argv = common_gen_argv(settings["seed"], settings["difficulty"], settings["budgets"])
-    argv += ["--concept-source", concept_source]
-    if detector_model is not None:
-        argv += ["--reuse-detector", "1", "--detector-model", str(detector_model)]
-    argv += ["--human-acc", str(human_acc)]
-    argv += ["--blackbox_metrics", str(bb_metrics)]
-
-    rn = make_run_name(view, regime, human_acc, tag)
-    if regime == "subjective" and "_noise20" in rn:
-        cand = rn.replace("_noise20", "_noise")
-        if (results_dir / "robot_text" / cand).exists():
-            rn = cand
-
-    if mode_setting == "both":
-        argv += ["--run-name", rn]
-        argv += ["--intervention-error-mode", "both"]
-        argv += list(map(str, extra_flags))
-        run_cmd(f"{view}:{regime}:both", argv)
-    else:
-        tag2 = f"{tag}_{'v1' if mode_setting=='miss' else 'v2'}"
-        rn2 = make_run_name(view, regime, human_acc, tag2)
-        if regime == "subjective" and "_noise20" in rn2:
-            cand2 = rn2.replace("_noise20", "_noise")
-            if (results_dir / "robot_text" / cand2).exists():
-                rn2 = cand2
-        argv += ["--run-name", rn2]
-        argv += ["--intervention-error-mode", mode_setting]
-        argv += list(map(str, extra_flags))
-        run_cmd(f"{view}:{regime}:{mode_setting}", argv)
-
-def make_run_name(view: str, regime: str, human_acc: float, tag: str) -> str:
-    kset = "_".join(str(k) for k in settings["budgets"])
-    return f"{regime}_{view}_{tag}_intervene{int(human_acc*100)}_kset-{kset}_{settings['difficulty']}_seed{settings['seed']}"
+def _csv_list(v: str) -> List[str]:
+    if not v:
+        return []
+    return [x for x in str(v).split(",") if x.strip() != ""]
 
 def run():
-    parse_cli()
-    seed = settings["seed"]
-    diff = settings["difficulty"]
+    seed = int(settings.get("seed", 0))
+    budgets = [int(x) for x in settings.get("budgets", [0, 1, 2, 5, 10])]
+    force = int(settings.get("force", 0))
+    make_plots = int(settings.get("make_plots", 0))
 
-    import hashlib, json as _json
-    label_expr = settings.get("label_model_expr") or "'glorp' if (min(int(str(row['has_antennae']).lower()=='true'), int(row['body_shape']=='square')) >= 1) else 'drent'"
-    sig = _json.dumps({
-        "seed": seed,
-        "diff": diff,
-        "type": settings.get("label_model_type", "stochastic"),
-        "alpha": settings.get("label_model_alpha", 100.0),
-        "bias": settings.get("label_model_bias", 0.5),
-        "expr": label_expr,
-        "templates": settings.get("templates_file") or "",
-        "budgets": settings.get("budgets", []),
-        "gen_enable": int(settings.get("generic_enable", 0)),
-        "gen_rate": float(settings.get("generic_rate", 0.0)),
-        "gen_tol": float(settings.get("generic_tol", 0.0)),
-    }, sort_keys=True)
-    tag_id = (settings.get("run_tag") or hashlib.sha256(sig.encode("utf-8")).hexdigest()[:8])
+    tag = str(settings.get("run_tag", "")).strip()
+    if not tag:
+        tag = "cbm"
 
-    label_flags = [
-        "--label-model-type", str(settings.get("label_model_type", "stochastic")),
-        "--label-model-alpha", str(settings.get("label_model_alpha", 100)),
-        "--label-model-bias", str(settings.get("label_model_bias", 0.5)),
-    ]
-    gen_label_flags = label_flags + ["--label-model-expr", label_expr]
+    bb = str(sorted((results_dir / "robot_baseline").rglob("baseline_*metrics.json"))[-1]) if list((results_dir / "robot_baseline").rglob("baseline_*metrics.json")) else ""
 
-    extra = [
-        "--samples_per_instance", "1",
-        "--train-balance-enable", "1",
-        "--train-target-pos-frac", "-1",
-        "--train-target-generic-frac", str(settings.get("generic_rate", 0.5)),
-        "--train-balance-within-label", "1",
-        "--val-balance-enable", "1",
-        "--val-target-generic-frac", str(settings.get("generic_rate", 0.5)),
-        "--val-balance-within-label", "1",
-        "--test-balance-enable", "1",
-        "--test-target-generic-frac", str(settings.get("generic_rate", 0.5)),
-        "--test-balance-within-label", "1",
-    ]
-    bb = ensure_baseline(seed, diff, tag=f"minrule_{tag_id}", extra_flags=extra)
-
-    det_path = None
-    csv_file = None
-
-    cs_anchor_tag = f"cs_anchor_{tag_id}"
-    cs_anchor_run_v1 = make_run_name("anchor", "anchor", settings["best_human_acc"], f"{cs_anchor_tag}_v1")
-    cs_anchor_run_v0 = make_run_name("anchor", "anchor", settings["best_human_acc"], cs_anchor_tag)
-    pkl_v1 = results_dir / "robot_text" / cs_anchor_run_v1 / f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"
-    pkl_v0 = results_dir / "robot_text" / cs_anchor_run_v0 / f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"
-    if pkl_v1.exists() or (results_dir / "robot_text" / cs_anchor_run_v1).exists():
-        cs_anchor_run = cs_anchor_run_v1
-    elif pkl_v0.exists() or (results_dir / "robot_text" / cs_anchor_run_v0).exists():
-        cs_anchor_run = cs_anchor_run_v0
-    else:
-        cs_anchor_run = cs_anchor_run_v1
-
-    def _latest(path_globs):
-        c = []
-        for gpat in path_globs:
-            c += glob.glob(gpat, recursive=True)
-        c = [Path(p) for p in c]
-        c = [p for p in c if p.exists()]
-        c.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        return c[0] if c else None
-
-    det_path = results_dir / "robot_text" / cs_anchor_run / f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"
-    if not det_path.exists():
-        anchor_flags = ["--variants-per-row", "1", "--force-rerun", str(int(settings.get("force", 0))), "--concept-mode", "soft"]
-        run_spec("anchor", "anchor", settings["best_human_acc"], bb, cs_anchor_tag, "detected",
-                 extra_flags=anchor_flags)
-        det_path = results_dir / "robot_text" / cs_anchor_run / f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"
-        if not det_path.exists():
-            raise FileNotFoundError(f"Missing detector at {det_path}")
-
-    patterns = [
-        str(results_dir / "robot_text" / cs_anchor_run / f"text_samples_*_seed{settings['seed']}.csv"),
-    ]
-    cands = []
-    for pat in patterns:
-        cands += glob.glob(pat, recursive=True)
-    cands = sorted(set(cands))
-    if not cands:
-        raise FileNotFoundError("No text_samples CSV found to compute minority upsample factor.")
-
-    labels_series = None
-    picked = None
-    for fp in reversed(cands):
-        try:
-            _df = pd.read_csv(fp)
-        except Exception:
-            continue
-        if "label" in _df.columns:
-            ser = _df["label"]
-            if ser.dtype != object and ser.dropna().isin([0, 1]).all():
-                ser = ser.map({1: "glorp", 0: "drent"})
-            labels_series = ser.astype(str)
-            picked = fp
-            break
-        if "y" in _df.columns:
-            labels_series = _df["y"].map({1: "glorp", 0: "drent", "1": "glorp", "0": "drent"}).astype(str)
-            picked = fp
-            break
-        if {"ears_shape", "body_shape"}.issubset(_df.columns):
-            ser = _df.apply(
-                lambda r: "glorp" if (str(r["ears_shape"]) == "square" and str(r["body_shape"]) == "square") else "drent",
-                axis=1
-            )
-            labels_series = ser.astype(str)
-            picked = fp
-            break
-
-    if labels_series is None:
-        raise FileNotFoundError("No suitable text_samples CSV with label, y, or concept columns")
-
-    csv_file = picked
-    counts = labels_series.value_counts()
-    n_pos = int(counts.get("glorp", 0))
-    n_neg = int(counts.get("drent", 0))
-    n_min = min(n_pos, n_neg)
-    n_maj = max(n_pos, n_neg)
-    vpr_min = max(1, math.ceil(n_maj / max(1, n_min)))
-    pos_frac_overall = (n_pos / max(1, (n_pos + n_neg)))
-
-    c_flags = [
-        "--variants-per-row", "1",
-        "--variants-per-row-minority", str(int(vpr_min)),
-        "--skip-fit", str(int(settings.get("skip_fit", 0))),
-        "--force-rerun", str(int(settings.get("force", 0))),
-        "--concept-mode", "soft",
-    ]
-
-    if settings.get("generic_enable", 0) == 1:
-        c_flags += [
-            "--train-balance-enable", "1",
-            "--train-target-generic-frac", str(settings.get("generic_rate", 0.5)),
-            "--train-balance-within-label", "1",
-            "--train-target-pos-frac", f"{pos_frac_overall:.6f}",
-            "--val-balance-enable", "1",
-            "--val-target-generic-frac", str(settings.get("generic_rate", 0.5)),
-            "--val-balance-within-label", "1",
-            "--test-balance-enable", "1",
-            "--test-target-generic-frac", str(settings.get("generic_rate", 0.5)),
-            "--test-balance-within-label", "1",
+    def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, tag_suffix: str, concept_source: str, extra_flags: Optional[List[str]] = None, detector_model: Optional[str] = None):
+        rn = f"{prefix}_{regime}_minrule_eval_vpr3_pos1152neg3456_unbalanced_pixelated_fixed_seed{seed}_v1_intervene{int(human_acc*100)}_kset-0_1_2_5_10_{settings.get('difficulty','hard')}_seed{seed}"
+        argv = [
+            "--variant", "perfect",
+            "--variants-per-row", "1",
+            "--imperfect-strategy", "missing_concepts",
+            "--heldout-concepts", "[]",
+            "--mask-p", "0.0",
+            "--mask-mode", "mask",
+            "--mask-rate", "0.0",
+            "--seed", str(seed),
+            "--concept-mode", "hard",
+            "--templates-file", "",
+            "--redact-concepts", str(settings.get("redact_concepts", "")),
+            "--redact-splits", str(settings.get("redact_splits", "")),
+            "--label-model-expr", "",
+            "--corr-pair", "",
+            "--train-corr", "1.0",
+            "--test-break", "1.0",
+            "--test-corr", "-1.0",
+            "--budgets", ",".join(str(x) for x in budgets),
+            "--target-acc-grid", "raw",
+            "--target-acc-concepts", "",
+            "--intervene-allow", "",
+            "--human-acc", str(human_acc),
+            "--human-acc-concepts", "",
+            "--make-plots", str(make_plots),
+            "--policy", "uncertainty",
+            "--concept-label-noise-mode", "none",
+            "--concept-label-noise-rate", "0.2",
+            "--blackbox-metrics", blackbox_metrics,
+            "--concepts-csv", settings.get("concepts_csv", ""),
+            "--generic-enable", str(int(settings.get("generic_enable", 1))),
+            "--generic-rate", str(float(settings.get("generic_rate", 0.7))),
+            "--generic-tol", str(float(settings.get("generic_tol", 0.02))),
+            "--concept-source", concept_source,
+            "--skip-fit", str(int(settings.get("skip_fit", 1))),
+            "--force-rerun", str(force),
+            "--intervention-error-mode", "both",
+            "--run-name", rn if not tag_suffix else f"{tag_suffix}_{rn}",
         ]
+        if int(settings.get("reuse_detector", 1)) and detector_model:
+            argv += ["--reuse-detector", "1", "--detector-model", detector_model]
+        if extra_flags:
+            argv += extra_flags
+        run_cmd("run", argv)
 
-    tag = f"minrule_eval_vpr{int(vpr_min)}_pos{n_pos}neg{n_neg}_{tag_id}_seed{settings['seed']}"
-
-    # run_spec("cs", "best", settings["best_human_acc"], bb, tag, "detected",
-    #          extra_flags=c_flags, detector_model=det_path)
-
-    def _float_list(v):
-        if v is None:
-            return []
-        if isinstance(v, (int, float)):
-            return [float(v)]
-        if isinstance(v, str):
-            s = v.strip()
-            if s.startswith("[") and s.endswith("]"):
-                try:
-                    return [float(x) for x in _json.loads(s)]
-                except Exception:
-                    pass
-            parts = [p.strip() for p in s.split(",") if p.strip()]
-            if parts:
-                return [float(p) for p in parts]
-            return [float(s)]
-        if isinstance(v, (list, tuple)):
-            out = []
-            for x in v:
-                out.extend(_float_list(x))
-            return out
-        return []
-
-    _expert_accs = _float_list(settings.get("expert_human_accs")) or _float_list(settings.get("expert_human_acc"))
-    _subjective_accs = _float_list(settings.get("subjective_human_accs")) or _float_list(settings.get("subjective_human_acc"))
-    _noise_rates = _float_list(settings.get("subjective_noise_rates")) or _float_list(settings.get("subjective_noise_rate", 0.20))
-
-    # for h in _expert_accs:
-    #     run_spec("cs", "expert", float(h), bb, tag, "detected",
-    #              extra_flags=c_flags, detector_model=det_path)
-
-    # for nr in _noise_rates:
-    #     c_flags_noise = c_flags + ["--concept-label-noise-mode", settings.get("subjective_noise_mode", "subjective"),
-    #                                "--concept-label-noise-rate", str(float(nr)),
-    #                                "--skip-fit", str(int(settings.get("skip_fit", 0))),
-    #                                "--force-rerun", str(int(settings.get("force", 0)))]
-
-    #     for h in _subjective_accs:
-    #         run_spec("cs", "subjective", float(h), bb, f"{tag}_noise{int(float(nr)*100):02d}", "detected",
-    #                  extra_flags=c_flags_noise, detector_model=det_path)
-
-    cbm_anchor_tag = f"cbm_anchor_{tag_id}"
-    cbm_anchor_run_v1 = make_run_name("anchor", "anchor", settings["best_human_acc"], f"{cbm_anchor_tag}_v1")
-    cbm_anchor_run_v0 = make_run_name("anchor", "anchor", settings["best_human_acc"], cbm_anchor_tag)
-    pkl_v1 = results_dir / "robot_text" / cbm_anchor_run_v1 / f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"
-    pkl_v0 = results_dir / "robot_text" / cbm_anchor_run_v0 / f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"
-    if pkl_v1.exists() or (results_dir / "robot_text" / cbm_anchor_run_v1).exists():
-        cbm_anchor_run = cbm_anchor_run_v1
-        cbm_det_path = pkl_v1
-    elif pkl_v0.exists() or (results_dir / "robot_text" / cbm_anchor_run_v0).exists():
-        cbm_anchor_run = cbm_anchor_run_v0
-        cbm_det_path = pkl_v0
-    else:
-        cbm_anchor_run = cbm_anchor_run_v1
-        cbm_det_path = results_dir / "robot_text" / cbm_anchor_run / f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"
-    if not cbm_det_path.exists():
-        cbm_anchor_flags = ["--variants-per-row", "1", "--force-rerun", str(int(settings.get("force", 0))), "--concept-mode", "hard"]
-        run_spec("anchor", "anchor", settings["best_human_acc"], bb, cbm_anchor_tag, "detected",
-                 extra_flags=cbm_anchor_flags)
-        cbm_det_path = results_dir / "robot_text" / cbm_anchor_run_v1 / f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"
-        if not cbm_det_path.exists():
-            cbm_det_path = results_dir / "robot_text" / cbm_anchor_run_v0 / f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"
-        if not cbm_det_path.exists():
-            raise FileNotFoundError(f"Missing detector at {cbm_det_path}")
-
-    cbm_flags = [
-        "--variants-per-row", "1",
-        "--variants-per-row-minority", str(int(vpr_min)),
-        "--skip-fit", str(int(settings.get("skip_fit", 1))),
-        "--force-rerun", str(int(settings.get("force", 0))),
-        "--concept-mode", "hard",
-    ]
-
-    if settings.get("generic_enable", 0) == 1:
-        cbm_flags += [
-            "--train-balance-enable", "1",
-            "--train-target-generic-frac", str(settings.get("generic_rate", 0.5)),
-            "--train-balance-within-label", "1",
-            "--train-target-pos-frac", f"{pos_frac_overall:.6f}",
-            "--val-balance-enable", "1",
-            "--val-target-generic-frac", str(settings.get("generic_rate", 0.5)),
-            "--val-balance-within-label", "1",
-            "--test-balance-enable", "1",
-            "--test-target-generic-frac", str(settings.get("generic_rate", 0.5)),
-            "--test-balance-within-label", "1",
-        ]
-
-    # run_spec("cbm", "best", settings["best_human_acc"], bb, tag, "detected",
-    #          extra_flags=cbm_flags, detector_model=cbm_det_path)
-
-    # for h in _expert_accs:
-    #     run_spec("cbm", "expert", float(h), bb, tag, "detected",
-    #              extra_flags=cbm_flags, detector_model=cbm_det_path)
-
-    # for nr in _noise_rates:
-    #     cbm_flags_noise = cbm_flags + ["--concept-label-noise-mode",
-    #                                    settings.get("subjective_noise_mode", "subjective"),
-    #                                    "--concept-label-noise-rate", str(float(nr)),
-    #                                    "--skip-fit", str(int(settings.get("skip_fit", 1))),
-    #                                    "--force-rerun", str(int(settings.get("force", 0)))]
-
-    #     for h in _subjective_accs:
-    #         run_spec("cbm", "subjective", float(h), bb, f"{tag}_noise{int(float(nr)*100):02d}", "detected",
-    #                  extra_flags=cbm_flags_noise, detector_model=cbm_det_path)
-
-    lf_flags = [
-        "--variants-per-row", "1",
-        "--variants-per-row-minority", str(int(vpr_min)),
-        "--skip-fit", str(int(settings.get("skip_fit", 1))),
-        "--force-rerun", str(int(settings.get("force", 0))),
-        "--concept-mode", "hard",
-        "--machine-method", "lfcbm",
-        "--concepts-csv", str(settings.get("concepts_csv", "data/robot_text/concepts/concepts.csv")),
-        "--lf-alpha", str(float(settings.get("lf_alpha", 0.5))),
-        "--lf-threshold", str(float(settings.get("lf_threshold", 0.5))),
-        "--lf-mode", str(settings.get("lf_mode", "soft")),
-        "--lf-encoder", str(settings.get("lf_encoder", "sentence-transformers/all-MiniLM-L6-v2")),
-        "--lf-device", str(settings.get("lf_device")),
-        "--lf-batch-size", str(int(settings.get("lf_batch_size", 64))),
-    ]
-    if settings.get("lf_ridge", False):
-        lf_flags += ["--lf-ridge", "--lf-ridge-alpha", str(float(settings.get("lf_ridge_alpha", 1.0)))]
-    tag_lf = f"{tag}_lfcbm"
-    run_spec("cbm", "best", settings["best_human_acc"], bb, tag_lf, "machine",
-             extra_flags=lf_flags, detector_model=None)
+    run_spec("best", "best", settings.get("best_human_acc", 1.0), bb, "best", "detected", detector_model=None)
 
 def recompute_metrics():
     seed = int(settings.get("seed", 0))
@@ -602,6 +211,9 @@ def recompute_metrics():
         add_arg("policy", args.get("policy"))
         add_arg("concept_label_noise_mode", args.get("concept_label_noise_mode"))
         add_arg("concept_label_noise_rate", args.get("concept_label_noise_rate"))
+        add_arg("generic_enable", args.get("generic_enable", settings.get("generic_enable")))
+        add_arg("generic_rate", args.get("generic_rate", settings.get("generic_rate")))
+        add_arg("generic_tol", args.get("generic_tol", settings.get("generic_tol")))
         ci = args.get("concept_include")
         ce = args.get("concept_exclude")
         if ci not in (None, "", "[]"): add_arg("concept_include", ci)
@@ -614,11 +226,28 @@ def recompute_metrics():
                 bm = str(cand[-1])
         if bm:
             add_arg("blackbox_metrics", bm)
+        ccsv = settings.get("concepts_csv") or args.get("concepts_csv")
+        add_arg("concepts_csv", ccsv)
 
         mobj = json.loads(Path(mp).read_text())
         det = mobj.get("artifacts", {}).get("model") or args.get("detector_model")
 
-        mode = settings.get("intervention_error_mode", "both")
+        cs = args.get("concept_source")
+        if cs in (None, "", "none", "human"):
+            machine_keys = ["machine_method","machine_k","machine_soft","machine_seed","machine_upper_bound","lf_alpha","lf_threshold","lf_mode","lf_ridge","lf_ridge_alpha","lf_encoder","lf_device","lf_batch_size"]
+            if any(args.get(k) for k in machine_keys):
+                cs = "machine"
+            elif det:
+                cs = "detected"
+            elif args.get("use_gt_concepts") in [1, "1", True, "true"]:
+                cs = "gt"
+        if cs:
+            add_arg("concept_source", cs)
+        if cs == "machine":
+            for k in ["machine_method","machine_k","machine_soft","machine_seed","machine_upper_bound","lf_alpha","lf_threshold","lf_mode","lf_ridge","lf_ridge_alpha","lf_encoder","lf_device","lf_batch_size"]:
+                add_arg(k, args.get(k))
+
+        mode = "both"
         rn0 = args.get("run_name") or ""
 
         import re as _re
@@ -657,7 +286,10 @@ def recompute_metrics():
         for ha in haccs:
             for rate in rates:
                 argv = list(base_argv)
-                argv += ["--skip-fit", str(int(settings.get("skip_fit", 1)))]
+                _skip = int(settings.get("skip_fit", 1))
+                if _skip == 1 and not (det and Path(det).exists()):
+                    raise RuntimeError(f"skip_fit=1 but detector missing: {det}")
+                argv += ["--skip-fit", str(_skip)]
                 if det and Path(det).exists():
                     argv += ["--reuse-detector", "1", "--detector-model", det]
                 else:
@@ -684,205 +316,87 @@ def recompute_metrics():
                             rn = _re.sub(r"_noise\d{2}", f"_noise{dd:02d}", rn)
                         else:
                             rn = rn + f"_noise{dd:02d}"
+                subs = str(settings.get("run_name_sub", "")).strip()
+                if subs:
+                    for part in subs.split(";"):
+                        part = part.strip()
+                        if not part:
+                            continue
+                        if "->" in part:
+                            a, b = part.split("->", 1)
+                        elif ":" in part:
+                            a, b = part.split(":", 1)
+                        elif "," in part:
+                            a, b = part.split(",", 1)
+                        else:
+                            continue
+                        rn = rn.replace(a.strip(), b.strip())
                 argv += ["--run-name", rn]
                 run_cmd("recompute", argv)
-
 
 def build_final_accuracy_table():
     import re
     files_v1 = glob.glob(str(results_dir / "robot_text" / "**" / "viability_robots_text_*_detected.csv"),
                          recursive=True) + \
-               glob.glob(str(results_dir / "robot_text" / "**" / "viability_robots_text_*_machine.csv"),
+               glob.glob(str(results_dir / "robot_text" / "**" / "viability_v2_robots_text_*_detected.csv"),
                          recursive=True)
-    files_v2 = glob.glob(str(results_dir / "robot_text" / "**" / "viability_v2_robots_text_*_detected.csv"),
-                         recursive=True) + \
-               glob.glob(str(results_dir / "robot_text" / "**" / "viability_v2_robots_text_*_machine.csv"),
-                         recursive=True)
-    files = sorted(set(files_v1 + files_v2))
-    if not files:
-        return
-
-    recs = []
-    for f in files:
-        run_name = Path(f).parent.name
-        m = re.search(r'^(best|expert|subjective)_(cs|cbm)_', run_name)
-        if m:
-            regime, view = m.group(1), m.group(2)
-        else:
-            regime = "best" if "best" in run_name else ("expert" if "expert" in run_name else ("subjective" if "subjective" in run_name else "unknown"))
-            view = "cs" if "_cs_" in run_name else ("cbm" if "_cbm_" in run_name else "unknown")
-        df = pd.read_csv(f)
-        if "acc_cbm_intv" not in df.columns:
+    rows = []
+    for fp in files_v1:
+        p = Path(fp)
+        try:
+            parts = p.stem.split("_")
+        except Exception:
             continue
-        if "budget" not in df.columns and "k" in df.columns:
-            df = df.rename(columns={"k":"budget"})
-        sub = df[df["budget"].isin(settings["budgets"])]
-        if sub.empty:
+        hacc = None
+        mm = re.search(r"intervene(\d+)", p.as_posix())
+        if mm:
+            try:
+                hacc = int(mm.group(1)) / 100.0
+            except Exception:
+                hacc = None
+        mode = "v2" if "viability_v2_" in p.name else "v1"
+        try:
+            df = pd.read_csv(fp)
+        except Exception:
             continue
-        g = sub.groupby("budget", as_index=False).mean(numeric_only=True)
-        for _, row in g.iterrows():
-            recs.append({
-                "regime": regime,
-                "budget": int(row["budget"]),
-                "method": view.upper(),
-                "accuracy": float(row["acc_cbm_intv"])
-            })
-        if "delta_vs_blackbox" in df.columns:
-            dnn_series = df["acc_cbm_intv"] - df["delta_vs_blackbox"]
-        elif "gain_acc_dnn" in df.columns:
-            dnn_series = df["acc_cbm_intv"] - df["gain_acc_dnn"]
-        else:
-            dnn_series = None
-        if dnn_series is not None and len(dnn_series) > 0:
-            if (df["budget"] == 0).any():
-                dnn_val = float(dnn_series[df["budget"] == 0].mean())
-            else:
-                dnn_val = float(dnn_series.mean())
-            for b in sorted(sub["budget"].unique()):
-                recs.append({
-                    "regime": "best",
-                    "budget": int(b),
-                    "method": "DNN",
-                    "accuracy": dnn_val,
-                })
-
-    if not recs:
+        df["human_acc"] = hacc
+        df["mode"] = mode
+        df["run_dir"] = str(p.parent)
+        rows.append(df)
+    if not rows:
         return
+    out = pd.concat(rows, ignore_index=True)
+    out["budget"] = out["budget"].astype(int)
+    out = out.sort_values(["run_dir", "mode", "human_acc", "budget"]).reset_index(drop=True)
+    out_csv = results_dir / "robot_text" / "final_intervention_accuracy_table.csv"
+    out_tex = results_dir / "robot_text" / "final_intervention_accuracy_table.tex"
 
-    tidy = pd.DataFrame(recs)
-    tidy["method"] = tidy["method"].replace({"ANCHOR": "DNN"})
-    tidy = tidy.groupby(["regime","budget","method"], as_index=False)["accuracy"].mean()
-    tidy["method"] = tidy["method"].astype(pd.CategoricalDtype(categories=["DNN","CBM","CS"], ordered=True))
-    tidy = tidy[tidy["method"].notna()]
-    pivot = tidy.pivot_table(index=["budget","method"], columns="regime", values="accuracy", aggfunc="mean").sort_index(level=[0,1])
-    if "unknown" in pivot.columns:
-        pivot = pivot.drop(columns=["unknown"])
-    pivot = pivot.round(4)
+    def _fmt(x):
+        try:
+            xi = int(x)
+            return f"{xi}"
+        except Exception:
+            try:
+                xf = float(x)
+                return f"{xf:.4f}"
+            except Exception:
+                return str(x)
 
-    outdir = results_dir / "robot_text" / "_summary"
-    outdir.mkdir(parents=True, exist_ok=True)
-    csv_path = outdir / f"final_accuracy_table_seed{settings['seed']}.csv"
-    tex_path = outdir / f"final_accuracy_table_seed{settings['seed']}.tex"
-    pivot.to_csv(csv_path)
-    with open(tex_path, "w") as f:
-        f.write(pivot.to_latex(na_rep="--", float_format="%.4f"))
-    print("Wrote", csv_path)
-    print("Wrote", tex_path)
-    print(pivot)
+    cols = [c for c in out.columns if c not in {"run_dir"}]
+    out.to_csv(out_csv, index=False)
+    with open(out_tex, "w") as f:
+        hdr = " & ".join(cols)
+        f.write("\\begin{tabular}{%s}\n" % ("l" * len(cols)))
+        f.write(hdr + " \\\\\n\\hline\n")
+        for _, row in out.iterrows():
+            f.write(" & ".join(_fmt(row[c]) for c in cols) + " \\\\\n")
+        f.write("\\end{tabular}\n")
 
-    eff_recs = []
-    concept_recs = []
-    for f in files:
-        run_dir = Path(f).parent
-        run_name = run_dir.name
-        import re as _re
-        m = _re.search(r'^(best|expert|subjective)_(cs|cbm)_', run_name)
-        if m:
-            regime, view = m.group(1), m.group(2)
-        else:
-            regime = "best" if "best" in run_name else ("expert" if "expert" in run_name else ("subjective" if "subjective" in run_name else "unknown"))
-            view = "cs" if "_cs_" in run_name else ("cbm" if "_cbm_" in run_name else "unknown")
-
-        dfv = pd.read_csv(f)
-        df_b = dfv if "budget" in dfv.columns else (dfv.rename(columns={"k": "budget"}) if "k" in dfv.columns else None)
-        if df_b is not None:
-            sub = df_b[df_b["budget"].isin(settings["budgets"])].copy()
-            if not sub.empty:
-                sub.replace([float("inf"), float("-inf")], pd.NA, inplace=True)
-
-                if "concept_checks" in sub.columns:
-                    cc = pd.to_numeric(sub["concept_checks"], errors="coerce")
-                elif "confirmation_cost" in sub.columns:
-                    cc = pd.to_numeric(sub["confirmation_cost"], errors="coerce")
-                else:
-                    cc = pd.Series(pd.NA, index=sub.index, dtype="float64")
-
-                bvec = pd.to_numeric(sub["budget"], errors="coerce")
-                sub["_n_cases"] = cc / bvec.replace(0, pd.NA)
-
-                if "interventions_pct" not in sub.columns:
-                    sub["interventions_pct"] = pd.NA
-                if "concepts_per_intervention" not in sub.columns:
-                    sub["concepts_per_intervention"] = pd.NA
-                if "avg_edits_per_case" not in sub.columns:
-                    sub["avg_edits_per_case"] = pd.NA
-
-                if "interventions_total" in sub.columns:
-                    itot = pd.to_numeric(sub["interventions_total"], errors="coerce")
-                    sub["interventions_pct"] = sub["interventions_pct"].fillna(itot / sub["_n_cases"])
-
-                if {"applied_edits_total", "interventions_total"}.issubset(sub.columns):
-                    etot = pd.to_numeric(sub["applied_edits_total"], errors="coerce")
-                    itot = pd.to_numeric(sub["interventions_total"], errors="coerce")
-                    sub["concepts_per_intervention"] = sub["concepts_per_intervention"].fillna(
-                        etot / itot.replace(0, pd.NA))
-
-                if {"interventions_pct", "concepts_per_intervention"}.issubset(sub.columns):
-                    ie = pd.to_numeric(sub["interventions_pct"], errors="coerce")
-                    ci = pd.to_numeric(sub["concepts_per_intervention"], errors="coerce")
-                    sub["avg_edits_per_case"] = sub["avg_edits_per_case"].fillna(ie * ci)
-
-                if "applied_edits_total" in sub.columns:
-                    etot = pd.to_numeric(sub["applied_edits_total"], errors="coerce")
-                    sub["avg_edits_per_case"] = sub["avg_edits_per_case"].fillna(etot / sub["_n_cases"])
-
-                sub.loc[bvec == 0, "avg_edits_per_case"] = sub.loc[bvec == 0, "avg_edits_per_case"].fillna(0.0)
-
-                g = sub.groupby("budget", as_index=False).mean(numeric_only=True)
-
-                for _, r in g.iterrows():
-                    avgv = r.get("avg_edits_per_case", float("nan"))
-                    if not pd.notnull(avgv):
-                        continue
-                    eff_recs.append({
-                        "regime": regime,
-                        "method": view.upper(),
-                        "budget": int(r["budget"]),
-                        "avg_edits_per_case": float(avgv),
-                        "interventions_pct": float(r.get("interventions_pct", float("nan"))),
-                        "concepts_per_intervention": float(r.get("concepts_per_intervention", float("nan"))),
-                        "failed_interventions_pct": float(r.get("failed_interventions_pct", float("nan"))),
-                        "edit_effectiveness": float(r.get("edit_effectiveness", float("nan"))),
-                        "edit_effectiveness_per_intervention": float(
-                            r.get("edit_effectiveness_per_intervention", float("nan"))),
-                    })
-        conc_files = sorted(set(run_dir.glob("interventions_per_concept_*_detected*.csv")) |
-                            set(run_dir.glob("interventions_per_concept_*_machine*.csv")))
-        if conc_files:
-            parts = []
-            for p in conc_files:
-                dfc = pd.read_csv(p)
-                if "budget" not in dfc.columns and "k" in dfc.columns:
-                    dfc = dfc.rename(columns={"k":"budget"})
-                if "budget" in dfc.columns:
-                    parts.append(dfc[dfc["budget"].isin(settings["budgets"])])
-            if parts:
-                dfc = pd.concat(parts, ignore_index=True)
-                if not dfc.empty:
-                    g2 = dfc.groupby(["budget","concept"], as_index=False).agg({"interventions":"sum","correct":"sum"})
-                    g2["correct_rate"] = g2.apply(lambda x: (x["correct"]/x["interventions"]) if x["interventions"]>0 else float("nan"), axis=1)
-                    g2["regime"] = regime
-                    g2["method"] = view.upper()
-                    concept_recs.append(g2)
-
-    if eff_recs:
-        eff = pd.DataFrame(eff_recs)
-        outdir = results_dir / "robot_text" / "_summary"
-        eff_path = outdir / f"intervention_effectiveness_summary_seed{settings['seed']}.csv"
-        eff.to_csv(eff_path, index=False)
-        print("Wrote", eff_path)
-
-    if concept_recs:
-        cdf = pd.concat(concept_recs, ignore_index=True)
-        outdir = results_dir / "robot_text" / "_summary"
-        c_path = outdir / f"intervention_effectiveness_per_concept_seed{settings['seed']}.csv"
-        cdf.to_csv(c_path, index=False)
-        print("Wrote", c_path)
-
-parse_cli()
-if int(settings.get("recompute_only", 0)) == 1:
-    recompute_metrics()
-    build_final_accuracy_table()
-else:
-    run()
-    build_final_accuracy_table()
+if __name__ == "__main__":
+    parse_cli()
+    if int(settings.get("recompute_only", 0)) == 1:
+        recompute_metrics()
+        build_final_accuracy_table()
+    else:
+        run()
+        build_final_accuracy_table()

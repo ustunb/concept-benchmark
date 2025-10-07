@@ -1057,8 +1057,7 @@ elif args_obj.template_difficulty == "hard":
     print(f"Using hard corpus: {default_jsonl}")
     if default_jsonl.is_file():
         _lbl = catalog_df["label"].astype(str)
-        n_pos = int((_lbl == "glorp").sum());
-        n_neg = int((_lbl == "drent").sum())
+        n_pos = int((_lbl == "glorp").sum()); n_neg = int((_lbl == "drent").sum())
         minority_label = "glorp" if n_pos < n_neg else ("drent" if n_neg < n_pos else "glorp")
         base_vpr = int(args_obj.variants_per_row)
         vpr_min = int(args_obj.variants_per_row_minority) if int(args_obj.variants_per_row_minority) > 0 else max(1,
@@ -1068,11 +1067,15 @@ elif args_obj.template_difficulty == "hard":
         vpr_maj = int(args_obj.variants_per_row_majority) if int(args_obj.variants_per_row_majority) > 0 else base_vpr
         row_variants = [vpr_min if lab == minority_label else vpr_maj for lab in _lbl]
         gen_jsonl = default_jsonl.with_name("HardCorpus_EarsGeneric.jsonl")
-        ds = _build_ds_from_corpus(catalog_df, params, default_jsonl, base_vpr, SEED, row_variants=row_variants,
-                                   generic_path=(gen_jsonl if (gen_jsonl.is_file() and int(
-                                       getattr(args_obj, "generic_enable", 0)) == 1) else None), generic_rate=(
-                float(getattr(args_obj, "generic_rate", 0.5)) if int(
-                    getattr(args_obj, "generic_enable", 0)) == 1 else 0.0))
+
+        # fail fast if genericization requested but the generic corpus isn't present
+        if int(getattr(args_obj, "generic_enable", 0)) == 1 and not gen_jsonl.is_file():
+            raise SystemExit(f"generic_enable=1 but missing generic corpus: {gen_jsonl}")
+
+        ds = _build_ds_from_corpus(catalog_df, params, default_jsonl, base_vpr, SEED,
+                                   row_variants=row_variants,
+                                   generic_path=(gen_jsonl if (gen_jsonl.is_file() and int(getattr(args_obj, "generic_enable", 0)) == 1) else None),
+                                   generic_rate=(float(getattr(args_obj, "generic_rate", 0.5)) if int(getattr(args_obj, "generic_enable", 0)) == 1 else 0.0))
         setattr(ds, "cvindices", None)
 
     # Fallback to legacy template mechanism if not using hard-corpus
@@ -1793,7 +1796,10 @@ if noise_mode == "machine":
 
 if not SKIP:
     cbm.front_end_model.fit(C_train_used, y_train)
-
+else:
+    _fe_n_in = getattr(getattr(cbm.front_end_model, "model", None), "n_features_in_", None)
+    if (_fe_n_in is None) or (int(_fe_n_in) != int(getattr(C_train_used, "shape", [None, 0])[1])):
+        cbm.front_end_model.fit(C_train_used, y_train)
 with np.errstate(invalid="ignore"):
     C_val_true = val_ds.C.astype(np.float32)
 
@@ -2452,7 +2458,8 @@ if args_obj.concept_source == "machine":
 
 acc_map = _csv_kv_float(args_obj.human_acc_concepts)
 rows = []
-rows_all = []
+rows_all_v1 = []
+rows_all_v2 = []
 rng = np.random.default_rng(SEED)
 
 def _choose_source():
@@ -2512,30 +2519,16 @@ def _choose_source():
         return names_vec, U_full, H_base, T_truth, fe_gt
 
     names_vec = names_m
-    demo_C = np.zeros((len(test_ds.X), len(names_vec)), dtype=np.float32)
-    test_ds_cd = ConceptDatasetSample(
-        X=[str(x) for x in test_ds.X],
-        C=demo_C,
-        y=test_ds.y.astype(int),
-        meta={"concepts": tuple(names_vec), "classes": test_ds.classes, "data_type": "text"}
-    )
-    _old_out = detector.output_mode
-    detector.output_mode = "soft"
-    P_te_cd = detector.predict(test_ds_cd).astype(np.float32)
-    detector.output_mode = "hard"
-    H_te_cd = detector.predict(test_ds_cd).astype(int)
-    detector.output_mode = _old_out
-
-    U_full = P_te_cd * (1.0 - P_te_cd)
-    H_base = H_te_cd
+    if names_vec is None:
+        raise ValueError(f"Unsupported or missing concept_source={args_obj.concept_source}. Pass --concept-source in {'gt','detected','machine'}.")
+    U_full = P_te_m * (1.0 - P_te_m)
+    H_base = H_te_m
     if int(args_obj.machine_upper_bound) and truth_map is not None:
         T_truth = T_test[:, truth_map]
     else:
         T_truth = H_te_m.copy()
     fe = fe_machine
     return names_vec, U_full, H_base, T_truth, fe
-
-
 names_vec, U_full_src, H_test_src, T_truth_src, fe_src = _choose_source()
 allow_idxs = _allowed_indices(names_vec, args_obj.intervene_allow)
 
@@ -2570,7 +2563,7 @@ for ta in acc_grid:
 
     tau_val = 0.2 if args_obj.concept_mode == "soft" else 0.5
     if args_obj.concept_mode == "soft":
-        if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm":
+        if args_obj.concept_source == "machine":
             base_proba = cbm._propagate_predict_proba(P_te_m)
         else:
             _old_mode = getattr(detector, "output_mode", None)
@@ -2616,8 +2609,7 @@ for ta in acc_grid:
             per_concept_edits = np.zeros(Hm.shape[1], dtype=int)
             per_concept_correct = np.zeros(Hm.shape[1], dtype=int)
             per_concept_attempts = np.zeros(Hm.shape[1], dtype=int)
-            P_work_loc = (P_te_m.copy() if (args_obj.concept_source == "machine" and str(
-                args_obj.machine_method) == "lfcbm") else C_test_scores.copy()) if args_obj.concept_mode == "soft" else None
+            P_work_loc = (P_te_m.copy() if (args_obj.concept_source == "machine") else C_test_scores.copy()) if args_obj.concept_mode == "soft" else None
 
             if k > 0:
                 cols_all = allow_idxs if allow_idxs.size > 0 else np.arange(Hm.shape[1], dtype=int)
@@ -2694,6 +2686,8 @@ for ta in acc_grid:
                 keep_idx = np.array([names_vec.index(n) for n in names_infer], dtype=int)
                 if args_obj.concept_source == "detected":
                     Xtr = C_train_used if 'C_train_used' in locals() else detector.predict(train_ds)
+                elif args_obj.concept_source == "machine":
+                    Xtr = (P_tr_m if int(args_obj.machine_soft) else H_tr_m)
                 else:
                     Xtr = train_ds.C
                 fe_src_drop = FrontEndModel()
@@ -2801,7 +2795,8 @@ for ta in acc_grid:
     if str(args_obj.intervention_error_mode) == "both":
         rows_v1, preds_v1 = _simulate_mode(H0, "miss")
         rows_v2, _ = _simulate_mode(H0, "flip")
-        rows_all.extend(rows_v1)
+        rows_all_v1.extend(rows_v1)
+        rows_all_v2.extend(rows_v2)
         rows = rows_v1
 
         try:
@@ -2838,10 +2833,8 @@ for ta in acc_grid:
         v2[["target_acc", "budget", "check_accuracy"]].to_csv(v2_path, index=False)
 
         viab = viab_v1
-
     else:
         rows, preds = _simulate_mode(H0, ("flip" if str(args_obj.intervention_error_mode) == "flip" else "miss"))
-        rows_all.extend(rows)
         try:
             pred_k0, proba1_k0, pred_kmax, proba1_kmax = preds
             df_pred = pd.DataFrame({
@@ -2858,7 +2851,8 @@ for ta in acc_grid:
         except Exception:
             pass
         viab = pd.DataFrame(rows)
-        viab_path = run_dir / f"viability_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+        viab_path = run_dir / (f"viability_v2_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv" if str(
+            args_obj.intervention_error_mode) == "flip" else f"viability_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv")
         viab.to_csv(viab_path, index=False)
 
 if miss_meta_capture is not None:
@@ -2929,12 +2923,16 @@ if miss_meta_capture is not None:
         mask_rows = [{"concept": k, "realized_rate": v} for k, v in miss_meta_capture["realized"].items()]
         pd.DataFrame(mask_rows).to_csv(run_dir / f"mask_realized_{miss_tag}_{seed_tag}.csv", index=False)
 
-_rows_for_write = rows_all if rows_all else rows
-if _rows_for_write:
-    viab = pd.DataFrame(_rows_for_write)
+if rows_all_v1:
+    viab = pd.DataFrame(rows_all_v1)
     viab_path = run_dir / f"viability_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
     viab.to_csv(viab_path, index=False)
     print("Saved intervention metrics:", viab_path)
+if rows_all_v2:
+    viab2 = pd.DataFrame(rows_all_v2)
+    viab2_path = run_dir / f"viability_v2_robots_text_{miss_tag}_{seed_tag}_{args_obj.concept_source}.csv"
+    viab2.to_csv(viab2_path, index=False)
+    print("Saved intervention metrics:", viab2_path)
 
 def _first_k_at_least():
     ks = viab.sort_values(["target_acc", "budget"])
