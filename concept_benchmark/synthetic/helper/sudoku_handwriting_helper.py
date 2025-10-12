@@ -152,7 +152,16 @@ class AdvancedHandwrittenGenerator(SimpleHandwrittenGenerator):
 
     """Extended version with more realistic distortions using OpenCV."""
     def generate(self, digit, size=64, color=(0, 0, 0), rng_seed=None):
-        """Generate with elastic distortions."""
+        """
+        Generate a handwritten digit image with random variations.
+        Args:
+            digit: Integer 0-9 representing which digit to generate
+            size: Desired output size
+            color: RGB tuple for the digit color
+            rng_seed: Random seed for reproducible results
+        Returns:
+            PIL Image object (RGBA mode)
+        """
         try:
             import cv2
         except ImportError:
@@ -175,7 +184,12 @@ class AdvancedHandwrittenGenerator(SimpleHandwrittenGenerator):
         return img
     
     def _elastic_transform(self, image, alpha, sigma):
-        """Apply elastic distortion to the image."""
+        """Apply elastic distortion to the image.
+        Args:
+            image: Image to modify
+            alpha:
+            sigma: Standard deviation of the gaussian
+        """
         import cv2
         random_state = np.random.RandomState(None)
         shape = image.shape[:2]
@@ -202,8 +216,18 @@ def _build_given_mask(board: np.ndarray,
     Returns a boolean mask (shape NxN). True = starter ('given') digit.
 
     Priority:
-      1) If given_mask is provided, use it as-is (coerced to bool).
-      2) Else sample a subset of nonzero cells by count or ratio.
+        1) If given_mask is provided, use it as-is (coerced to bool).
+        2) Else sample a subset of nonzero cells by count or ratio.
+
+    Args:
+        board: The board to mask.
+        given_mask: Current mask of given values.
+        starters_ratio: The percentage of starting values in teh board.
+        starters_count: Discrete value of starting values
+        starters_seed: Random seed to determine starting values.
+    
+    Returns:
+        Boolean mask of given values.
     """
     N = board.shape[0]
     mask = np.zeros((N, N), dtype=bool)
@@ -236,17 +260,6 @@ def _build_given_mask(board: np.ndarray,
         mask[r, c] = True
     return mask
 
-def _valid_candidates(board: np.ndarray, r: int, c: int) -> list[int]:
-    """Return Sudoku-valid digits for (r,c) using row/col/block constraints."""
-    N = board.shape[0]
-    n = int(math.isqrt(N))
-    if int(board[r, c]) != 0:
-        return []
-    used = set(board[r, :].astype(int)) | set(board[:, c].astype(int))
-    br, bc = (r // n) * n, (c // n) * n
-    used |= set(board[br:br+n, bc:bc+n].astype(int).ravel())
-    return [d for d in range(1, N+1) if d not in used]
-
 def _synthesize_prior_from_neighbors(
     board: np.ndarray,
     starters: np.ndarray,                 # bool mask: True = starter
@@ -259,7 +272,17 @@ def _synthesize_prior_from_neighbors(
 ) -> dict[tuple[int,int], list[int]]:
     """
     Build prior_options by choosing random adjacent pairs/triples among NON-STARTER filled cells.
-    Returns: {(r,c): [digits]} where list is the other cells' digits in the same group.
+    Args:
+        board: array representation of the sudoku board.
+        starters: mask of given values.
+        groups_count: Exact number of cells with a group of candidates
+        groups_ratio: Ratio of cells that have a group of candidates.
+        groups_size: Number of candidates.
+        allow_diagonal: Allow candidates based on diagonal squares.
+        seed: Random seed for cell selection.
+
+    Returns:
+        {(r,c): [digits]} where list is the other cells' digits in the same group.
     """
     rng = np.random.default_rng(seed)
     N = board.shape[0]
@@ -325,7 +348,15 @@ def _synthesize_prior_from_neighbors(
     return {pos: sorted(list(ds)) for pos, ds in prior.items()}
 
 def _render_inline_candidates(generator, opts, color, size, seed_base=0):
-    """Render all candidate digits in one tight horizontal row (RGBA, no gaps)."""
+    """
+    Render all candidate digits in one tight horizontal row (RGBA, no gaps).
+    Args:
+        generator: digit generator
+        opts: 
+        color:
+        size:
+        seed_base:
+    """
     tiles = []
     for j, d in enumerate(opts):
         if generator is not None:
@@ -358,7 +389,13 @@ def _render_inline_candidates(generator, opts, color, size, seed_base=0):
     return strip
 
 def _tight_crop_rgba(im: Image.Image, alpha_thresh: int = 8) -> Image.Image:
-    """Trim transparent margins from an RGBA image."""
+    """Trim transparent margins from an RGBA image.
+    Args:
+        im: Image to crop
+        alpha_thresh: how closely to crop
+    
+    Returns: the cropped iamge
+    """
     if im.mode != "RGBA":
         im = im.convert("RGBA")
     a = np.array(im)[:, :, 3]
