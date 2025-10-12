@@ -16,12 +16,13 @@ settings = {
     # 'data_type': 'tabular',
     # 'n': 3,
     'max_corrupt': 21,
-    'concept_noise': 0.3,
+    'concept_noise': 0.0,
     'concept_missing': 0.0,
     'concept_missing_mech': 'none',
     'target_accuracy': 1.0, # doesn't matter but need for dataset loading
-    'epochs': 10,
-    'patience': 3,
+    'epochs': 50,
+    'patience': 10,
+    'collapse': False,
 }
 
 if Process(pid=os.getppid()).name() not in ("node"):
@@ -75,20 +76,18 @@ model.fit(
     }
 )
 
+clean_data = data.__copy__()
+clean_data.concept_noise = False
+clean_data.transform = data.transform
+clean_data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
 
-# clean_data = data.__copy__()
-# clean_data.concept_noise = False
-# clean_data.transform = data.transform
-# clean_data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
+train_accuracy = ((model.predict(clean_data.training) > 0.5) == clean_data.training.C).mean(axis=0)
+valid_accuracy = ((model.predict(clean_data.validation) > 0.5) == clean_data.validation.C).mean(axis=0)
+test_accuracy = ((model.predict(data.test) > 0.5) == clean_data.test.C).mean(axis=0)
 
-# train_accuracy = ((model.predict(clean_data.training) > 0.5) == clean_data.training.C).mean(axis=0)
-# valid_accuracy = ((model.predict(clean_data.validation) > 0.5) == clean_data.validation.C).mean(axis=0)
-# test_accuracy = ((model.predict(data.test) > 0.5) == clean_data.test.C).mean(axis=0)
-
-# print(f"Train Concept Accuracy: {train_accuracy.mean() * 100:.2f}% ± {train_accuracy.std() * 100:.2f}%")
-# print(f"Validation Concept Accuracy: {valid_accuracy.mean() * 100:.2f}% ± {valid_accuracy.std() * 100:.2f}%")
-# print(f"Test Concept Accuracy: {test_accuracy.mean() * 100:.2f}% ± {test_accuracy.std() * 100:.2f}%")
-
+print(f"Train Concept Accuracy: {train_accuracy.mean() * 100:.2f}% ± {train_accuracy.std() * 100:.2f}%")
+print(f"Validation Concept Accuracy: {valid_accuracy.mean() * 100:.2f}% ± {valid_accuracy.std() * 100:.2f}%")
+print(f"Test Concept Accuracy: {test_accuracy.mean() * 100:.2f}% ± {test_accuracy.std() * 100:.2f}%")
 
 # save the model
 save(model, get_model_file(model_type="cd", **settings), overwrite=True)

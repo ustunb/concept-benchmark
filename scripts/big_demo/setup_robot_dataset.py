@@ -15,10 +15,10 @@ if Process(pid=os.getppid()).name() not in ("node"):
     p.add_argument('--n', type=int, default=settings['n'])
     p.add_argument('--concept_noise', type=float, default=settings['concept_noise'])
     p.add_argument('--target_accuracy', type=float, default=settings['target_accuracy'])
+    p.add_argument('--draw', action='store_true', default=False)
     # need flag for concept noise
     args, _ = p.parse_known_args()
-
-settings.update(vars(args))
+    settings.update(vars(args))
 
 data = create_synthetic_dataset(**settings)
 data.generate_cvindices(strata=data.y, total_folds_for_cv=[5])

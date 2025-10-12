@@ -4,16 +4,16 @@ from concept_benchmark.intervention import ConceptInterventionRunner, Interventi
 from utils import get_dataset_file, get_model_file, determine_device
 
 settings = {
-    # 'data_name': 'robot',
-    # 'data_type': 'image',
-    # 'n': 1,
-    'data_name': 'sudoku',
-    'data_type': 'tabular',
-    'n': 3,
+    'data_name': 'robot',
+    'data_type': 'image',
+    'n': 1,
+    # 'data_name': 'sudoku',
+    # 'data_type': 'tabular',
+    # 'n': 3,
     'max_corrupt': 21,
-    'concept_noise': 0.15,
-    'concept_missing': 0.00,
-    'concept_missing_mech': 'none',
+    'concept_noise': 0.00,
+    'concept_missing': 0.3,
+    'concept_missing_mech': 'mnar',
     'target_accuracy': 1.0, # doesn't matter but need for dataset loading
     'epochs': 50,
     'patience': 20,
@@ -39,7 +39,7 @@ cs = ConceptBasedModel(
 
 
 runner = ConceptInterventionRunner(model=cs)
-config = InterventionConfig(tau=0.05)
+config = InterventionConfig(tau=0.25)
 strategy = ConceptualSafeguardsStrategy()
 result = runner.run(
     strategy=strategy,
@@ -64,4 +64,10 @@ score_result = runner.run(
     dataset=data.test
 )
 
-score_result.proposal.details
+dets = score_result.proposal.details
+dets['scores'] >= 0.3
+
+preds = cbm.predict(data.test)
+(preds == data.test.y).mean()
+
+((cd.predict(data.test) >= 0.5) == data.test.base_concepts).mean(axis=0)

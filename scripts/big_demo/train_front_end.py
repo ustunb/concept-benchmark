@@ -12,7 +12,7 @@ settings = {
     'data_type': 'image',
     'n': 1,
     'max_corrupt': 21,
-    'concept_noise': 0.15,  
+    'concept_noise': 0.0,  
     'concept_missing': 0.0,
     'concept_missing_mech': 'none',
     'target_accuracy': 1.0,

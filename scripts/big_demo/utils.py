@@ -31,20 +31,33 @@ DEFAULT_ROBOT_SETTINGS = {
     'n': 1,
     'draw': False,
     'output_directory': results_dir / 'robots_large',
-    'concepts': {
-        'head_shape': ['square', 'round'],
-        'body_shape': ['square', 'round'],
-        'has_knees': ['false', 'true'],
-        'has_elbows': ['false', 'true'],
-        'has_antennae': ['false', 'true'],
-        'ears_shape': ['square', 'triangle'],
-        'mouth_type': ['closed', 'open'],
-        'hand_shape': ['round_circle', 'round_oval', 'round_oval2',
-                        'edgy_triangle', 'edgy_square', 'edgy_trapezoid'],
-        'foot_shape': ['flat_4sided', 'flat_5sided', 'flat_lshaped',
-                        'pointy_3sided', 'pointy_4sided', 'pointy_6sided'],
+    'concepts' : {
+        "foot_shape": [
+            "flat_4sided",
+            "flat_5sided",
+            "flat_lshaped",
+            "pointy_3sided",
+            "pointy_4sided",
+            "pointy_6sided",
+        ],
+        "body_shape": ["square", "round"],  # no subtypes (could add)
+        "head_shape": ["square", "round"],  # no subtypes (could add)
+        #
+        "has_elbows": [True, False],  # all round
+        "has_knees": [True, False],
+        "has_antennae": [True, False],
+        "ears_shape": ["square", "triangle"],
+        "mouth_type": ["closed", "open"],
+        "hand_shape": [
+            "round_circle",
+            "round_oval",
+            "round_oval2",
+            "edgy_triangle",
+            "edgy_square",
+            "edgy_trapezoid",
+        ],
     },
-    'irrelevant_features': ['has_antennae'],  # take antennae out, as they are too hard to detect
+    # 'irrelevant_features': ['has_antennae'],  # take antennae out, as they are too hard to detect
     'model': "'glorp' if (int(row['body_shape']=='square') + int(row['foot_shape']=='pointy') - 2 >= 0) else 'drent'",
     'model_type': 'deterministic', 
     'size': 'large',  
@@ -74,6 +87,8 @@ def get_dataset_file(
                 filename += f"_expand{blur['expand_mask_px']}"
             if blur.get('feather_mask_px'):
                 filename += f"_feather{blur['feather_mask_px']}"
+        if kwargs.get('collapse') is False:
+            filename += "_ncollapse"
 
     return results_dir / f"{filename}.data"
 
