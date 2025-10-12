@@ -708,6 +708,7 @@ class ConceptInterventionRunner:
             strat_metrics['overall_acc_before'] = proposal.details.get("overall_acc_before", None)
             strat_metrics['overall_acc_after'] = proposal.details.get("overall_acc_after", None)
             strat_metrics['acc_non_intervened_before'] = proposal.details.get("acc_non_intervened_before", None)
+            strat_metrics['intervened'] = proposal.selected_instances.size / batch.n_samples if batch.n_samples > 0 else 0.0
 
         return InterventionResult(
             C_pred=batch.C_pred,
