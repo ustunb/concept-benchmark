@@ -28,7 +28,9 @@ settings = {
     "knows_concepts": False,
     "spurious_features": ["has_elbows", "hand_shape", "foot_shape_pointy_5sided", "foot_shape"],
     "human_alignment": {"foot_shape": 1, "mouth_type": -1, "bias": -0.01}, # OR of ANDs model's logic
-    "model_type": "deterministic",
+    "model_type": "stochastic",
+    "logit_scalar": 4.0,
+    "logit_intercept": 1.0,
     "label_noise_rate": 0,
     "missingness": "complete",
     "missing_rate": 1.0,
@@ -54,7 +56,7 @@ settings = {
     "intervention_threshold": 0.1,
     "epochs": 10,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "test005",
+    "run_name": "test006",
     "load_detector": "",#str(Path(results_dir / "robots" / "test000" / "detector_dnn_robots_image_deterministic_complete__skewint-acc90_seed555.pt")),
     "load_frontend": "",#str(Path(results_dir / "robots" / "test000" / "frontend_logreg_robots_image_deterministic_complete__skewint-acc90_seed555.pkl")),
 }
@@ -128,6 +130,7 @@ def train_eval_image(paths_tr, y_tr, paths_te, y_te, model_id, epochs, batch_siz
             total += yb.numel()
     acc = correct / total if total > 0 else 0.0
     return float(acc), proc, model
+
 
 def _apply_label_noise(sample, noise_rate, seed):
     if noise_rate <= 0:
@@ -457,6 +460,8 @@ def main():
         "spurious_features": S.get("spurious_features", ["has_elbows", "hand_shape"]),
         "model": S.get("model", "'glorp' if (int(row['body_shape']=='square') + int(str(row['foot_shape']).startswith('pointy')))>=1 else 'drent'"),
         "model_type": S["model_type"],
+        "scalar": float(S.get("logit_scalar", 1.0)),
+        "intercept": float(S.get("logit_intercept", 0.0)),
         "size": S["image_size"],
         "color_mode": str(S["color_mode"]),
         "train_concept_detector": True,
@@ -527,6 +532,7 @@ def main():
         return dist_str
     print("Training set class distribution:", count_classes(train))
     print("Test set class distribution:", count_classes(test))
+
 
     device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
     config = {

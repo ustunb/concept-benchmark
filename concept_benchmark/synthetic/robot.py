@@ -320,7 +320,8 @@ def create_robot_image_dataset(
     if model_type == "deterministic":
         glorp_model_true = lambda row: eval(unlist0(model))
     elif model_type == "stochastic":
-        glorp_model_true = lambda row: eval(model_to_logistic(model))
+        glorp_model_true = lambda row: eval(model_to_logistic(model, scalar = extra_params.get("scalar", 1.0),
+                                                              intercept = extra_params.get("intercept", None)))
     else:
         raise ValueError("Invalid model_type. Use 'deterministic' or 'stochastic'.")
 

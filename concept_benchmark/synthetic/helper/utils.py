@@ -61,7 +61,7 @@ def unlist0(obj):
         return obj
 
 
-def model_to_logistic(model: str):
+def model_to_logistic(model: str, scalar = 1.0, intercept = None) -> str:
     """
     Extracts the arithmetic expression inside the first (...) before a comparison operator and the number after the
     comparison operator >= then constructs a new expression that subtracts the number from the arithmetic expression
@@ -76,7 +76,11 @@ def model_to_logistic(model: str):
     num = re.search(r">=\s*([-\d.]+)", model)
 
     expr = match.group(1).strip()[:-1]
-    expr += ' - ' + num.group(1)
+    intercept = intercept if intercept is not None else num.group(1)
+    expr += ' - ' + str(intercept)
+
+    if scalar != 1.0:
+        expr = f"({expr}) * {scalar}"
     return f"expit({expr})"
 
 
