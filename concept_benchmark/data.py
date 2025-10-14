@@ -996,12 +996,17 @@ class ConceptDatasetSample(Dataset):
         assert isinstance(indices, np.ndarray)
         assert indices.ndim == 1 and indices.shape[0] == self.n
         assert np.isin(indices, (0, 1)).all()
+
+        filtered_meta = self.meta.copy()
+        if 'UC' in filtered_meta:
+            filtered_meta['UC'] = filtered_meta['UC'][indices]
+
         new_sample = self.__class__(
             parent=self.parent,
             X=self.X[indices],
             C=self.base_concepts[indices],
             y=self.base_labels[indices],
-            meta=self.meta,
+            meta=filtered_meta,
             indices=indices,
             concept_noise=self.concept_noise,
             concept_missing=self.concept_missing,
@@ -1170,12 +1175,17 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         assert isinstance(indices, np.ndarray)
         assert indices.ndim == 1 and indices.shape[0] == self.n
         assert np.isin(indices, (0, 1)).all()
+
+        filtered_meta = self.meta.copy()
+        if 'UC' in filtered_meta:
+            filtered_meta['UC'] = filtered_meta['UC'][indices]
+
         new_sample = self.__class__(
             parent=self.parent,
             X=self.X[indices],
             C=self.base_concepts[indices],
             y=self.base_labels[indices],
-            meta=self.meta,
+            meta=filtered_meta,
             indices=indices,
             concept_noise=self.concept_noise,
             concept_missing=self.concept_missing,

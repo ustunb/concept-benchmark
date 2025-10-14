@@ -19,7 +19,7 @@ ALL_ROBOT_FEATURES = {
         "flat_lshaped",
         "pointy_3sided",
         "pointy_4sided",
-        "pointy_6sided",
+        "pointy_5sided",
     ),
     "body_shape": ("square", "round"),  # no subtypes (could add)
     "head_shape": ("square", "round"),  # no subtypes (could add)
@@ -342,23 +342,23 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
             (x_right + 0.5 * foot_width, y_top + 0.5 * foot_height),
         )
 
-    elif foot_subtype == "pointy_6sided":
+
+    elif foot_subtype == "pointy_5sided":
+
         p_left = (
-            (x_left, y_top),
-            (x_left - 0.33 * foot_width, y_top + 0.33 * foot_height),
-            (x_left - 0.33 * foot_width, y_top + 0.66 * foot_height),
+            (x_left - 0.5 * foot_width, y_top),
+            (x_left - 0.5 * foot_width, y_top + 0.7 * foot_height),
             (x_left, y_top + foot_height),
-            (x_left + 0.33 * foot_width, y_top + 0.66 * foot_height),
-            (x_left + 0.33 * foot_width, y_top + 0.33 * foot_height),
+            (x_left + 0.5 * foot_width, y_top + 0.7 * foot_height),
+            (x_left + 0.5 * foot_width, y_top),
         )
 
         p_right = (
-            (x_right, y_top),
-            (x_right - 0.33 * foot_width, y_top + 0.33 * foot_height),
-            (x_right - 0.33 * foot_width, y_top + 0.66 * foot_height),
+            (x_right - 0.5 * foot_width, y_top),
+            (x_right - 0.5 * foot_width, y_top + 0.7 * foot_height),
             (x_right, y_top + foot_height),
-            (x_right + 0.33 * foot_width, y_top + 0.66 * foot_height),
-            (x_right + 0.33 * foot_width, y_top + 0.33 * foot_height),
+            (x_right + 0.5 * foot_width, y_top + 0.7 * foot_height),
+            (x_right + 0.5 * foot_width, y_top),
         )
 
     else:

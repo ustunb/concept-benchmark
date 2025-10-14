@@ -19,43 +19,44 @@ settings = {
     "draw": 0,
     "CBM_type": "joint", #"sequential"
     "image_dir": "./data/robot_images",
-    "image_size": "large",
-    "color_mode": "greyscale",
+    "image_size": "small",
+    "color_mode": "color",
     "train_dnn": 0,
     "seed": 555,
     "model": "'glorp' if (int(row['mouth_type']=='closed') +  int(row['foot_shape']=='pointy'))>= 2 else 'drent'",
     'dataset_characterization': "",
-    "knows_concepts": True,
+    "knows_concepts": False,
+    "spurious_features": ["has_elbows", "hand_shape", "foot_shape_pointy_5sided", "foot_shape"],
     "human_alignment": {"foot_shape": 1, "mouth_type": -1, "bias": -0.01}, # OR of ANDs model's logic
     "model_type": "deterministic",
-    "label_noise_rate": 0.15,
+    "label_noise_rate": 0,
     "missingness": "complete",
     "missing_rate": 1.0,
     "impute_missing": 0,
-    "skew_concept": [],# [{'concepts': {'mouth_type': 0, 'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.15},
-                    # {'concepts': {'mouth_type': 0, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.16},
-                    # #{'concepts': {'mouth_type': 0, 'foot_shape_pointy_6sided': 1}, 'min_fraction': 0.005},
-                    # {'concepts': {'mouth_type': 1, 'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.1},
-                    # {'concepts': {'mouth_type': 1, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.16},
-                    # {'concepts': {'mouth_type': 1, 'foot_shape_flat_lshaped': 1}, 'min_fraction': 0.08},
-                    # {'concepts': {'mouth_type': 1, 'foot_shape_flat_4sided': 1}, 'min_fraction': 0.08},
-                    # {'concepts': {'mouth_type': 1, 'foot_shape_flat_5sided': 1}, 'min_fraction': 0.08},
-                    # {'concepts': {'mouth_type': 0, 'foot_shape_flat_lshaped': 1}, 'min_fraction': 0.08},
-                    # {'concepts': {'mouth_type': 0, 'foot_shape_flat_4sided': 1}, 'min_fraction': 0.08},
-                    # {'concepts': {'mouth_type': 0, 'foot_shape_flat_5sided': 1}, 'min_fraction': 0.08},
-                    # ], #[{'concepts': {'body_shape': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.243},
+    "skew_concept": [{'concepts': {'mouth_type': 0, 'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.15},
+                     {'concepts': {'mouth_type': 0, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.16},
+                     {'concepts': {'mouth_type': 1, 'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.1},
+                     {'concepts': {'mouth_type': 1, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.16},
+                     {'concepts': {'mouth_type': 1, 'foot_shape_flat_lshaped': 1}, 'min_fraction': 0.08},
+                     {'concepts': {'mouth_type': 1, 'foot_shape_flat_4sided': 1}, 'min_fraction': 0.08},
+                     {'concepts': {'mouth_type': 1, 'foot_shape_flat_5sided': 1}, 'min_fraction': 0.08},
+                     {'concepts': {'mouth_type': 0, 'foot_shape_flat_lshaped': 1}, 'min_fraction': 0.08},
+                     {'concepts': {'mouth_type': 0, 'foot_shape_flat_4sided': 1}, 'min_fraction': 0.08},
+                     {'concepts': {'mouth_type': 0, 'foot_shape_flat_5sided': 1}, 'min_fraction': 0.08},
+                     ], #[{'concepts': {'body_shape': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.243},
                      # {'concepts': {'mouth_type': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.2},
                      # {'concepts': {'body_shape': 0, 'mouth_type': 0, 'has_antennae': 1}, 'min_fraction': 0.15},
                      # {'concepts': {'body_shape': 1, 'mouth_type': 1, 'has_antennae': 0}, 'min_fraction': 0.235},
                      # {'concepts': {'body_shape': 1, 'foot_shape': 0, 'has_antennae': 0}, 'min_fraction': 0.2},
                      # {'concepts': {'foot_shape': 0, 'mouth_type': 1, 'has_antennae': 0}, 'min_fraction': 0.15}],#[{'concepts': {'mouth_type': 0, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.13},
-    "budget": [9],
+    "budget": [1,9],
     "intervention_accuracy": 0.9,
+    "intervention_threshold": 0.1,
     "epochs": 10,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "noise",
-    "load_detector": "",#str(Path(results_dir / "robots" / "bias_footshape_subtype4" / "detector_dnn_robots_image_deterministic_complete__skewint-acc90_seed555.pt")),
-    "load_frontend": "",#str(Path(results_dir / "robots" / "bias_footshape_subtype4" / "frontend_logreg_robots_image_deterministic_complete__skewint-acc90_seed555.pkl")),
+    "run_name": "test000",
+    "load_detector": str(Path(results_dir / "robots" / "test000" / "detector_dnn_robots_image_deterministic_complete__skewint-acc90_seed555.pt")),
+    "load_frontend": str(Path(results_dir / "robots" / "test000" / "frontend_logreg_robots_image_deterministic_complete__skewint-acc90_seed555.pkl")),
 }
 
 class ImageDS(Dataset):
@@ -200,19 +201,18 @@ def create_skewed_splits(dataset, skew_specs, train_fraction=0.5, val_fraction=0
         train_indices.extend(unused[:remaining_slots])
         print(f"Filled {min(remaining_slots, len(unused))} remaining slots")
 
-    print("\n=== Debugging: Sample robots from each spec ===")
-    for spec, indices in zip(skew_specs, spec_indices):
-        print(f"\nSpec {spec['concepts']}: {len(indices)} total samples")
-        print("Sample of 10 robots:")
-        sample_indices = indices[:10] if len(indices) >= 10 else indices
-
-        for sample_idx in sample_indices:
-            robot_features = {}
-            for i, concept_name in enumerate(dataset.concepts):
-                robot_features[concept_name] = int(dataset.C[sample_idx, i])
-                robot_features["class"] = int(dataset.y[sample_idx])
-            print(f"  Robot {sample_idx}: {robot_features}")
-
+    # print("\n=== Debugging: Sample robots from each spec ===")
+    # for spec, indices in zip(skew_specs, spec_indices):
+    #     print(f"\nSpec {spec['concepts']}: {len(indices)} total samples")
+    #     print("Sample of 10 robots:")
+    #     sample_indices = indices[:10] if len(indices) >= 10 else indices
+    #
+    #     for sample_idx in sample_indices:
+    #         robot_features = {}
+    #         for i, concept_name in enumerate(dataset.concepts):
+    #             robot_features[concept_name] = int(dataset.C[sample_idx, i])
+    #             robot_features["class"] = int(dataset.y[sample_idx])
+    #         print(f"  Robot {sample_idx}: {robot_features}")
 
     train_indices = np.array(train_indices)
     rng.shuffle(train_indices)
@@ -224,6 +224,7 @@ def create_skewed_splits(dataset, skew_specs, train_fraction=0.5, val_fraction=0
     val_size = int(len(remaining) * val_fraction / (val_fraction + test_fraction))
     val_indices = remaining[:val_size]
     test_indices = remaining[val_size:]
+    print("Resulting training size:", len(train_indices))
 
     dataset.training = create_sample(total_size, train_indices, dataset)
     dataset.validation = create_sample(total_size, val_indices, dataset)
@@ -452,11 +453,11 @@ def main():
                 "flat_lshaped",
                 "pointy_3sided",
                 "pointy_4sided",
-                "pointy_6sided",
+                "pointy_5sided",
             ],
         },
         "additional_features": [] if S.get("knows_concepts", True) else ["foot_shape_subtype"],
-        "spurious_features": ["has_elbows", "hand_shape"],
+        "spurious_features": S.get("spurious_features", ["has_elbows", "hand_shape"]),
         "model": S.get("model", "'glorp' if (int(row['body_shape']=='square') + int(str(row['foot_shape']).startswith('pointy')))>=1 else 'drent'"),
         "model_type": S["model_type"],
         "size": S["image_size"],
@@ -500,6 +501,18 @@ def main():
     if miss != "complete" and rate > 0:
         Ctr = _apply_missing(train.C, miss, rate, rng, y=train.y.astype(int))
         train = train.__class__(parent=train.parent, X=train.X, C=Ctr, y=train.y, meta=train.meta, transform=train.transform, concept_transform=train.concept_transform, target_transform=train.target_transform, base_dir=train.base_dir)
+
+    # print distribution of each concept in the training set
+    print("Training set concept distributions:")
+    for i, concept_name in enumerate(train.concepts):
+        unique, counts = np.unique(train.C[:, i], return_counts=True)
+        dist = dict(zip(unique, counts))
+        total = counts.sum()
+        dist_str = ", ".join([f"{int(k)}: {v} ({v/total:.1%})" for k, v in dist.items()])
+        print(f"  {concept_name}: {dist_str}")
+
+    import sys
+    sys.exit()
 
     device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
     config = {
@@ -659,113 +672,228 @@ def main():
 
 
     # INTERVENTIONS
-    def select_intervention_concepts(current_pred, frontend_model, budget_k):
-        """Select concepts to intervene on based on prediction change probability."""
-        n_concepts = len(current_pred)
-        current_proba = frontend_model.predict_proba(current_pred.reshape(1, -1))[0]
-        current_class = np.argmax(current_proba)
+    def compute_intervention_score(pred_probs, frontend_model, budget_k, policy="top-k"):
+        """
+        Compute intervention score for a single sample.
 
-        concept_scores = []
+        Args:
+            pred_probs: (n_concepts,) - Concept prediction probabilities
+            frontend_model: Trained frontend model
+            budget_k: Number of concepts to intervene on
+            policy: "top-1" or "top-k"
 
-        for j in range(n_concepts):
-            # try flipping concept j to opposite value
-            test_pred = current_pred.copy()
-            test_pred[j] = 1 - current_pred[j]
-            test_proba = frontend_model.predict_proba(test_pred.reshape(1, -1))[0]
-            new_class = np.argmax(test_proba)
+        Returns:
+            score: float - Probability that intervention changes prediction
+            best_concepts: list - Indices of concepts to intervene on
+        """
+        n_concepts = len(pred_probs)
+        c_rounded = (pred_probs > 0.5).astype(np.float32)
+        pred_original = np.argmax(frontend_model.predict_proba(c_rounded.reshape(1, -1))[0])
 
-            # score = probability this intervention changes the prediction
-            flip_probability = 1.0 if new_class != current_class else 0.0
-            concept_scores.append((j, flip_probability))
+        print(f"Original prediction: {pred_original} with concepts {c_rounded} of length {n_concepts}")
 
-        # sort by highest flip probability
-        concept_scores.sort(key=lambda x: x[1], reverse=True)
+        if policy == "top-1":
+            best_score = 0.0
+            best_concept = None
 
-        # select top budget_k concepts
-        selected = [idx for idx, score in concept_scores[:budget_k]]
-        return selected
+            for j in range(n_concepts):
+                total_prob_change = 0.0
 
-    def apply_interventions(predictions, ground_truth, frontend_model, budget_k, human_accuracy=1.0,
-                            policy="probability", rng=None):
+                # Outcome 1: concept j = 1 (with probability pred_probs[j])
+                c_if_one = c_rounded.copy()
+                c_if_one[j] = 1
+                pred_if_one = np.argmax(frontend_model.predict_proba(c_if_one.reshape(1, -1))[0])
+                if pred_if_one != pred_original:
+                    total_prob_change += pred_probs[j]
+
+                # Outcome 2: concept j = 0 (with probability 1 - pred_probs[j])
+                c_if_zero = c_rounded.copy()
+                c_if_zero[j] = 0
+                pred_if_zero = np.argmax(frontend_model.predict_proba(c_if_zero.reshape(1, -1))[0])
+                if pred_if_zero != pred_original:
+                    total_prob_change += (1 - pred_probs[j])
+
+                if total_prob_change > best_score:
+                    print(f"    New best concept {j} with score {total_prob_change:.8f}")
+                    best_score = total_prob_change
+                    best_concept = j
+
+            return best_score, [best_concept] if best_concept is not None else []
+
+
+        elif policy == "top-k":
+
+            from itertools import combinations, product
+            # Pre-generate all combinations
+            all_combinations = np.array(list(product([0, 1], repeat=budget_k)))  # (2^K, K)
+            n_combinations = len(all_combinations)
+
+            # Get all subsets
+            all_subsets = list(combinations(range(n_concepts), budget_k))
+            n_subsets = len(all_subsets)
+
+            # Process in batches to manage memory
+            batch_size = 100
+            best_score = 0.0
+            best_subset = []
+
+            for batch_start in range(0, n_subsets, batch_size):
+                print("Processing batch starting at subset index", batch_start, "of", n_subsets)
+                batch_end = min(batch_start + batch_size, n_subsets)
+                batch_subsets = all_subsets[batch_start:batch_end]
+                n_batch = len(batch_subsets)
+
+                # Create all concept vectors for this batch: (n_batch * 2^K, n_concepts)
+                c_batch = np.tile(c_rounded, (n_batch * n_combinations, 1))
+                prob_batch = np.ones(n_batch * n_combinations)
+
+                # Apply interventions for all subsets in batch
+                for batch_idx, subset in enumerate(batch_subsets):
+                    subset = np.array(subset)
+                    start_idx = batch_idx * n_combinations
+                    end_idx = start_idx + n_combinations
+
+                    # Set concepts for all combinations of this subset
+                    c_batch[start_idx:end_idx, subset] = all_combinations
+
+                    # Compute probabilities
+                    for idx, j in enumerate(subset):
+                        prob_batch[start_idx:end_idx] *= np.where(
+                            all_combinations[:, idx] == 1,
+                            pred_probs[j],
+                            1 - pred_probs[j]
+                        )
+
+                # Single prediction call for entire batch
+                pred_probs_all = frontend_model.predict_proba(c_batch)
+                pred_all = np.argmax(pred_probs_all, axis=1)
+                prediction_changes = (pred_all != pred_original).astype(float)
+
+                # Compute scores for each subset in batch
+                for batch_idx in range(n_batch):
+                    start_idx = batch_idx * n_combinations
+                    end_idx = start_idx + n_combinations
+                    score = np.sum(prob_batch[start_idx:end_idx] * prediction_changes[start_idx:end_idx])
+                    if score > best_score:
+                        best_score = score
+                        best_subset = list(batch_subsets[batch_idx])
+
+            return best_score, best_subset
+
+        else:
+            raise ValueError(f"Unknown policy: {policy}")
+
+    def select_samples_for_intervention(pred_probs, frontend_model, budget_k,
+                                        intervention_threshold, policy="top-k"):
+        """
+        Score all samples and select which ones to intervene on.
+
+        Args:
+            pred_probs: (n_samples, n_concepts) - Concept prediction probabilities
+            frontend_model: Trained frontend model
+            budget_k: Number of concepts to intervene on per sample
+            intervention_threshold: Minimum score required to intervene
+            policy: "top-1" or "top-k"
+
+        Returns:
+            samples_to_intervene: list of (sample_idx, score, concepts_to_check)
+        """
+        n_samples = pred_probs.shape[0]
+        samples_to_intervene = []
+
+        for i in range(n_samples):
+            score, best_concepts = compute_intervention_score(
+                pred_probs[i], frontend_model, budget_k, policy
+            )
+
+            if score >= intervention_threshold:
+                samples_to_intervene.append((i, score, best_concepts))
+
+        return samples_to_intervene
+
+    def apply_interventions(pred_probs, ground_truth, frontend_model, budget_k,
+                            intervention_threshold=0.0, human_accuracy=1.0,
+                            policy="top-k", rng=None):
         """
         Apply human interventions to concept predictions.
 
         Args:
-            predictions: (n_samples, n_concepts) - Current concept predictions
-            ground_truth: (n_samples, n_concepts) - True concept values
+            pred_probs: (n_samples, n_concepts) - Concept prediction probabilities
+            ground_truth: (n_samples, n_concepts) - True concept values (binary)
             frontend_model: Trained frontend model for final predictions
-            budget_k: int - Max concepts to intervene on per sample
+            budget_k: int - Number of concepts to intervene on per sample
+            intervention_threshold: float - Minimum score to intervene on a sample (0 to 1)
             human_accuracy: float - Probability human gives correct intervention
-            policy: str - "uncertainty" or "oracle" intervention selection
+            policy: str - "top-1" or "top-k" intervention selection
             rng: np.random.Generator - For reproducibility
 
         Returns:
-            intervened_predictions: (n_samples, n_concepts) - After interventions
+            intervened_concepts: (n_samples, n_concepts) - Binary concepts after interventions
             intervention_stats: dict - Statistics about interventions applied
         """
         if rng is None:
             rng = np.random.default_rng()
 
-        H_intervened = predictions.copy().astype(float)
-        n_samples, n_concepts = H_intervened.shape
+        # Stage 1: Score and select samples to intervene on
+        samples_to_intervene = select_samples_for_intervention(
+            pred_probs, frontend_model, budget_k, intervention_threshold, policy
+        )
+
+        # Initialize output - start with rounded binary concepts
+        intervened_concepts = (pred_probs >= 0.5).astype(int)
+        n_samples, n_concepts = pred_probs.shape
         edit_counts = np.zeros(n_samples, dtype=int)
 
-        for i in range(n_samples):
-            if budget_k <= 0:
-                continue
-
-            current_pred = H_intervened[i].copy()
-            if policy == "oracle":
-                # oracle: select concepts that are currently wrong
-                wrong_concepts = [j for j in range(n_concepts)
-                                  if abs(current_pred[j] - ground_truth[i, j]) > 0.5]
-                if not wrong_concepts:
-                    continue
-                selected_concepts = wrong_concepts[:budget_k]
-            else:
-                # flip probability policy
-                selected_concepts = select_intervention_concepts(current_pred, frontend_model, budget_k)
-
+        # Stage 2: Apply interventions to selected samples
+        for sample_idx, score, concepts_to_check in samples_to_intervene:
             actual_edits = 0
-            for j in selected_concepts:
-                original_value = current_pred[j]
+
+            for j in concepts_to_check:
+                original_value = intervened_concepts[sample_idx, j]
+
+                # Human intervention
                 if rng.random() < human_accuracy:
-                    # human gives correct value
-                    new_value = ground_truth[i, j]
+                    # Human gives correct value
+                    new_value = ground_truth[sample_idx, j]
                 else:
-                    # human gives incorrect value
-                    new_value = 1 - ground_truth[i, j]
+                    # Human makes error
+                    new_value = 1 - ground_truth[sample_idx, j]
 
-                current_pred[j] = new_value
+                # Update the binary concept value
+                intervened_concepts[sample_idx, j] = new_value
 
-                # only count as edit if value actually changed
-                if abs(new_value - original_value) > 1e-6:
+                # Count as edit if value changed
+                if original_value != new_value:
                     actual_edits += 1
 
-            H_intervened[i] = current_pred
-            edit_counts[i] = actual_edits
+            edit_counts[sample_idx] = actual_edits
 
-        n_interventions = np.sum(edit_counts > 0)
+        # Statistics
+        n_interventions = len(samples_to_intervene)
         stats = {
-            "predictions_intervened_on": int(n_interventions),
-            "interventions_rate": float(n_interventions) / n_samples,
+            "samples_intervened_on": int(n_interventions),
+            "intervention_rate": float(n_interventions) / n_samples,
             "avg_edits_per_intervention": float(edit_counts[edit_counts > 0].mean()) if n_interventions > 0 else 0.0,
-            "total_concept_checks": int(budget_k * n_samples),
-            "total_concept_edits_made": int(edit_counts.sum())
+            "total_concept_checks": int(budget_k * n_interventions),
+            "total_concept_edits_made": int(edit_counts.sum()),
+            "avg_score": float(np.mean([s for _, s, _ in samples_to_intervene])) if n_interventions > 0 else 0.0,
+            "max_score": float(max([s for _, s, _ in samples_to_intervene])) if n_interventions > 0 else 0.0,
+            "min_score": float(min([s for _, s, _ in samples_to_intervene])) if n_interventions > 0 else 0.0,
         }
 
-        return H_intervened, stats
+        return intervened_concepts, stats
 
     intervention_results = {}
     budgets = S.get('budget', [1, 2, 3, 4, 5])
     human_acc = S.get("intervention_accuracy", 1.0)
     for budget in budgets:
-        for policy in ["oracle", "flip_probability"]:
+        for policy in ["top-1", "top-k"]:
             H_intervened, intervention_stats = apply_interventions(
-                predictions=H_te,
-                ground_truth=test.C.astype(np.float32),
+                pred_probs=P_te,
+                ground_truth=test.C.astype(int),
                 frontend_model=fe,
                 budget_k=budget,
+                intervention_threshold=S.get("intervention_threshold", 0.5),
                 human_accuracy=human_acc,
                 policy=policy,
                 rng=rng
@@ -780,8 +908,8 @@ def main():
             intervention_results[key] = {
                 "accuracy": acc_intervened,
                 "accuracy_gain": acc_intervened - acc_det,
-                "predictions_intervened_on": intervention_stats["predictions_intervened_on"],
-                "interventions_rate": intervention_stats["interventions_rate"],
+                "predictions_intervened_on": intervention_stats["samples_intervened_on"],
+                "interventions_rate": intervention_stats["intervention_rate"],
                 "avg_edits_per_intervention": intervention_stats["avg_edits_per_intervention"],
                 "total_concept_checks": intervention_stats["total_concept_checks"],
                 "total_concept_edits_made": intervention_stats["total_concept_edits_made"],
@@ -791,6 +919,18 @@ def main():
             }
 
     # ALIGNMENT
+    def _get_foot_shape_pred(pred_row, concept_names):
+        """Helper to extract foot_shape prediction consistently"""
+        if 'foot_shape' in concept_names:
+            return int(pred_row[concept_names.index('foot_shape')])
+
+        # Check subtypes - if ANY pointy subtype is 1, return 1 (pointy), else 0 (flat)
+        pointy_types = [c for c in concept_names if 'foot_shape_pointy' in c]
+        for ptype in pointy_types:
+            if pred_row[concept_names.index(ptype)] == 1:
+                return 1  # pointy
+        return 0  # flat
+
     alignment_stats = {}
     if S.get("human_alignment", {}) != {}:
         test_concepts = H_te
@@ -832,32 +972,19 @@ def main():
 
             # Only include misclassified samples
             if pred_label != true_label:
-                body_idx = test.concepts.index('body_shape')
-                mouth_idx = test.concepts.index('mouth_type')
-                try:
-                    foot_idx = test.concepts.index('foot_shape')
-                except ValueError:
-                    foot_idx1 = test.concepts.index('foot_shape_pointy_3sided')
-                    foot_idx2 = test.concepts.index('foot_shape_pointy_4sided')
-                    foot_idx3 = test.concepts.index('foot_shape_flat_5sided')
-                    foot_idx4 = test.concepts.index('foot_shape_pointy_6sided')
-                    foot_idx5 = test.concepts.index('foot_shape_flat_lshaped')
-                    foot_idx6 = test.concepts.index('foot_shape_flat_4sided')
-                    # foot_idx in the index where there is 1 or any index, if all are 0, take the first index
-                    foot_idx = next((idx for idx in [foot_idx1, foot_idx2, foot_idx3, foot_idx4, foot_idx5, foot_idx6] if H_te[i, idx] == 1), foot_idx1)
-
-                antenna_idx = test.concepts.index('has_antennae')
 
                 row_data = {
                     'sample_idx': i,
-                    'body_shape_pred': int(H_te[i, body_idx]),
-                    'mouth_type_pred': int(H_te[i, mouth_idx]),
-                    'foot_shape_pred': int(H_te[i, foot_idx]),
-                    'has_antenna_pred': int(H_te[i, antenna_idx]),
-                    'body_shape': int(test.C[i, body_idx]),
-                    'mouth_type': int(test.C[i, mouth_idx]),
-                    'foot_shape': int(test.C[i, foot_idx]),
-                    'has_antenna': int(test.C[i, antenna_idx]),
+                    'body_shape_pred': int(H_te[i, test.concepts.index('body_shape')]),
+                    'mouth_type_pred': int(H_te[i, test.concepts.index('mouth_type')]),
+                    'has_antenna_pred': int(H_te[i, test.concepts.index('has_antennae')]),
+                    # For foot_shape, check if it's a subtype or single feature
+                    'foot_shape_pred': _get_foot_shape_pred(H_te[i], test.concepts),
+                    # Ground truth from UC
+                    'body_shape': int(test.meta['UC'][i, test.meta['unfiltered_concepts'].index('body_shape')]),
+                    'mouth_type': int(test.meta['UC'][i, test.meta['unfiltered_concepts'].index('mouth_type')]),
+                    'foot_shape': int(test.meta['UC'][i, test.meta['unfiltered_concepts'].index('foot_shape')]),
+                    'has_antenna': int(test.meta['UC'][i, test.meta['unfiltered_concepts'].index('has_antennae')]),
                     'score': float(aligned_scores[i]),
                     'prob_glorp': float(aligned_probs_glorp[i]),
                     'predicted': pred_label,

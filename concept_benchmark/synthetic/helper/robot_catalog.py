@@ -61,13 +61,12 @@ def collapse_robot_subtypes(
                     if f"{name}_subtype" in collapse_as_new_feature:
                         for sv in subtype_values:
                             new_feature_name = f"{name}_{t}_{sv}"
+                            print(f"Creating new feature {new_feature_name}")
                             if new_feature_name not in df.columns:
                                 df[new_feature_name] = False
                                 new_features[new_feature_name] = [False, True]
                             df.loc[df[name] == t, new_feature_name] = (sf.loc[:, 1] == sv) & (sf.loc[:, 0] == t) # this call ensures that you only get True if the type matches
                             df[new_feature_name] = df[new_feature_name].astype(str)
-                # remove the normal feature
-                df.pop(name)
             try:
                 sf.loc[:, 0].empty or sf.loc[:, 1].empty is False
             except:
@@ -111,8 +110,6 @@ def generate_robot_catalog(
     output_directory: str | Path = ".static/images",
     draw: bool = False,
     color_mode: str = "color",
-    drop_irrelevant: bool = True,
-    irrelevant_features: Sequence[str] | None = None,
     additional_features: Sequence[str] | None = None,
     verbose: bool = False,
     **unused,
@@ -140,25 +137,19 @@ def generate_robot_catalog(
 
     init_catalog_df = copy.deepcopy(catalog_df)
 
-    if drop_irrelevant and irrelevant_features:
-        # check if irrelevant features are in the catalog
-        existing_irrelevant_features = [
-            f for f in irrelevant_features if f in catalog_df.columns
-        ]
-        if existing_irrelevant_features:
-            catalog_df.drop(columns=existing_irrelevant_features, inplace=True)
-
     catalog_df, new_features = collapse_robot_subtypes(
         df=catalog_df, robot_features=list(concepts.keys()),
         collapse_as_new_feature=additional_features or [],
     )
     print(f"After collapse: {new_features}")
+
     constant_cols = [
         col
         for col in catalog_df.columns
         if catalog_df[col].nunique() == 1 and col not in ["id", "png_filename"]
     ]
     catalog_df = catalog_df.drop(columns=constant_cols)
+    new_features = {k: v for k, v in new_features.items() if k not in constant_cols}
 
     # create local directories
     output_path = Path(output_directory)

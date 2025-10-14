@@ -281,7 +281,6 @@ def create_robot_image_dataset(
     model: str = "",
     model_type: str = "deterministic",
     spurious_features: Sequence[str] | None = None,
-    irrelevant_features: Sequence[str] | None = None,
     color_mode: str = "color",
     verbose: bool = False,
     train_concept_detector: bool | None = None,
@@ -298,8 +297,7 @@ def create_robot_image_dataset(
     num_combinations = int(np.prod([len(v) for v in concepts.values()]))
     total_robots = num_robots or num_combinations * samples_per_instance
     eff_resolution = resolution if resolution is not None else (600 if size == "large" else 32)
-    spurious = list(spurious_features or [])
-    irrelevant = list(irrelevant_features) if irrelevant_features is not None else spurious
+    irrelevant = list(spurious_features or [])
     drop_irrelevant = extra_params.pop("drop_irrelevant", True)
     _ = (train_concept_detector, epochs)  # parameters accepted for API compatibility
 
@@ -310,8 +308,6 @@ def create_robot_image_dataset(
         output_directory=output_directory,
         draw=draw,
         color_mode=color_mode,
-        drop_irrelevant=drop_irrelevant,
-        irrelevant_features=irrelevant,
         verbose=verbose,
         **extra_params,
     )
@@ -345,7 +341,7 @@ def create_robot_image_dataset(
 
     if verbose:
         print("Catalog DataFrame:")
-        print(catalog_df.to_string(index=False))
+        print(catalog_df.head(10).to_string(index=False))
 
     # X: Image paths (stored as strings)
     image_dir = output_directory
@@ -356,15 +352,35 @@ def create_robot_image_dataset(
     copy_features.update(new_concepts)
     print(copy_features)
 
+    pos_map = {
+        feat: list(dict.fromkeys([str(f).split("_")[0] for f in copy_features[feat]]))[1]
+        for feat in catalog_df.columns if feat in copy_features
+    }
+
+    UC_cols = []
+    for feat in copy_features:
+        pos_val = list(dict.fromkeys([str(f).split("_")[0] for f in copy_features[feat]]))[1]
+        col = (
+            (catalog_df[feat].astype(str).str.split("_").str[0] == str(pos_val))
+            .astype(np.int32)
+            .to_numpy()
+        )
+        UC_cols.append(col)
+    UC = np.stack(UC_cols, axis=1).astype(np.int8)
+
+    if drop_irrelevant and irrelevant:
+        # check if irrelevant features are in the catalog
+        existing_irrelevant_features = [
+            f for f in irrelevant if f in catalog_df.columns
+        ]
+        if existing_irrelevant_features:
+            catalog_df.drop(columns=existing_irrelevant_features, inplace=True)
+
     # C: Concept matrix
     feature_names = [
         feat for feat in catalog_df.columns if feat in copy_features
     ]
-    pos_map = {
-        feat: list(dict.fromkeys([str(f).split("_")[0] for f in copy_features[feat]]))[1]
-        for feat in feature_names
-    }
-    print(pos_map)
+
     # Binary encode concepts: 1 if feature equals designated positive value, else 0
     C_cols = []
     for feat in feature_names:
@@ -407,6 +423,8 @@ def create_robot_image_dataset(
     meta = {
         "classes": ["drent", "glorp"],
         "concepts": feature_names,
+        "unfiltered_concepts": list(copy_features.keys()),
+        "UC": UC,
         "data_type": "image",
         "image_dir": image_dir,
         "resolution": eff_resolution,
