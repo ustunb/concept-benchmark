@@ -19,23 +19,34 @@ from concept_benchmark.train import (
 
 
 class RobotConceptClassifier(nn.Module):
-    def __init__(self, num_concepts: int):
+    def __init__(self, num_concepts: int, input_size: int):
         super(RobotConceptClassifier, self).__init__()
 
-        # 1) Shared CNN Backbone
-        self.backbone = nn.Sequential(
-            nn.Conv2d(3, 16, kernel_size=3, padding=1), nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            nn.Conv2d(16, 32, kernel_size=3, padding=1), nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1), nn.ReLU(),
-            nn.MaxPool2d(2, 2)
-        )
+        if input_size >= 128:
+            # Large images: use pooling to reduce spatial dimensions
+            self.backbone = nn.Sequential(
+                nn.Conv2d(3, 16, kernel_size=3, padding=1), nn.ReLU(),
+                nn.MaxPool2d(2, 2),
+                nn.Conv2d(16, 32, kernel_size=3, padding=1), nn.ReLU(),
+                nn.MaxPool2d(2, 2),
+                nn.Conv2d(32, 64, kernel_size=3, padding=1), nn.ReLU(),
+                nn.MaxPool2d(2, 2)
+            )
+        else:
+            # Small images: No pooling, keep all spatial information
+            self.backbone = nn.Sequential(
+                nn.Conv2d(3, 16, kernel_size=3, padding=1), nn.ReLU(),
+                nn.Conv2d(16, 32, kernel_size=3, padding=1), nn.ReLU(),
+                nn.Conv2d(32, 64, kernel_size=3, padding=1), nn.ReLU(),
+            )
 
-        # 224 -> 112 -> 56 -> 28 after 3 MaxPool(2,2)
-        feature_size = 64 * 28 * 28
+        # Automatically compute feature size with dummy forward pass
+        with torch.no_grad():
+            dummy = torch.zeros(1, 3, input_size, input_size)
+            dummy_out = self.backbone(dummy)
+            feature_size = dummy_out.view(1, -1).size(1)
 
-        # 2) One head per concept (order matches input labels), wrapped in nn.Sequential
+        # Concept heads
         self.heads = nn.ModuleList([
             nn.Linear(feature_size, 1)
             for _ in range(num_concepts)
@@ -44,7 +55,6 @@ class RobotConceptClassifier(nn.Module):
     def forward(self, x):
         features = self.backbone(x)
         features = torch.flatten(features, 1)
-        # Concatenate per-concept logits into shape (N, num_concepts)
         logits = torch.cat([head(features) for head in self.heads], dim=1)
         return logits
 

@@ -54,9 +54,9 @@ settings = {
     "intervention_threshold": 0.1,
     "epochs": 10,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "test000",
-    "load_detector": str(Path(results_dir / "robots" / "test000" / "detector_dnn_robots_image_deterministic_complete__skewint-acc90_seed555.pt")),
-    "load_frontend": str(Path(results_dir / "robots" / "test000" / "frontend_logreg_robots_image_deterministic_complete__skewint-acc90_seed555.pkl")),
+    "run_name": "test005",
+    "load_detector": "",#str(Path(results_dir / "robots" / "test000" / "detector_dnn_robots_image_deterministic_complete__skewint-acc90_seed555.pt")),
+    "load_frontend": "",#str(Path(results_dir / "robots" / "test000" / "frontend_logreg_robots_image_deterministic_complete__skewint-acc90_seed555.pkl")),
 }
 
 class ImageDS(Dataset):
@@ -420,11 +420,8 @@ def main():
         run_dir = base_out / f"{slug}_{time.strftime('%Y%m%d_%H%M%S')}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    IMG_SIZE = 224
     tf = transforms.Compose([
-        transforms.Resize((IMG_SIZE, IMG_SIZE)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
 
     params = {
@@ -511,8 +508,25 @@ def main():
         dist_str = ", ".join([f"{int(k)}: {v} ({v/total:.1%})" for k, v in dist.items()])
         print(f"  {concept_name}: {dist_str}")
 
-    import sys
-    sys.exit()
+    # print distribution of each concept in the test set
+    print("Test set concept distributions:")
+    for i, concept_name in enumerate(test.concepts):
+        unique, counts = np.unique(test.C[:, i], return_counts=True)
+        dist = dict(zip(unique, counts))
+        total = counts.sum()
+        dist_str = ", ".join([f"{int(k)}: {v} ({v/total:.1%})" for k, v in dist.items()])
+        print(f"  {concept_name}: {dist_str}")
+
+    # print num glorps and dreints in the training vs test set:
+    def count_classes(sample):
+        y = sample.y.astype(int)
+        unique, counts = np.unique(y, return_counts=True)
+        dist = dict(zip(unique, counts))
+        total = counts.sum()
+        dist_str = ", ".join([f"{int(k)}: {v} ({v/total:.1%})" for k, v in dist.items()])
+        return dist_str
+    print("Training set class distribution:", count_classes(train))
+    print("Test set class distribution:", count_classes(test))
 
     device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
     config = {
@@ -521,7 +535,7 @@ def main():
         'num_workers': 0 if device == 'mps' else 12,
         'pin_memory': False if device == 'mps' else True,
     }
-    cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=train.n_concepts))
+    cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=train.n_concepts, input_size=600 if S["image_size"] == "large" else 8))
     det_name = f"detector_dnn_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
     if S["load_detector"]:
         mini_train = train.filter(np.array([True] + [False] * (len(train.C) - 1)))
@@ -690,8 +704,6 @@ def main():
         c_rounded = (pred_probs > 0.5).astype(np.float32)
         pred_original = np.argmax(frontend_model.predict_proba(c_rounded.reshape(1, -1))[0])
 
-        print(f"Original prediction: {pred_original} with concepts {c_rounded} of length {n_concepts}")
-
         if policy == "top-1":
             best_score = 0.0
             best_concept = None
@@ -714,7 +726,6 @@ def main():
                     total_prob_change += (1 - pred_probs[j])
 
                 if total_prob_change > best_score:
-                    print(f"    New best concept {j} with score {total_prob_change:.8f}")
                     best_score = total_prob_change
                     best_concept = j
 
@@ -738,7 +749,7 @@ def main():
             best_subset = []
 
             for batch_start in range(0, n_subsets, batch_size):
-                print("Processing batch starting at subset index", batch_start, "of", n_subsets)
+                # print("Processing batch starting at subset index", batch_start, "of", n_subsets)
                 batch_end = min(batch_start + batch_size, n_subsets)
                 batch_subsets = all_subsets[batch_start:batch_end]
                 n_batch = len(batch_subsets)
@@ -971,7 +982,7 @@ def main():
             pred_label = int(aligned_preds[i])
 
             # Only include misclassified samples
-            if pred_label != true_label:
+            if pred_label != true_label or pred_label == true_label:
 
                 row_data = {
                     'sample_idx': i,
@@ -984,6 +995,7 @@ def main():
                     'body_shape': int(test.meta['UC'][i, test.meta['unfiltered_concepts'].index('body_shape')]),
                     'mouth_type': int(test.meta['UC'][i, test.meta['unfiltered_concepts'].index('mouth_type')]),
                     'foot_shape': int(test.meta['UC'][i, test.meta['unfiltered_concepts'].index('foot_shape')]),
+                    "foot_shape_subtype_string": test.meta['catalog_df'].iloc[test.meta['df_indices'][i]]['foot_shape_subtype'],
                     'has_antenna': int(test.meta['UC'][i, test.meta['unfiltered_concepts'].index('has_antennae')]),
                     'score': float(aligned_scores[i]),
                     'prob_glorp': float(aligned_probs_glorp[i]),
@@ -997,6 +1009,24 @@ def main():
         print(f"\n=== Total Misclassified by Aligned Model: {len(df_misclassified)} / {len(test.y)} ===")
         print("\nMisclassified samples:")
         print(df_misclassified.to_string(index=False))
+
+        # number of cases where foot_shape == 1 and foot_shape_subtype_string is 5sided, but foot_shape_pred == 0
+        foot_shape_mismatch = df_misclassified[
+            (df_misclassified['foot_shape'] == 1) &
+            (df_misclassified['foot_shape_subtype_string'].str.startswith('5sided')) &
+            (df_misclassified['foot_shape_pred'] == 0) &
+            (df_misclassified['predicted'] != df_misclassified['true_label'])
+        ]
+        # total cases where foot_shape == 1 and foot_shape_subtype_string is 5sided and true label is glorp (1)
+        total_5sided = df_misclassified[
+            (df_misclassified['foot_shape'] == 1) &
+            (df_misclassified['foot_shape_subtype_string'].str.startswith('5sided')) &
+            (df_misclassified['true_label'] == 1)
+        ]
+        print(f"\nNumber of misclassified samples where foot_shape==1, subtype is 5sided, it is a Glorp, but foot_shape_pred==0: {len(foot_shape_mismatch)} / {len(total_5sided)}")
+        if len(foot_shape_mismatch) > 0:
+            print(foot_shape_mismatch.to_string(index=False))
+
 
         alignment_stats = {
             'original_accuracy': float(original_acc),

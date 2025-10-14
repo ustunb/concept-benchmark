@@ -412,7 +412,7 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
     # antennae
     if "has_antennae" in features.keys() and features["has_antennae"] == "true":
         antenna_length = 1.5 * r if head_shape == "round" else 1.75 * r
-        antenna_width = 4
+        antenna_width = max(1, int(r * 0.08))
 
         antenna_ray = pero.Ray(line_color=pero.colors.Black, line_width=antenna_width)
         antenna_ray.draw(
