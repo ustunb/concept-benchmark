@@ -1,573 +1,122 @@
 import itertools
+from typing import List, Optional
+
 import numpy as np
 import torch
 import torch.nn as nn
-import copy
-from typing import Any, Callable, Dict, Optional, Tuple, Union
 from sklearn.linear_model import LogisticRegression
 from tqdm import tqdm
 
 from concept_benchmark.data import ConceptDatasetSample
-from concept_benchmark.ext.fileutils import load as load_object, save as save_object
 from concept_benchmark.train import (
-    ConceptTrainer,
-    DefaultConceptTrainer,
-    TrainerResult,
-    _extract_logits,
-    _prepare_inputs,
+    train_concept_heads,
 )
 
 
-class RobotConceptClassifier(nn.Module):
-    def __init__(self, num_concepts: int, input_size: int):
-        super(RobotConceptClassifier, self).__init__()
-
-        if input_size >= 128:
-            # Large images: use pooling to reduce spatial dimensions
-            self.backbone = nn.Sequential(
-                nn.Conv2d(3, 16, kernel_size=3, padding=1), nn.ReLU(),
-                nn.MaxPool2d(2, 2),
-                nn.Conv2d(16, 32, kernel_size=3, padding=1), nn.ReLU(),
-                nn.MaxPool2d(2, 2),
-                nn.Conv2d(32, 64, kernel_size=3, padding=1), nn.ReLU(),
-                nn.MaxPool2d(2, 2)
-            )
-        else:
-            # Small images: No pooling, keep all spatial information
-            self.backbone = nn.Sequential(
-                nn.Conv2d(3, 16, kernel_size=3, padding=1), nn.ReLU(),
-                nn.Conv2d(16, 32, kernel_size=3, padding=1), nn.ReLU(),
-                nn.Conv2d(32, 64, kernel_size=3, padding=1), nn.ReLU(),
-            )
-
-        # Automatically compute feature size with dummy forward pass
-        with torch.no_grad():
-            dummy = torch.zeros(1, 3, input_size, input_size)
-            dummy_out = self.backbone(dummy)
-            feature_size = dummy_out.view(1, -1).size(1)
-
-        # Concept heads
-        self.heads = nn.ModuleList([
-            nn.Linear(feature_size, 1)
-            for _ in range(num_concepts)
-        ])
-
-    def forward(self, x):
-        features = self.backbone(x)
-        features = torch.flatten(features, 1)
-        logits = torch.cat([head(features) for head in self.heads], dim=1)
-        return logits
-
-
-class RobotViTConceptClassifier(nn.Module):
-    def __init__(self, num_concepts: int):
-        super(RobotViTConceptClassifier, self).__init__()
-        from transformers import ViTModel
-        self.vit = ViTModel.from_pretrained("google/vit-base-patch16-224")
-
-        feature_size = 768  # ViT base model feature size
-
-        # 2) One head per concept (order matches input labels), wrapped in nn.Sequential
-        self.heads = nn.ModuleList([
-            nn.Linear(feature_size, 1)
-            for _ in range(num_concepts)
-        ])
-
-    def forward(self, x):
-        vit_outputs = self.vit(pixel_values=x)
-        features = vit_outputs.last_hidden_state[:, 0, :]  # (N, 768)
-        # Concatenate per-concept logits into shape (N, num_concepts)
-        logits = torch.cat([head(features) for head in self.heads], dim=1)  # (N, num_concepts)
-        return logits
-
-
-class JointConceptModel(nn.Module):
-    """Simple wrapper that links an optional backbone with a concept head."""
-
-    def __init__(
-        self,
-        backbone: Optional[nn.Module],
-        head: nn.Module,
-        *,
-        flatten: bool = True,
-    ) -> None:
-        """Create a joint concept model.
-
-        Args:
-            backbone: Optional feature extractor applied before the concept head.
-                If ``None`` the raw input is forwarded directly to ``head``.
-            head: Module that maps backbone features to per-concept logits.
-            flatten: Whether to flatten high-rank tensors before feeding them to
-                ``head``. Disable when ``head`` expects structured inputs (e.g. CNN).
-        """
-        super().__init__()
-        self.backbone = backbone
-        self.head = head
-        self.flatten = bool(flatten)
-
-    def forward(self, x: Any) -> torch.Tensor:
-        """Return per-concept logits for the provided batch.
-
-        Args:
-            x: Mini-batch of raw inputs consumed by the backbone/head stack.
-
-        Returns:
-            torch.Tensor: Logits of shape ``(batch, n_concepts)``.
-
-        Raises:
-            ValueError: If the backbone returns an empty sequence of features.
-            TypeError: If the backbone output dict lacks recognised keys.
-        """
-        features = x
-        if self.backbone is not None:
-            features = self.backbone(x)
-        if isinstance(features, (list, tuple)):
-            if not features:
-                raise ValueError("Backbone returned an empty sequence of features.")
-            features = features[0]
-        if isinstance(features, dict):
-            if "logits" in features:
-                features = features["logits"]
-            elif "last_hidden_state" in features:
-                features = features["last_hidden_state"][:, 0]
-            else:
-                raise TypeError("Unable to extract tensor from backbone output dictionary.")
-        if not isinstance(features, torch.Tensor):
-            features = torch.as_tensor(features)
-        if self.flatten and features.ndim > 2:
-            features = features.view(features.size(0), -1)
-        return self.head(features)
-
-
 class ConceptDetector(object):
-    """Concept detector with optional calibration and pluggable trainer."""
+    """
+    Concept detector with optional calibration.
+    Trains per-concept heads and can apply Platt scaling at inference.
+    """
 
     def __init__(
         self,
         embedding_model: Optional[nn.Module] = None,
-        concept_layers: Optional[Any] = None,
-        *,
-        model: Optional[nn.Module] = None,
-        trainer: Optional[ConceptTrainer] = None,
-        model_builder: Optional[Callable[[int, int, int], nn.Module]] = None,
+        concept_layers: Optional[List] = None,
     ) -> None:
-        """Initialise a concept detector.
-
-        Args:
-            embedding_model: Optional backbone that produces intermediate
-                representations. If provided, it is wrapped inside a
-                ``JointConceptModel`` when the detector builds its default head.
-            concept_layers: Kept for backwards compatibility; must be ``None``.
-            model: Pre-built joint concept model. When supplied the detector
-                skips automatic model construction.
-            trainer: Custom training callable. Defaults to
-                :class:`~concept_benchmark.train.DefaultConceptTrainer`.
-            model_builder: Optional factory used to create a joint model when
-                ``model`` is not provided. Receives ``(train_dataset, device,
-                hidden_dim)`` and must return an ``nn.Module`` that emits
-                ``n_concepts`` logits.
-
-        Raises:
-            ValueError: If ``concept_layers`` is set (legacy API path).
         """
-        if concept_layers not in (None, []):
-            raise ValueError(
-                "`concept_layers` is deprecated in the joint-training ConceptDetector."
-            )
+        Initialize the concept detector with an optional embedding model and concept layers.
 
+        :param embedding_model: Optional PyTorch model for embedding.
+        :param concept_layers: Optional list of concept layers (PyTorch models).
+        """
         self.embedding_model = embedding_model
-        self.model = model
-        self.model_builder = model_builder
-        self.trainer = trainer or DefaultConceptTrainer()
-        self.calibration_params: Optional[list[Optional[dict]]] = None
-        self.training_result: Optional[TrainerResult] = None
-        self._n_concepts: Optional[int] = None
-        self._eval_config: Dict[str, Any] = {}
-
-    def to(self, device: Union[str, torch.device]) -> "ConceptDetector":
-        """Move the underlying torch modules to a target device."""
-        target = torch.device(device)
-        if self.model is not None:
-            self.model.to(target)
-            if isinstance(self.model, JointConceptModel):
-                self.embedding_model = self.model.backbone
-        elif self.embedding_model is not None:
-            self.embedding_model.to(target)
-        return self
-
-    def state_dict(self) -> Dict[str, Any]:
-        """Return a serialization-friendly snapshot of the detector."""
-        model_copy = None
-        if self.model is not None:
-            model_copy = copy.deepcopy(self.model)
-            model_copy.to("cpu")
-        embedding_copy = None
-        if self.embedding_model is not None:
-            embedding_copy = copy.deepcopy(self.embedding_model)
-            if isinstance(embedding_copy, nn.Module):
-                embedding_copy.to("cpu")
-
-        training_summary = None
-        if self.training_result is not None:
-            training_summary = {
-                "history": copy.deepcopy(self.training_result.history),
-                "best_metric": self.training_result.best_metric,
-            }
-
-        return {
-            "version": 1,
-            "model": model_copy,
-            "embedding_model": embedding_copy,
-            "calibration_params": copy.deepcopy(self.calibration_params),
-            "eval_config": copy.deepcopy(self._eval_config),
-            "n_concepts": self._n_concepts,
-            "training_summary": training_summary,
-        }
-
-    def load_state_dict(self, state: Dict[str, Any]) -> None:
-        """Restore detector state saved with :meth:`state_dict`."""
-        version = state.get("version", 1)
-        if version != 1:
-            raise ValueError(f"Unsupported ConceptDetector state version: {version}")
-
-        self.model = state.get("model")
-        if isinstance(self.model, JointConceptModel):
-            self.embedding_model = self.model.backbone
-        else:
-            self.embedding_model = state.get("embedding_model")
-            if isinstance(self.embedding_model, nn.Module):
-                self.embedding_model.to("cpu")
-        if self.model is not None and isinstance(self.model, nn.Module):
-            self.model.to("cpu")
-            self.model.eval()
-
-        self.calibration_params = state.get("calibration_params")
-        self._eval_config = state.get("eval_config", {})
-        self._n_concepts = state.get("n_concepts")
-
-        summary = state.get("training_summary")
-        if summary is not None:
-            self.training_result = TrainerResult(
-                model=None,
-                history=copy.deepcopy(summary.get("history")),
-                best_metric=summary.get("best_metric"),
-            )
-        else:
-            self.training_result = None
-
-    def save(
-        self,
-        path: Union[str, "os.PathLike"],
-        *,
-        overwrite: bool = False,
-        msg: bool = True,
-    ) -> "os.PathLike":
-        """Persist the detector using concept_benchmark.ext.fileutils.save."""
-        payload = {"version": 1, "state": self.state_dict()}
-        return save_object(payload, path, overwrite=overwrite, msg=msg)
-
-    @classmethod
-    def load(
-        cls,
-        path: Union[str, "os.PathLike"],
-        *,
-        map_location: Optional[Union[str, torch.device]] = "cpu",
-    ) -> "ConceptDetector":
-        """Restore a detector previously saved with ``save``."""
-        payload = load_object(path)
-        if isinstance(payload, dict) and "state" in payload:
-            state = payload["state"]
-        elif isinstance(payload, dict) and "detector" in payload:
-            detector = payload["detector"]
-            if map_location is not None:
-                detector.to(map_location)
-            return detector
-        else:
-            state = payload
-        detector = cls()
-        detector.load_state_dict(state)
-        if map_location is not None:
-            detector.to(map_location)
-        return detector
-
-    def _default_head(self, feature_dim: int, hidden_dim: int, num_concepts: int) -> nn.Module:
-        """Build a simple MLP concept head when the caller does not provide one.
-
-        Args:
-            feature_dim: Size of the flattened backbone feature vector.
-            hidden_dim: Width of the intermediate hidden layer.
-            num_concepts: Number of concept logits to predict.
-
-        Returns:
-            nn.Module: Two-layer MLP that produces ``num_concepts`` logits.
-        """
-        layers = [nn.Linear(feature_dim, hidden_dim), nn.ReLU(inplace=True), nn.Linear(hidden_dim, num_concepts)]
-        return nn.Sequential(*layers)
-
-    def _build_default_model(
-        self,
-        train_dataset: ConceptDatasetSample,
-        *,
-        device: torch.device,
-        hidden_dim: int,
-    ) -> nn.Module:
-        """Infer feature dimensions and assemble a ``JointConceptModel``.
-
-        Args:
-            train_dataset: Dataset used to probe feature dimensionality.
-            device: Device where the probe forward pass should execute.
-            hidden_dim: Width of the default concept head hidden layer.
-
-        Returns:
-            nn.Module: Joint model combining the configured backbone and default
-            head.
-
-        Raises:
-            ValueError: If ``train_dataset`` contains no samples or the backbone
-                returns no features.
-            TypeError: If the backbone output type is unsupported for shape
-                inference.
-        """
-        sample_loader = train_dataset.loader(batch_size=min(8, max(1, getattr(train_dataset, "n", 8))), shuffle=False, num_workers=0, pin_memory=False)
-        try:
-            sample_X, _, _ = next(iter(sample_loader))
-        except StopIteration:
-            raise ValueError("Training dataset is empty; cannot build default model.")
-
-        # Use a small probe batch to discover the size of the backbone features.
-        tensor_X = _prepare_inputs(sample_X, device=torch.device("cpu"))
-
-        feature_source = tensor_X
-        if self.embedding_model is not None:
-            module = self.embedding_model
-            was_training = module.training
-            try:
-                param = next(module.parameters())
-                original_device = param.device
-            except StopIteration:
-                original_device = torch.device("cpu")
-            module = module.to(device)
-            module.eval()
-            with torch.no_grad():
-                feature_source = module(_prepare_inputs(sample_X, device))
-            if was_training:
-                module.train()
-            module.to(original_device)
-        if isinstance(feature_source, (list, tuple)):
-            if not feature_source:
-                raise ValueError("Embedding model returned empty output.")
-            feature_source = feature_source[0]
-        if isinstance(feature_source, dict):
-            if "logits" in feature_source:
-                feature_source = feature_source["logits"]
-            elif "last_hidden_state" in feature_source:
-                feature_source = feature_source["last_hidden_state"][:, 0]
-            else:
-                raise TypeError("Cannot infer feature dimension from embedding output.")
-        if isinstance(feature_source, torch.Tensor):
-            feature_source = feature_source.detach().cpu()
-        else:
-            feature_source = torch.as_tensor(feature_source)
-        flat = feature_source.view(feature_source.size(0), -1)
-        feature_dim = int(flat.size(1))
-
-        head = self._default_head(feature_dim, hidden_dim, train_dataset.n_concepts)
-        flatten_inputs = self.embedding_model is None
-        if flatten_inputs:
-            # absorb flatten into head for raw features
-            head = nn.Sequential(nn.Flatten(), head)
-
-        return JointConceptModel(self.embedding_model, head, flatten=not flatten_inputs)
-
-    def _set_trainable(self, freeze_backbone: bool) -> None:
-        """Freeze or unfreeze the backbone parameters depending on user request."""
-        if not isinstance(self.model, JointConceptModel):
-            return
-        backbone = self.model.backbone
-        if backbone is None:
-            return
-        for param in backbone.parameters():
-            param.requires_grad = not freeze_backbone
+        self.concept_layers = concept_layers
+        self.calibration_params: Optional[List[Optional[dict]]] = None
 
     def fit(
         self,
         train_dataset: ConceptDatasetSample,
         valid_dataset: ConceptDatasetSample,
-        freeze: bool = False,
+        freeze: bool = True,
         embed_params: Optional[dict] = None,
         fit_params: Optional[dict] = None,
         l1_size: Optional[int] = 100,
+        n_jobs: Optional[int] = -1,
         calibrate: bool = False,
         log_training: bool = False,
         log_interval: Optional[int] = None,
-        *,
-        model: Optional[nn.Module] = None,
-        trainer: Optional[ConceptTrainer] = None,
+        **kwargs,
     ) -> None:
-        """Train the detector and optionally calibrate the resulting logits.
+        """
+        Fit the concept detector, and optionally fit per-concept calibration.
 
         Args:
-            train_dataset: Dataset providing supervised concept labels for
-                optimisation.
-            valid_dataset: Held-out dataset used for early stopping and
-                calibration.
-            freeze: When ``True`` the detector disables gradient updates on the
-                backbone parameters.
-            embed_params: Unused in the joint setup; accepted for parity with
-                older call sites.
-            fit_params: Keyword overrides passed to the trainer. Recognised keys
-                include ``epochs``, ``batch_size``, ``device``,
-                ``lr_encoder``, ``lr_heads``, and ``optimizer_factory``.
-            l1_size: Hidden width for the default MLP head when a custom model is
-                not supplied.
-            n_jobs: Present for API compatibility; ignored.
-            calibrate: When ``True`` runs ``calibrate`` on the validation split
-                after training completes.
-            log_training: Convenience flag that sets ``fit_params['verbose']``.
-            log_interval: How often (in steps) to emit training loss when verbose
-                logging is active.
-            model: Optional joint model to train instead of constructing the
-                default.
-            trainer: Custom trainer overriding ``self.trainer`` for this call.
-
-        Raises:
-            ValueError: If the training dataset is empty when constructing a
-                default model.
-            TypeError: If the trainer returns an unexpected object.
+            train_dataset (ConceptDatasetSample): Training dataset.
+            valid_dataset (ConceptDatasetSample): Validation dataset.
+            freeze (bool): Whether to freeze the embedding model parameters.
+            embed_params (Optional[dict]): Parameters for embedding.
+            fit_params (Optional[dict]): Parameters for fitting the concept layers.
+            l1_size (Optional[int]): Size of the first linear layer in the model.
+                The other dimension is determined by the size of the embedded dataset.
+            n_jobs (Optional[int]): Kept for API compatibility (unused).
+            calibrate (bool): If True, fit Platt scaling (w, b) per concept on validation logits.
         """
+        # Train per-concept heads with optional encoder finetuning
+        # Propagate logging toggles into fit_params
         if fit_params is None:
             fit_params = {}
-        fit_params = dict(fit_params)
-        fit_params.setdefault("verbose", bool(log_training))
-        if log_interval is not None:
-            fit_params.setdefault("log_interval", int(log_interval))
+        if "verbose" not in fit_params:
+            fit_params["verbose"] = bool(log_training)
+        if log_interval is not None and "log_interval" not in fit_params:
+            fit_params["log_interval"] = int(log_interval)
 
-        training_device = torch.device(fit_params.get("device", "cpu"))
-        eval_batch = int(fit_params.get("eval_batch_size", fit_params.get("batch_size", 128)))
-        # Snapshot evaluation configuration so inference and calibration share settings.
-        self._eval_config = {
-            "batch_size": eval_batch,
-            "num_workers": fit_params.get("num_workers", 0),
-            "pin_memory": fit_params.get("pin_memory", False),
-            "device": training_device,
-        }
-
-        if model is not None:
-            self.model = model
-        if self.model is None:
-            hidden = int(l1_size or fit_params.get("hidden_dim", 100))
-            builder = self.model_builder or self._build_default_model
-            self.model = builder(train_dataset, device=training_device, hidden_dim=hidden)
-
-        self._n_concepts = train_dataset.n_concepts
-
-        lr_encoder = fit_params.pop("lr_encoder", None)
-        lr_heads = fit_params.pop("lr_heads", None)
-        if (lr_encoder is not None or lr_heads is not None) and "optimizer_factory" not in fit_params:
-
-            def _make_optimizer(param_iterable):
-                """Build an Adam optimizer honouring distinct backbone/head learning rates."""
-                params_list = list(param_iterable)
-                base_lr = fit_params.get("lr", lr_heads or lr_encoder or 1e-3)
-                weight_decay = fit_params.get("weight_decay", 0.0)
-
-                if isinstance(self.model, JointConceptModel):
-                    groups = []
-                    if self.model.backbone is not None:
-                        enc_params = [
-                            p for p in self.model.backbone.parameters() if p.requires_grad
-                        ]
-                        if enc_params:
-                            groups.append({"params": enc_params, "lr": lr_encoder or base_lr})
-                    head_params = [
-                        p for p in self.model.head.parameters() if p.requires_grad
-                    ]
-                    if head_params:
-                        groups.append({"params": head_params, "lr": lr_heads or base_lr})
-                    if not groups:
-                        groups = [{"params": params_list}]
-                    return torch.optim.Adam(groups, lr=base_lr, weight_decay=weight_decay)
-
-                trainable = [p for p in params_list if p.requires_grad] or params_list
-                return torch.optim.Adam(
-                    trainable,
-                    lr=lr_heads or lr_encoder or base_lr,
-                    weight_decay=weight_decay,
-                )
-
-            fit_params["optimizer_factory"] = _make_optimizer
-
-        self._set_trainable(freeze_backbone=freeze)
-
-        trainer_fn = trainer if trainer is not None else self.trainer
-        result = trainer_fn(
-            self.model,
-            train_dataset,
-            valid_dataset,
-            num_concepts=train_dataset.n_concepts,
-            params=fit_params,
+        heads = train_concept_heads(
+            train_dataset=train_dataset,
+            valid_dataset=valid_dataset,
+            embedding_model=self.embedding_model,
+            input_dim=None,
+            l1_size=l1_size or 100,
+            freeze=freeze,
+            fit_params=fit_params,
         )
+        self.concept_layers = nn.ModuleList(heads)
 
-        trained_model, trainer_metadata = self._parse_trainer_output(result)
-        self.model = trained_model
-        if isinstance(self.model, JointConceptModel):
-            self.embedding_model = self.model.backbone
-        self.training_result = trainer_metadata
-        self.model.eval()
-        self.model.cpu()
-
+        # Optionally fit calibration using validation logits
         if calibrate:
             self.calibrate(valid_dataset, embed_params=embed_params)
         else:
             self.calibration_params = None
 
-    def _parse_trainer_output(
-        self, output: Union[nn.Module, Tuple[nn.Module, Dict[str, Any]], TrainerResult]
-    ) -> Tuple[nn.Module, Optional[TrainerResult]]:
-        """Normalise trainer outputs into a `(model, TrainerResult|None)` tuple."""
-        if isinstance(output, TrainerResult):
-            return output.model, output
-        if isinstance(output, tuple):
-            model, meta = output
-            if isinstance(meta, TrainerResult):
-                return model, meta
-            result = TrainerResult(model=model, history=getattr(meta, "history", meta), best_metric=getattr(meta, "best_metric", None))
-            return model, result
-        if isinstance(output, nn.Module):
-            return output, None
-        raise TypeError("Trainer must return an nn.Module, (nn.Module, info), or TrainerResult instance.")
-
     def calibrate(
         self,
         valid_dataset: ConceptDatasetSample,
+        embed_params: Optional[dict] = None,
     ) -> None:
-        """Fit Platt-scaling parameters on validation logits."""
-        if self.model is None or self._n_concepts is None:
+        """
+        Fit Platt scaling parameters (w, b) per concept on validation logits.
+
+        Args:
+            valid_dataset: Validation split used to fit calibration.
+            embed_params: Optional kwargs passed to dataset.embed when using an embedding model.
+        """
+        if self.concept_layers is None:
             raise RuntimeError("Must call fit(...) before calibrating.")
 
-        logits = self._predict_logits(valid_dataset)
-        concepts = valid_dataset.C.copy()
-
-        if (
-            bool(getattr(valid_dataset, "concept_missing", False))
-            and getattr(valid_dataset, "concept_missing_mask", None) is not None
-        ):
-            fill_value = getattr(valid_dataset, "concept_missing_fill_value", np.nan)
-            if isinstance(fill_value, float) and np.isnan(fill_value):
-                observed_mask = ~np.isnan(concepts)
-            else:
-                observed_mask = ~np.isclose(concepts, fill_value)
-        else:
-            observed_mask = np.ones_like(concepts, dtype=bool)
+        embedded_valid = (
+            valid_dataset.embed(self.embedding_model, **(embed_params or {}))
+            if self.embedding_model
+            else valid_dataset
+        )
+        with torch.no_grad():
+            X_t = torch.from_numpy(embedded_valid.X).float()
+            logits_list = [m(X_t).squeeze(1) for m in self.concept_layers]
+            logits = torch.stack(logits_list, dim=1).numpy()
 
         params = []
-        for i in range(self._n_concepts):
-            observed = observed_mask[:, i]
-            if not np.any(observed):
-                params.append({"w": 1.0, "b": 0.0})
-                continue
-            z = logits[observed, i:i + 1]
-            y = concepts[observed, i].astype(int)
+        for i in range(embedded_valid.n_concepts):
+            z = logits[:, i:i+1]
+            y = embedded_valid.C[:, i].astype(int)
             if np.unique(y).size < 2:
                 params.append({"w": 1.0, "b": 0.0})
                 continue
@@ -577,44 +126,15 @@ class ConceptDetector(object):
 
         self.calibration_params = params
 
-    def _predict_logits(self, dataset: ConceptDatasetSample) -> np.ndarray:
-        """Run inference and collect raw concept logits."""
-        if self.model is None:
-            raise RuntimeError("Model has not been fitted yet. Call fit() first.")
-
-        batch_size = int(self._eval_config.get("batch_size", 128))
-        num_workers = self._eval_config.get("num_workers", 0)
-        pin_memory = self._eval_config.get("pin_memory", False)
-        device = torch.device(self._eval_config.get("device", "cpu"))
-
-        loader = dataset.loader(
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=num_workers,
-            pin_memory=pin_memory,
-        )
-
-        model = self.model.to(device)
-        model.eval()
-
-        outputs = []
-        with torch.no_grad():
-            for batch_X, _, _ in loader:
-                batch_X = _prepare_inputs(batch_X, device)
-                logits = _extract_logits(model(batch_X))
-                outputs.append(logits.detach().cpu().numpy())
-
-        model.cpu()
-
-        if not outputs:
-            return np.zeros((0, self._n_concepts or 0), dtype=np.float32)
-        return np.vstack(outputs)
-
     @property
     def n_concepts(self) -> int:
-        if self._n_concepts is None:
+        """
+        Return the number of concepts.
+        """
+        if self.concept_layers is None:
             raise RuntimeError("Model has not been fitted yet. Call fit() first.")
-        return int(self._n_concepts)
+
+        return len(self.concept_layers)
 
     def predict(
         self,
@@ -622,12 +142,23 @@ class ConceptDetector(object):
         embed_params: Optional[dict] = None,
         calibrate: Optional[bool] = None,
     ) -> np.ndarray:
-        """Return per-concept probabilities, optionally applying calibration."""
-        if self.model is None:
-            raise RuntimeError("Model has not been fitted yet. Please call fit() first.")
+        if self.concept_layers is None:
+            raise RuntimeError(
+                "Model has not been fitted yet. Please call fit() first."
+            )
 
-        logits = self._predict_logits(dataset)
+        embedded_dataset = (
+            dataset.embed(self.embedding_model, **(embed_params or {}))
+            if self.embedding_model
+            else dataset
+        )
 
+        with torch.no_grad():
+            X_t = torch.from_numpy(embedded_dataset.X).float()
+            logits_list = [m(X_t).squeeze(1) for m in self.concept_layers]
+            logits = torch.stack(logits_list, dim=1).numpy()
+
+        # Determine whether to apply calibration
         if calibrate is None:
             apply_cal = self.calibration_params is not None
         else:
@@ -1080,3 +611,141 @@ class ConceptBasedModel(object):
         """
         self._concept_poss = self._gen_concept_possibilities()
         self._y_proba_all_concepts = self._pred_y_proba_concept_poss()
+
+    def plan_interventions_kflip(
+            self,
+            *,
+            dataset=None,
+            concept_probs=None,
+            k=1,
+            threshold=0.2,
+            others_mode="hard",  # "hard" fixes non-intervened concepts at (p>=0.5); "soft" uses p
+            batch_size=4096,  # max rows per predict_proba call (rows = samples × 2^k)
+            limit_subsets=None,  # optional cap on evaluated subsets
+            return_details=False,
+    ):
+        import itertools
+
+        if (dataset is None) == (concept_probs is None):
+            raise ValueError("Provide exactly one of {dataset, concept_probs}.")
+
+        if concept_probs is None:
+            P = self.concept_detector.predict(dataset)  # (N,C) in [0,1]
+        else:
+            P = np.asarray(concept_probs, dtype=np.float64)
+
+        if P.ndim != 2:
+            raise ValueError("concept_probs must be (N, C).")
+
+        P = np.clip(P, 1e-9, 1.0 - 1e-9)
+        N, C = P.shape
+
+        if not (1 <= k <= C):
+            out = {
+                "flip_prob": np.zeros(N, dtype=np.float64),
+                "best_subset": [tuple() for _ in range(N)],
+                "selected": np.zeros(N, dtype=bool),
+                "base_label": np.zeros(N, dtype=int),
+            }
+            if return_details:
+                out["best_label"] = np.full(N, -1, dtype=int)
+            return out
+
+        if others_mode == "hard":
+            base_Z = (P >= 0.5).astype(np.float32)
+        elif others_mode == "soft":
+            base_Z = P.astype(np.float32)
+        else:
+            raise ValueError("others_mode must be 'hard' or 'soft'.")
+
+        # Base labels
+        base_probs = self.front_end_model.predict_proba(base_Z)
+        base_lbl = base_probs.argmax(axis=1)
+        n_classes = base_probs.shape[1]
+
+        # Candidate subsets
+        all_subsets = list(itertools.combinations(range(C), k))
+        if limit_subsets is not None and limit_subsets < len(all_subsets):
+            try:
+                coef = getattr(self.front_end_model.model, "coef_", None)
+                if coef is None:
+                    w = np.ones((1, C), dtype=np.float32)
+                else:
+                    w = np.abs(coef)
+                    if w.ndim == 1:
+                        w = w[None, :]
+                    w = np.max(w, axis=0, keepdims=True)
+            except Exception:
+                w = np.ones((1, C), dtype=np.float32)
+
+            feat_score = np.mean((0.5 - np.abs(P - 0.5)) * w, axis=0)  # higher = more useful
+            m = max(k, int(np.ceil(limit_subsets ** (1.0 / max(1, k)) * k)))
+            top_idx = np.argsort(feat_score)[::-1][:min(C, m)]
+            pruned = list(itertools.combinations(list(top_idx), k))
+            all_subsets = pruned[:limit_subsets]
+
+        # Enumerate assignments for the k intervened concepts
+        assign = np.array(list(itertools.product([0.0, 1.0], repeat=k)), dtype=np.float32)
+        A = assign.shape[0]
+
+        flip_prob = np.zeros(N, dtype=np.float64)
+        best_subset = [tuple() for _ in range(N)]
+        best_label = np.full(N, -1, dtype=int)
+
+        # Stream over samples to bound memory: ensure samples_per_chunk * A <= batch_size
+        rows_per_eval = max(1, int(batch_size))
+        samples_per_chunk = max(1, rows_per_eval // A)
+
+        for subset in all_subsets:
+            subset = np.asarray(subset, dtype=int)
+
+            for s in range(0, N, samples_per_chunk):
+                m = min(samples_per_chunk, N - s)
+
+                pS = P[s: s + m][:, subset]  # (m,k)
+                w_assign = np.prod(
+                    np.where(assign[None, :, :] == 1.0, pS[:, None, :], 1.0 - pS[:, None, :]),
+                    axis=2,
+                )  # (m, A)
+
+                Z_chunk = np.repeat(base_Z[s: s + m], A, axis=0)  # (m*A, C)
+                AS = np.tile(assign, (m, 1))  # (m*A, k)
+                Z_chunk[:, subset] = AS
+
+                # Predict once for this chunk (<= batch_size rows)
+                Y = self.front_end_model.predict_proba(Z_chunk)  # (m*A, K)
+                Y_lbl = Y.argmax(axis=1).reshape(m, A)  # (m, A)
+
+                flip_mask = (Y_lbl != base_lbl[s: s + m][:, None])  # (m, A)
+                mass = (w_assign * flip_mask).sum(axis=1)  # (m,)
+
+                if return_details:
+                    cls_mass = (Y.reshape(m, A, n_classes) * (w_assign * flip_mask)[:, :, None]).sum(axis=1)
+                    lbl_star = cls_mass.argmax(axis=1)
+                else:
+                    lbl_star = None
+
+                cur = flip_prob[s: s + m]
+                improve = mass > cur
+                if np.any(improve):
+                    flip_prob[s: s + m][improve] = mass[improve]
+                    if return_details:
+                        best_label[s: s + m][improve] = lbl_star[improve]
+
+                    # write subset indices for improved samples
+                    imp_idx = np.nonzero(improve)[0]
+                    for j in imp_idx:
+                        best_subset[s + j] = tuple(int(x) for x in subset.tolist())
+
+        selected = flip_prob >= float(threshold)
+
+        out = {
+            "flip_prob": flip_prob,
+            "best_subset": best_subset,
+            "selected": selected,
+            "base_label": base_lbl,
+        }
+        if return_details:
+            out["best_label"] = best_label
+        return out
+
