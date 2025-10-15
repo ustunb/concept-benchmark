@@ -17,6 +17,7 @@ from transformers import (
     AutoModelForImageClassification,
 )
 from sklearn.metrics import accuracy_score, f1_score, balanced_accuracy_score, roc_auc_score
+from sklearn.linear_model import LogisticRegression
 import torch.nn.functional as F
 
 from concept_benchmark.paths import results_dir, pkg_dir
@@ -353,18 +354,46 @@ def train_eval_image(paths_tr, y_tr, paths_te, y_te, model_id, size, epochs, bat
     acc = correct / total if total > 0 else 0.0
     return float(acc), proc, model
 
-def _eval_text_metrics(X, y, tok, model, device):
+def _fit_platt(X, y, tok, model, device):
     ds = TextDS(X, np.asarray(y, dtype=int), tok)
     dl = DataLoader(ds, batch_size=64, shuffle=False)
+    z_list = []
+    y_list = []
     model.eval()
-    preds, probs = [], []
     with torch.no_grad():
         for xb, yb in dl:
             xb = {k: v.to(device) for k, v in xb.items()}
             out = model(**xb)
-            p = out.logits.softmax(dim=-1)
-            preds.append(p.argmax(dim=-1).cpu().numpy())
-            probs.append(p[:, 1].cpu().numpy())
+            z = (out.logits[:, 1] - out.logits[:, 0]).detach().cpu().numpy()
+            z_list.append(z)
+            y_list.append(yb.numpy())
+    Z = np.concatenate(z_list).reshape(-1, 1) if z_list else np.zeros((0, 1), dtype=float)
+    Y = np.concatenate(y_list).astype(int) if y_list else np.zeros((0,), dtype=int)
+    if Y.size == 0 or np.unique(Y).size < 2:
+        return None
+    lr = LogisticRegression(solver="lbfgs", max_iter=1000)
+    lr.fit(Z, Y)
+    return lr
+
+def _eval_text_metrics(X, y, tok, model, device, calibrator=None, abstain=None, tau=None):
+    ds = TextDS(X, np.asarray(y, dtype=int), tok)
+    dl = DataLoader(ds, batch_size=64, shuffle=False)
+    model.eval()
+    preds = []
+    probs = []
+    with torch.no_grad():
+        for xb, yb in dl:
+            xb = {k: v.to(device) for k, v in xb.items()}
+            out = model(**xb)
+            if calibrator is not None:
+                z = (out.logits[:, 1] - out.logits[:, 0]).detach().cpu().numpy()
+                p1 = calibrator.predict_proba(z.reshape(-1, 1))[:, 1]
+                probs.append(p1)
+                preds.append((p1 >= 0.5).astype(int))
+            else:
+                p = out.logits.softmax(dim=-1)
+                preds.append(p.argmax(dim=-1).cpu().numpy())
+                probs.append(p[:, 1].cpu().numpy())
     y_true = np.asarray(y, dtype=int)
     y_pred = np.concatenate(preds) if preds else np.zeros_like(y_true)
     proba1 = np.concatenate(probs) if probs else np.zeros_like(y_true, dtype=float)
@@ -372,7 +401,18 @@ def _eval_text_metrics(X, y, tok, model, device):
     ba = float(balanced_accuracy_score(y_true, y_pred)) if y_true.size else 0.0
     f1 = float(f1_score(y_true, y_pred, zero_division=0)) if y_true.size else 0.0
     roc = float(roc_auc_score(y_true, proba1)) if np.unique(y_true).size == 2 else float("nan")
-    return {"accuracy": acc, "balanced_acc": ba, "ber": float(1.0 - ba), "f1": f1, "roc_auc": roc}
+    out = {"accuracy": acc, "balanced_acc": ba, "ber": float(1.0 - ba), "f1": f1, "roc_auc": roc}
+    if abstain == "conf" and (tau is not None):
+        conf = np.where(y_pred == 1, proba1, 1.0 - proba1)
+        m = conf >= float(tau)
+        cov = float(m.mean()) if m.size else 0.0
+        if m.any():
+            sel_acc = float((y_pred[m] == y_true[m]).mean())
+        else:
+            sel_acc = float("nan")
+        out["selective_accuracy"] = sel_acc
+        out["coverage"] = cov
+    return out
 
 def _eval_image_metrics(paths, y, proc, model, device):
     ds = ImageDS(paths, np.asarray(y, dtype=int), proc)
@@ -412,7 +452,12 @@ p.add_argument("--test_break", type=float)
 p.add_argument("--epochs", type=int)
 p.add_argument("--batch_size", type=int)
 p.add_argument("--lr", type=float)
+p.add_argument("--calibrate", choices=["none","platt"], default="platt")
+p.add_argument("--abstain", choices=["none","conf"], default="conf")
+p.add_argument("--tau", type=float)
+p.add_argument("--tau-target", dest="tau_target", type=float, default=0.99)
 p.add_argument("--text_model")
+p.add_argument("--deployment-size", dest="deployment_size", type=int)
 p.add_argument("--image_model")
 p.add_argument("--image_size", type=int)
 p.add_argument("--color_mode")
@@ -782,6 +827,20 @@ if modality == "text":
             setattr(te_ds, "ears_generic_mask", ds.test.ears_generic_mask[take_t])
             ds.test = te_ds
 
+        dep_n = int(settings.get("deployment_size", 10000))
+        if dep_n > 0:
+            rng_dep = np.random.default_rng(int(settings["seed"]) + 777)
+            idx_dep = rng_dep.integers(0, len(ds.y), size=dep_n)
+            Xd = [ds.X[i] for i in idx_dep]
+            Cd = ds.C[idx_dep]
+            yd = ds.y[idx_dep]
+            dep_ds = ConceptDatasetSample(X=Xd, C=Cd, y=yd,
+                                          meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text"})
+            if hasattr(ds, "ears_generic_mask"):
+                setattr(dep_ds, "ears_generic_mask", np.asarray(ds.ears_generic_mask)[idx_dep])
+            ds.deployment = dep_ds
+
+        split_dump = {}
     split_dump = {}
     for name, part in [("train", ds.training), ("val", ds.validation), ("test", ds.test)]:
         p = out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_seed{int(settings['seed'])}_split_{name}.csv"
@@ -876,9 +935,48 @@ if modality == "text":
         lr=float(settings["lr"]),
         device=device,
     )
-    _train_metrics = _eval_text_metrics(Xtr, ytr, tok_or_proc, model, device)
-    _val_metrics = _eval_text_metrics(ds.validation.X, ds.validation.y.astype(int), tok_or_proc, model, device)
-    _test_metrics = _eval_text_metrics(Xte, yte, tok_or_proc, model, device)
+    calibrator = None
+    if str(settings.get("calibrate", "none")).lower() == "platt":
+        calibrator = _fit_platt(ds.validation.X, ds.validation.y.astype(int), tok_or_proc, model, device)
+
+    abstain_mode = str(settings.get("abstain", "none")).lower()
+    target_sel = float(settings.get("tau_target", 0.99))
+    tau_val = settings.get("tau", None)
+
+    if abstain_mode == "conf" and (tau_val is None or str(tau_val).lower() == "none"):
+        grid = np.linspace(0.5, 0.999, 201)
+        best_tau = None
+        best_cov = 0.0
+        for t in grid:
+            m = _eval_text_metrics(
+                ds.validation.X, ds.validation.y.astype(int),
+                tok_or_proc, model, device,
+                calibrator=calibrator, abstain="conf", tau=float(t)
+            )
+            sel_acc = m.get("selective_accuracy", float("nan"))
+            cov = m.get("coverage", 0.0)
+            if not np.isnan(sel_acc) and sel_acc >= target_sel:
+                if best_tau is None or t < best_tau or (t == best_tau and cov > best_cov):
+                    best_tau = float(t)
+                    best_cov = float(cov)
+        tau_val = best_tau if best_tau is not None else 1.0
+        settings["tau"] = float(tau_val)
+
+    _train_metrics = _eval_text_metrics(Xtr, ytr, tok_or_proc, model, device, calibrator=calibrator, abstain=abstain_mode, tau=tau_val)
+    _val_metrics = _eval_text_metrics(ds.validation.X, ds.validation.y.astype(int), tok_or_proc, model, device, calibrator=calibrator, abstain=abstain_mode, tau=tau_val)
+    _test_metrics = _eval_text_metrics(Xte, yte, tok_or_proc, model, device, calibrator=calibrator, abstain=abstain_mode, tau=tau_val)
+
+    _deploy_metrics = None
+    if hasattr(ds, "deployment"):
+        _deploy_metrics = _eval_text_metrics(ds.deployment.X, ds.deployment.y.astype(int), tok_or_proc, model, device, calibrator=calibrator, abstain=abstain_mode, tau=tau_val)
+
+    if abstain_mode == "conf" and tau_val is not None:
+        for _m in [_train_metrics, _val_metrics, _test_metrics]:
+            _m["tau"] = float(tau_val)
+            _m["tau_target"] = float(target_sel)
+        if _deploy_metrics is not None:
+            _deploy_metrics["tau"] = float(tau_val)
+            _deploy_metrics["tau_target"] = float(target_sel)
     print("Baseline test metrics:", {
         "accuracy": round(_test_metrics["accuracy"], 4),
         "balanced_acc": round(_test_metrics["balanced_acc"], 4),
@@ -997,6 +1095,10 @@ split_files = {
     "val":   out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_seed{int(settings['seed'])}_metrics_val.json",
     "test":  out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_seed{int(settings['seed'])}_metrics_test.json",
 }
+metrics_map = {"train": _train_metrics, "val": _val_metrics, "test": _test_metrics}
+if _deploy_metrics is not None:
+    split_files["deploy"] = out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_seed{int(settings['seed'])}_metrics_deploy.json"
+    metrics_map["deploy"] = _deploy_metrics
 for name, path in split_files.items():
-    m = {"train": _train_metrics, "val": _val_metrics, "test": _test_metrics}[name]
+    m = metrics_map[name]
     path.write_text(json.dumps(m, indent=2))
