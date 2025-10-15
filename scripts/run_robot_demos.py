@@ -315,7 +315,14 @@ def run():
         lf_flags += ["--lf-ridge"]
     lf_flags += ["--lf-ridge-alpha", str(settings.get("lf_ridge_alpha", 1.0))]
     lf_flags += ["--lf-encoder", str(settings.get("lf_encoder", "sentence-transformers/all-MiniLM-L6-v2"))]
-    lf_flags += ["--lf-device", str(settings.get("lf_device", "cpu"))]
+    _lf_dev = settings.get("lf_device")
+    if _lf_dev is None:
+        try:
+            import torch
+            _lf_dev = "cuda" if torch.cuda.is_available() else "cpu"
+        except Exception:
+            _lf_dev = "cpu"
+    lf_flags += ["--lf-device", str(_lf_dev)]
     lf_flags += ["--lf-batch-size", str(settings.get("lf_batch_size", 64))]
 
     run_spec(
