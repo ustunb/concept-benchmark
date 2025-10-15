@@ -242,7 +242,9 @@ def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, 
     make_plots = int(settings.get("make_plots", 0))
     seed = int(settings.get("seed", 0))
 
-    rn = f"{prefix}_{regime}_minrule_eval_vpr3_pos1152neg3456_unbalanced_pixelated_fixed_seed{seed}_v1_intervene{int(human_acc*100)}_kset-0_1_2_5_10_{settings.get('difficulty','hard')}_seed{seed}"
+    _sub = str(settings.get("run_name_sub", "")).strip()
+    rn_base = f"{prefix}_{regime}_minrule_eval_vpr3_pos1152neg3456_unbalanced_pixelated_fixed_seed{seed}_v1_intervene{int(human_acc * 100)}_kset-0_1_2_5_10_{settings.get('difficulty', 'hard')}_seed{seed}"
+    rn = f"{_sub}_{rn_base}" if _sub else rn_base
 
     # start with base cmd (includes [PY, GEN] + core flags and kflip knobs)
     argv = common_gen_argv()
