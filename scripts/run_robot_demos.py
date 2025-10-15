@@ -175,6 +175,14 @@ def ensure_baseline(model_id: str, modality: str):
         argv += ["--deployment-size", str(settings["deployment_size"])]
     if settings.get("seed") is not None:
         argv += ["--seed", str(settings["seed"])]
+    if settings.get("seed_cv") is not None:
+        argv += ["--seed-cv", str(settings["seed_cv"])]
+    if settings.get("cv_k") is not None:
+        argv += ["--cv-k", str(settings["cv_k"])]
+    if settings.get("cv_fold") is not None:
+        argv += ["--cv-fold", str(settings["cv_fold"])]
+    if settings.get("dev_per_fold") is not None:
+        argv += ["--dev-per-fold", str(settings["dev_per_fold"])]
     run_cmd(argv)
 
 def find_metrics_json(modality: str, model_id: str, split: str):
