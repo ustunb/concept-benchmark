@@ -7,19 +7,14 @@ from typing import List, Optional
 import pandas as pd
 import math
 import json
-from concept_benchmark.paths import repo_dir, results_dir
+from concept_benchmark.paths import repo_dir, results_dir, pkg_dir
 
 ROOT = repo_dir
 PY = sys.executable
 GEN = ROOT / "scripts" / "gen_text_samples.py"
 DNN = ROOT / "scripts" / "robot_baseline.py"
-
 ENV = os.environ.copy()
 ENV["PYTHONPATH"] = str(ROOT) + (os.pathsep + ENV.get("PYTHONPATH", ""))
-#
-# settings = {
-#
-# }
 
 settings = {
     "seed": 1337,
@@ -27,7 +22,7 @@ settings = {
     "budgets": [0, 1, 2, 5, 10],
     "force": 0,
     "reuse_detector": 1,
-    "run_tag": "",
+    "run_tag": "new_try",
 
     "modality": "text",
     "text_model": "distilbert-base-uncased",
@@ -49,354 +44,350 @@ settings = {
     "generic_enable": 1,
     "generic_rate": 0.7,
     "generic_tol": 0.02,
+
+    "policy": "kflip",
+    "k": 2,
+    "flip_threshold": 0.30,
+    "flip_batch_size": 8192,
+    "flip_limit_subsets": None,
+    "abstain_only": 0,
+
+    "seed_test_offset": 1234,
 }
 
+
+
 def parse_cli():
-    p = argparse.ArgumentParser(add_help=False)
-    p.add_argument("--seed", type=int)
-    p.add_argument("--difficulty")
-    p.add_argument("--budgets")
-    p.add_argument("--force", type=int)
-    p.add_argument("--reuse-detector", type=int)
-    p.add_argument("--run-tag")
-    p.add_argument("--modality")
-    p.add_argument("--text-model")
-    p.add_argument("--best-human-acc", type=float)
-    p.add_argument("--expert-human-accs")
-    p.add_argument("--subjective-human-accs")
-    p.add_argument("--subjective-noise-rates")
-    p.add_argument("--skip-fit", type=int)
-    p.add_argument("--make-plots", type=int)
-    p.add_argument("--recompute-only", type=int)
-    p.add_argument("--redact-concepts")
-    p.add_argument("--redact-splits")
-    p.add_argument("--concepts-csv")
-    p.add_argument("--force-rerun", type=int)
-    p.add_argument("--run-name-sub")
-    args, _ = p.parse_known_args()
-    for k, v in vars(args).items():
-        if v is None:
-            continue
-        if k in {"budgets", "expert_human_accs", "subjective_human_accs", "subjective_noise_rates"}:
-            if isinstance(v, str):
-                vals = [x for x in v.split(",") if x.strip() != ""]
-                if k in {"budgets"}:
-                    settings[k] = [int(float(x)) for x in vals]
-                else:
-                    settings[k] = [float(x) for x in vals]
-            else:
-                settings[k] = v
-        else:
-            kk = k.replace("-", "_")
-            settings[kk] = v
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("--seed", type=int)
+    ap.add_argument("--difficulty", type=str)
+    ap.add_argument("--budgets", type=str)
+    ap.add_argument("--force", type=int)
+    ap.add_argument("--reuse_detector", type=int)
+    ap.add_argument("--run_tag", type=str)
+    ap.add_argument("--modality", type=str)
+    ap.add_argument("--text_model", type=str)
+    ap.add_argument("--best_human_acc", type=float)
+    ap.add_argument("--expert_human_acc", type=float)
+    ap.add_argument("--subjective_human_acc", type=float)
+    ap.add_argument("--subjective_noise_rate", type=float)
+    ap.add_argument("--label_model_type", type=str)
+    ap.add_argument("--label_model_alpha", type=float)
+    ap.add_argument("--label_model_bias", type=float)
+    ap.add_argument("--label_model_expr", type=str)
+    ap.add_argument("--templates_file", type=str)
+    ap.add_argument("--redact_concepts", type=str)
+    ap.add_argument("--redact_splits", type=str)
+    ap.add_argument("--concept_mode", type=str)
+    ap.add_argument("--generic_rate", type=float)
+    ap.add_argument("--generic_tol", type=float)
+    ap.add_argument("--generic_enable", type=int)
+    ap.add_argument("--train_target_generic_frac", type=float)
+    ap.add_argument("--val_target_generic_frac", type=float)
+    ap.add_argument("--test_target_generic_frac", type=float)
+    ap.add_argument("--deployment_target_generic_frac", type=float)
+    ap.add_argument("--intervention_error_mode", type=str)
+    ap.add_argument("--random_intervene", type=int)
+    ap.add_argument("--build_hardness", type=int)
+    ap.add_argument("--build_consensus", type=int)
+    ap.add_argument("--build_disagreement", type=int)
+    ap.add_argument("--build_ambiguity", type=int)
+    ap.add_argument("--toy_concept_abstain", type=int)
+    ap.add_argument("--toy_concept_popular", type=int)
+    ap.add_argument("--toy_concept_random", type=int)
+    ap.add_argument("--abstain_coverage", type=float)
+    ap.add_argument("--abstain_metric", type=str)
+    ap.add_argument("--concept_source", type=str)
+    ap.add_argument("--machine_method", type=str)
+    ap.add_argument("--use_interventions", type=int)
+    ap.add_argument("--intervention_budget", type=int)
+    ap.add_argument("--intervention_where", type=str)
+    ap.add_argument("--intervention_policy", type=str)
+    ap.add_argument("--intervention_k", type=int)
+    ap.add_argument("--subtype-mode", type=str)
+    ap.add_argument("--concept-variant", type=str)
+    ap.add_argument("--salient-allowlist", type=str)
+    ap.add_argument("--seed-cv", type=int)
+    ap.add_argument("--cv-k", type=int)
+    ap.add_argument("--cv-fold", type=int)
+    ap.add_argument("--dev-per-fold", type=int)
+    ap.add_argument("--deployment-size", type=int)
+    ap.add_argument("--calibrate", type=str)
+    ap.add_argument("--abstain", type=str)
+    ap.add_argument("--tau", type=float)
+    ap.add_argument("--tau-target", type=float)
+    ap.add_argument("--lf-alpha", type=float)
+    ap.add_argument("--lf-threshold", type=float)
+    ap.add_argument("--lf-mode", type=str)
+    ap.add_argument("--lf-ridge", action="store_true")
+    ap.add_argument("--lf-ridge-alpha", type=float)
+    ap.add_argument("--lf-encoder", type=str)
+    ap.add_argument("--lf-device", type=str)
+    ap.add_argument("--lf-batch-size", type=int)
+    ap.add_argument("--policy", type=str)
+    ap.add_argument("--run-name-sub")
+    ap.add_argument("--k", type=int)
+    ap.add_argument("--flip-threshold", type=float)
+    ap.add_argument("--flip-batch-size", type=int)
+    ap.add_argument("--flip-limit-subsets")
+    ap.add_argument("--abstain-only", type=int)
 
-def run_cmd(tag: str, argv: List[str], cwd: Optional[Path] = None):
-    cmd = [str(PY), str(GEN)] + argv
-    subprocess.run(cmd, check=True, env=ENV)
+    known, _ = ap.parse_known_args()
+    for k, v in settings.items():
+        if k not in known.__dict__ or known.__dict__[k] is None:
+            pass
+    for k in list(settings.keys()):
+        k2 = k.replace("_", "-")
+        if k2 in known.__dict__ and known.__dict__[k2] is not None:
+            settings[k] = known.__dict__[k2]
+        elif k in known.__dict__ and known.__dict__[k] is not None:
+            settings[k] = known.__dict__[k]
+    if isinstance(settings.get("budgets"), str):
+        try:
+            settings["budgets"] = [int(x) for x in settings["budgets"].split(",")]
+        except Exception:
+            settings["budgets"] = [0, 1, 2, 5, 10]
 
-def _csv_list(v: str) -> List[str]:
-    if not v:
-        return []
-    return [x for x in str(v).split(",") if x.strip() != ""]
+def run_cmd(argv: List[str], cwd: Optional[Path] = None):
+    cmd = " ".join(shlex.quote(str(x)) for x in argv)
+    print("RUN:", cmd)
+    subprocess.check_call(argv, cwd=str(cwd) if cwd else None, env=ENV)
 
-def run():
-    seed = int(settings.get("seed", 0))
-    budgets = [int(x) for x in settings.get("budgets", [0, 1, 2, 5, 10])]
+def ensure_baseline(model_id: str, modality: str):
+    outdir = results_dir / "robot_baseline" / modality
+    outdir.mkdir(parents=True, exist_ok=True)
+    run_name = f"robots_{modality}_{model_id}_seed{int(settings.get('seed', 0))}"
+    mfile = outdir / f"baseline_dnn_robots_{modality}_{model_id}_seed{int(settings.get('seed', 0))}_metrics_test.json"
+    if mfile.exists():
+        return
+    argv = [str(PY), str(DNN)]
+    if modality == "text":
+        argv += ["--text_model", str(settings.get("text_model", "distilbert-base-uncased"))]
+    if settings.get("calibrate"):
+        argv += ["--calibrate", str(settings["calibrate"])]
+    if settings.get("abstain"):
+        argv += ["--abstain", str(settings["abstain"])]
+    if settings.get("tau") is not None:
+        argv += ["--tau", str(settings["tau"])]
+    if settings.get("tau_target") is not None:
+        argv += ["--tau-target", str(settings["tau_target"])]
+    if settings.get("deployment_size") is not None:
+        argv += ["--deployment-size", str(settings["deployment_size"])]
+    if settings.get("seed") is not None:
+        argv += ["--seed", str(settings["seed"])]
+    run_cmd(argv)
+
+def find_metrics_json(modality: str, model_id: str, split: str):
+    outdir = results_dir / "robot_baseline" / modality
+    f = outdir / f"baseline_dnn_robots_{modality}_{model_id}_seed{int(settings.get('seed', 0))}_metrics_{split}.json"
+    return f if f.exists() else None
+
+def common_gen_argv():
+    argv = [
+        str(PY), str(GEN),
+        "--modality", str(settings.get("modality", "text")),
+        "--concept-source", str(settings.get("concept_source", "gt")),
+        "--machine-method", str(settings.get("machine_method", "lfcbm")),
+        "--seed", str(settings.get("seed", 0)),
+        "--seed-cv", str(settings.get("seed_cv", int(settings.get("seed", 0)) + 1)),
+        "--cv-k", str(settings.get("cv_k", 5)),
+        "--cv-fold", str(settings.get("cv_fold", 0)),
+        "--dev-per-fold", str(settings.get("dev_per_fold", 1000)),
+        "--deployment-size", str(settings.get("deployment_size", 10000)),
+        "--subtype-mode", str(settings.get("subtype_mode", "track")),
+        "--policy", str(settings.get("policy", settings.get("intervention_policy", "kflip"))),
+        "--k", str(settings.get("k", settings.get("intervention_k", 2))),
+        "--flip-threshold", str(settings.get("flip_threshold", 0.30)),
+        "--flip-batch-size", str(settings.get("flip_batch_size", 8192)),
+        "--budgets", ",".join(str(x) for x in settings.get("budgets", [0, 1, 2, 5, 10])),
+    ]
+    if settings.get("flip_limit_subsets") is not None:
+        argv += ["--flip-limit-subsets", str(settings["flip_limit_subsets"])]
+    if settings.get("abstain_only"):
+        argv += ["--abstain-only"]
+    if settings.get("tau") is not None:
+        argv += ["--tau", str(settings["tau"])]
+    return argv
+
+
+def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, tag_suffix: str, concept_source: str,
+             extra_flags: Optional[List[str]] = None, detector_model: Optional[str] = None):
+    budgets = settings.get("budgets", [0, 1, 2, 5, 10])
     force = int(settings.get("force", 0))
     make_plots = int(settings.get("make_plots", 0))
+    seed = int(settings.get("seed", 0))
 
-    tag = str(settings.get("run_tag", "")).strip()
-    if not tag:
-        tag = "cbm"
+    rn = f"{prefix}_{regime}_minrule_eval_vpr3_pos1152neg3456_unbalanced_pixelated_fixed_seed{seed}_v1_intervene{int(human_acc*100)}_kset-0_1_2_5_10_{settings.get('difficulty','hard')}_seed{seed}"
 
-    bb = str(sorted((results_dir / "robot_baseline").rglob("baseline_*metrics.json"))[-1]) if list((results_dir / "robot_baseline").rglob("baseline_*metrics.json")) else ""
+    # start with base cmd (includes [PY, GEN] + core flags and kflip knobs)
+    argv = common_gen_argv()
 
-    def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, tag_suffix: str, concept_source: str, extra_flags: Optional[List[str]] = None, detector_model: Optional[str] = None):
-        rn = f"{prefix}_{regime}_minrule_eval_vpr3_pos1152neg3456_unbalanced_pixelated_fixed_seed{seed}_v1_intervene{int(human_acc*100)}_kset-0_1_2_5_10_{settings.get('difficulty','hard')}_seed{seed}"
-        argv = [
-            "--variant", "perfect",
-            "--variants-per-row", "1",
-            "--imperfect-strategy", "missing_concepts",
-            "--heldout-concepts", "[]",
-            "--mask-p", "0.0",
-            "--mask-mode", "mask",
-            "--mask-rate", "0.0",
-            "--seed", str(seed),
-            "--concept-mode", "hard",
-            "--templates-file", "",
-            "--redact-concepts", str(settings.get("redact_concepts", "")),
-            "--redact-splits", str(settings.get("redact_splits", "")),
-            "--label-model-expr", "",
-            "--corr-pair", "",
-            "--train-corr", "1.0",
-            "--test-break", "1.0",
-            "--test-corr", "-1.0",
-            "--budgets", ",".join(str(x) for x in budgets),
-            "--target-acc-grid", "raw",
-            "--target-acc-concepts", "",
-            "--intervene-allow", "",
-            "--human-acc", str(human_acc),
-            "--human-acc-concepts", "",
-            "--make-plots", str(make_plots),
-            "--policy", "uncertainty",
-            "--concept-label-noise-mode", "none",
-            "--concept-label-noise-rate", "0.2",
-            "--blackbox-metrics", blackbox_metrics,
-            "--concepts-csv", settings.get("concepts_csv", ""),
-            "--generic-enable", str(int(settings.get("generic_enable", 1))),
-            "--generic-rate", str(float(settings.get("generic_rate", 0.7))),
-            "--generic-tol", str(float(settings.get("generic_tol", 0.02))),
-            "--concept-source", concept_source,
-            "--skip-fit", str(int(settings.get("skip_fit", 1))),
-            "--force-rerun", str(force),
-            "--intervention-error-mode", "both",
-            "--run-name", rn if not tag_suffix else f"{tag_suffix}_{rn}",
-        ]
-        if int(settings.get("reuse_detector", 1)) and detector_model:
-            argv += ["--reuse-detector", "1", "--detector-model", detector_model]
-        if extra_flags:
-            argv += extra_flags
-        run_cmd("run", argv)
+    # scenario-specific flags
+    argv += [
+        "--variant", "perfect",
+        "--variants-per-row", "1",
+        "--imperfect-strategy", "missing_concepts",
+        "--heldout-concepts", "[]",
+        "--mask-p", "0.0",
+        "--mask-mode", "mask",
+        "--mask-rate", "0.0",
+        "--concept-mode", "hard",
+        "--templates-file", "",
+        "--redact-concepts", str(settings.get("redact_concepts", "")),
+        "--redact-splits", str(settings.get("redact_splits", "")),
+        "--label-model-expr", "",
+        "--corr-pair", "",
+        "--train-corr", "1.0",
+        "--test-break", "1.0",
+        "--test-corr", "-1.0",
+        "--target-acc-grid", "raw",
+        "--target-acc-concepts", "",
+        "--intervene-allow", "",
+        "--human-acc", str(human_acc),
+        "--human-acc-concepts", "",
+        "--make-plots", str(make_plots),
+        "--concept-label-noise-mode", "none",
+        "--concept-label-noise-rate", "0.2",
+        "--blackbox-metrics", blackbox_metrics or "",
+        "--concepts-csv", settings.get("concepts_csv", ""),
+        "--generic-enable", str(int(settings.get("generic_enable", 1))),
+        "--generic-rate", str(float(settings.get("generic_rate", 0.7))),
+        "--generic-tol", str(float(settings.get("generic_tol", 0.02))),
+        "--concept-source", concept_source,
+        "--skip-fit", str(int(settings.get("skip_fit", 1))),
+        "--force-rerun", str(force),
+        "--intervention-error-mode", "both",
+        "--run-name", rn if not tag_suffix else f"{tag_suffix}_{rn}",
+        "--seed-test-offset", str(int(settings.get("seed_test_offset", 1234))),
+    ]
 
-    run_spec("best", "best", settings.get("best_human_acc", 1.0), bb, "best", "detected", detector_model=None)
+    if int(settings.get("reuse_detector", 1)) and detector_model:
+        argv += ["--reuse-detector", "1", "--detector-model", detector_model]
+    if extra_flags:
+        argv += extra_flags
+
+    run_cmd(argv)
+
+def make_run_name():
+    tag = settings.get("run_tag", "")
+    diff = settings.get("difficulty", "hard")
+    seed = int(settings.get("seed", 0))
+    return f"{tag}_{diff}_seed{seed}" if tag else f"{diff}_seed{seed}"
+
+def run():
+    modality = str(settings.get("modality", "text"))
+    model_id = str(settings.get("text_model", "distilbert-base-uncased")) if modality == "text" else "vit"
+    ensure_baseline(model_id=model_id, modality=modality)
+
+    # baseline metrics path
+    bb = str(find_metrics_json(modality, model_id, "test") or "")
+
+    lf_flags = []
+    lf_flags += ["--lf-alpha", str(settings.get("lf_alpha", 0.5))]
+    lf_flags += ["--lf-threshold", str(settings.get("lf_threshold", 0.5))]
+    lf_flags += ["--lf-mode", str(settings.get("lf_mode", "soft"))]
+    if bool(settings.get("lf_ridge", False)):
+        lf_flags += ["--lf-ridge"]
+    lf_flags += ["--lf-ridge-alpha", str(settings.get("lf_ridge_alpha", 1.0))]
+    lf_flags += ["--lf-encoder", str(settings.get("lf_encoder", "sentence-transformers/all-MiniLM-L6-v2"))]
+    lf_flags += ["--lf-device", str(settings.get("lf_device", "cpu"))]
+    lf_flags += ["--lf-batch-size", str(settings.get("lf_batch_size", 64))]
+
+    run_spec(
+        prefix="best",
+        regime="best",
+        human_acc=float(settings.get("best_human_acc", 1.0)),
+        blackbox_metrics=bb,
+        tag_suffix="best",
+        concept_source=str(settings.get("concept_source", "machine")),
+        extra_flags=lf_flags,
+        detector_model=None,
+    )
 
 def recompute_metrics():
-    seed = int(settings.get("seed", 0))
-    base = results_dir / "robot_text"
-    meta_glob = f"**/meta_cbm_fe_*_robots_text_complete_seed{seed}.json"
-    all_meta = sorted(base.rglob(meta_glob))
-    rtag = str(settings.get("run_tag", "")).strip()
-    meta_paths = [p for p in all_meta if (not rtag or rtag in str(p.parent))]
-    if not meta_paths:
-        return
-    for mp in meta_paths:
-        try:
-            args = json.loads(Path(mp).read_text()).get("args", {})
-        except Exception:
+    base = results_dir / "robot_baseline" / "text"
+    rows = []
+    for run_dir in sorted(base.glob("*")):
+        if not run_dir.is_dir():
             continue
-        base_argv = [str(GEN)]
-
-        def add_arg(k, v):
-            if v is None:
-                return
-            base_argv.extend([f"--{k.replace('_', '-')}", str(v)])
-
-        add_arg("variant", args.get("variant"))
-        add_arg("variants_per_row", args.get("variants_per_row"))
-        add_arg("imperfect_strategy", args.get("imperfect_strategy"))
-        add_arg("heldout_concepts", args.get("heldout_concepts"))
-        add_arg("mask_p", args.get("mask_p"))
-        add_arg("mask_mode", args.get("mask_mode"))
-        add_arg("mask_rate", args.get("mask_rate"))
-        add_arg("seed", args.get("seed"))
-        add_arg("concept_mode", args.get("concept_mode"))
-        add_arg("templates_file", args.get("templates_file"))
-        rc = settings.get("redact_concepts") if "redact_concepts" in settings else args.get("redact_concepts")
-        rs = settings.get("redact_splits") if "redact_splits" in settings else args.get("redact_splits")
-        add_arg("redact_concepts", rc)
-        add_arg("redact_splits", rs)
-        expr = settings.get("label_model_expr") if "label_model_expr" in settings else args.get("label_model_expr")
-        add_arg("label_model_expr", expr)
-        add_arg("corr_pair", args.get("corr_pair"))
-        add_arg("train_corr", args.get("train_corr"))
-        add_arg("test_break", args.get("test_break"))
-        add_arg("test_corr", args.get("test_corr"))
-        add_arg("budgets", args.get("budgets"))
-        add_arg("target_acc_grid", args.get("target_acc_grid"))
-        add_arg("target_acc_concepts", args.get("target_acc_concepts"))
-        add_arg("intervene_allow", args.get("intervene_allow"))
-        add_arg("human_acc", args.get("human_acc"))
-        add_arg("human_acc_concepts", args.get("human_acc_concepts"))
-        add_arg("make_plots", args.get("make_plots"))
-        add_arg("policy", args.get("policy"))
-        add_arg("concept_label_noise_mode", args.get("concept_label_noise_mode"))
-        add_arg("concept_label_noise_rate", args.get("concept_label_noise_rate"))
-        add_arg("generic_enable", args.get("generic_enable", settings.get("generic_enable")))
-        add_arg("generic_rate", args.get("generic_rate", settings.get("generic_rate")))
-        add_arg("generic_tol", args.get("generic_tol", settings.get("generic_tol")))
-        ci = args.get("concept_include")
-        ce = args.get("concept_exclude")
-        if ci not in (None, "", "[]"): add_arg("concept_include", ci)
-        if ce not in (None, "", "[]"): add_arg("concept_exclude", ce)
-
-        bm = args.get("blackbox_metrics")
-        if not bm or not Path(bm).exists():
-            cand = sorted((results_dir / "robot_baseline").rglob("baseline_*metrics.json"))
-            if cand:
-                bm = str(cand[-1])
-        if bm:
-            add_arg("blackbox_metrics", bm)
-        ccsv = settings.get("concepts_csv") or args.get("concepts_csv")
-        add_arg("concepts_csv", ccsv)
-
-        mobj = json.loads(Path(mp).read_text())
-        det = mobj.get("artifacts", {}).get("model") or args.get("detector_model")
-
-        cs = args.get("concept_source")
-        if cs in (None, "", "none", "human"):
-            machine_keys = ["machine_method","machine_k","machine_soft","machine_seed","machine_upper_bound","lf_alpha","lf_threshold","lf_mode","lf_ridge","lf_ridge_alpha","lf_encoder","lf_device","lf_batch_size"]
-            if any(args.get(k) for k in machine_keys):
-                cs = "machine"
-            elif det:
-                cs = "detected"
-            elif args.get("use_gt_concepts") in [1, "1", True, "true"]:
-                cs = "gt"
-        if cs:
-            add_arg("concept_source", cs)
-        if cs == "machine":
-            for k in ["machine_method","machine_k","machine_soft","machine_seed","machine_upper_bound","lf_alpha","lf_threshold","lf_mode","lf_ridge","lf_ridge_alpha","lf_encoder","lf_device","lf_batch_size"]:
-                add_arg(k, args.get(k))
-
-        mode = "both"
-        rn0 = args.get("run_name") or ""
-
-        import re as _re
-        if rn0.startswith("best_") or rn0.startswith("anchor_"):
-            regime = "best"
-        elif rn0.startswith("expert_"):
-            regime = "expert"
-        elif rn0.startswith("subjective_"):
-            regime = "subjective"
-        else:
-            regime = "unknown"
-
-        def _listify(v):
-            if isinstance(v, (list, tuple)):
-                return [float(x) for x in v]
-            if isinstance(v, str):
-                return [float(x) for x in v.split(",") if x.strip() != ""]
-            if v is None:
-                return []
-            return [float(v)]
-
-        if regime == "expert":
-            haccs = _listify(settings.get("expert_human_accs")) or _listify(args.get("human_acc"))
-        elif regime == "subjective":
-            haccs = _listify(settings.get("subjective_human_accs")) or _listify(args.get("human_acc"))
-        else:
-            haccs = _listify(args.get("human_acc")) or _listify(settings.get("best_human_acc"))
-
-        if regime == "subjective":
-            rates = _listify(settings.get("subjective_noise_rates"))
-            if not rates:
-                rates = _listify(args.get("concept_label_noise_rate")) or _listify(settings.get("subjective_noise_rate", 0.20))
-        else:
-            rates = [None]
-
-        for ha in haccs:
-            for rate in rates:
-                argv = list(base_argv)
-                _skip = int(settings.get("skip_fit", 1))
-                if _skip == 1 and not (det and Path(det).exists()):
-                    raise RuntimeError(f"skip_fit=1 but detector missing: {det}")
-                argv += ["--skip-fit", str(_skip)]
-                if det and Path(det).exists():
-                    argv += ["--reuse-detector", "1", "--detector-model", det]
-                else:
-                    print("Warning: missing detector model", det)
-                argv += ["--force-rerun", str(int(settings.get("force", 0))), "--intervention-error-mode", mode]
-
-                argv += ["--human-acc", str(float(ha))]
-                rn = rn0
-                rn = _re.sub(r"_intervene\d+", f"_intervene{int(float(ha)*100)}", rn)
-                if regime == "subjective" and rate is not None:
-                    argv += ["--concept-label-noise-rate", str(float(rate))]
-                    dd = int(round(float(rate)*100))
-                    if dd == 20:
-                        if "_noise20" in rn:
-                            cand = rn.replace("_noise20", "_noise")
-                            if (results_dir / "robot_text" / cand).exists():
-                                rn = cand
-                        elif "_noise" not in rn:
-                            rn = rn + "_noise"
-                    else:
-                        if "_noise" in rn and not _re.search(r"_noise\d{2}", rn):
-                            rn = rn.replace("_noise", f"_noise{dd:02d}")
-                        elif _re.search(r"_noise\d{2}", rn):
-                            rn = _re.sub(r"_noise\d{2}", f"_noise{dd:02d}", rn)
-                        else:
-                            rn = rn + f"_noise{dd:02d}"
-                subs = str(settings.get("run_name_sub", "")).strip()
-                if subs:
-                    for part in subs.split(";"):
-                        part = part.strip()
-                        if not part:
-                            continue
-                        if "->" in part:
-                            a, b = part.split("->", 1)
-                        elif ":" in part:
-                            a, b = part.split(":", 1)
-                        elif "," in part:
-                            a, b = part.split(",", 1)
-                        else:
-                            continue
-                        rn = rn.replace(a.strip(), b.strip())
-                argv += ["--run-name", rn]
-                run_cmd("recompute", argv)
+        parts = sorted(run_dir.glob("baseline_dnn_robots_text_*_metrics_*.json"))
+        for p in parts:
+            try:
+                data = json.loads(p.read_text())
+            except Exception:
+                data = {}
+            row = {"run_dir": run_dir.name, "file": p.name}
+            for k, v in data.items():
+                row[k] = v
+            rows.append(row)
+    if rows:
+        df = pd.DataFrame(rows)
+        out = results_dir / "robot_text" / "_summary"
+        out.mkdir(parents=True, exist_ok=True)
+        eff = out / "baseline_metrics_flat.csv"
+        df.to_csv(eff, index=False)
 
 def build_final_accuracy_table():
-    import re
-    files_v1 = glob.glob(str(results_dir / "robot_text" / "**" / "viability_robots_text_*_detected.csv"),
-                         recursive=True) + \
-               glob.glob(str(results_dir / "robot_text" / "**" / "viability_v2_robots_text_*_detected.csv"),
-                         recursive=True)
-    rows = []
-    for fp in files_v1:
-        p = Path(fp)
-        try:
-            parts = p.stem.split("_")
-        except Exception:
+    tbl = []
+    base = results_dir / "robot_baseline" / "text"
+    for run_dir in sorted(base.glob("*")):
+        if not run_dir.is_dir():
             continue
-        hacc = None
-        mm = re.search(r"intervene(\d+)", p.as_posix())
-        if mm:
+        row = {"run_dir": run_dir.name}
+        for split in ("train", "val", "test", "deploy"):
+            p = sorted(run_dir.glob(f"baseline_dnn_robots_text_*_metrics_{split}.json"))
+            if not p:
+                continue
             try:
-                hacc = int(mm.group(1)) / 100.0
+                data = json.loads(p[0].read_text())
             except Exception:
-                hacc = None
-        mode = "v2" if "viability_v2_" in p.name else "v1"
+                data = {}
+            row[f"{split}_accuracy"] = data.get("accuracy")
+            row[f"{split}_balanced_acc"] = data.get("balanced_acc")
+            row[f"{split}_coverage"] = data.get("coverage")
+            row[f"{split}_selective_accuracy"] = data.get("selective_accuracy")
+            row[f"{split}_tau"] = data.get("tau")
+            row[f"{split}_tau_target"] = data.get("tau_target")
+        tbl.append(row)
+    if tbl:
+        df = pd.DataFrame(tbl)
+        out = results_dir / "robot_text" / "_summary"
+        out.mkdir(parents=True, exist_ok=True)
+        eff_path = out / "final_accuracy_table.csv"
+        df.to_csv(eff_path, index=False)
+        print("Wrote", eff_path)
+
+    concept_recs = []
+    robot_text_dir = results_dir / "robot_text"
+    sub_all = sorted(robot_text_dir.glob("**/subtype_stats_*_*.csv"))
+    for p in sub_all:
         try:
-            df = pd.read_csv(fp)
+            dfp = pd.read_csv(p)
+            dfp["source_file"] = str(p)
+            concept_recs.append(dfp)
         except Exception:
-            continue
-        df["human_acc"] = hacc
-        df["mode"] = mode
-        df["run_dir"] = str(p.parent)
-        rows.append(df)
-    if not rows:
-        return
-    out = pd.concat(rows, ignore_index=True)
-    out["budget"] = out["budget"].astype(int)
-    out = out.sort_values(["run_dir", "mode", "human_acc", "budget"]).reset_index(drop=True)
-    out_csv = results_dir / "robot_text" / "final_intervention_accuracy_table.csv"
-    out_tex = results_dir / "robot_text" / "final_intervention_accuracy_table.tex"
+            pass
+    if concept_recs:
+        cdf = pd.concat(concept_recs, ignore_index=True)
+        outdir = results_dir / "robot_text" / "_summary"
+        c_path = outdir / f"intervention_effectiveness_per_concept_seed{settings['seed']}.csv"
+        cdf.to_csv(c_path, index=False)
+        print("Wrote", c_path)
 
-    def _fmt(x):
-        try:
-            xi = int(x)
-            return f"{xi}"
-        except Exception:
-            try:
-                xf = float(x)
-                return f"{xf:.4f}"
-            except Exception:
-                return str(x)
-
-    cols = [c for c in out.columns if c not in {"run_dir"}]
-    out.to_csv(out_csv, index=False)
-    with open(out_tex, "w") as f:
-        hdr = " & ".join(cols)
-        f.write("\\begin{tabular}{%s}\n" % ("l" * len(cols)))
-        f.write(hdr + " \\\\\n\\hline\n")
-        for _, row in out.iterrows():
-            f.write(" & ".join(_fmt(row[c]) for c in cols) + " \\\\\n")
-        f.write("\\end{tabular}\n")
-
-if __name__ == "__main__":
-    parse_cli()
-    if int(settings.get("recompute_only", 0)) == 1:
-        recompute_metrics()
-        build_final_accuracy_table()
-    else:
-        run()
-        build_final_accuracy_table()
+parse_cli()
+if int(settings.get("recompute_only", 0)) == 1:
+    recompute_metrics()
+    build_final_accuracy_table()
+    try:
+        from scripts.report_text_tables import build_text_summary_tables
+        build_text_summary_tables()
+    except Exception:
+        pass
+else:
+    run()
+    build_final_accuracy_table()
+    try:
+        from scripts.report_text_tables import build_text_summary_tables
+        build_text_summary_tables()
+    except Exception:
+        pass
