@@ -17,6 +17,7 @@ from transformers import (
     AutoModelForImageClassification,
 )
 from sklearn.metrics import accuracy_score, f1_score, balanced_accuracy_score, roc_auc_score
+import numpy as np
 from sklearn.linear_model import LogisticRegression
 import torch.nn.functional as F
 
@@ -136,6 +137,40 @@ def _signals_from_row(row: dict) -> dict:
         "ears_shape": str(row["ears_shape"]),
         "mouth_type": str(row["mouth_type"]),
     }
+def _kfold_by_row(row_index_arr, y_arr, K, seed_cv, test_frac, dev_per_fold):
+    rng = np.random.default_rng(int(seed_cv))
+    ids = np.unique(row_index_arr.astype(int))
+    y_by_id = {}
+    ya = np.asarray(y_arr, dtype=int)
+    for i2, rid2 in enumerate(row_index_arr):
+        r2 = int(rid2)
+        if r2 not in y_by_id:
+            y_by_id[r2] = int(ya[i2])
+    ids0 = [r for r in ids if y_by_id[r] == 0]
+    ids1 = [r for r in ids if y_by_id[r] == 1]
+    rng.shuffle(ids0); rng.shuffle(ids1)
+    n_t0 = int(np.floor(test_frac * len(ids0)))
+    n_t1 = int(np.floor(test_frac * len(ids1)))
+    test_ids = set(ids0[:n_t0] + ids1[:n_t1])
+    rem0 = ids0[n_t0:]; rem1 = ids1[n_t1:]
+    buckets0 = [rem0[i3::K] for i3 in range(K)]
+    buckets1 = [rem1[i3::K] for i3 in range(K)]
+    fold_by_id = {}
+    for k3 in range(K):
+        fold_ids = list(buckets0[k3]) + list(buckets1[k3])
+        if dev_per_fold and len(fold_ids) > dev_per_fold:
+            rng.shuffle(fold_ids)
+            fold_ids = fold_ids[:dev_per_fold]
+        for r3 in fold_ids:
+            fold_by_id[r3] = k3 + 1
+    arr = np.zeros(len(row_index_arr), dtype=int)
+    for i3, rid3 in enumerate(row_index_arr):
+        r3 = int(rid3)
+        if r3 in test_ids:
+            arr[i3] = 0
+        else:
+            arr[i3] = fold_by_id.get(r3, ((i3 % K) + 1))
+    return arr
 
 def _nat_from_tokens(row: dict) -> dict:
     head_nat = {"square": "boxy", "round": "dome-like"}[str(row["head_shape"])]
@@ -440,6 +475,12 @@ p = argparse.ArgumentParser(add_help=False)
 p.add_argument("--modality", choices=["text", "image"])
 p.add_argument("--n", type=int)
 p.add_argument("--seed", type=int)
+p.add_argument("--seed-cv", type=int)
+p.add_argument("--cv-k", type=int)
+p.add_argument("--cv-fold", type=int)
+p.add_argument("--dev-per-fold", type=int)
+p.add_argument("--deployment-size", type=int)
+p.add_argument("--text_model")
 p.add_argument("--out_dir")
 p.add_argument("--label_model_expr")
 p.add_argument("--label-model-expr", dest="label_model_expr")
@@ -619,31 +660,64 @@ if modality == "text":
             llm_model="gemini-1.5-flash",
             llm_user_prompt="Describe the robot based only on attributes.",
         )
+    # 5-fold CV split with 15% test, 1 dev fold capped to dev_per_fold
+    K = int(settings.get("cv_k", 5))
+    seed_cv = int(settings.get("seed_cv", int(settings.get("seed", 0)) + 1))
+    val_fold = int(settings.get("cv_fold", 0)) or ((seed_cv % K) + 1)
+    devN = int(settings.get("dev_per_fold", 1000))
+
     row_index = getattr(getattr(ds, "_full", None), "meta", {}).get("row_index", None)
+
+    def _kfold_ids(ids, y_by_id, K, seed_cv, test_frac, devN):
+        rng = np.random.default_rng(int(seed_cv))
+        ids0 = [i for i in ids if y_by_id.get(i, 0) == 0]
+        ids1 = [i for i in ids if y_by_id.get(i, 0) == 1]
+        rng.shuffle(ids0); rng.shuffle(ids1)
+        n_t0 = int(np.floor(test_frac * len(ids0)))
+        n_t1 = int(np.floor(test_frac * len(ids1)))
+        test_ids = set(ids0[:n_t0] + ids1[:n_t1])
+        rem0 = ids0[n_t0:]; rem1 = ids1[n_t1:]
+        buckets0 = [rem0[i::K] for i in range(K)]
+        buckets1 = [rem1[i::K] for i in range(K)]
+        fold_by_id = {}
+        for k in range(K):
+            fold_ids = list(buckets0[k]) + list(buckets1[k])
+            if devN and len(fold_ids) > devN:
+                rng.shuffle(fold_ids)
+                fold_ids = fold_ids[:devN]
+            for r in fold_ids:
+                fold_by_id[r] = k + 1
+        return test_ids, fold_by_id
+
     if isinstance(row_index, np.ndarray) and len(row_index) == len(ds.X):
-        rng = np.random.default_rng(0)
-        base_ids = np.unique(row_index)
-        rng.shuffle(base_ids)
-        n_ids = len(base_ids)
-        n_val_ids = int(np.floor(0.15 * n_ids))
-        n_te_ids = int(np.floor(0.15 * n_ids))
-        val_ids = set(base_ids[:n_val_ids])
-        te_ids = set(base_ids[n_val_ids:n_val_ids + n_te_ids])
-        mask_val = np.array([rid in val_ids for rid in row_index], dtype=bool)
-        mask_te = np.array([rid in te_ids for rid in row_index], dtype=bool)
-        mask_tr = ~(mask_val | mask_te)
-        tr = np.where(mask_tr)[0]
-        va = np.where(mask_val)[0]
-        te = np.where(mask_te)[0]
+        ids = np.unique(row_index.astype(int))
+        ya = np.asarray(ds.y, dtype=int)
+        y_by_id = {}
+        for i, rid in enumerate(row_index):
+            r = int(rid)
+            if r not in y_by_id:
+                y_by_id[r] = int(ya[i])
+        test_ids, fold_by_id = _kfold_ids(ids, y_by_id, K, seed_cv, 0.15, devN)
+        fold_arr = np.zeros(len(row_index), dtype=int)
+        for i, rid in enumerate(row_index):
+            r = int(rid)
+            fold_arr[i] = 0 if r in test_ids else fold_by_id.get(r, ((i % K) + 1))
     else:
         n = len(ds.X)
-        idx = np.arange(n)
-        rng = np.random.default_rng(int(settings["seed"]))
-        rng.shuffle(idx)
-        tr_end = int(0.70 * n)
-        va_end = int(0.85 * n)
-        tr, va, te = idx[:tr_end], idx[tr_end:va_end], idx[va_end:]
+        ids = list(range(n))
+        ya = np.asarray(ds.y, dtype=int)
+        y_by_id = {i: int(ya[i]) for i in range(n)}
+        test_ids, fold_by_id = _kfold_ids(ids, y_by_id, K, seed_cv, 0.15, devN)
+        fold_arr = np.zeros(n, dtype=int)
+        for i in range(n):
+            fold_arr[i] = 0 if i in test_ids else fold_by_id.get(i, ((i % K) + 1))
 
+    mask_val = (fold_arr == val_fold)
+    mask_te = (fold_arr == 0)
+    mask_tr = ~(mask_val | mask_te)
+    tr = np.where(mask_tr)[0]
+    va = np.where(mask_val)[0]
+    te = np.where(mask_te)[0]
 
     def _subset(ds_obj, take):
         X = [ds_obj.X[i] for i in take]
@@ -1096,9 +1170,10 @@ split_files = {
     "test":  out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_seed{int(settings['seed'])}_metrics_test.json",
 }
 metrics_map = {"train": _train_metrics, "val": _val_metrics, "test": _test_metrics}
-if _deploy_metrics is not None:
+if hasattr(ds, "deployment"):
     split_files["deploy"] = out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_seed{int(settings['seed'])}_metrics_deploy.json"
+    _deploy_metrics = _eval_text_metrics(ds.deployment.X, ds.deployment.y.astype(int), tok_or_proc, model, device, calibrator=calibrator, abstain=str(settings.get("abstain","none")).lower(), tau=settings.get("tau"))
     metrics_map["deploy"] = _deploy_metrics
 for name, path in split_files.items():
-    m = metrics_map[name]
-    path.write_text(json.dumps(m, indent=2))
+    path.write_text(json.dumps(metrics_map[name], indent=2))
+
