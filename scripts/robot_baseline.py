@@ -497,7 +497,6 @@ p.add_argument("--calibrate", choices=["none","platt"], default="platt")
 p.add_argument("--abstain", choices=["none","conf"], default="conf")
 p.add_argument("--tau", type=float)
 p.add_argument("--tau-target", dest="tau_target", type=float, default=0.99)
-p.add_argument("--text_model")
 p.add_argument("--deployment-size", dest="deployment_size", type=int)
 p.add_argument("--image_model")
 p.add_argument("--image_size", type=int)
@@ -1176,4 +1175,5 @@ if hasattr(ds, "deployment"):
     metrics_map["deploy"] = _deploy_metrics
 for name, path in split_files.items():
     path.write_text(json.dumps(metrics_map[name], indent=2))
+
 
