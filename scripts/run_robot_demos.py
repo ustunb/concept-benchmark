@@ -136,20 +136,24 @@ def parse_cli():
     ap.add_argument("--abstain-only", type=int)
 
     known, _ = ap.parse_known_args()
-    for k, v in settings.items():
-        if k not in known.__dict__ or known.__dict__[k] is None:
-            pass
+
+    for k, v in vars(known).items():
+        if v is not None:
+            settings[k] = v
+
     for k in list(settings.keys()):
         k2 = k.replace("_", "-")
-        if k2 in known.__dict__ and known.__dict__[k2] is not None:
-            settings[k] = known.__dict__[k2]
-        elif k in known.__dict__ and known.__dict__[k] is not None:
-            settings[k] = known.__dict__[k]
+        if k2 in vars(known) and vars(known)[k2] is not None:
+            settings[k] = vars(known)[k2]
+        elif k in vars(known) and vars(known)[k] is not None:
+            settings[k] = vars(known)[k]
+
     if isinstance(settings.get("budgets"), str):
         try:
             settings["budgets"] = [int(x) for x in settings["budgets"].split(",")]
         except Exception:
             settings["budgets"] = [0, 1, 2, 5, 10]
+
 
 def run_cmd(argv: List[str], cwd: Optional[Path] = None):
     cmd = " ".join(shlex.quote(str(x)) for x in argv)
