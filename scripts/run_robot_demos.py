@@ -43,7 +43,7 @@ settings = {
 
     "generic_enable": 1,
     "generic_rate": 0.7,
-    "generic_tol": 0.02,
+    "generic_tol": 0.1,
 
     "policy": "kflip",
     "k": 2,
