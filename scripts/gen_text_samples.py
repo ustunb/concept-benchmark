@@ -462,7 +462,6 @@ else:
     ap.add_argument("--flip-batch-size", type=int, default=8192)
     ap.add_argument("--flip-limit-subsets", type=lambda s: None if str(s).lower() == "none" else int(s), default=None)
     ap.add_argument("--abstain-only", action="store_true", help="restrict to abstentions if --tau is set")
-    ap.add_argument("--deployment-size", type=int, default=0)
     ap.add_argument("--seed-test-offset", type=int, default=1234, dest="seed_test_offset")
 
     known, _ = ap.parse_known_args()
