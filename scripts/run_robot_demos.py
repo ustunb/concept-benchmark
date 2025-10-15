@@ -66,7 +66,6 @@ def parse_cli():
     ap.add_argument("--reuse_detector", type=int)
     ap.add_argument("--run_tag", type=str)
     ap.add_argument("--modality", type=str)
-    ap.add_argument("--text_model", type=str)
     ap.add_argument("--best_human_acc", type=float)
     ap.add_argument("--expert_human_acc", type=float)
     ap.add_argument("--subjective_human_acc", type=float)
