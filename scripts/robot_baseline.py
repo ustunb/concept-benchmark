@@ -479,11 +479,9 @@ p.add_argument("--seed-cv", type=int)
 p.add_argument("--cv-k", type=int)
 p.add_argument("--cv-fold", type=int)
 p.add_argument("--dev-per-fold", type=int)
-p.add_argument("--deployment-size", type=int)
 p.add_argument("--text_model")
 p.add_argument("--out_dir")
-p.add_argument("--label_model_expr")
-p.add_argument("--label-model-expr", dest="label_model_expr")
+p.add_argument("--label_model_expr", "--label-model-expr", dest="label_model_expr")
 p.add_argument("--label-model-type", dest="label_model_type", choices=["deterministic","stochastic"])
 p.add_argument("--label-model-alpha", dest="label_model_alpha", type=float)
 p.add_argument("--label-model-bias", dest="label_model_bias", type=float)
@@ -1175,5 +1173,6 @@ if hasattr(ds, "deployment"):
     metrics_map["deploy"] = _deploy_metrics
 for name, path in split_files.items():
     path.write_text(json.dumps(metrics_map[name], indent=2))
+
 
 
