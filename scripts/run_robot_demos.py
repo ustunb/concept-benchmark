@@ -111,6 +111,7 @@ def parse_cli():
     ap.add_argument("--cv-k", type=int)
     ap.add_argument("--cv-fold", type=int)
     ap.add_argument("--dev-per-fold", type=int)
+    ap.add_argument("--dev-size", type=int)
     ap.add_argument("--deployment-size", type=int)
     ap.add_argument("--calibrate", type=str)
     ap.add_argument("--abstain", type=str)
