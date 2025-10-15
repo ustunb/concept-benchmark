@@ -1122,7 +1122,24 @@ if ds is None:
         llm_user_prompt=llm_user_prompt,
     )
 
-ds_path = ROBOT_DATA_DIR / "robot_text_dataset.pkl"
+_run = str(getattr(args_obj, "run_name", settings.get("run_name", ""))).strip()
+_suffix = re.sub(r"[^A-Za-z0-9_.-]+", "_", _run)
+if not _suffix:
+    _cfg = {
+        "seed": int(settings.get("seed", 0)),
+        "seed_cv": int(settings.get("seed_cv", 0)),
+        "templates": str(settings.get("templates_file", "")),
+        "template_difficulty": str(settings.get("template_difficulty", "")),
+        "generic_enable": int(settings.get("generic_enable", 0)),
+        "generic_rate": float(settings.get("generic_rate", 0.5)),
+        "samples_per_instance": int(settings.get("samples_per_instance", 1)),
+        "concept_source": str(settings.get("concept_source", "gt")),
+        "machine_method": str(settings.get("machine_method", "lfcbm")),
+    }
+    _suffix = hashlib.blake2b(json.dumps(_cfg, sort_keys=True).encode(), digest_size=8).hexdigest()
+
+ds_path = ROBOT_DATA_DIR  / f"robot_text_dataset_{_suffix}.pkl"
+
 save_obj(ds, ds_path, overwrite=True)
 
 print("SAMPLE CAPTIONS:")
