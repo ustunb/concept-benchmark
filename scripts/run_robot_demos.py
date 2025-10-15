@@ -183,6 +183,14 @@ def ensure_baseline(model_id: str, modality: str):
         argv += ["--cv-fold", str(settings["cv_fold"])]
     if settings.get("dev_per_fold") is not None:
         argv += ["--dev-per-fold", str(settings["dev_per_fold"])]
+    for flag, val in [
+        ("--generic-rate", settings.get("generic_rate")),
+        ("--generic-tol", settings.get("generic_tol")),
+        ("--val-balance-enable", settings.get("val_balance_enable")),
+        ("--test-balance-enable", settings.get("test_balance_enable")),
+    ]:
+        if val is not None:
+            argv += [flag, str(val)]
     run_cmd(argv)
 
 def find_metrics_json(modality: str, model_id: str, split: str):
