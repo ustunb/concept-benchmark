@@ -347,4 +347,106 @@ class DefaultConceptTrainer:
         model.eval()
 
         best_value = None if best_metric == float("-inf") else best_metric
-        return TrainerResult(model=model, history=history, best_metric=best_value)
+                return TrainerResult(model=model, history=history, best_metric=best_value)
+
+def train_concept_heads(
+    train_dataset: ConceptDatasetSample,
+    valid_dataset: Optional[ConceptDatasetSample],
+    embedding_model: Optional[nn.Module],
+    *,
+    input_dim: Optional[int] = None,
+    l1_size: int = 100,
+    freeze: bool = False,
+    fit_params: Optional[Dict[str, Any]] = None,
+) -> nn.ModuleList:
+    params = {
+        "epochs": 10,
+        "batch_size": 64,
+        "valid_batch_size": None,
+        "lr": 1e-3,
+        "weight_decay": 0.0,
+        "min_delta": 0.0,
+        "patience": 5,
+        "device": "cpu",
+        "num_workers": 0,
+        "pin_memory": False,
+        "loss_fn": None,
+        "optimizer_factory": None,
+        "scheduler_factory": None,
+        "use_tqdm": False,
+        "verbose": False,
+        "log_interval": 50,
+    }
+    if fit_params:
+        params.update(fit_params)
+
+    device = torch.device(params["device"])
+    num_concepts = int(getattr(train_dataset, "n_concepts", train_dataset.C.shape[1]))
+
+    if input_dim is None:
+        samp_bs = min(8, max(1, int(getattr(train_dataset, "n", 8))))
+        loader = train_dataset.loader(
+            batch_size=samp_bs,
+            shuffle=False,
+            num_workers=int(params["num_workers"]),
+            pin_memory=bool(params["pin_memory"]),
+        )
+        bx, _, *_ = next(iter(loader))
+        bx = bx
+        if embedding_model is None:
+            with torch.no_grad():
+                if isinstance(bx, torch.Tensor):
+                    emb = bx
+                else:
+                    emb = torch.as_tensor(bx, dtype=torch.float32)
+        else:
+            embedding_model = embedding_model.to(device)
+            embedding_model.eval()
+            with torch.no_grad():
+                x = bx
+                if isinstance(x, torch.Tensor):
+                    x = x.to(device)
+                out = embedding_model(x)
+                if isinstance(out, (list, tuple)):
+                    out = out[0]
+                emb = out if isinstance(out, torch.Tensor) else torch.as_tensor(out, dtype=torch.float32, device=device)
+        input_dim = int(emb.shape[1])
+
+    class _EmbedAndLinear(nn.Module):
+        def __init__(self, enc: Optional[nn.Module], d_in: int, k: int, freeze_enc: bool):
+            super().__init__()
+            self.enc = enc
+            if self.enc is not None:
+                self.enc.to(device)
+                if freeze_enc:
+                    for p in self.enc.parameters():
+                        p.requires_grad = False
+                    self.enc.eval()
+            self.linear = nn.Linear(d_in, k)
+
+        def forward(self, x):
+            h = x
+            if self.enc is not None:
+                h = self.enc(x)
+            if isinstance(h, (list, tuple)):
+                h = h[0]
+            if not isinstance(h, torch.Tensor):
+                h = torch.as_tensor(h, dtype=torch.float32)
+            return self.linear(h)
+
+    model = _EmbedAndLinear(embedding_model, int(input_dim), int(num_concepts), bool(freeze))
+
+    trainer = DefaultConceptTrainer()
+    res = trainer(model, train_dataset, valid_dataset, num_concepts=num_concepts, params=params)
+    joint = res.model if isinstance(res, TrainerResult) else res
+    W = joint.linear.weight.detach().cpu().clone()    # (k, d)
+    b = joint.linear.bias.detach().cpu().clone()       # (k,)
+    heads = nn.ModuleList([nn.Linear(int(input_dim), 1) for _ in range(num_concepts)])
+    for j in range(num_concepts):
+        heads[j].weight.data.copy_(W[j:j+1, :])
+        heads[j].bias.data.copy_(b[j:j+1])
+    heads.cpu()
+    if embedding_model is not None:
+        embedding_model.cpu()
+    return heads
+
