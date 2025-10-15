@@ -347,7 +347,7 @@ class DefaultConceptTrainer:
         model.eval()
 
         best_value = None if best_metric == float("-inf") else best_metric
-                return TrainerResult(model=model, history=history, best_metric=best_value)
+        return TrainerResult(model=model, history=history, best_metric=best_value)
 
 def train_concept_heads(
     train_dataset: ConceptDatasetSample,
