@@ -124,6 +124,11 @@ def parse_cli():
     ap.add_argument("--lf-encoder", type=str)
     ap.add_argument("--lf-device", type=str)
     ap.add_argument("--lf-batch-size", type=int)
+    ap.add_argument("--dev-size", type=int)
+    ap.add_argument("--generic-rate", "--generic_rate", dest="generic_rate", type=float)
+    ap.add_argument("--generic-tol", "--generic_tol", dest="generic_tol", type=float)
+    ap.add_argument("--val-balance-enable", "--val_balance_enable", dest="val_balance_enable", type=int)
+    ap.add_argument("--test-balance-enable", "--test_balance_enable", dest="test_balance_enable", type=int)
     ap.add_argument("--policy", type=str)
     ap.add_argument("--run-name-sub")
     ap.add_argument("--k", type=int)
@@ -173,6 +178,8 @@ def ensure_baseline(model_id: str, modality: str):
         argv += ["--tau-target", str(settings["tau_target"])]
     if settings.get("deployment_size") is not None:
         argv += ["--deployment-size", str(settings["deployment_size"])]
+    if settings.get("dev_size") is not None:
+        argv += ["--dev-size", str(settings["dev_size"])]
     if settings.get("seed") is not None:
         argv += ["--seed", str(settings["seed"])]
     if settings.get("seed_cv") is not None:
