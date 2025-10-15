@@ -125,8 +125,6 @@ def parse_cli():
     ap.add_argument("--lf-device", type=str)
     ap.add_argument("--lf-batch-size", type=int)
     ap.add_argument("--dev-size", type=int)
-    ap.add_argument("--generic-rate", "--generic_rate", dest="generic_rate", type=float)
-    ap.add_argument("--generic-tol", "--generic_tol", dest="generic_tol", type=float)
     ap.add_argument("--val-balance-enable", "--val_balance_enable", dest="val_balance_enable", type=int)
     ap.add_argument("--test-balance-enable", "--test_balance_enable", dest="test_balance_enable", type=int)
     ap.add_argument("--policy", type=str)
