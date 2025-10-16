@@ -237,10 +237,15 @@ class LabelFreeDetector:
             Z_base = H @ self._W
         else:
             Z_base = self._mix(H, list(texts))
-        out = np.zeros((Z_base.shape[0], len(self._keep_idx)), dtype=np.float32)
-        for oi, g in enumerate(self._keep_idx):
-            grp = self._groups[g]
-            out[:, oi] = Z_base[:, grp].mean(axis=1)
+        K = len(self.concept_names)
+        out = np.zeros((Z_base.shape[0], K), dtype=np.float32)
+        # Fill every concept with its group's mean
+        if self._groups is None:
+            out[:] = Z_base
+        else:
+            for grp in self._groups:
+                z = Z_base[:, grp].mean(axis=1)
+                out[:, grp] = z[:, None]
         if self.settings["lf_mode"] == "hard":
             thr = float(self.settings["lf_threshold"])
             return (out >= thr).astype(np.float32, copy=False)
