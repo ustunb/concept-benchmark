@@ -142,7 +142,12 @@ class _Encoder:
 
 class LabelFreeDetector:
     def __init__(self, settings):
-        self.settings = dict(settings)
+        _defaults = dict(globals().get("settings", {}))
+        _cfg = dict(_defaults)
+        if settings:
+            _cfg.update(settings)
+        self.settings = _cfg
+
         self.concept_names = []
         self._concept_aliases = []
         self._concept_regex = []
@@ -167,7 +172,7 @@ class LabelFreeDetector:
             self._keep_idx = list(range(K))
             return
         S = _cosine(self._E, self._E)
-        thr = float(self.settings["lf_group_threshold"])
+        thr = float(self.settings.get("lf_group_threshold", 0.9))
         used = np.zeros(K, dtype=bool)
         groups = []
         for i in range(K):
