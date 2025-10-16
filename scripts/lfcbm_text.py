@@ -226,21 +226,6 @@ class LabelFreeDetector:
             self._W = _ridge(H, Z0, float(self.settings["lf_ridge_alpha"]))
         self._build_groups()
         self._rank_groups(Z0, y)
-        new_names = []
-        new_aliases = []
-        new_regex = []
-        for g in self._keep_idx:
-            grp = self._groups[g]
-            new_names.append(self.concept_names[grp[0]])
-            a = []
-            for j in grp[1:]:
-                a.append(self.concept_names[j])
-                a.extend(self._concept_aliases[j])
-            new_aliases.append(a)
-            new_regex.append(self._concept_regex[grp[0]])
-        self.concept_names = new_names
-        self._concept_aliases = new_aliases
-        self._concept_regex = new_regex
         self._regex_compiled = _compile_regex(self._concept_regex)
         self._fitted = True
 
