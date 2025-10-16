@@ -15,19 +15,19 @@ from concept_benchmark.paths import results_dir
 from concept_benchmark.synthetic.robot import create_synthetic_dataset
 
 settings = {
-    "samples_per_instance": 1,
+    "samples_per_instance": 3,
     "draw": 0,
     "CBM_type": "joint", #"sequential"
     "image_dir": "./data/robot_images",
-    "image_size": "small",
+    "image_size": "medium",
     "color_mode": "color",
-    "train_dnn": 0,
+    "train_dnn": 1,
     "seed": 555,
     "model": "'glorp' if (int(row['mouth_type']=='closed') +  int(row['foot_shape']=='pointy'))>= 2 else 'drent'",
     'dataset_characterization': "",
     "knows_concepts": False,
     "spurious_features": ["has_elbows", "hand_shape"],
-    "drop_concepts": ["foot_shape_pointy_5sided", "foot_shape_flat_4sided", "foot_shape"],#"foot_shape_pointy_3sided",  "foot_shape_pointy_4sided", "foot_shape_flat_4sided", "foot_shape_flat_5sided", "foot_shape_flat_lshaped"],
+    "drop_concepts": ["foot_shape_pointy_5sided", "foot_shape_flat_4sided", "foot_shape_pointy_4sided", "foot_shape_flat_4sided", "foot_shape_flat_5sided", "foot_shape"],#, "foot_shape_pointy_3sided", "foot_shape_flat_lshaped"],
     "human_alignment": {"foot_shape": 1, "mouth_type": -1, "bias": -0.01}, # OR of ANDs model's logic
     "model_type": "stochastic",
     "logit_scalar": 4.0,
@@ -36,16 +36,11 @@ settings = {
     "missingness": "complete",
     "missing_rate": 1.0,
     "impute_missing": 0,
-    "skew_concept": [{'concepts': {'mouth_type': 0, 'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.15},
-                     {'concepts': {'mouth_type': 0, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.16},
-                     {'concepts': {'mouth_type': 1, 'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.1},
-                     {'concepts': {'mouth_type': 1, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.16},
-                     {'concepts': {'mouth_type': 1, 'foot_shape_flat_lshaped': 1}, 'min_fraction': 0.08},
-                     {'concepts': {'mouth_type': 1, 'foot_shape_flat_4sided': 1}, 'min_fraction': 0.08},
-                     {'concepts': {'mouth_type': 1, 'foot_shape_flat_5sided': 1}, 'min_fraction': 0.08},
-                     {'concepts': {'mouth_type': 0, 'foot_shape_flat_lshaped': 1}, 'min_fraction': 0.08},
-                     {'concepts': {'mouth_type': 0, 'foot_shape_flat_4sided': 1}, 'min_fraction': 0.08},
-                     {'concepts': {'mouth_type': 0, 'foot_shape_flat_5sided': 1}, 'min_fraction': 0.08},
+    "skew_concept": [
+                     {'concepts': {'mouth_type': 0, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.25},
+                     {'concepts': {'mouth_type': 1, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.25},
+                     {'concepts': {'mouth_type': 1, 'foot_shape_flat_lshaped': 1}, 'min_fraction': 0.25},
+                     {'concepts': {'mouth_type': 0, 'foot_shape_flat_lshaped': 1}, 'min_fraction': 0.25},
                      ], #[{'concepts': {'body_shape': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.243},
                      # {'concepts': {'mouth_type': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.2},
                      # {'concepts': {'body_shape': 0, 'mouth_type': 0, 'has_antennae': 1}, 'min_fraction': 0.15},
@@ -57,7 +52,7 @@ settings = {
     "intervention_threshold": 0.1,
     "epochs": 10,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "labeling_and_masked2_subconcepts",
+    "run_name": "labeling_and_masked_2subconcepts_medium",
     "load_detector": "",#str(Path(results_dir / "robots" / "test000" / "detector_dnn_robots_image_deterministic_complete__skewint-acc90_seed555.pt")),
     "load_frontend": "",#str(Path(results_dir / "robots" / "test000" / "frontend_logreg_robots_image_deterministic_complete__skewint-acc90_seed555.pkl")),
 }
@@ -154,7 +149,7 @@ def create_sample(size, indices, dataset):
     return dataset._full.filter(mask)
 
 
-def create_skewed_splits(dataset, skew_specs, train_fraction=0.5, val_fraction=0.25, test_fraction=0.25, rng=None, drop_concepts=[]):
+def create_skewed_splits(dataset, skew_specs, train_fraction=0.5, val_fraction=0.25, test_fraction=0.25, rng=None, drop_concepts=[], fractions_unique=True):
     """
     Skew training by ensuring minimum representation of specific concept patterns.
 
@@ -162,6 +157,10 @@ def create_skewed_splits(dataset, skew_specs, train_fraction=0.5, val_fraction=0
         skew_specs: List of dicts, each with 'concepts' (dict of concept:value) and 'min_fraction' (float)
                    e.g., [{'concepts': {'body_shape': 0, 'foot_shape_3sided': 1}, 'min_fraction': 0.4},
                           {'concepts': {'body_shape': 0, 'foot_shape_4sided': 1}, 'min_fraction': 0.4}]
+        train_fraction, val_fraction, test_fraction: Split proportions
+        rng: Random number generator
+        drop_concepts: List of concept names to drop from dataset after splitting
+        fractions_unique: If True, fractions regard the unique set of concepts, not total samples
     """
     if rng is None:
         rng = np.random.default_rng()
@@ -174,7 +173,8 @@ def create_skewed_splits(dataset, skew_specs, train_fraction=0.5, val_fraction=0
         print(f"  Class {cls}: {cnt} samples ({cnt / len(dataset.y):.1%})")
 
     total_size = len(dataset.C)
-    desired_train_size = int(total_size * train_fraction)
+    total_unique_size = total_size if not fractions_unique else dataset.meta["num_unique_robots"]
+    desired_train_size = int(total_unique_size * train_fraction)
     print("Desired training size:", desired_train_size)
 
     # Find indices matching each specification
@@ -515,7 +515,7 @@ def main():
 
     # Setup the test set
     test_params = copy.deepcopy(params)
-    standard_size = float(len(data))
+    standard_size = data.meta["num_unique_robots"]
     test_params["output_directory"] = Path(params['output_directory']) / "test_images"
     test_params["draw"] = True if not Path(test_params["output_directory"]).exists() or S.get("draw", False) else False
     test_params["samples_per_instance"] = int(params["test_set_size"] / standard_size) + 1
@@ -573,7 +573,7 @@ def main():
         'num_workers': 0 if device == 'mps' else 12,
         'pin_memory': False if device == 'mps' else True,
     }
-    cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=train.n_concepts, input_size=600 if S["image_size"] == "large" else 8))
+    cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=train.n_concepts, input_size=600 if S["image_size"] == "large" else 32 if S["image_size"] == "medium" else 8))
     det_name = f"detector_dnn_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
     if S["load_detector"]:
         mini_train = train.filter(np.array([True] + [False] * (len(train.C) - 1)))

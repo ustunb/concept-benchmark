@@ -296,7 +296,7 @@ def create_robot_image_dataset(
 
     num_combinations = int(np.prod([len(v) for v in concepts.values()]))
     total_robots = num_robots or num_combinations * samples_per_instance
-    eff_resolution = resolution if resolution is not None else (600 if size == "large" else 8)
+    eff_resolution = resolution if resolution is not None else (600 if size == "large" else 32 if size == "medium" else 8)
     irrelevant = list(spurious_features or [])
     drop_irrelevant = extra_params.pop("drop_irrelevant", True)
     _ = (train_concept_detector, epochs)  # parameters accepted for API compatibility
@@ -424,6 +424,7 @@ def create_robot_image_dataset(
     meta = {
         "classes": ["drent", "glorp"],
         "concepts": feature_names,
+        "num_unique_robots": num_combinations,
         "unfiltered_concepts": list(copy_features.keys()),
         "UC": UC,
         "df_indices": catalog_df.index.to_numpy(),
