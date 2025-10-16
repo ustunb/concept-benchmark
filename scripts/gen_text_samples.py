@@ -2946,10 +2946,14 @@ for ta in acc_grid:
                     batch_size=int(getattr(args_obj, "flip_batch_size", 8192)),
                     limit_subsets=getattr(args_obj, "flip_limit_subsets", None),
                 )
-                prop_k = strat_k.propose(cbm, batch_k, cfg_k)
-                mask = prop_k.mask
-                selected = prop_k.selected_instances if prop_k.selected_instances is not None else np.array([],
-                                                                                                            dtype=int)
+
+                if int(k) <= 0:
+                    selected = np.array([], dtype=int)
+                    mask = None
+                else:
+                    prop_k = strat_k.propose(cbm, batch_k, cfg_k)
+                    mask = prop_k.mask
+                    selected = prop_k.selected_instances if prop_k.selected_instances is not None else np.array([],dtype=int)
 
                 for i in selected:
                     picks_plan = np.nonzero(mask[i])[0]
