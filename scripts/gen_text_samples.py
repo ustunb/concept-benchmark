@@ -1368,33 +1368,61 @@ if hasattr(ds, "split") and need_split:
                 arr[i3] = fold_by_id.get(r3, ((i3 % K) + 1))
         return arr
 
-
-    K = int(getattr(args_obj, "cv_k", 5))
+    K = 5
     seed_cv = int(getattr(args_obj, "seed_cv", int(getattr(args_obj, "seed", 0)) + 1))
-    val_fold = int(getattr(args_obj, "cv_fold", 0)) or ((seed_cv % K) + 1)
     devN = int(getattr(args_obj, "dev_per_fold", 1000))
 
-    fold_arr = _kfold_by_row(row_index, ds.y, K=K, seed_cv=seed_cv, test_frac=0.15, dev_per_fold=devN)
+    n_all = len(ds.y)
+    n_sel = K * devN
+    rng = np.random.default_rng(seed_cv)
+    idx_all = np.arange(n_all)
+    if n_sel > n_all:
+        n_sel = n_all
+    sel = rng.choice(idx_all, size=n_sel, replace=False)
 
-    if getattr(ds, "cvindices", None) is None:
-        ds.cvindices = {}
-    fid = f"K{K:02d}N01"
-    ds.cvindices[fid] = fold_arr
-    ds.split(fold_id=fid, fold_num_validation=val_fold, fold_num_test=0)
+    fold_ids = np.repeat(np.arange(1, K + 1), devN)
+    if fold_ids.size > sel.size:
+        fold_ids = fold_ids[:sel.size]
+    elif fold_ids.size < sel.size:
+        fold_ids = np.concatenate([fold_ids, np.full(sel.size - fold_ids.size, K, dtype=int)])
 
-    gm = getattr(ds, "ears_generic_mask", None)
-    if gm is not None:
-        mtr = ~((fold_arr == 0) | (fold_arr == val_fold));
-        mva = (fold_arr == val_fold);
-        mte = (fold_arr == 0)
-        setattr(ds.training, "ears_generic_mask", np.asarray(gm)[mtr])
-        setattr(ds.validation, "ears_generic_mask", np.asarray(gm)[mva])
-        setattr(ds.test, "ears_generic_mask", np.asarray(gm)[mte])
-    _sub = getattr(ds, "subtypes", None)
-    if _sub is not None:
-        setattr(ds.training, "subtypes", {k: np.asarray(_sub[k])[mtr] for k in _sub.keys()})
-        setattr(ds.validation, "subtypes", {k: np.asarray(_sub[k])[mva] for k in _sub.keys()})
-        setattr(ds.test, "subtypes", {k: np.asarray(_sub[k])[mte] for k in _sub.keys()})
+    perm = rng.permutation(sel.size)
+    sel = sel[perm]
+    fold_ids = fold_ids[perm]
+
+    val_fold = int(getattr(args_obj, "cv_fold", 0)) or 1
+    if val_fold < 1 or val_fold > 5:
+        val_fold = 1
+    test_fold = 2 if val_fold == 1 else 1
+
+    mask_all = np.zeros(n_all, dtype=int)
+    mask_all[sel] = fold_ids
+
+    mtr = (mask_all != val_fold) & (mask_all != test_fold) & (mask_all != 0)
+    mva = (mask_all == val_fold)
+    mte = (mask_all == test_fold)
+
+
+    def _subset_mask(mask):
+        idx = np.where(mask)[0]
+        X = [ds.X[i] for i in idx]
+        C = ds.C[idx]
+        y = ds.y[idx]
+        sub = ConceptDatasetSample(X=X, C=C, y=y,
+                                   meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text"})
+        gm = getattr(ds, "ears_generic_mask", None)
+        if gm is not None:
+            setattr(sub, "ears_generic_mask", np.asarray(gm)[idx])
+        _sub = getattr(ds, "subtypes", None)
+        if _sub is not None:
+            setattr(sub, "subtypes", {k: np.asarray(_sub[k])[idx] for k in _sub.keys()})
+        return sub
+
+
+    ds.training = _subset_mask(mtr)
+    ds.validation = _subset_mask(mva)
+    ds.test = _subset_mask(mte)
+
     dep_n = int(getattr(args_obj, "deployment_size", 0))
     if dep_n > 0:
         rng_dep = np.random.default_rng(int(getattr(args_obj, "seed", 0)) + int(getattr(args_obj, "seed_test_offset", 1234)))
