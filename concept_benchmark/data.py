@@ -186,6 +186,36 @@ class ConceptDataset(object):
         self._cvindices = cvindices
         self.reset()
 
+    def drop_concepts(self, concepts_to_drop):
+        """
+        Drop specified concepts from the dataset.
+
+        Args:
+            concepts_to_drop (list of str): List of concept names to drop.
+        """
+        if not isinstance(concepts_to_drop, (list, tuple, set)):
+            raise ValueError("concepts_to_drop should be a list, tuple, or set of strings")
+        concepts_to_drop = set(concepts_to_drop)
+        existing_concepts = set(self.concepts)
+        invalid_concepts = concepts_to_drop - existing_concepts
+        if invalid_concepts:
+            raise ValueError(f"Concepts not found in dataset: {invalid_concepts}")
+
+        keep_indices = [i for i, c in enumerate(self.concepts) if c not in concepts_to_drop]
+        if not keep_indices:
+            raise ValueError("Cannot drop all concepts; at least one must remain.")
+
+        # Update concept matrix and metadata
+        self._full._C_base = self._full._C_base[:, keep_indices]
+        self._full.meta["concepts"] = [self.concepts[i] for i in keep_indices]
+        self._full.concepts = self._full.meta["concepts"]
+
+        # Update all samples
+        for sample in self._iter_samples():
+            sample.concepts = sample.meta["concepts"]
+
+        assert self.__check_rep__()
+
     def reset(self):
         """
         initialize data object to a state before CV

@@ -312,7 +312,8 @@ def create_robot_image_dataset(
         **extra_params,
     )
     catalog_df = catalog_df.copy()
-    print(catalog_df.columns)
+    if verbose:
+        print(catalog_df.columns)
     catalog_df[OUTCOME_NAME] = OUTCOME_MISSING
     df = catalog_df
 
@@ -349,9 +350,7 @@ def create_robot_image_dataset(
     X = np.array([row["png_filename"] for _, row in catalog_df.iterrows()])
 
     copy_features = copy.deepcopy(ALL_ROBOT_FEATURES)
-    print(copy_features)
     copy_features.update(new_concepts)
-    print(copy_features)
 
     pos_map = {
         feat: list(dict.fromkeys([str(f).split("_")[0] for f in copy_features[feat]]))[1]
@@ -391,7 +390,8 @@ def create_robot_image_dataset(
             .astype(np.int32)
             .to_numpy()
         )
-        print(f"Feature '{feat}': positive value '{pos_val}' -> column head {col.tolist()[:10]}")
+        if verbose:
+            print(f"Feature '{feat}': positive value '{pos_val}' -> column head {col.tolist()[:10]}")
         C_cols.append(col)
     C = np.stack(C_cols, axis=1).astype(np.int8)
 
