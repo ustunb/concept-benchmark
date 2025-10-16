@@ -23,10 +23,12 @@ from concept_benchmark.metrics import calc_metric
 from concept_benchmark.data import ConceptDatasetSample
 from concept_benchmark.ext.fileutils import load as load_obj
 from concept_benchmark.synthetic.helper.utils import apply_subjective_noise, apply_machine_noise
+from concept_benchmark.intervention import ConceptInterventionRunner, InterventionConfig
+from concept_benchmark.kflip import KFlipInterventionStrategy
 from types import SimpleNamespace
 import argparse, psutil
 from scripts.lfcbm_text import LabelFreeDetector
-from itertools import product
+from itertools import product, combinations
 import builtins, functools
 
 print = functools.partial(builtins.print, end="\n\n")
@@ -58,6 +60,7 @@ settings = {
     "target_acc_grid": "raw",
     "target_acc_concepts": "",
     "intervene_allow": "",
+    "intervene_threshold": 0.5,
     "human_acc": 1.0,
     "human_acc_concepts": "",
     "skew_concept": "",
@@ -88,7 +91,9 @@ settings = {
     "template_difficulty": "hard",
     "test_label_flip": 0.0,
     "intervention_error_mode": "miss",
+    "subtype_mode": "track",
 }
+
 
 
 def _csv_list(s: str) -> list[str]:
@@ -290,6 +295,8 @@ def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, v
     names = _core_concept_names()
     classes = [0, 1]
     X, C, y, row_index, ears_generic = [], [], [], [], []
+    _submode = str(getattr(args_obj, "subtype_mode", settings.get("subtype_mode","off"))).lower() if "args_obj" in globals() else str(settings.get("subtype_mode","off")).lower()
+    _subtypes = {"foot_is_pointy": [], "hands_are_pointy": []} if _submode != "off" else None
     for i, sr in catalog_df.iterrows():
         row = {k: sr[k] for k in params["concepts"].keys()}
         repeats = int(row_variants[i]) if row_variants is not None else int(variants_per_row)
@@ -304,6 +311,9 @@ def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, v
             y.append(1 if str(sr["label"]) == "glorp" else 0)
             row_index.append(i)
             ears_generic.append(bool(use_gen))
+            if _subtypes is not None:
+                _subtypes["foot_is_pointy"].append(str(row.get("foot_shape", "na")))
+                _subtypes["hands_are_pointy"].append(str(row.get("hand_shape", "na")))
     X = [str(t) for t in X]
     C = np.stack(C, axis=0).astype(np.float32)
     y = np.asarray(y, dtype=int)
@@ -312,6 +322,8 @@ def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, v
     )
     setattr(ds, "_full", type("Full", (), {"meta": {"row_index": np.asarray(row_index, dtype=int)}}))
     ds.ears_generic_mask = np.asarray(ears_generic, dtype=bool)
+    if _subtypes is not None:
+        setattr(ds, "subtypes", {k: np.asarray(v, dtype=object) for k, v in _subtypes.items()})
     return ds
 
 
@@ -352,7 +364,10 @@ def _render_from_corpus(row: dict, corpus: list[dict], seed: int) -> str:
 if psutil.Process(psutil.Process().ppid()).name().lower().startswith("pycharm"):
     args_obj = SimpleNamespace(**settings)
 else:
-    ap = argparse.ArgumentParser(add_help=False)
+    ap = argparse.ArgumentParser(description="Generate robot text samples",
+                                 formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+                                 conflict_handler="resolve")
+
     ap.add_argument("--variant", choices=["perfect", "imperfect"], default=settings["variant"])
     ap.add_argument("--variants-per-row", type=int)
     ap.add_argument("--variants-per-row-minority", type=int, default=0)
@@ -374,6 +389,11 @@ else:
     ap.add_argument("--mask-p", type=float, default=settings["mask_p"])
     ap.add_argument("--test-label-prior", type=str, default=settings["test_label_prior"])
     ap.add_argument("--seed", type=int, default=settings["seed"])
+    ap.add_argument("--seed-cv", type=int, default=(settings["seed"] + 1))
+    ap.add_argument("--cv-k", type=int, default=5)
+    ap.add_argument("--cv-fold", type=int, default=0)
+    ap.add_argument("--dev-per-fold", type=int, default=1000)
+    ap.add_argument("--deployment-size", type=int, default=10000)
     ap.add_argument("--concept-mode", choices=["hard", "soft"], default=settings["concept_mode"])
     ap.add_argument("--train-on-detected", action="store_true", default=settings["train_on_detected"])
     ap.add_argument("--templates-file", type=str, default=settings["templates_file"])
@@ -386,14 +406,15 @@ else:
     ap.add_argument("--target-acc-grid", type=str, default=settings["target_acc_grid"])
     ap.add_argument("--target-acc-concepts", type=str, default=settings["target_acc_concepts"])
     ap.add_argument("--intervene-allow", type=str, default=settings["intervene_allow"])
+    ap.add_argument("--intervene-threshold", type=float, default=settings["intervene_threshold"])
     ap.add_argument("--human-acc", type=float, default=settings["human_acc"])
     ap.add_argument("--human-acc-concepts", type=str, default=settings["human_acc_concepts"])
     ap.add_argument("--skew-concept", type=str, default=settings["skew_concept"])
     ap.add_argument("--make-plots", type=int, default=settings["make_plots"])
-    ap.add_argument("--policy", choices=["uncertainty", "oracle"], default=settings["policy"])
     ap.add_argument("--concept-include", type=str, default=settings["concept_include"])
     ap.add_argument("--concept-exclude", type=str, default=settings["concept_exclude"])
     ap.add_argument("--blackbox_metrics", type=str, default=settings["blackbox_metrics"])
+    ap.add_argument("--subtype-mode", choices=["off","track","salience"], default=settings["subtype_mode"])
     ap.add_argument("--human-alone", type=float, default=0.75)
     ap.add_argument("--concept-source", type=str, choices=["gt", "detected", "machine", "human", "none"],
                     default=settings["concept_source"])
@@ -408,6 +429,7 @@ else:
     ap.add_argument("--lf-encoder", type=str, default=settings.get("lf_encoder", ""))
     ap.add_argument("--lf-device", type=str, default=settings.get("lf_device", "cpu"))
     ap.add_argument("--lf-batch-size", type=int, default=settings.get("lf_batch_size", 32))
+    ap.add_argument("--lf-topk-concepts", type=int, default=9, help="select top‑K concepts by LR importance (default 9)")
     ap.add_argument("--machine-k", type=int, default=settings["machine_k"])
     ap.add_argument("--machine-soft", type=int, default=settings["machine_soft"])
     ap.add_argument("--machine-seed", type=int, default=settings["machine_seed"])
@@ -426,6 +448,8 @@ else:
     ap.add_argument("--reuse-detector", type=int, default=0)
     ap.add_argument("--detector-model", type=str, default="")
     ap.add_argument("--skip-fit", type=int, default=0)
+    ap.add_argument("--lf-keep-k", type=int, default=9)
+    ap.add_argument("--lf-group-threshold", type=float, default=0.9)
     ap.add_argument("--test-label-flip", type=float, default=0.0)
     ap.add_argument("--label-model-type", choices=["deterministic", "stochastic"], default="deterministic")
     ap.add_argument("--label-model-alpha", type=float, default=10.0)
@@ -438,6 +462,13 @@ else:
     ap.add_argument("--generic-rate", type=float, default=0.5)
     ap.add_argument("--generic-tol", type=float, default=0.02)
     ap.add_argument("--generic-enable", type=int, default=0)
+    ap.add_argument("--policy", choices=["uncertainty", "oracle", "kflip"], default="kflip")
+    ap.add_argument("--k", type=int, default=2, help="concepts per instance")
+    ap.add_argument("--flip-threshold", type=float, default=0.30)
+    ap.add_argument("--flip-batch-size", type=int, default=8192)
+    ap.add_argument("--flip-limit-subsets", type=lambda s: None if str(s).lower() == "none" else int(s), default=None)
+    ap.add_argument("--abstain-only", action="store_true", help="restrict to abstentions if --tau is set")
+    ap.add_argument("--seed-test-offset", type=int, default=1234, dest="seed_test_offset")
 
     known, _ = ap.parse_known_args()
     merged = dict(settings)
@@ -470,6 +501,7 @@ else:
         "concept_include": known.concept_include,
         "concept_exclude": known.concept_exclude,
         "blackbox_metrics": known.blackbox_metrics,
+        "subtype_mode": known.subtype_mode,
         "human_alone": float(getattr(known, "human_alone", 0.75)),
         "concept_source": known.concept_source,
         "machine_method": known.machine_method,
@@ -1096,7 +1128,25 @@ if ds is None:
         llm_user_prompt=llm_user_prompt,
     )
 
-ds_path = ROBOT_DATA_DIR / "robot_text_dataset.pkl"
+_run = str(getattr(args_obj, "run_name", settings.get("run_name", ""))).strip()
+_suffix = re.sub(r"[^A-Za-z0-9_.-]+", "_", _run)
+if not _suffix:
+    _cfg = {
+        "seed": int(settings.get("seed", 0)),
+        "seed_cv": int(settings.get("seed_cv", 0)),
+        "templates": str(settings.get("templates_file", "")),
+        "template_difficulty": str(settings.get("template_difficulty", "")),
+        "generic_enable": int(settings.get("generic_enable", 0)),
+        "generic_rate": float(settings.get("generic_rate", 0.5)),
+        "samples_per_instance": int(settings.get("samples_per_instance", 1)),
+        "concept_source": str(settings.get("concept_source", "gt")),
+        "machine_method": str(settings.get("machine_method", "lfcbm")),
+        "concepts_csv": str(Path(settings.get("concepts_csv", "")).resolve()) if settings.get("concepts_csv") else "",
+    }
+    _suffix = hashlib.blake2b(json.dumps(_cfg, sort_keys=True).encode(), digest_size=8).hexdigest()
+
+ds_path = ROBOT_DATA_DIR  / f"robot_text_dataset_{_suffix}.pkl"
+
 save_obj(ds, ds_path, overwrite=True)
 
 print("SAMPLE CAPTIONS:")
@@ -1177,72 +1227,69 @@ row_index = getattr(getattr(ds, "_full", ds), "meta", {}).get("row_index", np.ar
 
 
 def _manual_by_robot_split(ds_obj, row_index_arr, n_folds=5, seed=0):
-    rng = np.random.default_rng(seed)
-    base_ids = np.unique(row_index_arr)
-    rng.shuffle(base_ids)
+    seed_cv = int(getattr(args_obj, "seed_cv", int(seed) + 1))
+    K = int(getattr(args_obj, "cv_k", n_folds))
+    val_fold = int(getattr(args_obj, "cv_fold", 0)) or ((seed_cv % K) + 1)
+    devN = int(getattr(args_obj, "dev_per_fold", 1000))
 
-    n_ids = len(base_ids)
-    n_val = int(np.floor(0.15 * n_ids))
-    n_te = int(np.floor(0.15 * n_ids))
-    val_ids = set(base_ids[:n_val])
-    te_ids = set(base_ids[n_val:n_val + n_te])
-
-    lab_by_id = {}
-    y_all = np.asarray(ds_obj.y, dtype=int)
-    for i, rid in enumerate(row_index_arr):
-        r = int(rid)
-        if r not in lab_by_id:
-            lab_by_id[r] = int(y_all[i])
-
-    tr_ids = set(base_ids) - val_ids - te_ids
-    cls_tr = {lab_by_id[r] for r in tr_ids}
-    if len(cls_tr) < 2:
-        want = 1 - list(cls_tr)[0] if len(cls_tr) == 1 else 1
-        pool = [r for r in list(val_ids) + list(te_ids) if lab_by_id[r] == want]
-        if pool:
-            add = pool[0]
-            rem = next(r for r in tr_ids if lab_by_id[r] != want)
-            if add in val_ids:
-                val_ids.remove(add);
-                val_ids.add(rem)
+    def _kfold_by_row(row_index_arr2, y_arr2, K2, seed_cv2, test_frac, dev_per_fold2):
+        rng2 = np.random.default_rng(int(seed_cv2))
+        ids2 = np.unique(row_index_arr2)
+        y_by_id2 = {}
+        ya2 = np.asarray(y_arr2, dtype=int)
+        for i2, rid2 in enumerate(row_index_arr2):
+            r2 = int(rid2)
+            if r2 not in y_by_id2:
+                y_by_id2[r2] = int(ya2[i2])
+        ids0 = [r for r in ids2 if y_by_id2[r] == 0]
+        ids1 = [r for r in ids2 if y_by_id2[r] == 1]
+        rng2.shuffle(ids0); rng2.shuffle(ids1)
+        n_t0 = int(np.floor(0.15 * len(ids0)))
+        n_t1 = int(np.floor(0.15 * len(ids1)))
+        test_ids2 = set(ids0[:n_t0] + ids1[:n_t1])
+        rem0 = ids0[n_t0:]; rem1 = ids1[n_t1:]
+        buckets0 = [rem0[i3::K2] for i3 in range(K2)]
+        buckets1 = [rem1[i3::K2] for i3 in range(K2)]
+        fold_by_id2 = {}
+        for k3 in range(K2):
+            fold_ids2 = list(buckets0[k3]) + list(buckets1[k3])
+            if dev_per_fold2 and len(fold_ids2) > dev_per_fold2:
+                rng2.shuffle(fold_ids2)
+                fold_ids2 = fold_ids2[:dev_per_fold2]
+            for r3 in fold_ids2:
+                fold_by_id2[r3] = k3 + 1
+        arr2 = np.zeros(len(row_index_arr2), dtype=int)
+        for i3, rid3 in enumerate(row_index_arr2):
+            r3 = int(rid3)
+            if r3 in test_ids2:
+                arr2[i3] = 0
             else:
-                te_ids.remove(add);
-                te_ids.add(rem)
-            tr_ids.remove(rem);
-            tr_ids.add(add)
+                arr2[i3] = fold_by_id2.get(r3, ((i3 % K2) + 1))
+        return arr2
 
-    fold_arr = np.empty(len(row_index_arr), dtype=int)
-    for i, rid in enumerate(row_index_arr):
-        r = int(rid)
-        fold_arr[i] = 0 if r in val_ids else (1 if r in te_ids else 2)
+    fold_arr = _kfold_by_row(row_index_arr, ds_obj.y, K, seed_cv, 0.15, devN)
 
     def _subset_mask(mask):
         idx = np.where(mask)[0]
         X = [ds_obj.X[i] for i in idx]
-        C = ds_obj.C[mask]
-        y = ds_obj.y[mask]
-        sub = ConceptDatasetSample(
-            X=X, C=C, y=y,
-            meta={"concepts": ds_obj.concepts, "classes": ds_obj.classes, "data_type": "text"}
-        )
+        C = ds_obj.C[idx]
+        y = ds_obj.y[idx]
+        sub = ConceptDatasetSample(X=X, C=C, y=y, meta={"concepts": ds_obj.concepts, "classes": ds_obj.classes, "data_type": "text"})
         gm = getattr(ds_obj, "ears_generic_mask", None)
         if gm is not None:
             setattr(sub, "ears_generic_mask", np.asarray(gm)[idx])
+        sub0 = getattr(ds_obj, "subtypes", None)
+        if sub0 is not None:
+            setattr(sub, "subtypes", {k: np.asarray(sub0[k])[idx] for k in sub0.keys()})
         return sub
 
-    val_mask = (fold_arr == 0)
-    test_mask = (fold_arr == 1)
+    val_mask   = (fold_arr == val_fold)
+    test_mask  = (fold_arr == 0)
     train_mask = ~(val_mask | test_mask)
 
-    ds_obj.training = _subset_mask(train_mask)
+    ds_obj.training   = _subset_mask(train_mask)
     ds_obj.validation = _subset_mask(val_mask)
-    ds_obj.test = _subset_mask(test_mask)
-
-    try:
-        ds_obj.cvindices = {"by_robot": fold_arr}
-    except Exception:
-        pass
-
+    ds_obj.test       = _subset_mask(test_mask)
 
 need_split = (
         getattr(ds, "cvindices", None) is None
@@ -1284,23 +1331,134 @@ if hasattr(ds, "split") and need_split:
             train_ids.remove(rem);
             train_ids.add(add)
 
-    fold_arr = np.empty(len(row_index), dtype=int)
-    for i, rid in enumerate(row_index):
-        r = int(rid)
-        fold_arr[i] = 0 if r in val_ids else (1 if r in test_ids else 2)
 
-    if getattr(ds, "cvindices", None) is None:
-        ds.cvindices = {}
-    ds.cvindices["by_robot"] = fold_arr
-    ds.split(fold_id="by_robot", fold_num_validation=0, fold_num_test=1)
-    gm = getattr(ds, "ears_generic_mask", None)
-    if gm is not None:
-        mtr = (fold_arr == 2);
-        mva = (fold_arr == 0);
-        mte = (fold_arr == 1)
-        setattr(ds.training, "ears_generic_mask", np.asarray(gm)[mtr])
-        setattr(ds.validation, "ears_generic_mask", np.asarray(gm)[mva])
-        setattr(ds.test, "ears_generic_mask", np.asarray(gm)[mte])
+    def _kfold_by_row(row_index_arr, y_arr, K, seed_cv, test_frac, dev_per_fold):
+        rng = np.random.default_rng(int(seed_cv))
+        ids = np.unique(row_index_arr)
+        y_by_id = {}
+        ya = np.asarray(y_arr, dtype=int)
+        for i2, rid2 in enumerate(row_index_arr):
+            r2 = int(rid2)
+            if r2 not in y_by_id:
+                y_by_id[r2] = int(ya[i2])
+        ids0 = [r for r in ids if y_by_id[r] == 0]
+        ids1 = [r for r in ids if y_by_id[r] == 1]
+        rng.shuffle(ids0);
+        rng.shuffle(ids1)
+        n_t0 = int(np.floor(test_frac * len(ids0)))
+        n_t1 = int(np.floor(test_frac * len(ids1)))
+        test_ids = set(ids0[:n_t0] + ids1[:n_t1])
+        rem0 = ids0[n_t0:];
+        rem1 = ids1[n_t1:]
+        buckets0 = [rem0[i3::K] for i3 in range(K)]
+        buckets1 = [rem1[i3::K] for i3 in range(K)]
+        fold_by_id = {}
+        for k3 in range(K):
+            fold_ids = list(buckets0[k3]) + list(buckets1[k3])
+            if dev_per_fold and len(fold_ids) > dev_per_fold:
+                rng.shuffle(fold_ids)
+                fold_ids = fold_ids[:dev_per_fold]
+            for r3 in fold_ids:
+                fold_by_id[r3] = k3 + 1
+        arr = np.zeros(len(row_index_arr), dtype=int)
+        for i3, rid3 in enumerate(row_index_arr):
+            r3 = int(rid3)
+            if r3 in test_ids:
+                arr[i3] = 0
+            else:
+                arr[i3] = fold_by_id.get(r3, ((i3 % K) + 1))
+        return arr
+
+
+    K = 5
+    seed_cv = int(getattr(args_obj, "seed_cv", int(getattr(args_obj, "seed", 0)) + 1))
+    devN = int(getattr(args_obj, "dev_per_fold", 1000))
+
+    n_all = len(ds.y)
+    n_sel = K * devN
+    rng = np.random.default_rng(seed_cv)
+    idx_all = np.arange(n_all)
+    if n_sel > n_all:
+        n_sel = n_all
+    sel = rng.choice(idx_all, size=n_sel, replace=False)
+
+    fold_ids = np.repeat(np.arange(1, K + 1), devN)
+    if fold_ids.size > sel.size:
+        fold_ids = fold_ids[:sel.size]
+    elif fold_ids.size < sel.size:
+        fold_ids = np.concatenate([fold_ids, np.full(sel.size - fold_ids.size, K, dtype=int)])
+
+    perm = rng.permutation(sel.size)
+    sel = sel[perm]
+    fold_ids = fold_ids[perm]
+
+    val_fold = int(getattr(args_obj, "cv_fold", 0)) or 1
+    if val_fold < 1 or val_fold > 4:
+        val_fold = 1
+
+    mask_all = np.zeros(n_all, dtype=int)
+    mask_all[sel] = fold_ids
+
+    use_mask = (mask_all >= 1) & (mask_all <= 4)
+    mva = (mask_all == val_fold)
+    mtr = use_mask & (~mva)
+
+
+    def _subset_mask(mask):
+        idx = np.where(mask)[0]
+        X = [ds.X[i] for i in idx]
+        C = ds.C[idx]
+        y = ds.y[idx]
+        sub = ConceptDatasetSample(X=X, C=C, y=y,
+                                   meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text"})
+        gm = getattr(ds, "ears_generic_mask", None)
+        if gm is not None:
+            setattr(sub, "ears_generic_mask", np.asarray(gm)[idx])
+        _sub = getattr(ds, "subtypes", None)
+        if _sub is not None:
+            setattr(sub, "subtypes", {k: np.asarray(_sub[k])[idx] for k in _sub.keys()})
+        return sub
+
+
+    ds.training = _subset_mask(mtr)
+    ds.validation = _subset_mask(mva)
+
+    dep_n = int(getattr(args_obj, "deployment_size", 0))
+    if dep_n > 0:
+        pool = np.setdiff1d(idx_all, np.where(use_mask)[0])
+        if dep_n > pool.size:
+            # sample with replacement if needed
+            extra = rng.choice(pool, size=dep_n - pool.size, replace=True)
+            dep_idx = np.concatenate([pool, extra])
+        else:
+            dep_idx = rng.choice(pool, size=dep_n, replace=False)
+        ds.deployment = _subset_mask(np.isin(idx_all, dep_idx))
+        ds.test = ds.deployment
+    else:
+        ds.test = _subset_mask(np.zeros(n_all, dtype=bool))
+
+    dep_n = int(getattr(args_obj, "deployment_size", 0))
+    if dep_n > 0:
+        rng_dep = np.random.default_rng(int(getattr(args_obj, "seed", 0)) + int(getattr(args_obj, "seed_test_offset", 1234)))
+        pool = np.arange(len(ds.y), dtype=int)
+        replace = bool(dep_n > pool.size)
+        idx_dep = rng_dep.choice(pool, size=dep_n, replace=replace)
+        mask_dep = np.zeros(len(ds.y), dtype=bool); mask_dep[idx_dep] = True
+        def _subset_mask_dep(mask):
+            idx = np.where(mask)[0]
+            X = [ds.X[i] for i in idx]
+            C = ds.C[idx]
+            y = ds.y[idx]
+            sub = ConceptDatasetSample(X=X, C=C, y=y, meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text"})
+            gm2 = getattr(ds, "ears_generic_mask", None)
+            if gm2 is not None:
+                setattr(sub, "ears_generic_mask", np.asarray(gm2)[idx])
+            sub0 = getattr(ds, "subtypes", None)
+            if sub0 is not None:
+                setattr(sub, "subtypes", {k: np.asarray(sub0[k])[idx] for k in sub0.keys()})
+            return sub
+        ds.deployment = _subset_mask_dep(mask_dep)
+
     print(f"Split sizes → train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
 
     yt = np.asarray(ds.training.y, dtype=int)
@@ -1324,7 +1482,6 @@ if hasattr(ds, "split") and need_split:
         "total": int(yte.size),
         "pos_frac": round((yte == 1).mean() if yte.size else 0.0, 4),
     })
-
 
 elif need_split:
     _manual_by_robot_split(ds, row_index, n_folds=5, seed=0)
@@ -1393,6 +1550,8 @@ if int(getattr(args_obj, "train_balance_enable", 0)) == 1 and hasattr(ds.trainin
         y = ds.training.y[take]
         tr_ds = ConceptDatasetSample(X=X, C=C, y=y, meta=ds.training.meta)
         setattr(tr_ds, "ears_generic_mask", ds.training.ears_generic_mask[take])
+        if hasattr(ds.training, "subtypes"):
+            setattr(tr_ds, "subtypes", {k: np.asarray(ds.training.subtypes[k])[take] for k in ds.training.subtypes})
         ds.training = tr_ds
 
 if int(getattr(args_obj, "val_balance_enable", 0)) == 1 and hasattr(ds.validation, "ears_generic_mask"):
@@ -1432,6 +1591,8 @@ if int(getattr(args_obj, "val_balance_enable", 0)) == 1 and hasattr(ds.validatio
         y = ds.validation.y[take_v]
         va_ds = ConceptDatasetSample(X=X, C=C, y=y, meta=ds.validation.meta)
         setattr(va_ds, "ears_generic_mask", ds.validation.ears_generic_mask[take_v])
+        if hasattr(ds.validation, "subtypes"):
+            setattr(va_ds, "subtypes", {k: np.asarray(ds.validation.subtypes[k])[take_v] for k in ds.validation.subtypes})
         ds.validation = va_ds
 
 if int(getattr(args_obj, "test_balance_enable", 0)) == 1 and hasattr(ds.test, "ears_generic_mask"):
@@ -1471,6 +1632,8 @@ if int(getattr(args_obj, "test_balance_enable", 0)) == 1 and hasattr(ds.test, "e
         y = ds.test.y[take_t]
         te_ds = ConceptDatasetSample(X=X, C=C, y=y, meta=ds.test.meta)
         setattr(te_ds, "ears_generic_mask", ds.test.ears_generic_mask[take_t])
+        if hasattr(ds.test, "subtypes"):
+            setattr(te_ds, "subtypes", {k: np.asarray(ds.test.subtypes[k])[take_t] for k in ds.test.subtypes})
         ds.test = te_ds
 
 train_ds = ds.training
@@ -1624,7 +1787,30 @@ if getattr(args_obj, "redact_concepts", ""):
         ds.training = train_ds
         ds.validation = val_ds
         ds.test = test_ds
+        dep_n = int(getattr(args_obj, "deployment_size", 0))
+        if dep_n > 0:
+            rng_dep = np.random.default_rng(int(getattr(args_obj, "seed", 0)) + int(getattr(args_obj, "seed_test_offset", 1234)))
+            pool = np.arange(len(ds.y), dtype=int)
+            replace = bool(dep_n > pool.size)
+            idx_dep = rng_dep.choice(pool, size=dep_n, replace=replace)
+            mask_dep = np.zeros(len(ds.y), dtype=bool)
+            mask_dep[idx_dep] = True
 
+
+            def _subset_mask_dep(mask):
+                idx = np.where(mask)[0]
+                X = [ds.X[i] for i in idx]
+                C = ds.C[idx]
+                y = ds.y[idx]
+                sub = ConceptDatasetSample(X=X, C=C, y=y,
+                                           meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text"})
+                gm = getattr(ds, "ears_generic_mask", None)
+                if gm is not None:
+                    setattr(sub, "ears_generic_mask", np.asarray(gm)[idx])
+                return sub
+
+
+            ds.deployment = _subset_mask_dep(mask_dep)
 
 def _apply_label_flip(sample, p, seed):
     if p <= 0: return sample
@@ -1713,15 +1899,25 @@ if label_mask is not None:
 
 SKIP = int(getattr(args_obj, "skip_fit", 0)) == 1
 loaded_cbm = None
-if int(args_obj.reuse_detector) and args_obj.detector_model:
-    print(f"Loading detector/cbm from: {args_obj.detector_model}")
-    obj_det = load_obj(str(args_obj.detector_model))
-    if isinstance(obj_det, dict) and "detector" in obj_det:
-        detector = obj_det["detector"]
-    if hasattr(detector, "output_mode"):
-        detector.output_mode = CONCEPT_MODE
-    if SKIP and isinstance(obj_det, dict) and "cbm" in obj_det:
-        loaded_cbm = obj_det["cbm"]
+det_path = None
+if int(args_obj.reuse_detector):
+    if args_obj.detector_model:
+        det_path = Path(args_obj.detector_model)
+    elif (args_obj.run_name or "").strip():
+        fe_src_tag = "fe_detected" if train_on_detected else "fe_gt"
+        det_path = (ROBOT_RUN_DIR / args_obj.run_name /
+                    f"cbm_{fe_src_tag}_robots_text_{miss_tag}_{seed_tag}.pkl")
+    if det_path and det_path.is_file():
+        print(f"Loading detector/cbm from: {det_path}")
+        obj_det = load_obj(str(det_path))
+        if isinstance(obj_det, dict) and "detector" in obj_det:
+            detector = obj_det["detector"]
+        if hasattr(detector, "output_mode"):
+            detector.output_mode = CONCEPT_MODE
+        if SKIP and isinstance(obj_det, dict) and "cbm" in obj_det:
+            loaded_cbm = obj_det["cbm"]
+    elif det_path:
+        raise FileNotFoundError(f"Detector not found: {det_path}")
 else:
     is_lfcbm_ma = (args_obj.concept_source == "machine") and (str(args_obj.machine_method) == "lfcbm")
     if SKIP and not is_lfcbm_ma:
@@ -1743,15 +1939,17 @@ if (args_obj.concept_source == "machine") and (str(args_obj.machine_method) == "
         "concepts_csv": str(args_obj.concepts_csv),
         "lf_alpha": float(args_obj.lf_alpha),
         "lf_threshold": float(args_obj.lf_threshold),
-        "lf_mode": "soft",
-        "lf_ridge": bool(args_obj.lf_ridge),
+        "lf_mode": str(getattr(args_obj, "lf_mode", "soft")),
+        "lf_ridge": bool(getattr(args_obj, "lf_ridge", False)),
         "lf_ridge_alpha": float(args_obj.lf_ridge_alpha),
         "lf_encoder": str(args_obj.lf_encoder),
         "lf_device": str(args_obj.lf_device),
         "lf_batch_size": int(args_obj.lf_batch_size),
+        "lf_keep_k": int(getattr(args_obj, "lf_keep_k", 9)),
+        "lf_group_threshold": float(getattr(args_obj, "lf_group_threshold", 0.9)),
     }
     _det_lf = LabelFreeDetector(lf_settings)
-    _det_lf.fit([str(x) for x in train_ds.X])
+    _det_lf.fit([str(x) for x in train_ds.X], y=train_ds.y.astype(int))
     det_lf = _det_lf
 
     det_lf = _det_lf
@@ -1931,6 +2129,29 @@ else:
     y_test_proba = cbm.predict_proba(test_ds)
 
 y_test_pred = np.argmax(y_test_proba, axis=1)
+
+def _subtype_stats(ds_split, y_pred, split_name):
+    sub = getattr(ds_split, "subtypes", None)
+    if sub is None:
+        return
+    rows = []
+    ytrue = np.asarray(ds_split.y, dtype=int)
+    for cname, arr in sub.items():
+        arr = np.asarray(arr)
+        vals = pd.unique(arr)
+        for v in vals:
+            m = (arr == v)
+            if m.size == 0 or not m.any():
+                continue
+            acc_s = float((y_pred[m] == ytrue[m]).mean())
+            rows.append({"concept": str(cname), "subtype": str(v), "count": int(m.sum()), "accuracy": acc_s})
+    pd.DataFrame(rows).to_csv(run_dir / f"subtype_stats_{split_name}_{miss_tag}_{seed_tag}.csv", index=False)
+
+if str(getattr(args_obj, "subtype_mode", "off")).lower() == "salience":
+    _subtype_stats(train_ds, y_train_pred, "train")
+    _subtype_stats(val_ds, y_val_pred, "val")
+    _subtype_stats(test_ds, y_test_pred, "test")
+d = np.argmax(y_test_proba, axis=1)
 acc_test = accuracy_score(y_test, y_test_pred)
 try:
     cls_index_1 = int(np.where(cbm.front_end_model.model.classes_ == 1)[0][0])
@@ -2293,7 +2514,6 @@ def ensure_split(ds):
 
     _manual_by_robot_split(ds, row_index, seed=0)
 
-
 def pick_split(ds, name):
     # safeguard if ensure_split hasn’t been called
     if not (hasattr(ds, "training") and hasattr(ds, "validation") and hasattr(ds, "test")):
@@ -2389,9 +2609,11 @@ if args_obj.concept_source == "machine":
             "lf_encoder": args_obj.lf_encoder,
             "lf_device": args_obj.lf_device,
             "lf_batch_size": int(args_obj.lf_batch_size),
+            "lf_keep_k": int(getattr(args_obj, "lf_keep_k", getattr(args_obj, "lf_topk_concepts", 9))),
+            "lf_group_threshold": float(getattr(args_obj, "lf_group_threshold", 0.9)),
         }
         det_lf = LabelFreeDetector(lf_settings)
-        det_lf.fit([str(x) for x in train_ds.X])
+        det_lf.fit([str(x) for x in train_ds.X], y=train_ds.y.astype(int))
         old_mode_lf = det_lf.settings["lf_mode"]
 
         det_lf.settings["lf_mode"] = "soft"
@@ -2407,6 +2629,27 @@ if args_obj.concept_source == "machine":
 
         names_m = list(det_lf.concept_names)
         print(f"[lfcbm] concepts={len(names_m)} first5={names_m[:5]}")
+
+        # Enforce exactly K concepts by LR importance (probabilities preferred; fall back to hard)
+        _k_top = int(getattr(args_obj, "lf_keep_k", getattr(args_obj, "lf_topk_concepts", 9)))
+        if len(names_m) > _k_top:
+            from sklearn.linear_model import LogisticRegression
+            # choose features for importance: probabilities if available
+            _Ximp = P_tr_m if P_tr_m is not None else H_tr_m.astype(np.float32)
+            _yimp = train_ds.y.astype(int)
+            _lr = LogisticRegression(penalty="l2", solver="liblinear", max_iter=1000, random_state=int(args_obj.seed))
+            _lr.fit(_Ximp, _yimp)
+            _w = np.abs(_lr.coef_[0])
+            _keep = np.argsort(-_w)[:_k_top]
+
+            # slice all LF products and names
+            P_tr_m = P_tr_m[:, _keep] if P_tr_m is not None else None
+            P_val_m = P_val_m[:, _keep] if 'P_val_m' in locals() and P_val_m is not None else None
+            P_te_m  = P_te_m[:,  _keep] if P_te_m  is not None else None
+            H_tr_m  = H_tr_m[:,  _keep]
+            H_val_m = H_val_m[:, _keep]
+            H_te_m  = H_te_m[:,  _keep]
+            names_m = [names_m[i] for i in _keep]
 
         train_ds_lf_hard = ConceptDatasetSample(
             X=[str(x) for x in train_ds.X],
@@ -2596,6 +2839,59 @@ for ta in acc_grid:
     acc_k0 = None
 
 
+    def _best_subset_vectorized(Hm, Pm, fe_model, cols_all, k, idxs, thr, batch_samples=256, subset_batch=256,
+                                assign_batch=64):
+        if k <= 0 or len(cols_all) < int(k):
+            return {int(i): [] for i in np.asarray(idxs, dtype=int)}
+        idxs_arr = np.asarray(idxs, dtype=int)
+        cols = np.asarray(list(cols_all), dtype=int)
+        w = fe_model.model.coef_.ravel().astype(np.float32)
+        b = float(fe_model.model.intercept_.ravel()[0])
+        subsets = np.asarray(list(combinations(cols.tolist(), int(k))), dtype=int)
+        assigns = np.asarray(list(product([0, 1], repeat=int(k))), dtype=np.float32)
+        best_prob_global = np.full(idxs_arr.shape[0], -1.0, dtype=np.float32)
+        best_subset_global = np.zeros((idxs_arr.shape[0], int(k)), dtype=int)
+        for bi in range(0, idxs_arr.shape[0], int(batch_samples)):
+            sel = idxs_arr[bi:bi + int(batch_samples)]
+            Cb = Hm[sel]
+            Pb = Pm[sel]
+            s0 = Cb @ w + b
+            s0_sign = (s0 >= 0)
+            best_prob = np.full(Cb.shape[0], -1.0, dtype=np.float32)
+            best_subset = np.zeros((Cb.shape[0], int(k)), dtype=int)
+            S = subsets.shape[0]
+            for sj in range(0, S, int(subset_batch)):
+                J = subsets[sj:sj + int(subset_batch)]
+                w_sub = w[J]
+                c_sub = Cb[:, J]
+                p_sub = Pb[:, J]
+                w_sub_b = w_sub[None, :, :]
+                d0 = -w_sub_b * c_sub
+                d1 = w_sub_b * (1.0 - c_sub)
+                m = assigns.shape[0]
+                flip_sum = np.zeros((Cb.shape[0], J.shape[0]), dtype=np.float32)
+                for ai in range(0, m, int(assign_batch)):
+                    A = assigns[ai:ai + int(assign_batch)]
+                    A4 = A[None, None, :, :]
+                    delta = A4 * d1[:, :, None, :] + (1.0 - A4) * d0[:, :, None, :]
+                    sp = s0[:, None, None] + delta.sum(axis=3)
+                    mask = (sp >= 0) != s0_sign[:, None, None]
+                    W = A4 * p_sub[:, :, None, :] + (1.0 - A4) * (1.0 - p_sub[:, :, None, :])
+                    wprod = W.prod(axis=3)
+                    flip_sum += (wprod * mask).sum(axis=2)
+                local_idx = flip_sum.argmax(axis=1)
+                local_prob = flip_sum[np.arange(flip_sum.shape[0]), local_idx]
+                upd = local_prob > best_prob
+                if np.any(upd):
+                    best_prob[upd] = local_prob[upd]
+                    best_subset[upd] = J[local_idx[upd]]
+            best_prob_global[bi:bi + Cb.shape[0]] = best_prob
+            best_subset_global[bi:bi + Cb.shape[0]] = best_subset
+        out = {}
+        for r in range(idxs_arr.shape[0]):
+            out[int(idxs_arr[r])] = best_subset_global[r].tolist() if best_prob_global[r] >= float(thr) else []
+        return out
+
     def _simulate_mode(H0_local, mode_name):
         recs = []
         conc_recs = []
@@ -2611,7 +2907,76 @@ for ta in acc_grid:
             per_concept_attempts = np.zeros(Hm.shape[1], dtype=int)
             P_work_loc = (P_te_m.copy() if (args_obj.concept_source == "machine") else C_test_scores.copy()) if args_obj.concept_mode == "soft" else None
 
-            if k > 0:
+            if str(getattr(args_obj, "policy", "")) == "kflip":
+                from concept_benchmark.intervention import InterventionBatch, InterventionConfig
+                from concept_benchmark.kflip import KFlipInterventionStrategy
+
+                if allow_idxs.size > 0:
+                    idx_map = allow_idxs.astype(int)
+                else:
+                    idx_map = None
+
+                if (args_obj.concept_source == "machine") and (str(args_obj.machine_method) == "lfcbm"):
+                    P_src = P_te_m.astype(np.float32)
+                elif args_obj.concept_source == "detected":
+                    P_src = C_test_scores.astype(np.float32)
+                else:
+                    P_src = T_truth_src.astype(np.float32)
+
+                if idx_map is not None:
+                    if P_src.shape[1] <= max(idx_map):
+                        raise ValueError(f"Concept width mismatch: src={P_src.shape[1]}, need>={max(idx_map) + 1}. "
+                                         f"Set --lf-keep-k to K or use full-width predict().")
+                    P_plan = P_src[:, idx_map]
+
+                    T_plan = T_truth_src[:, idx_map]
+                else:
+                    P_plan = P_src
+                    T_plan = T_truth_src
+
+                batch_k = InterventionBatch(C_pred=P_plan, C_true=T_plan, y_true=y_test_true)
+                cfg_k = InterventionConfig(
+                    tau=(tau_val if args_obj.concept_mode == "soft" else None),
+                    select_only_abstained=(args_obj.concept_mode == "soft"),
+                    max_concepts_per_instance=int(k),
+                    score_threshold=float(getattr(args_obj, "flip_threshold", 0.30)),
+                    random_state=getattr(args_obj, "seed", None),
+                )
+                strat_k = KFlipInterventionStrategy(
+                    batch_size=int(getattr(args_obj, "flip_batch_size", 8192)),
+                    limit_subsets=getattr(args_obj, "flip_limit_subsets", None),
+                )
+
+                if int(k) <= 0:
+                    selected = np.array([], dtype=int)
+                    mask = None
+                else:
+                    prop_k = strat_k.propose(cbm, batch_k, cfg_k)
+                    mask = prop_k.mask
+                    selected = prop_k.selected_instances if prop_k.selected_instances is not None else np.array([],dtype=int)
+
+                for i in selected:
+                    picks_plan = np.nonzero(mask[i])[0]
+                    if picks_plan.size == 0:
+                        continue
+                    picks = (idx_map[picks_plan] if idx_map is not None else picks_plan)
+                    for j in picks:
+                        per_concept_attempts[j] += 1
+                    before = Hm[i, picks].copy()
+                    Hm[i] = _apply_human_edit(Hm[i], T_truth_src[i], picks, names_vec, float(args_obj.human_acc),
+                                              acc_map, rng, mode=mode_name)
+                    after = Hm[i, picks]
+                    changed_mask = (after != before)
+                    for j, chg in zip(picks, changed_mask):
+                        if chg:
+                            per_concept_edits[j] += 1
+                            if int(Hm[i, j]) == int(T_truth_src[i, j]):
+                                per_concept_correct[j] += 1
+                    edit_counts[i] = int(changed_mask.sum())
+                    if P_work_loc is not None:
+                        for j in picks:
+                            P_work_loc[i, j] = float(Hm[i, j])
+            else:
                 cols_all = allow_idxs if allow_idxs.size > 0 else np.arange(Hm.shape[1], dtype=int)
                 y0 = fe_src.predict(Hm)
                 if args_obj.concept_mode == "soft":
