@@ -213,20 +213,39 @@ class LabelFreeDetector:
         self._concept_aliases = aliases
         self._concept_regex = regex
         self._regex_compiled = _compile_regex(regex)
+
         enc = _Encoder(self.settings["lf_encoder"], self.settings["lf_device"])
         self._encoder = enc
-        terms = []
-        for i in range(len(names)):
-            t = [names[i]] + aliases[i]
-            terms.append(" ".join(t))
+
+        # encode label terms and training texts
+        terms = [" ".join([names[i]] + aliases[i]) for i in range(len(names))]
         self._E = enc.encode(terms, self.settings["lf_batch_size"])
         H = enc.encode(list(train_texts), self.settings["lf_batch_size"])
         Z0 = self._mix(H, list(train_texts))
+
+        # optional ridge projection
         if bool(self.settings["lf_ridge"]):
             self._W = _ridge(H, Z0, float(self.settings["lf_ridge_alpha"]))
+
+        # group and rank, then SHRINK to top‑K (default 9)
         self._build_groups()
         self._rank_groups(Z0, y)
-        self._regex_compiled = _compile_regex(self._concept_regex)
+        # keep one representative per kept group
+        kept_groups = [self._groups[g] for g in (self._keep_idx or [])] if self._groups else []
+        if kept_groups:
+            rep_idx = [grp[0] for grp in kept_groups]  # representative column per group
+            # remap model tensors and metadata to the selected reps
+            self.concept_names = [self.concept_names[i] for i in rep_idx]
+            self._concept_aliases = [self._concept_aliases[i] for i in rep_idx]
+            self._concept_regex = [self._concept_regex[i] for i in rep_idx]
+            self._regex_compiled = _compile_regex(self._concept_regex)
+            self._E = self._E[rep_idx]
+            if self._W is not None:
+                self._W = self._W[:, rep_idx]
+            # collapse groups to singletons so predict() returns K_keep columns
+            self._groups = [[i] for i in range(len(rep_idx))]
+            self._keep_idx = list(range(len(rep_idx)))
+
         self._fitted = True
 
     def predict(self, texts):
