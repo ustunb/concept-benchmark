@@ -211,7 +211,7 @@ def common_gen_argv():
     argv = [
         str(PY), str(GEN),
         "--modality", str(settings.get("modality", "text")),
-        "--concept-source", str(settings.get("concept_source", "gt")),
+        # "--concept-source", str(settings.get("concept_source", "gt")),
         "--machine-method", str(settings.get("machine_method", "lfcbm")),
         "--seed", str(settings.get("seed", 0)),
         "--seed-cv", str(settings.get("seed_cv", int(settings.get("seed", 0)) + 1)),
@@ -326,6 +326,7 @@ def run():
             _lf_dev = "cpu"
     lf_flags += ["--lf-device", str(_lf_dev)]
     lf_flags += ["--lf-batch-size", str(settings.get("lf_batch_size", 64))]
+    lf_flags += ["--lf-group-threshold", str(settings.get("lf_group_threshold", 0.9))]
 
     run_spec(
         prefix="best",
