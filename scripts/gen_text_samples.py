@@ -533,6 +533,8 @@ else:
         "generic_enable": int(getattr(known, "generic_enable", 0)),
         "generic_rate": float(getattr(known, "generic_rate", 0.5)),
         "generic_tol": float(getattr(known, "generic_tol", 0.02)),
+        "dev_per_fold": int(getattr(known, "dev_per_fold", 1000)),
+        "deployment_size": int(getattr(known, "deployment_size", 0)),
     })
     if merged["test_corr"] is not None and merged["test_corr"] >= 0:
         merged["test_break"] = max(0.0, min(1.0, 1.0 - float(merged["test_corr"])))
@@ -1427,6 +1429,8 @@ if need_split:
                 setattr(sub, "subtypes", {k: np.asarray(sub0[k])[idx] for k in sub0.keys()})
             return sub
         ds.deployment = _subset_mask_dep(mask_dep)
+        if not hasattr(ds, "test") or getattr(ds.test, "n", 0) == 0:
+            ds.test = ds.deployment
 
     print(f"Split sizes → train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
 
