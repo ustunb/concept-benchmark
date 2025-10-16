@@ -444,6 +444,8 @@ else:
     ap.add_argument("--reuse-detector", type=int, default=0)
     ap.add_argument("--detector-model", type=str, default="")
     ap.add_argument("--skip-fit", type=int, default=0)
+    ap.add_argument("--lf-keep-k", type=int, default=9)
+    ap.add_argument("--lf-group-threshold", type=float, default=0.9)
     ap.add_argument("--test-label-flip", type=float, default=0.0)
     ap.add_argument("--label-model-type", choices=["deterministic", "stochastic"], default="deterministic")
     ap.add_argument("--label-model-alpha", type=float, default=10.0)
@@ -462,6 +464,7 @@ else:
     ap.add_argument("--flip-batch-size", type=int, default=8192)
     ap.add_argument("--flip-limit-subsets", type=lambda s: None if str(s).lower() == "none" else int(s), default=None)
     ap.add_argument("--abstain-only", action="store_true", help="restrict to abstentions if --tau is set")
+    ap.add_argument("--deployment-size", type=int, default=0)
     ap.add_argument("--seed-test-offset", type=int, default=1234, dest="seed_test_offset")
 
     known, _ = ap.parse_known_args()
@@ -1135,6 +1138,7 @@ if not _suffix:
         "samples_per_instance": int(settings.get("samples_per_instance", 1)),
         "concept_source": str(settings.get("concept_source", "gt")),
         "machine_method": str(settings.get("machine_method", "lfcbm")),
+        "concepts_csv": str(Path(settings.get("concepts_csv", "")).resolve()) if settings.get("concepts_csv") else "",
     }
     _suffix = hashlib.blake2b(json.dumps(_cfg, sort_keys=True).encode(), digest_size=8).hexdigest()
 
@@ -1851,15 +1855,25 @@ if label_mask is not None:
 
 SKIP = int(getattr(args_obj, "skip_fit", 0)) == 1
 loaded_cbm = None
-if int(args_obj.reuse_detector) and args_obj.detector_model:
-    print(f"Loading detector/cbm from: {args_obj.detector_model}")
-    obj_det = load_obj(str(args_obj.detector_model))
-    if isinstance(obj_det, dict) and "detector" in obj_det:
-        detector = obj_det["detector"]
-    if hasattr(detector, "output_mode"):
-        detector.output_mode = CONCEPT_MODE
-    if SKIP and isinstance(obj_det, dict) and "cbm" in obj_det:
-        loaded_cbm = obj_det["cbm"]
+det_path = None
+if int(args_obj.reuse_detector):
+    if args_obj.detector_model:
+        det_path = Path(args_obj.detector_model)
+    elif (args_obj.run_name or "").strip():
+        fe_src_tag = "fe_detected" if train_on_detected else "fe_gt"
+        det_path = (ROBOT_RUN_DIR / args_obj.run_name /
+                    f"cbm_{fe_src_tag}_robots_text_{miss_tag}_{seed_tag}.pkl")
+    if det_path and det_path.is_file():
+        print(f"Loading detector/cbm from: {det_path}")
+        obj_det = load_obj(str(det_path))
+        if isinstance(obj_det, dict) and "detector" in obj_det:
+            detector = obj_det["detector"]
+        if hasattr(detector, "output_mode"):
+            detector.output_mode = CONCEPT_MODE
+        if SKIP and isinstance(obj_det, dict) and "cbm" in obj_det:
+            loaded_cbm = obj_det["cbm"]
+    elif det_path:
+        raise FileNotFoundError(f"Detector not found: {det_path}")
 else:
     is_lfcbm_ma = (args_obj.concept_source == "machine") and (str(args_obj.machine_method) == "lfcbm")
     if SKIP and not is_lfcbm_ma:
@@ -1881,12 +1895,14 @@ if (args_obj.concept_source == "machine") and (str(args_obj.machine_method) == "
         "concepts_csv": str(args_obj.concepts_csv),
         "lf_alpha": float(args_obj.lf_alpha),
         "lf_threshold": float(args_obj.lf_threshold),
-        "lf_mode": "soft",
-        "lf_ridge": bool(args_obj.lf_ridge),
+        "lf_mode": str(getattr(args_obj, "lf_mode", "soft")),
+        "lf_ridge": bool(getattr(args_obj, "lf_ridge", False)),
         "lf_ridge_alpha": float(args_obj.lf_ridge_alpha),
         "lf_encoder": str(args_obj.lf_encoder),
         "lf_device": str(args_obj.lf_device),
         "lf_batch_size": int(args_obj.lf_batch_size),
+        "lf_keep_k": int(getattr(args_obj, "lf_keep_k", 9)),
+        "lf_group_threshold": float(getattr(args_obj, "lf_group_threshold", 0.9)),
     }
     _det_lf = LabelFreeDetector(lf_settings)
     _det_lf.fit([str(x) for x in train_ds.X], y=train_ds.y.astype(int))
