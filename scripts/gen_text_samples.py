@@ -1297,39 +1297,8 @@ need_split = (
         or getattr(ds, "test", None) is None
 )
 
-if hasattr(ds, "split") and need_split:
-    rng = np.random.default_rng(0)
-    base_ids = np.unique(row_index)
-    rng.shuffle(base_ids)
-    n = len(base_ids)
-    n_val = int(np.floor(0.15 * n))
-    n_test = int(np.floor(0.15 * n))
-    val_ids = set(base_ids[:n_val])
-    test_ids = set(base_ids[n_val:n_val + n_test])
-
-    lab_by_id = {}
-    y_all = np.asarray(ds.y, dtype=int)
-    for i, rid in enumerate(row_index):
-        r = int(rid)
-        if r not in lab_by_id:
-            lab_by_id[r] = int(y_all[i])
-
-    train_ids = set(base_ids) - val_ids - test_ids
-    cls_tr = {lab_by_id[r] for r in train_ids}
-    if len(cls_tr) < 2:
-        want = 1 - list(cls_tr)[0] if len(cls_tr) == 1 else 1
-        pool = [r for r in list(val_ids) + list(test_ids) if lab_by_id[r] == want]
-        if pool:
-            add = pool[0]
-            rem = next(r for r in train_ids if lab_by_id[r] != want)
-            if add in val_ids:
-                val_ids.remove(add);
-                val_ids.add(rem)
-            else:
-                test_ids.remove(add);
-                test_ids.add(rem)
-            train_ids.remove(rem);
-            train_ids.add(add)
+if need_split:
+    pass
 
 
     def _kfold_by_row(row_index_arr, y_arr, K, seed_cv, test_frac, dev_per_fold):
@@ -1484,30 +1453,7 @@ if hasattr(ds, "split") and need_split:
     })
 
 elif need_split:
-    _manual_by_robot_split(ds, row_index, n_folds=5, seed=0)
-    print(f"Split sizes → train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
-
-    yt = np.asarray(ds.training.y, dtype=int)
-    yv = np.asarray(ds.validation.y, dtype=int)
-    yte = np.asarray(ds.test.y, dtype=int)
-    print("Label distribution (train):", {
-        "glorp": int((yt == 1).sum()),
-        "drent": int((yt == 0).sum()),
-        "total": int(yt.size),
-        "pos_frac": round((yt == 1).mean() if yt.size else 0.0, 4),
-    })
-    print("Label distribution (val):", {
-        "glorp": int((yv == 1).sum()),
-        "drent": int((yv == 0).sum()),
-        "total": int(yv.size),
-        "pos_frac": round((yv == 1).mean() if yv.size else 0.0, 4),
-    })
-    print("Label distribution (test):", {
-        "glorp": int((yte == 1).sum()),
-        "drent": int((yte == 0).sum()),
-        "total": int(yte.size),
-        "pos_frac": round((yte == 1).mean() if yte.size else 0.0, 4),
-    })
+    pass
 
 if int(getattr(args_obj, "train_balance_enable", 0)) == 1 and hasattr(ds.training, "ears_generic_mask"):
     ytr0 = np.asarray(ds.training.y, dtype=int)
