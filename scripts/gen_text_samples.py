@@ -2030,10 +2030,19 @@ if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfc
     det_lf.settings["lf_mode"] = _old_mode
 
 else:
-    _old = detector.output_mode
-    detector.output_mode = "soft"
-    C_val_scores = detector.predict(val_ds)
-    detector.output_mode = _old
+    _old = getattr(detector, "output_mode", None)
+    if hasattr(detector, "output_mode"):
+        detector.output_mode = "soft"
+    try:
+        C_val_scores = detector.predict(val_ds)
+    except RuntimeError as e:
+        if "not been fitted" in str(e).lower():
+            detector.fit(train_ds, val_ds)
+            C_val_scores = detector.predict(val_ds)
+        else:
+            raise
+    if hasattr(detector, "output_mode") and _old is not None:
+        detector.output_mode = _old
 
 concept_names = list(ds.concepts)
 per = {}
