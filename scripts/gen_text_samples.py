@@ -429,6 +429,7 @@ else:
     ap.add_argument("--lf-encoder", type=str, default=settings.get("lf_encoder", ""))
     ap.add_argument("--lf-device", type=str, default=settings.get("lf_device", "cpu"))
     ap.add_argument("--lf-batch-size", type=int, default=settings.get("lf_batch_size", 32))
+    ap.add_argument("--lf-topk-concepts", type=int, default=9, help="select top‑K concepts by LR importance (default 9)")
     ap.add_argument("--machine-k", type=int, default=settings["machine_k"])
     ap.add_argument("--machine-soft", type=int, default=settings["machine_soft"])
     ap.add_argument("--machine-seed", type=int, default=settings["machine_seed"])
@@ -2608,6 +2609,8 @@ if args_obj.concept_source == "machine":
             "lf_encoder": args_obj.lf_encoder,
             "lf_device": args_obj.lf_device,
             "lf_batch_size": int(args_obj.lf_batch_size),
+            "lf_keep_k": int(getattr(args_obj, "lf_keep_k", getattr(args_obj, "lf_topk_concepts", 9))),
+            "lf_group_threshold": float(getattr(args_obj, "lf_group_threshold", 0.9)),
         }
         det_lf = LabelFreeDetector(lf_settings)
         det_lf.fit([str(x) for x in train_ds.X], y=train_ds.y.astype(int))
@@ -2626,6 +2629,27 @@ if args_obj.concept_source == "machine":
 
         names_m = list(det_lf.concept_names)
         print(f"[lfcbm] concepts={len(names_m)} first5={names_m[:5]}")
+
+        # Enforce exactly K concepts by LR importance (probabilities preferred; fall back to hard)
+        _k_top = int(getattr(args_obj, "lf_keep_k", getattr(args_obj, "lf_topk_concepts", 9)))
+        if len(names_m) > _k_top:
+            from sklearn.linear_model import LogisticRegression
+            # choose features for importance: probabilities if available
+            _Ximp = P_tr_m if P_tr_m is not None else H_tr_m.astype(np.float32)
+            _yimp = train_ds.y.astype(int)
+            _lr = LogisticRegression(penalty="l2", solver="liblinear", max_iter=1000, random_state=int(args_obj.seed))
+            _lr.fit(_Ximp, _yimp)
+            _w = np.abs(_lr.coef_[0])
+            _keep = np.argsort(-_w)[:_k_top]
+
+            # slice all LF products and names
+            P_tr_m = P_tr_m[:, _keep] if P_tr_m is not None else None
+            P_val_m = P_val_m[:, _keep] if 'P_val_m' in locals() and P_val_m is not None else None
+            P_te_m  = P_te_m[:,  _keep] if P_te_m  is not None else None
+            H_tr_m  = H_tr_m[:,  _keep]
+            H_val_m = H_val_m[:, _keep]
+            H_te_m  = H_te_m[:,  _keep]
+            names_m = [names_m[i] for i in _keep]
 
         train_ds_lf_hard = ConceptDatasetSample(
             X=[str(x) for x in train_ds.X],
