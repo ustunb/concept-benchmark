@@ -360,6 +360,39 @@ def _render_from_corpus(row: dict, corpus: list[dict], seed: int) -> str:
             txt = txt.replace(ph, v)
     return txt
 
+def _render_from_corpus_distinct(row: dict, corpus: list[dict], seed: int) -> str:
+    # pick a template different from the dev choice for the same row
+    fp = (f"{row['head_shape']}|{row['body_shape']}|{row['foot_shape']}|"
+          f"{row['ears_shape']}|{row['mouth_type']}|{row['hand_shape']}|"
+          f"{row['has_antennae']}|{row['has_knees']}|{row['has_elbows']}")
+    key = f"{seed}:{fp}"
+    L = len(corpus)
+    base = int(hashlib.sha256(key.encode()).hexdigest(), 16) % L
+    # offset ensures different index; add a salt to spread choices
+    off = 1 + (int(seed) % max(1, L-1))
+    idx = (base + off) % L
+    txt = str(corpus[idx].get("text", ""))
+    nat = _nat_from_tokens(row, seed)
+    for k, v in nat.items():
+        ph = "{" + k + "}"
+        if ph in txt:
+            txt = txt.replace(ph, v)
+    raw_map = {
+        "head_shape": str(row["head_shape"]),
+        "body_shape": str(row["body_shape"]),
+        "ears_shape": str(row["ears_shape"]),
+        "mouth_type": str(row["mouth_type"]),
+        "hand_shape": str(row["hand_shape"]),
+        "foot_shape": str(row["foot_shape"]),
+        "has_antennae": str(row["has_antennae"]),
+        "has_knees": str(row["has_knees"]),
+        "has_elbows": str(row["has_elbows"]),
+    }
+    for k, v in raw_map.items():
+        ph = "{" + k + "}"
+        if ph in txt:
+            txt = txt.replace(ph, v)
+    return txt
 
 if psutil.Process(psutil.Process().ppid()).name().lower().startswith("pycharm"):
     args_obj = SimpleNamespace(**settings)
@@ -437,6 +470,7 @@ else:
     ap.add_argument("--mask-mode", choices=["rowdrop", "mask"], default=settings["mask_mode"])
     ap.add_argument("--mask-rate", type=float, default=settings["mask_rate"])
     ap.add_argument("--run-name", type=str, default=settings["run_name"])
+    ap.add_argument("--template-distinct-test", type=int, default=0, help="use a different template index for test rows")
     ap.add_argument("--force-rerun", type=int, default=settings["force_rerun"])
     ap.add_argument("--template-difficulty", choices=["easy", "medium", "hard"],
                     default=settings["template_difficulty"])
@@ -533,6 +567,8 @@ else:
         "generic_enable": int(getattr(known, "generic_enable", 0)),
         "generic_rate": float(getattr(known, "generic_rate", 0.5)),
         "generic_tol": float(getattr(known, "generic_tol", 0.02)),
+        "dev_per_fold": int(getattr(known, "dev_per_fold", 1000)),
+        "deployment_size": int(getattr(known, "deployment_size", 0)),
     })
     if merged["test_corr"] is not None and merged["test_corr"] >= 0:
         merged["test_break"] = max(0.0, min(1.0, 1.0 - float(merged["test_corr"])))
@@ -1297,39 +1333,8 @@ need_split = (
         or getattr(ds, "test", None) is None
 )
 
-if hasattr(ds, "split") and need_split:
-    rng = np.random.default_rng(0)
-    base_ids = np.unique(row_index)
-    rng.shuffle(base_ids)
-    n = len(base_ids)
-    n_val = int(np.floor(0.15 * n))
-    n_test = int(np.floor(0.15 * n))
-    val_ids = set(base_ids[:n_val])
-    test_ids = set(base_ids[n_val:n_val + n_test])
-
-    lab_by_id = {}
-    y_all = np.asarray(ds.y, dtype=int)
-    for i, rid in enumerate(row_index):
-        r = int(rid)
-        if r not in lab_by_id:
-            lab_by_id[r] = int(y_all[i])
-
-    train_ids = set(base_ids) - val_ids - test_ids
-    cls_tr = {lab_by_id[r] for r in train_ids}
-    if len(cls_tr) < 2:
-        want = 1 - list(cls_tr)[0] if len(cls_tr) == 1 else 1
-        pool = [r for r in list(val_ids) + list(test_ids) if lab_by_id[r] == want]
-        if pool:
-            add = pool[0]
-            rem = next(r for r in train_ids if lab_by_id[r] != want)
-            if add in val_ids:
-                val_ids.remove(add);
-                val_ids.add(rem)
-            else:
-                test_ids.remove(add);
-                test_ids.add(rem)
-            train_ids.remove(rem);
-            train_ids.add(add)
+if need_split:
+    pass
 
 
     def _kfold_by_row(row_index_arr, y_arr, K, seed_cv, test_frac, dev_per_fold):
@@ -1427,12 +1432,29 @@ if hasattr(ds, "split") and need_split:
     if dep_n > 0:
         pool = np.setdiff1d(idx_all, np.where(use_mask)[0])
         if dep_n > pool.size:
-            # sample with replacement if needed
             extra = rng.choice(pool, size=dep_n - pool.size, replace=True)
             dep_idx = np.concatenate([pool, extra])
         else:
             dep_idx = rng.choice(pool, size=dep_n, replace=False)
-        ds.deployment = _subset_mask(np.isin(idx_all, dep_idx))
+
+
+        def _subset_idx(idxs):
+            idxs = np.asarray(idxs, dtype=int)
+            X = [ds.X[i] for i in idxs]
+            C = ds.C[idxs]
+            y = ds.y[idxs]
+            sub = ConceptDatasetSample(X=X, C=C, y=y,
+                                       meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text",
+                                             "df_indices": idxs.tolist()})
+            gm = getattr(ds, "ears_generic_mask", None)
+            if gm is not None:
+                setattr(sub, "ears_generic_mask", np.asarray(gm)[idxs])
+            sub0 = getattr(ds, "subtypes", None)
+            if sub0 is not None:
+                setattr(sub, "subtypes", {k: np.asarray(sub0[k])[idxs] for k in sub0.keys()})
+            return sub
+
+        ds.deployment = _subset_idx(dep_idx)
         ds.test = ds.deployment
     else:
         ds.test = _subset_mask(np.zeros(n_all, dtype=bool))
@@ -1443,21 +1465,27 @@ if hasattr(ds, "split") and need_split:
         pool = np.arange(len(ds.y), dtype=int)
         replace = bool(dep_n > pool.size)
         idx_dep = rng_dep.choice(pool, size=dep_n, replace=replace)
-        mask_dep = np.zeros(len(ds.y), dtype=bool); mask_dep[idx_dep] = True
-        def _subset_mask_dep(mask):
-            idx = np.where(mask)[0]
-            X = [ds.X[i] for i in idx]
-            C = ds.C[idx]
-            y = ds.y[idx]
-            sub = ConceptDatasetSample(X=X, C=C, y=y, meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text"})
+
+        def _subset_idx_dep(idxs):
+            idxs = np.asarray(idxs, dtype=int)
+            X = [ds.X[i] for i in idxs]
+            C = ds.C[idxs]
+            y = ds.y[idxs]
+            sub = ConceptDatasetSample(X=X, C=C, y=y,
+                                       meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text"})
             gm2 = getattr(ds, "ears_generic_mask", None)
             if gm2 is not None:
-                setattr(sub, "ears_generic_mask", np.asarray(gm2)[idx])
+                setattr(sub, "ears_generic_mask", np.asarray(gm2)[idxs])
             sub0 = getattr(ds, "subtypes", None)
             if sub0 is not None:
-                setattr(sub, "subtypes", {k: np.asarray(sub0[k])[idx] for k in sub0.keys()})
+                setattr(sub, "subtypes", {k: np.asarray(sub0[k])[idxs] for k in sub0.keys()})
             return sub
-        ds.deployment = _subset_mask_dep(mask_dep)
+
+        ds.deployment = _subset_idx_dep(idx_dep)
+        if not hasattr(ds, "test") or getattr(ds.test, "n", 0) == 0:
+            ds.test = ds.deployment
+        if not hasattr(ds, "test") or getattr(ds.test, "n", 0) == 0:
+            ds.test = ds.deployment
 
     print(f"Split sizes → train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
 
@@ -1484,30 +1512,7 @@ if hasattr(ds, "split") and need_split:
     })
 
 elif need_split:
-    _manual_by_robot_split(ds, row_index, n_folds=5, seed=0)
-    print(f"Split sizes → train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
-
-    yt = np.asarray(ds.training.y, dtype=int)
-    yv = np.asarray(ds.validation.y, dtype=int)
-    yte = np.asarray(ds.test.y, dtype=int)
-    print("Label distribution (train):", {
-        "glorp": int((yt == 1).sum()),
-        "drent": int((yt == 0).sum()),
-        "total": int(yt.size),
-        "pos_frac": round((yt == 1).mean() if yt.size else 0.0, 4),
-    })
-    print("Label distribution (val):", {
-        "glorp": int((yv == 1).sum()),
-        "drent": int((yv == 0).sum()),
-        "total": int(yv.size),
-        "pos_frac": round((yv == 1).mean() if yv.size else 0.0, 4),
-    })
-    print("Label distribution (test):", {
-        "glorp": int((yte == 1).sum()),
-        "drent": int((yte == 0).sum()),
-        "total": int(yte.size),
-        "pos_frac": round((yte == 1).mean() if yte.size else 0.0, 4),
-    })
+    pass
 
 if int(getattr(args_obj, "train_balance_enable", 0)) == 1 and hasattr(ds.training, "ears_generic_mask"):
     ytr0 = np.asarray(ds.training.y, dtype=int)
@@ -1739,11 +1744,28 @@ def _count_mentions(sample):
     return int(sum(1 for x in sample.X if _pat_ant.search(str(x))))
 
 
-print("Leak check — 'antenna' mentions:", {
-    "train": _count_mentions(train_ds),
-    "val": _count_mentions(val_ds),
-    "test": _count_mentions(test_ds),
-})
+# print("Leak check — 'antenna' mentions:", {
+#     "train": _count_mentions(train_ds),
+#     "val": _count_mentions(val_ds),
+#     "test": _count_mentions(test_ds),
+# })
+
+if int(getattr(args_obj, "template_distinct_test", 0)) == 1:
+    base_jsonl = Path(args_obj.templates_file) if args_obj.templates_file and str(args_obj.templates_file).lower().endswith(".jsonl") else (
+                 pkg_dir / "synthetic" / "helper" / "static" / "text_templates" / "HardCorpus.jsonl")
+    if base_jsonl.is_file():
+        corpus_any = _load_jsonl(base_jsonl)
+        row_index_full = getattr(getattr(ds, "_full", ds), "meta", {}).get("row_index", np.arange(len(ds)))
+        df_idx = (getattr(test_ds, "meta", {}) or {}).get("df_indices", list(range(test_ds.n)))
+        newX = []
+        for j, i_abs in enumerate(df_idx):
+            rid = int(row_index_full[i_abs]) if isinstance(i_abs, (int, np.integer)) else int(i_abs)
+            row = {k: catalog_df.loc[rid, k] for k in params["concepts"].keys()}
+            txt = _render_from_corpus_distinct(row, corpus_any, int(SEED) + j)
+            newX.append(txt)
+        test_ds = ConceptDatasetSample(X=newX, C=test_ds.C, y=test_ds.y, meta=test_ds.meta)
+        ds.test = test_ds
+
 
 if getattr(args_obj, "redact_concepts", ""):
     _rc = set(t.strip() for t in str(args_obj.redact_concepts).split(",") if t.strip())
@@ -2008,10 +2030,19 @@ if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfc
     det_lf.settings["lf_mode"] = _old_mode
 
 else:
-    _old = detector.output_mode
-    detector.output_mode = "soft"
-    C_val_scores = detector.predict(val_ds)
-    detector.output_mode = _old
+    _old = getattr(detector, "output_mode", None)
+    if hasattr(detector, "output_mode"):
+        detector.output_mode = "soft"
+    try:
+        C_val_scores = detector.predict(val_ds)
+    except RuntimeError as e:
+        if "not been fitted" in str(e).lower():
+            detector.fit(train_ds, val_ds)
+            C_val_scores = detector.predict(val_ds)
+        else:
+            raise
+    if hasattr(detector, "output_mode") and _old is not None:
+        detector.output_mode = _old
 
 concept_names = list(ds.concepts)
 per = {}
