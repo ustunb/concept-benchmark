@@ -2859,7 +2859,11 @@ for ta in acc_grid:
                     P_src = T_truth_src.astype(np.float32)
 
                 if idx_map is not None:
+                    if P_src.shape[1] <= max(idx_map):
+                        raise ValueError(f"Concept width mismatch: src={P_src.shape[1]}, need>={max(idx_map) + 1}. "
+                                         f"Set --lf-keep-k to K or use full-width predict().")
                     P_plan = P_src[:, idx_map]
+
                     T_plan = T_truth_src[:, idx_map]
                 else:
                     P_plan = P_src
