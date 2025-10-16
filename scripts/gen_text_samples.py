@@ -1368,6 +1368,7 @@ if hasattr(ds, "split") and need_split:
                 arr[i3] = fold_by_id.get(r3, ((i3 % K) + 1))
         return arr
 
+
     K = 5
     seed_cv = int(getattr(args_obj, "seed_cv", int(getattr(args_obj, "seed", 0)) + 1))
     devN = int(getattr(args_obj, "dev_per_fold", 1000))
@@ -1391,16 +1392,15 @@ if hasattr(ds, "split") and need_split:
     fold_ids = fold_ids[perm]
 
     val_fold = int(getattr(args_obj, "cv_fold", 0)) or 1
-    if val_fold < 1 or val_fold > 5:
+    if val_fold < 1 or val_fold > 4:
         val_fold = 1
-    test_fold = 2 if val_fold == 1 else 1
 
     mask_all = np.zeros(n_all, dtype=int)
     mask_all[sel] = fold_ids
 
-    mtr = (mask_all != val_fold) & (mask_all != test_fold) & (mask_all != 0)
+    use_mask = (mask_all >= 1) & (mask_all <= 4)
     mva = (mask_all == val_fold)
-    mte = (mask_all == test_fold)
+    mtr = use_mask & (~mva)
 
 
     def _subset_mask(mask):
@@ -1421,7 +1421,20 @@ if hasattr(ds, "split") and need_split:
 
     ds.training = _subset_mask(mtr)
     ds.validation = _subset_mask(mva)
-    ds.test = _subset_mask(mte)
+
+    dep_n = int(getattr(args_obj, "deployment_size", 0))
+    if dep_n > 0:
+        pool = np.setdiff1d(idx_all, np.where(use_mask)[0])
+        if dep_n > pool.size:
+            # sample with replacement if needed
+            extra = rng.choice(pool, size=dep_n - pool.size, replace=True)
+            dep_idx = np.concatenate([pool, extra])
+        else:
+            dep_idx = rng.choice(pool, size=dep_n, replace=False)
+        ds.deployment = _subset_mask(np.isin(idx_all, dep_idx))
+        ds.test = ds.deployment
+    else:
+        ds.test = _subset_mask(np.zeros(n_all, dtype=bool))
 
     dep_n = int(getattr(args_obj, "deployment_size", 0))
     if dep_n > 0:
