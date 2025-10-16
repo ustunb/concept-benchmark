@@ -364,7 +364,10 @@ def _render_from_corpus(row: dict, corpus: list[dict], seed: int) -> str:
 if psutil.Process(psutil.Process().ppid()).name().lower().startswith("pycharm"):
     args_obj = SimpleNamespace(**settings)
 else:
-    ap = argparse.ArgumentParser(add_help=False)
+    ap = argparse.ArgumentParser(description="Generate robot text samples",
+                                 formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+                                 conflict_handler="resolve")
+
     ap.add_argument("--variant", choices=["perfect", "imperfect"], default=settings["variant"])
     ap.add_argument("--variants-per-row", type=int)
     ap.add_argument("--variants-per-row-minority", type=int, default=0)
@@ -464,7 +467,6 @@ else:
     ap.add_argument("--flip-batch-size", type=int, default=8192)
     ap.add_argument("--flip-limit-subsets", type=lambda s: None if str(s).lower() == "none" else int(s), default=None)
     ap.add_argument("--abstain-only", action="store_true", help="restrict to abstentions if --tau is set")
-    ap.add_argument("--deployment-size", type=int, default=0)
     ap.add_argument("--seed-test-offset", type=int, default=1234, dest="seed_test_offset")
 
     known, _ = ap.parse_known_args()
