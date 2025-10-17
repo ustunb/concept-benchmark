@@ -1,18 +1,15 @@
-import argparse, json, time, pickle
+import json, time, pickle
 from pathlib import Path
 import numpy as np
 import torch
 import copy
-from PIL import Image
-from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
-from transformers import (
-    AutoImageProcessor,
-    AutoModelForImageClassification,
-)
 from concept_benchmark.models import ConceptDetector, FrontEndModel, RobotConceptClassifier
 from concept_benchmark.paths import results_dir
 from concept_benchmark.synthetic.robot import create_synthetic_dataset
+from scripts.dataset_skewing import create_skewed_splits, filter_training_by_string
+from scripts.dnn_training import train_eval_image
+from scripts.interventions import apply_interventions
 
 settings = {
     "samples_per_instance": 3,
@@ -37,10 +34,8 @@ settings = {
     "missing_rate": 1.0,
     "impute_missing": 0,
     "skew_concept": [
-                     {'concepts': {'mouth_type': 0, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.25},
-                     {'concepts': {'mouth_type': 1, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.25},
-                     {'concepts': {'mouth_type': 1, 'foot_shape_flat_4sided': 1}, 'min_fraction': 0.25},
-                     {'concepts': {'mouth_type': 0, 'foot_shape_flat_4sided': 1}, 'min_fraction': 0.25},
+                     {'concepts': {'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.5},
+                     {'concepts': {'foot_shape_flat_4sided': 1}, 'min_fraction': 0.5},
                      ], #[{'concepts': {'body_shape': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.243},
                      # {'concepts': {'mouth_type': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.2},
                      # {'concepts': {'body_shape': 0, 'mouth_type': 0, 'has_antennae': 1}, 'min_fraction': 0.15},
@@ -52,24 +47,10 @@ settings = {
     "intervention_threshold": 0.1,
     "epochs": 10,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "labeling_and_p3f4_medium_rerun",
-    "load_detector": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed555.pt")),
-    "load_frontend": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed555.pkl")),
+    "run_name": "labeling_and_p3f4_medium_imbalanced_equal",
+    "load_detector": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed555.pt")),
+    "load_frontend": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed555.pkl")),
 }
-
-class ImageDS(Dataset):
-    def __init__(self, X_paths, y, proc):
-        self.X = [str(p) for p in X_paths]
-        self.y = np.asarray(y, dtype=int)
-        self.proc = proc
-    def __len__(self):
-        return len(self.X)
-    def __getitem__(self, i):
-        img = Image.open(self.X[i]).convert("RGB")
-        enc = self.proc(images=img, return_tensors="pt")
-        enc = {k: v.squeeze(0) for k, v in enc.items()}
-        y = torch.tensor(self.y[i], dtype=torch.long)
-        return enc, y
 
 def _apply_missing(C, mode, rate, rng, y=None):
     if mode == "complete" or rate <= 0:
@@ -94,40 +75,6 @@ def _apply_missing(C, mode, rate, rng, y=None):
     return C
 
 
-def train_eval_image(paths_tr, y_tr, paths_te, y_te, model_id, epochs, batch_size, lr, device):
-    proc = AutoImageProcessor.from_pretrained(model_id)
-    model = AutoModelForImageClassification.from_pretrained(model_id, num_labels=2, ignore_mismatched_sizes=True)
-    ds_tr = ImageDS(paths_tr, y_tr, proc)
-    ds_te = ImageDS(paths_te, y_te, proc)
-    dl_tr = DataLoader(ds_tr, batch_size=batch_size, shuffle=True)
-    dl_te = DataLoader(ds_te, batch_size=batch_size, shuffle=False)
-    model.to(device)
-    optim = torch.optim.AdamW(model.parameters(), lr=lr)
-    model.train()
-    for _ in range(int(epochs)):
-        for xb, yb in dl_tr:
-            xb = {k: v.to(device) for k, v in xb.items()}
-            yb = yb.to(device)
-            out = model(**xb, labels=yb)
-            loss = out.loss
-            optim.zero_grad()
-            loss.backward()
-            optim.step()
-    model.eval()
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for xb, yb in dl_te:
-            xb = {k: v.to(device) for k, v in xb.items()}
-            yb = yb.to(device)
-            out = model(**xb)
-            pred = out.logits.argmax(dim=-1)
-            correct += (pred == yb).sum().item()
-            total += yb.numel()
-    acc = correct / total if total > 0 else 0.0
-    return float(acc), proc, model
-
-
 def _apply_label_noise(sample, noise_rate, seed):
     if noise_rate <= 0:
         return sample
@@ -141,89 +88,6 @@ def _apply_label_noise(sample, noise_rate, seed):
         transform=sample.transform, concept_transform=sample.concept_transform,
         target_transform=sample.target_transform, base_dir=getattr(sample, 'base_dir', None)
     )
-
-
-def create_sample(size, indices, dataset):
-    mask = np.zeros(size, dtype=bool)
-    mask[indices] = True
-    return dataset._full.filter(mask)
-
-
-def create_skewed_splits(dataset, skew_specs, train_fraction=0.5, val_fraction=0.25, test_fraction=0.25, rng=None, drop_concepts=[], fractions_unique=True):
-    """
-    Skew training by ensuring minimum representation of specific concept patterns.
-
-    Args:
-        skew_specs: List of dicts, each with 'concepts' (dict of concept:value) and 'min_fraction' (float)
-                   e.g., [{'concepts': {'body_shape': 0, 'foot_shape_3sided': 1}, 'min_fraction': 0.4},
-                          {'concepts': {'body_shape': 0, 'foot_shape_4sided': 1}, 'min_fraction': 0.4}]
-        train_fraction, val_fraction, test_fraction: Split proportions
-        rng: Random number generator
-        drop_concepts: List of concept names to drop from dataset after splitting
-        fractions_unique: If True, fractions regard the unique set of concepts, not total samples
-    """
-    if rng is None:
-        rng = np.random.default_rng()
-
-    # print y labels all
-    print("Overall class distribution in full dataset:")
-    unique, counts = np.unique(dataset.y, return_counts=True)
-    class_dist = dict(zip(unique, counts))
-    for cls, cnt in class_dist.items():
-        print(f"  Class {cls}: {cnt} samples ({cnt / len(dataset.y):.1%})")
-
-    total_size = len(dataset.C)
-    total_unique_size = total_size if not fractions_unique else dataset.meta["num_unique_robots"]
-    desired_train_size = int(total_unique_size * train_fraction)
-    print("Desired training size:", desired_train_size)
-
-    # Find indices matching each specification
-    spec_indices = []
-    for spec in skew_specs:
-        mask = np.ones(total_size, dtype=bool)
-        for concept_name, target_value in spec['concepts'].items():
-            concept_idx = dataset.concepts.index(concept_name)
-            mask &= (dataset.C[:, concept_idx] == target_value)
-        spec_indices.append(np.where(mask)[0])
-
-    train_indices = []
-    used = set()
-    for spec, indices in zip(skew_specs, spec_indices):
-        needed = int(desired_train_size * spec['min_fraction'])
-        available = [i for i in indices if i not in used]
-        rng.shuffle(available)
-        take = available[:min(needed, len(available))]
-        train_indices.extend(take)
-        used.update(take)
-        print(f"Added {len(take)} for spec {spec['concepts']} (wanted {needed})")
-
-    # Fill remaining slots with any unused samples
-    remaining_slots = desired_train_size - len(train_indices)
-    if remaining_slots > 0:
-        unused = [i for i in range(total_size) if i not in used]
-        rng.shuffle(unused)
-        train_indices.extend(unused[:remaining_slots])
-        print(f"Filled {min(remaining_slots, len(unused))} remaining slots")
-
-    train_indices = np.array(train_indices)
-    rng.shuffle(train_indices)
-
-    # Validation and test from what's left
-    remaining = np.array([i for i in range(total_size) if i not in train_indices])
-    rng.shuffle(remaining)
-
-    val_size = int(len(remaining) * val_fraction / (val_fraction + test_fraction))
-    val_indices = remaining[:val_size]
-    test_indices = remaining[val_size:]
-    print("Resulting training size:", len(train_indices))
-
-    dataset.drop_concepts(drop_concepts)
-
-    dataset.training = create_sample(total_size, train_indices, dataset)
-    dataset.validation = create_sample(total_size, val_indices, dataset)
-    dataset.test = create_sample(total_size, test_indices, dataset)
-
-    return dataset.training, dataset.validation, dataset.test
 
 
 def align_frontend_weights(frontend_model, concept_names, weight_dict):
@@ -259,97 +123,6 @@ def align_frontend_weights(frontend_model, concept_names, weight_dict):
     return frontend_model
 
 
-def filter_training_by_string(dataset, string, train_fraction=0.6, val_fraction=0.2, test_fraction=0.2, rng=None):
-    """
-    Filter robots for training set based on model string, put rest in val/test.
-
-    Args:
-        dataset: ConceptDataset instance
-        string: String condition to evaluate for training selection
-        train_fraction, val_fraction, test_fraction: Split proportions
-        rng: Random number generator
-
-    Returns:
-        train, validation, test splits
-    """
-    if rng is None:
-        rng = np.random.default_rng()
-
-    def create_row_dict(sample_idx):
-        row = {}
-        for i, concept_name in enumerate(dataset.concepts):
-            concept_value = dataset.C[sample_idx, i]
-
-            if concept_name == 'body_shape':
-                row[concept_name] = 'square' if concept_value == 0 else 'round'
-            elif concept_name == 'head_shape':
-                row[concept_name] = 'square' if concept_value == 0 else 'round'
-            elif concept_name in ['has_knees', 'has_elbows', 'has_antennae']:
-                row[concept_name] = 'true' if concept_value == 1 else 'false'
-            elif concept_name == 'ears_shape':
-                row[concept_name] = 'square' if concept_value == 0 else 'triangle'
-            elif concept_name == 'mouth_type':
-                row[concept_name] = 'closed' if concept_value == 0 else 'open'
-            elif concept_name == 'hand_shape':
-                row[concept_name] = 'round_circle' if concept_value == 0 else 'edgy_triangle'
-            elif concept_name == 'foot_shape':
-                row[concept_name] = 'flat_4sided' if concept_value == 0 else 'pointy_3sided'
-            else:
-                row[concept_name] = concept_value
-
-        return row
-
-    train_candidates = []
-    other_samples = []
-
-    for idx in range(len(dataset.C)):
-        row = create_row_dict(idx)
-        try:
-            print(row)
-            if eval(string, {"row": row}):
-                print("  -> Train candidate")
-                train_candidates.append(idx)
-            else:
-                other_samples.append(idx)
-        except Exception as e:
-            print(f"Error evaluating condition for sample {idx}: {e}")
-            other_samples.append(idx)
-
-    train_candidates = np.array(train_candidates)
-    other_samples = np.array(other_samples)
-
-    print(f"Candidates for training (satisfy condition): {len(train_candidates)}")
-    print(f"Other samples: {len(other_samples)}")
-
-    total_size = len(dataset.C)
-    desired_train_size = int(total_size * train_fraction)
-
-    actual_train_size = min(len(train_candidates), desired_train_size)
-    rng.shuffle(train_candidates)
-    train_indices = train_candidates[:actual_train_size]
-
-    unused_candidates = train_candidates[actual_train_size:]
-    remaining_samples = np.concatenate([unused_candidates, other_samples])
-    rng.shuffle(remaining_samples)
-
-    remaining_size = len(remaining_samples)
-    val_size = int(remaining_size * val_fraction / (val_fraction + test_fraction))
-
-    val_indices = remaining_samples[:val_size]
-    test_indices = remaining_samples[val_size:]
-
-    dataset.training = create_sample(total_size, train_indices, dataset)
-    dataset.validation = create_sample(total_size, val_indices, dataset)
-    dataset.test = create_sample(total_size, test_indices, dataset)
-
-    print(f"\nFinal splits:")
-    print(f"Training: {len(train_indices)} samples ({len(train_indices) / total_size:.1%})")
-    print(f"Validation: {len(val_indices)} samples ({len(val_indices) / total_size:.1%})")
-    print(f"Test: {len(test_indices)} samples ({len(test_indices) / total_size:.1%})")
-
-    return dataset.training, dataset.validation, dataset.test
-
-
 def _rate_tag(r):
     v = int(round(float(r) * 100))
     return f"{v:03d}"
@@ -368,44 +141,76 @@ def _get_foot_shape_pred(pred_row, concept_names):
     return 0  # flat
 
 
-def main():
-    p = argparse.ArgumentParser(add_help=False)
-    p.add_argument("--samples-per-instance", type=int)
-    p.add_argument("--draw", type=int)
-    p.add_argument("--image-dir", type=str, help="Directory to save robot images")
-    p.add_argument("--image-size", type=int)
-    p.add_argument("--color-mode", type=str)
-    p.add_argument("--seed", type=int)
-    p.add_argument("--missingness", type=str)
-    p.add_argument("--missing-rate", type=float)
-    p.add_argument("--skew-concept", type=str, nargs='+', help="Concept(s) to skew")
-    p.add_argument("--skew-value", type=int, nargs='+', help="Value(s) to keep (0 or 1)")
-    p.add_argument("--skew-fraction", type=float, nargs='+', help="Fraction(s) of data to keep")
-    p.add_argument("--impute-missing", type=int)
-    p.add_argument("--epochs", type=int)
-    p.add_argument("--out-dir", type=str)
-    p.add_argument("--run-name", type=str)
-    p.add_argument("--load-detector", type=str)
-    p.add_argument("--load-frontend", type=str)
-    args, _ = p.parse_known_args()
-    if args.samples_per_instance is not None: settings["samples_per_instance"] = args.samples_per_instance
-    if args.draw is not None: settings["draw"] = args.draw
-    if args.image_dir is not None: settings["image_dir"] = args.image_dir
-    if args.image_size is not None: settings["image_size"] = args.image_size
-    if args.color_mode is not None: settings["color_mode"] = args.color_mode
-    if args.seed is not None: settings["seed"] = args.seed
-    if args.missingness is not None: settings["missingness"] = args.missingness
-    if args.missing_rate is not None: settings["missing_rate"] = args.missing_rate
-    if args.impute_missing is not None: settings["impute_missing"] = args.impute_missing
-    if args.skew_concept is not None: settings["skew_concept"] = args.skew_concept
-    if args.skew_value is not None: settings["skew_value"] = args.skew_value
-    if args.skew_fraction is not None: settings["skew_fraction"] = args.skew_fraction
-    if args.epochs is not None: settings["epochs"] = args.epochs
-    if args.out_dir is not None: settings["out_dir"] = args.out_dir
-    if args.run_name is not None: settings["run_name"] = args.run_name
-    if args.load_detector is not None: settings["load_detector"] = args.load_detector
-    if args.load_frontend is not None: settings["load_frontend"] = args.load_frontend
+def test_concept_detector_invariance_point(concept_detector, concept, concept_names, point, dataset, device):
+    """
+    Test if the concept_detector for concept is invariant to changes it other features.
 
+    Check that the concept prediction for one point will not change over other counterfactual points that share the same
+    concept value.
+
+    :param concept_detector:
+    :param concept:
+    :param concept_names:
+    :param point:
+    :param dataset:
+    :param device:
+    :return:
+    """
+    concept_idx = concept_names.index(concept)
+    concept_value = dataset.C[point, concept_idx]
+    if "foot_shape" in concept:
+        foot_type = 1 if concept.split("_")[2] == "pointy" else 0
+        foot_subtype = concept.split("_")[3]
+    # Get all points that share the same concept value
+    dataset_indices = dataset.meta["df_indices"]
+    subcatalog = dataset.meta["catalog_df"].iloc[dataset_indices]
+    matching_points = np.where(dataset.C[:, concept_idx] == concept_value)[0] if "foot_shape" not in concept else \
+        np.where((subcatalog["foot_shape"] == foot_type) & (subcatalog["foot_shape_subtype"] == foot_subtype))[0]
+    # Get the dataset with just the original point
+    dataset_point = dataset.filter(np.array([i == point for i in range(len(dataset))]))
+    original_pred = concept_detector.predict(dataset_point, embed_params={"device": device})[0, concept_idx]
+    print("Original prediction for point", point, "concept", concept, "value", concept_value, "is", original_pred)
+    # count the number of matching points that have different predictions
+    variant_points = []
+    dataset_mp = dataset.filter(np.array([i in matching_points for i in range(len(dataset))]))
+    cf_preds = concept_detector.predict(dataset_mp, embed_params={"device": device})
+    for i, mp in enumerate(matching_points):
+        if mp == point:
+            continue
+        cf_pred = cf_preds[i, concept_idx]
+        if (original_pred >= 0.5) != (cf_pred >= 0.5):
+            print("Error on matching point", mp, "concept", concept, "value", concept_value, "prediction", cf_pred)
+            variant_points.append(mp)
+
+    if len(variant_points) > 0:
+        print(f"Concept detector for concept '{concept}' is NOT invariant for point {point} with concept value {concept_value}.")
+        return False
+    return True
+
+
+def test_concept_detector_invariance(concept_detector, concept_to_test, concept_names, dataset, device, num_tests=10):
+    """
+    Test concept detector invariance for all concepts on random points in the dataset.
+
+    :param concept_detector:
+    :param concept_to_test:
+    :param concept_names:
+    :param dataset:
+    :param device:
+    :param num_tests:
+    :return:
+    """
+    rng = np.random.default_rng(12345)
+    n_samples = len(dataset)
+    all_passed = True
+    for _ in range(num_tests):
+        point = rng.integers(0, n_samples)
+        passed = test_concept_detector_invariance_point(concept_detector, concept_to_test, concept_names, point, dataset, device)
+        if not passed:
+            all_passed = False
+    return all_passed
+
+def main():
     S = dict(settings)
     rng = np.random.default_rng(int(S["seed"]))
     base_out = Path(S["out_dir"]); base_out.mkdir(parents=True, exist_ok=True)
@@ -523,6 +328,33 @@ def main():
         Ctr = _apply_missing(train.C, miss, rate, rng, y=train.y.astype(int))
         train = train.__class__(parent=train.parent, X=train.X, C=Ctr, y=train.y, meta=train.meta, transform=train.transform, concept_transform=train.concept_transform, target_transform=train.target_transform, base_dir=train.base_dir)
 
+    # print a breakdown of unique robots per each fot shape subtype in the training set
+    # print the proportion of each unique robot in the training dataset by foot shape subtype
+    # print("Training set unique robot distribution by foot shape subtype:")
+    # foot_shape_concept_names = [c for c in train.concepts if 'foot_shape' in c]
+    # foot_shape_concept_indices = [train.concepts.index(c) for c in foot_shape_concept_names]
+    # unique_robots = {}
+    # for i in range(len(train.C)):
+    #     robot_key = tuple(train.C[i, :])
+    #     if robot_key not in unique_robots:
+    #         unique_robots[robot_key] = 0
+    #     unique_robots[robot_key] += 1
+    # # for each subtype enumerate all unique robots and for each unique robot count how many have that subtype
+    # subtype_counts = {c: {r: 0 for r in unique_robots.keys()} for c in foot_shape_concept_names}
+    # # iterate over the whole training set to count
+    # for i in range(len(train.C)):
+    #     robot_key = tuple(train.C[i, :])
+    #     for c, c_idx in zip(foot_shape_concept_names, foot_shape_concept_indices):
+    #         if train.C[i, c_idx] == 1:
+    #             subtype_counts[c][robot_key] += 1
+    # for c in foot_shape_concept_names:
+    #     total = sum(subtype_counts[c].values())
+    #     print(f"  {c}:")
+    #     for robot_key, count in subtype_counts[c].items():
+    #         if count > 0:
+    #             print(f"    Robot {robot_key}: {count} ({count/total:.1%})")
+
+
     # print distribution of each concept in the training set
     print("Training set concept distributions:")
     for i, concept_name in enumerate(train.concepts):
@@ -575,6 +407,13 @@ def main():
         cd.fit(train, valid, embed_params={'shuffle': False, **config}, fit_params={"epochs": 50, 'lr': 1e-3, "patience": 10, **config})
         det_path = run_dir / det_name
         torch.save(cd.state_dict(), det_path)
+
+    # test invariance of concept detectors
+    subtype_concepts = [c for c in test.concepts if 'foot_shape' in c]
+    for concept in subtype_concepts:
+        invariance_passed = test_concept_detector_invariance(cd, concept, train.concepts, test, device, num_tests=10)
+        print (f"Invariance test for concept '{concept}': {'PASSED' if invariance_passed else 'FAILED'}")
+
 
     P_tr = cd.predict(train, embed_params={"device": device})
     P_vl = cd.predict(valid, embed_params={"device": device})
@@ -702,214 +541,6 @@ def main():
 
 
     # INTERVENTIONS
-    def compute_intervention_score(pred_probs, frontend_model, budget_k, policy="top-k"):
-        """
-        Compute intervention score for a single sample.
-
-        Args:
-            pred_probs: (n_concepts,) - Concept prediction probabilities
-            frontend_model: Trained frontend model
-            budget_k: Number of concepts to intervene on
-            policy: "top-1" or "top-k"
-
-        Returns:
-            score: float - Probability that intervention changes prediction
-            best_concepts: list - Indices of concepts to intervene on
-        """
-        n_concepts = len(pred_probs)
-        c_rounded = (pred_probs > 0.5).astype(np.float32)
-        pred_original = np.argmax(frontend_model.predict_proba(c_rounded.reshape(1, -1))[0])
-
-        if policy == "top-1":
-            best_score = 0.0
-            best_concept = None
-
-            for j in range(n_concepts):
-                total_prob_change = 0.0
-
-                # Outcome 1: concept j = 1 (with probability pred_probs[j])
-                c_if_one = c_rounded.copy()
-                c_if_one[j] = 1
-                pred_if_one = np.argmax(frontend_model.predict_proba(c_if_one.reshape(1, -1))[0])
-                if pred_if_one != pred_original:
-                    total_prob_change += pred_probs[j]
-
-                # Outcome 2: concept j = 0 (with probability 1 - pred_probs[j])
-                c_if_zero = c_rounded.copy()
-                c_if_zero[j] = 0
-                pred_if_zero = np.argmax(frontend_model.predict_proba(c_if_zero.reshape(1, -1))[0])
-                if pred_if_zero != pred_original:
-                    total_prob_change += (1 - pred_probs[j])
-
-                if total_prob_change > best_score:
-                    best_score = total_prob_change
-                    best_concept = j
-
-            return best_score, [best_concept] if best_concept is not None else []
-
-
-        elif policy == "top-k":
-
-            from itertools import combinations, product
-            # Pre-generate all combinations
-            all_combinations = np.array(list(product([0, 1], repeat=budget_k)))  # (2^K, K)
-            n_combinations = len(all_combinations)
-
-            # Get all subsets
-            all_subsets = list(combinations(range(n_concepts), budget_k))
-            n_subsets = len(all_subsets)
-
-            # Process in batches to manage memory
-            batch_size = 100
-            best_score = 0.0
-            best_subset = []
-
-            for batch_start in range(0, n_subsets, batch_size):
-                # print("Processing batch starting at subset index", batch_start, "of", n_subsets)
-                batch_end = min(batch_start + batch_size, n_subsets)
-                batch_subsets = all_subsets[batch_start:batch_end]
-                n_batch = len(batch_subsets)
-
-                # Create all concept vectors for this batch: (n_batch * 2^K, n_concepts)
-                c_batch = np.tile(c_rounded, (n_batch * n_combinations, 1))
-                prob_batch = np.ones(n_batch * n_combinations)
-
-                # Apply interventions for all subsets in batch
-                for batch_idx, subset in enumerate(batch_subsets):
-                    subset = np.array(subset)
-                    start_idx = batch_idx * n_combinations
-                    end_idx = start_idx + n_combinations
-
-                    # Set concepts for all combinations of this subset
-                    c_batch[start_idx:end_idx, subset] = all_combinations
-
-                    # Compute probabilities
-                    for idx, j in enumerate(subset):
-                        prob_batch[start_idx:end_idx] *= np.where(
-                            all_combinations[:, idx] == 1,
-                            pred_probs[j],
-                            1 - pred_probs[j]
-                        )
-
-                # Single prediction call for entire batch
-                pred_probs_all = frontend_model.predict_proba(c_batch)
-                pred_all = np.argmax(pred_probs_all, axis=1)
-                prediction_changes = (pred_all != pred_original).astype(float)
-
-                # Compute scores for each subset in batch
-                for batch_idx in range(n_batch):
-                    start_idx = batch_idx * n_combinations
-                    end_idx = start_idx + n_combinations
-                    score = np.sum(prob_batch[start_idx:end_idx] * prediction_changes[start_idx:end_idx])
-                    if score > best_score:
-                        best_score = score
-                        best_subset = list(batch_subsets[batch_idx])
-
-            return best_score, best_subset
-
-        else:
-            raise ValueError(f"Unknown policy: {policy}")
-
-    def select_samples_for_intervention(pred_probs, frontend_model, budget_k,
-                                        intervention_threshold, policy="top-k"):
-        """
-        Score all samples and select which ones to intervene on.
-
-        Args:
-            pred_probs: (n_samples, n_concepts) - Concept prediction probabilities
-            frontend_model: Trained frontend model
-            budget_k: Number of concepts to intervene on per sample
-            intervention_threshold: Minimum score required to intervene
-            policy: "top-1" or "top-k"
-
-        Returns:
-            samples_to_intervene: list of (sample_idx, score, concepts_to_check)
-        """
-        n_samples = pred_probs.shape[0]
-        samples_to_intervene = []
-
-        for i in range(n_samples):
-            score, best_concepts = compute_intervention_score(
-                pred_probs[i], frontend_model, budget_k, policy
-            )
-
-            if score >= intervention_threshold:
-                samples_to_intervene.append((i, score, best_concepts))
-
-        return samples_to_intervene
-
-    def apply_interventions(pred_probs, ground_truth, frontend_model, budget_k,
-                            intervention_threshold=0.0, human_accuracy=1.0,
-                            policy="top-k", rng=None):
-        """
-        Apply human interventions to concept predictions.
-
-        Args:
-            pred_probs: (n_samples, n_concepts) - Concept prediction probabilities
-            ground_truth: (n_samples, n_concepts) - True concept values (binary)
-            frontend_model: Trained frontend model for final predictions
-            budget_k: int - Number of concepts to intervene on per sample
-            intervention_threshold: float - Minimum score to intervene on a sample (0 to 1)
-            human_accuracy: float - Probability human gives correct intervention
-            policy: str - "top-1" or "top-k" intervention selection
-            rng: np.random.Generator - For reproducibility
-
-        Returns:
-            intervened_concepts: (n_samples, n_concepts) - Binary concepts after interventions
-            intervention_stats: dict - Statistics about interventions applied
-        """
-        if rng is None:
-            rng = np.random.default_rng()
-
-        # Stage 1: Score and select samples to intervene on
-        samples_to_intervene = select_samples_for_intervention(
-            pred_probs, frontend_model, budget_k, intervention_threshold, policy
-        )
-
-        # Initialize output - start with rounded binary concepts
-        intervened_concepts = (pred_probs >= 0.5).astype(int)
-        n_samples, n_concepts = pred_probs.shape
-        edit_counts = np.zeros(n_samples, dtype=int)
-
-        # Stage 2: Apply interventions to selected samples
-        for sample_idx, score, concepts_to_check in samples_to_intervene:
-            actual_edits = 0
-
-            for j in concepts_to_check:
-                original_value = intervened_concepts[sample_idx, j]
-
-                # Human intervention
-                if rng.random() < human_accuracy:
-                    # Human gives correct value
-                    new_value = ground_truth[sample_idx, j]
-                else:
-                    # Human makes error
-                    new_value = 1 - ground_truth[sample_idx, j]
-
-                # Update the binary concept value
-                intervened_concepts[sample_idx, j] = new_value
-
-                # Count as edit if value changed
-                if original_value != new_value:
-                    actual_edits += 1
-
-            edit_counts[sample_idx] = actual_edits
-
-        # Statistics
-        n_interventions = len(samples_to_intervene)
-        stats = {
-            "samples_intervened_on": int(n_interventions),
-            "intervention_rate": float(n_interventions) / n_samples,
-            "avg_edits_per_intervention": float(edit_counts[edit_counts > 0].mean()) if n_interventions > 0 else 0.0,
-            "total_concept_checks": int(budget_k * n_interventions),
-            "total_concept_edits_made": int(edit_counts.sum()),
-            "avg_score": float(np.mean([s for _, s, _ in samples_to_intervene])) if n_interventions > 0 else 0.0,
-            "max_score": float(max([s for _, s, _ in samples_to_intervene])) if n_interventions > 0 else 0.0,
-            "min_score": float(min([s for _, s, _ in samples_to_intervene])) if n_interventions > 0 else 0.0,
-        }
-
-        return intervened_concepts, stats
-
     intervention_results = {}
     budgets = S.get('budget', [1, 2, 3, 4, 5])
     human_acc = S.get("intervention_accuracy", 1.0)
