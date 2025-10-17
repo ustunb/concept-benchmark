@@ -21,13 +21,13 @@ settings = {
     "image_dir": "./data/robot_images",
     "image_size": "medium",
     "color_mode": "color",
-    "train_dnn": 1,
+    "train_dnn": 0,
     "seed": 555,
     "model": "'glorp' if (int(row['mouth_type']=='closed') +  int(row['foot_shape']=='pointy'))>= 2 else 'drent'",
     'dataset_characterization': "",
     "knows_concepts": False,
     "spurious_features": ["has_elbows", "hand_shape"],
-    "drop_concepts": ["foot_shape_pointy_5sided", "foot_shape_flat_4sided", "foot_shape_pointy_4sided", "foot_shape_flat_4sided", "foot_shape_flat_5sided", "foot_shape"],#, "foot_shape_pointy_3sided", "foot_shape_flat_lshaped"],
+    "drop_concepts": ["foot_shape_pointy_5sided", "foot_shape_flat_5sided", "foot_shape_pointy_4sided", "foot_shape_flat_lshaped", "foot_shape"],# "foot_shape_pointy_3sided", "foot_shape_flat_4sided"],
     "human_alignment": {"foot_shape": 1, "mouth_type": -1, "bias": -0.01}, # OR of ANDs model's logic
     "model_type": "stochastic",
     "logit_scalar": 4.0,
@@ -39,8 +39,8 @@ settings = {
     "skew_concept": [
                      {'concepts': {'mouth_type': 0, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.25},
                      {'concepts': {'mouth_type': 1, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.25},
-                     {'concepts': {'mouth_type': 1, 'foot_shape_flat_lshaped': 1}, 'min_fraction': 0.25},
-                     {'concepts': {'mouth_type': 0, 'foot_shape_flat_lshaped': 1}, 'min_fraction': 0.25},
+                     {'concepts': {'mouth_type': 1, 'foot_shape_flat_4sided': 1}, 'min_fraction': 0.25},
+                     {'concepts': {'mouth_type': 0, 'foot_shape_flat_4sided': 1}, 'min_fraction': 0.25},
                      ], #[{'concepts': {'body_shape': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.243},
                      # {'concepts': {'mouth_type': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.2},
                      # {'concepts': {'body_shape': 0, 'mouth_type': 0, 'has_antennae': 1}, 'min_fraction': 0.15},
@@ -52,9 +52,9 @@ settings = {
     "intervention_threshold": 0.1,
     "epochs": 10,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "labeling_and_masked_2subconcepts_medium",
-    "load_detector": "",#str(Path(results_dir / "robots" / "test000" / "detector_dnn_robots_image_deterministic_complete__skewint-acc90_seed555.pt")),
-    "load_frontend": "",#str(Path(results_dir / "robots" / "test000" / "frontend_logreg_robots_image_deterministic_complete__skewint-acc90_seed555.pkl")),
+    "run_name": "labeling_and_p3f4_medium_rerun",
+    "load_detector": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed555.pt")),
+    "load_frontend": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed555.pkl")),
 }
 
 class ImageDS(Dataset):
@@ -204,19 +204,6 @@ def create_skewed_splits(dataset, skew_specs, train_fraction=0.5, val_fraction=0
         rng.shuffle(unused)
         train_indices.extend(unused[:remaining_slots])
         print(f"Filled {min(remaining_slots, len(unused))} remaining slots")
-
-    # print("\n=== Debugging: Sample robots from each spec ===")
-    # for spec, indices in zip(skew_specs, spec_indices):
-    #     print(f"\nSpec {spec['concepts']}: {len(indices)} total samples")
-    #     print("Sample of 10 robots:")
-    #     sample_indices = indices[:10] if len(indices) >= 10 else indices
-    #
-    #     for sample_idx in sample_indices:
-    #         robot_features = {}
-    #         for i, concept_name in enumerate(dataset.concepts):
-    #             robot_features[concept_name] = int(dataset.C[sample_idx, i])
-    #             robot_features["class"] = int(dataset.y[sample_idx])
-    #         print(f"  Robot {sample_idx}: {robot_features}")
 
     train_indices = np.array(train_indices)
     rng.shuffle(train_indices)
@@ -958,6 +945,76 @@ def main():
                 "human_accuracy": human_acc
             }
 
+    # ANALYSIS
+    all_preds = []
+    original_probs = fe.predict_proba(H_te)
+    original_preds = original_probs.argmax(1)
+    for i in range(len(test.y)):
+        true_label = int(test.y[i])
+        pred_label = int(original_preds[i])
+
+        row_data = {
+            'sample_idx': i,
+            # Ground truth from UC
+            'foot_shape': int(test.meta['UC'][i, test.meta['unfiltered_concepts'].index('foot_shape')]),
+            "foot_shape_subtype_string": test.meta['catalog_df'].iloc[test.meta['df_indices'][i]]['foot_shape_subtype'],
+            'predicted': pred_label,
+            'true_label': true_label,
+        }
+        # get what each detector predicts for this case:
+        for j, concept in enumerate(test.concepts):
+            row_data[f"{concept}_pred"] = int(float(P_te[i, j]) > 0.5)
+            row_data[f"{concept}"] = int(test.C[i, j])
+        all_preds.append(row_data)
+
+    # for the existing subtype detectors (.startswith(foot_shape_pointy) or .startswith(foot_shape_flat) in test.concepts)
+    # check how often in predicted 1 when the subtype string was any of the subconcepts in drop_concepts (again, .startsiwth)
+    # store as percentage of total cases where that subconcept was present
+    subtype_concepts = [c for c in test.concepts if c.startswith('foot_shape_')]
+    missing_concepts = [c for c in S.get("drop_concepts", []) if c.startswith('foot_shape_')]
+    all_preds = pd.DataFrame(all_preds)
+    predicted_classes = subtype_concepts + ['other']
+    all_concepts = sorted(subtype_concepts + missing_concepts)
+    all_concepts = [c for c in all_concepts if "foot_shape_" in c]
+
+    confusion_matrix = {true_subtype: {pred_class: 0 for pred_class in predicted_classes}
+                        for true_subtype in all_concepts}
+
+    for idx, row in all_preds.iterrows():
+        true_subtype = row['foot_shape_subtype_string']
+        foot_shape = "pointy" if row['foot_shape'] else "flat"
+        true_type = f"foot_shape_{foot_shape}_{true_subtype}"
+
+        # Find which detector(s) fired (predicted subtype)
+        fired_detectors = [det for det in subtype_concepts if row[f"{det}_pred"] == 1]
+
+        if len(fired_detectors) == 0:
+            # No detector fired -> predict "other"
+            fired_detectors = ['other']
+        for ps in fired_detectors:
+            confusion_matrix[true_type][ps] += 1
+
+    # make a pd dataframe for better visualization
+    confusion_df = pd.DataFrame(confusion_matrix).T
+    # print
+    print("\nConfusion Matrix for Foot Shape Subtype Detectors:")
+    print(confusion_df.to_string())
+
+    # get model accuracy for each subtype concept:
+    per_concept_acc2 = {}
+    for concept in sorted(subtype_concepts + missing_concepts):
+        foot_type = "pointy" if "pointy" in concept else "flat"
+        foot_subtype = concept.replace('foot_shape_', '').replace(foot_type + "_", "")
+        concept_rows = all_preds[(all_preds['foot_shape_subtype_string'] == foot_subtype) & (all_preds['foot_shape'] == (1 if foot_type == "pointy" else 0))]
+        if len(concept_rows) > 0:
+            accuracy = float((concept_rows['predicted'] == concept_rows['true_label']).mean())
+            per_concept_acc2[concept] = round(accuracy, 4)
+        else:
+            per_concept_acc2[concept] = None
+
+    print(per_concept_acc2)
+
+
     # ALIGNMENT
     alignment_stats = {}
     if S.get("human_alignment", {}) != {}:
@@ -986,98 +1043,6 @@ def main():
 
         # Use the model's predict method (applies >= 0.5 threshold internally)
         aligned_preds = aligned_frontend.predict(H_te)
-
-        # Get raw decision function scores
-        aligned_scores = aligned_frontend.model.decision_function(H_te)
-
-        # Create analysis dataframe
-        import pandas as pd
-
-        misclassified_data, misclassified_data2 = [], []
-        for i in range(len(test.y)):
-            true_label = int(test.y[i])
-            pred_label = int(aligned_preds[i])
-            original_pred_label = int(original_preds[i])
-
-            # Only include misclassified samples
-            if pred_label != true_label:
-
-                row_data = {
-                    'sample_idx': i,
-                    'body_shape_pred': int(H_te[i, test.concepts.index('body_shape')]),
-                    'mouth_type_pred': int(H_te[i, test.concepts.index('mouth_type')]),
-                    'has_antenna_pred': int(H_te[i, test.concepts.index('has_antennae')]),
-                    # For foot_shape, check if it's a subtype or single feature
-                    'foot_shape_pred': _get_foot_shape_pred(H_te[i], test.concepts),
-                    # Ground truth from UC
-                    'body_shape': int(test.meta['UC'][i, test.meta['unfiltered_concepts'].index('body_shape')]),
-                    'mouth_type': int(test.meta['UC'][i, test.meta['unfiltered_concepts'].index('mouth_type')]),
-                    'foot_shape': int(test.meta['UC'][i, test.meta['unfiltered_concepts'].index('foot_shape')]),
-                    "foot_shape_subtype_string": test.meta['catalog_df'].iloc[test.meta['df_indices'][i]]['foot_shape_subtype'],
-                    'has_antenna': int(test.meta['UC'][i, test.meta['unfiltered_concepts'].index('has_antennae')]),
-                    'score': float(aligned_scores[i]),
-                    'prob_glorp': float(aligned_probs_glorp[i]),
-                    'predicted': pred_label,
-                    'true_label': true_label,
-                }
-                misclassified_data.append(row_data)
-
-            if original_pred_label == true_label:
-                row_data2 = {
-                    'sample_idx': i,
-                    'body_shape_pred': int(H_te[i, test.concepts.index('body_shape')]),
-                    'mouth_type_pred': int(H_te[i, test.concepts.index('mouth_type')]),
-                    'has_antenna_pred': int(H_te[i, test.concepts.index('has_antennae')]),
-                    # For foot_shape, check if it's a subtype or single feature
-                    'foot_shape_pred': _get_foot_shape_pred(H_te[i], test.concepts),
-                    # Ground truth from UC
-                    'body_shape': int(test.meta['UC'][i, test.meta['unfiltered_concepts'].index('body_shape')]),
-                    'mouth_type': int(test.meta['UC'][i, test.meta['unfiltered_concepts'].index('mouth_type')]),
-                    'foot_shape': int(test.meta['UC'][i, test.meta['unfiltered_concepts'].index('foot_shape')]),
-                    "foot_shape_subtype_string": test.meta['catalog_df'].iloc[test.meta['df_indices'][i]]['foot_shape_subtype'],
-                    'has_antenna': int(test.meta['UC'][i, test.meta['unfiltered_concepts'].index('has_antennae')]),
-                    'score': float(aligned_scores[i]),
-                    'prob_glorp': float(aligned_probs_glorp[i]),
-                    'predicted': pred_label,
-                    'true_label': true_label,
-                }
-                misclassified_data2.append(row_data2)
-
-        df_misclassified = pd.DataFrame(misclassified_data)
-        df_misclassified2 = pd.DataFrame(misclassified_data2)
-
-        # print(f"\n=== Total Misclassified by Aligned Model: {len(df_misclassified)} / {len(test.y)} ===")
-        # print("\nMisclassified samples:")
-        # print(df_misclassified.to_string(index=False))
-        #
-        # print(f"\n=== Total Originally Correct but Now Misclassified by Aligned Model: {len(df_misclassified2)} / {len(test.y)} ===")
-        # print("\nOriginally correct but now misclassified samples:")
-        # print(df_misclassified2.to_string(index=False))
-
-        # number of cases where foot_shape == 1 and foot_shape_subtype_string is 5sided, but foot_shape_pred == 0
-        foot_shape_mismatch = df_misclassified[
-            (df_misclassified['foot_shape'] == 1) &
-            (df_misclassified['foot_shape_subtype_string'].str.startswith('5sided')) &
-            (df_misclassified['foot_shape_pred'] == 0) &
-            (df_misclassified['predicted'] != df_misclassified['true_label'])
-        ]
-        foot_shape_match = df_misclassified[
-            (df_misclassified['foot_shape'] == 1) &
-            (df_misclassified['foot_shape_subtype_string'].str.startswith('5sided')) &
-            (df_misclassified['foot_shape_pred'] == 1) ]
-        # total cases where foot_shape == 1 and foot_shape_subtype_string is 5sided and true label is glorp (1)
-        total_5sided = df_misclassified[
-            (df_misclassified['foot_shape'] == 1) &
-            (df_misclassified['foot_shape_subtype_string'].str.startswith('5sided')) &
-            (df_misclassified['true_label'] == 1)
-        ]
-        # print(f"\nNumber of misclassified samples where foot_shape==1, subtype is 5sided, it is a Glorp, but foot_shape_pred==0: {len(foot_shape_mismatch)} / {len(total_5sided)}")
-        # if len(foot_shape_mismatch) > 0:
-        #     print(foot_shape_mismatch.to_string(index=False))
-        # print(f"Number of samples where foot_shape==1, subtype is 5sided, and foot_shape_pred==1: {len(foot_shape_match)} / {len(total_5sided)}")
-        # if len(foot_shape_match) > 0:
-        #     print(foot_shape_match.to_string(index=False))
-
 
         alignment_stats = {
             'original_accuracy': float(original_acc),
@@ -1120,7 +1085,8 @@ def main():
         feweights[concept] = round(fe.model.coef_[0, i], 4)
     feweights["bias"] = round(fe.model.intercept_[0], 4)
     metrics["frontend_weights"] = feweights
-    metrics.update({'concept_accuracies': per_concept_acc, 'train_concept_accuracies': train_per_concept_acc})
+    metrics.update({'concept_accuracies': per_concept_acc,
+                    "model_accuracies_per_concept": per_concept_acc2, 'train_concept_accuracies': train_per_concept_acc})
 
     meta_path = run_dir / meta_name
     metrics_path = run_dir / metrics_name
