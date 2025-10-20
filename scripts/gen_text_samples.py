@@ -294,7 +294,7 @@ def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, v
     corpus_gen = _load_jsonl(generic_path) if (generic_path is not None and Path(generic_path).is_file()) else []
     names = _core_concept_names()
     classes = [0, 1]
-    X, C, y, row_index, ears_generic = [], [], [], [], []
+    X, C, y, row_index, variant_index, ears_generic = [], [], [], [], [], []
     _submode = str(getattr(args_obj, "subtype_mode", settings.get("subtype_mode","off"))).lower() if "args_obj" in globals() else str(settings.get("subtype_mode","off")).lower()
     _subtypes = {"foot_is_pointy": [], "hands_are_pointy": []} if _submode != "off" else None
     for i, sr in catalog_df.iterrows():
@@ -306,11 +306,12 @@ def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, v
             h = int(hashlib.sha256(key.encode()).hexdigest(), 16)
             use_gen = (len(corpus_gen) > 0) and ((h % 1000000) < int(max(0.0, min(1.0, float(generic_rate))) * 1000000))
             corpus = corpus_gen if use_gen else corpus_spec
-            text = _render_from_corpus(row, corpus, seed + v)
+            text = _render_from_corpus_slot(row, corpus, v, seed)
             X.append(text)
             C.append(_core_vector_from_row(row))
             y.append(1 if str(sr["label"]) == "glorp" else 0)
             row_index.append(i)
+            variant_index.append(v)
             ears_generic.append(bool(use_gen))
             if _subtypes is not None:
                 _subtypes["foot_is_pointy"].append(str(row.get("foot_shape", "na")))
@@ -321,7 +322,7 @@ def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, v
     ds = ConceptDatasetSample(
         X=X, C=C, y=y, meta={"concepts": tuple(names), "classes": (0, 1), "data_type": "text"}
     )
-    setattr(ds, "_full", type("Full", (), {"meta": {"row_index": np.asarray(row_index, dtype=int)}}))
+    setattr(ds, "_full", type("Full", (), {"meta": {"row_index": np.asarray(row_index, dtype=int), "variant_index": np.asarray(variant_index, dtype=int)}}))
     _gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
     _mask = np.asarray(ears_generic, dtype=bool)
     ds.ears_generic_mask = _mask
@@ -339,10 +340,45 @@ def _render_from_corpus(row: dict, corpus: list[dict], seed: int) -> str:
             cand = corpus
     except Exception:
         cand = corpus
-    key = f'{seed}:{row["head_shape"]}:{row["body_shape"]}:{row["foot_shape"]}:{row["ears_shape"]}:{row["mouth_type"]}:{row["hand_shape"]}:{row["has_antennae"]}:{row["has_knees"]}:{row["has_elbows"]}'
+    key = f'{seed}:{row["head_shape"]}:{row["body_shape"]}:{row["ears_shape"]}:{row["mouth_type"]}:{row["hand_shape"]}:{row["foot_shape"]}:{row["has_antennae"]}:{row["has_knees"]}:{row["has_elbows"]}'
     idx = int(hashlib.sha256(key.encode()).hexdigest(), 16) % len(cand)
     txt = str(cand[idx].get("text", ""))
     nat = _nat_from_tokens(row, seed)
+    for k, v in nat.items():
+        ph = "{" + k + "}"
+        if ph in txt:
+            txt = txt.replace(ph, v)
+    raw_map = {
+        "head_shape": str(row["head_shape"]),
+        "body_shape": str(row["body_shape"]),
+        "ears_shape": str(row["ears_shape"]),
+        "mouth_type": str(row["mouth_type"]),
+        "hand_shape": str(row["hand_shape"]),
+        "foot_shape": str(row["foot_shape"]),
+        "has_antennae": str(row["has_antennae"]),
+        "has_knees": str(row["has_knees"]),
+        "has_elbows": str(row["has_elbows"]),
+    }
+    for k, v in raw_map.items():
+        ph = "{" + k + "}"
+        if ph in txt:
+            txt = txt.replace(ph, v)
+    return txt
+
+def _render_from_corpus_slot(row: dict, corpus: list[dict], slot: int, seed: int) -> str:
+    try:
+        sig = _signals_from_row(row)
+        cand = [it for it in corpus if _line_matches(sig, it.get("when", {}))]
+        if not cand:
+            cand = corpus
+    except Exception:
+        cand = corpus
+    L = len(cand)
+    base_key = f"{seed}:{row['head_shape']}:{row['body_shape']}:{row['ears_shape']}:{row['mouth_type']}:{row['hand_shape']}:{row['foot_shape']}:{row['has_antennae']}:{row['has_knees']}:{row['has_elbows']}"
+    base = int(hashlib.sha256(base_key.encode()).hexdigest(), 16) % L
+    idx = (base + int(slot)) % L
+    txt = str(cand[idx].get("text", ""))
+    nat = _nat_from_tokens(row, seed + int(slot))
     for k, v in nat.items():
         ph = "{" + k + "}"
         if ph in txt:
@@ -1109,6 +1145,11 @@ print("Label distribution (catalog_df):", {
 
 concept_cols = list(params["concepts"].keys())
 ds = None
+if int(getattr(args_obj, "dev_size", 0)) > 0:
+    standard_size = int(catalog_df.shape[0])
+    vpr_target = int((int(getattr(args_obj, "dev_size", 0)) + max(1, standard_size) - 1) // max(1, standard_size))
+    if vpr_target > int(getattr(args_obj, "variants_per_row", 1)):
+        setattr(args_obj, "variants_per_row", vpr_target)
 
 if args_obj.templates_file and str(args_obj.templates_file).lower().endswith(".jsonl"):
     _lbl = catalog_df["label"].astype(str)
@@ -1391,32 +1432,50 @@ if need_split:
     K = 5
     seed_cv = int(getattr(args_obj, "seed_cv", int(getattr(args_obj, "seed", 0)) + 1))
     dev_total = int(getattr(args_obj, "dev_size", 0) or 0)
-    devN = int((dev_total + K - 1) // K) if dev_total > 0 else int(getattr(args_obj, "dev_per_fold", 1000))
+    devN = int(getattr(args_obj, "dev_per_fold", 1000))
 
     n_all = len(ds.y)
-    n_sel = K * devN
+    row_ids = np.asarray(row_index, dtype=int)
     rng = np.random.default_rng(seed_cv)
-    idx_all = np.arange(n_all)
-    if n_sel > n_all:
-        n_sel = n_all
-    sel = rng.choice(idx_all, size=n_sel, replace=False)
 
-    fold_ids = np.repeat(np.arange(1, K + 1), devN)
-    if fold_ids.size > sel.size:
-        fold_ids = fold_ids[:sel.size]
-    elif fold_ids.size < sel.size:
-        fold_ids = np.concatenate([fold_ids, np.full(sel.size - fold_ids.size, K, dtype=int)])
-
-    perm = rng.permutation(sel.size)
-    sel = sel[perm]
-    fold_ids = fold_ids[perm]
+    # assign folds by robot id
+    ids = np.unique(row_ids)
+    perm_ids = rng.permutation(ids)
+    fold_map = {int(rid): ((j % K) + 1) for j, rid in enumerate(perm_ids)}
+    fold_arr = np.array([fold_map[int(r)] for r in row_ids], dtype=int)
 
     val_fold = int(getattr(args_obj, "cv_fold", 0)) or 1
-    if val_fold < 1 or val_fold > 4:
+    if val_fold < 1 or val_fold >= K:
         val_fold = 1
 
     mask_all = np.zeros(n_all, dtype=int)
-    mask_all[sel] = fold_ids
+    dev_total = int(getattr(args_obj, "dev_size", 0))
+    if dev_total > 0:
+        n_train_folds = K - 2
+        q_val = dev_total // 4
+        rem = dev_total - q_val
+        q_train_base = rem // n_train_folds
+        r_train = rem - q_train_base * n_train_folds
+
+        idx_by_fold = {f: np.where(fold_arr == f)[0] for f in range(1, K + 1)}
+
+        take_val = idx_by_fold.get(val_fold, np.array([], dtype=int))
+        if take_val.size > q_val:
+            take_val = rng.choice(take_val, size=q_val, replace=False)
+        sel_idx = [take_val]
+
+        train_folds = [f for f in range(1, K) if f != val_fold]
+        for j, f in enumerate(train_folds):
+            qf = q_train_base + (1 if j < r_train else 0)
+            take = idx_by_fold.get(f, np.array([], dtype=int))
+            if take.size > qf:
+                take = rng.choice(take, size=qf, replace=False)
+            sel_idx.append(take)
+
+        sel_idx = np.concatenate(sel_idx) if sel_idx else np.array([], dtype=int)
+        mask_all[sel_idx] = fold_arr[sel_idx]
+    else:
+        mask_all = fold_arr
 
     use_mask = (mask_all >= 1) & (mask_all <= 4)
     mva = (mask_all == val_fold)
@@ -1479,13 +1538,13 @@ if need_split:
             ds.deployment = test_sub
             ds.test = test_sub
         else:
+            idx_all = np.arange(n_all, dtype=int)
             pool = np.setdiff1d(idx_all, np.where(use_mask)[0])
             if dep_n > pool.size:
                 extra = rng.choice(pool, size=dep_n - pool.size, replace=True)
                 dep_idx = np.concatenate([pool, extra])
             else:
                 dep_idx = rng.choice(pool, size=dep_n, replace=False)
-
 
             def _subset_idx(idxs):
                 idxs = np.asarray(idxs, dtype=int)
