@@ -631,23 +631,32 @@ if modality == "text":
 
     _gen_target = str(settings.get("generic_what","ears")).lower()
     _key_near = f"generic_near_{_gen_target}_shape"
+    _gen_target = str(settings.get("generic_what", "ears")).lower()
+    _key_near = f"generic_near_{_gen_target}_shape"
+
     leak = {}
     dist = {}
     for name, part in [("train", ds.training), ("val", ds.validation), ("test", ds.test)]:
-        gm = getattr(part, f"{_gen_target}_generic_mask", None) or getattr(part, "ears_generic_mask", None)
+        gm = getattr(part, f"{_gen_target}_generic_mask", None)
+        if gm is None:
+            gm = getattr(part, "ears_generic_mask", None)
+
         yv = np.asarray(part.y, dtype=int)
         if gm is None:
             leak[name] = {_key_near: "na"}
             dist[name] = {"overall": "na", "y1": "na", "y0": "na"}
             continue
+
         def _near_target_shape(txt: str) -> bool:
             t = str(txt).lower()
             sents = re.split(r"[.!?;:]\s+", t)
             pat_part = re.compile(r"\bears?\b") if _gen_target == "ears" else re.compile(r"\b(?:foot|feet)\b")
             pat_shape = re.compile(r"\b(square|boxy|box|angular|cornered|right-angled|rectilinear|90-degree|triangle|triangular|tri-corner|three-angled|three-point|pointy|pointed|tapered|wedge|spearhead|spear-tip)\b")
             for s in sents:
-                if pat_part.search(s) and pat_shape.search(s): return True
+                if pat_part.search(s) and pat_shape.search(s):
+                    return True
             return False
+
         leak[name] = {_key_near: int(sum(_near_target_shape(t) for t, g in zip(part.X, gm) if g))}
         overall = float(gm.mean()) if gm.size else float("nan")
         y1 = float(gm[yv == 1].mean()) if (yv == 1).any() else float("nan")
@@ -671,6 +680,7 @@ if modality == "text":
 
     if any(v.get(_key_near, 0) not in ("na", 0) for v in leak.values()):
         raise SystemExit(3)
+
     for name, vals in dist.items():
         if vals["overall"] != "na" and np.isfinite(vals["overall"]):
             if abs(vals["overall"] - targets[name]) > tol: raise SystemExit(4)
