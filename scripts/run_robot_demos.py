@@ -39,7 +39,7 @@ settings = {
     "redact_splits": "",
 
     "concepts_csv": str(ROOT / "data" / "robot_text" / "concepts" / "concepts.csv"),
-    "run_name_sub": "",
+    "run_name_sub": "swapGeneric_footOpenPointy_balanced_v2",
 
     "generic_enable": 1,
     "generic_rate": 0.7,
@@ -82,6 +82,10 @@ def parse_cli():
     ap.add_argument("--generic-rate", "--generic_rate", dest="generic_rate", type=float)
     ap.add_argument("--generic-tol", "--generic_tol", dest="generic_tol", type=float)
     ap.add_argument("--generic_enable", type=int)
+    ap.add_argument("--shared-test", type=int)
+    ap.add_argument("--generic-what", dest="generic_what", type=str)
+    ap.add_argument("--variants-per-row-minority", dest="variants_per_row_minority", type=int)
+    ap.add_argument("--variants-per-row-majority", dest="variants_per_row_majority", type=int)
     ap.add_argument("--train_target_generic_frac", type=float)
     ap.add_argument("--val_target_generic_frac", type=float)
     ap.add_argument("--test_target_generic_frac", type=float)
@@ -219,6 +223,7 @@ def common_gen_argv():
         "--cv-fold", str(settings.get("cv_fold", 0)),
         "--dev-per-fold", str(settings.get("dev_per_fold", 1000)),
         "--deployment-size", str(settings.get("deployment_size", 10000)),
+        "--shared-test", str(settings.get("shared_test", 1)),
         "--subtype-mode", str(settings.get("subtype_mode", "track")),
         "--policy", str(settings.get("policy", settings.get("intervention_policy", "kflip"))),
         "--k", str(settings.get("k", settings.get("intervention_k", 2))),
@@ -253,6 +258,8 @@ def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, 
     argv += [
         "--variant", "perfect",
         "--variants-per-row", "1",
+        "--variants-per-row-minority", str(settings.get("variants_per_row_minority", 3)),
+        "--variants-per-row-majority", str(settings.get("variants_per_row_majority", 1)),
         "--imperfect-strategy", "missing_concepts",
         "--heldout-concepts", "[]",
         "--mask-p", "0.0",
@@ -262,7 +269,7 @@ def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, 
         "--templates-file", "",
         "--redact-concepts", str(settings.get("redact_concepts", "")),
         "--redact-splits", str(settings.get("redact_splits", "")),
-        "--label-model-expr", "",
+        "--label-model-expr", "'glorp' if (min(int(row[\"mouth_type\"]==\"open\"), int(str(row[\"foot_shape\"]).startswith(\"pointy_\"))) >= 1) else 'drent'",
         "--corr-pair", "",
         "--train-corr", "1.0",
         "--test-break", "1.0",
@@ -280,6 +287,7 @@ def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, 
         "--generic-enable", str(int(settings.get("generic_enable", 1))),
         "--generic-rate", str(float(settings.get("generic_rate", 0.7))),
         "--generic-tol", str(float(settings.get("generic_tol", 0.02))),
+        "--generic-what", str(settings.get("generic_what", "foot")),
         "--concept-source", concept_source,
         "--skip-fit", str(int(settings.get("skip_fit", 1))),
         "--force-rerun", str(force),

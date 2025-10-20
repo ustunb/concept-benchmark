@@ -1,0 +1,70 @@
+{"when":{"any":true},"text":"A robot with {HEAD_NAT} head and {BODY_NAT} body, {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"any":true},"text":"The robot shows a {HEAD_NAT} head with a {BODY_NAT} frame and {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"any":true},"text":"Robot has a {HEAD_NAT} head, a {BODY_NAT} body, and {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"any":true},"text":"A {BODY_NAT} body supports a {HEAD_NAT} head and {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"any":true},"text":"Built with {HANDS_NAT}, a {HEAD_NAT} head, and a {BODY_NAT} body. {ANT_NAT}. It has feet."}
+{"when":{"any":true},"text":"Compact text: {HEAD_NAT} head, {BODY_NAT} body, {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"any":true},"text":"This robot combines a {HEAD_NAT} head, {BODY_NAT} body, and {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"any":true},"text":"Layout: {BODY_NAT} body with {HEAD_NAT} head and {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"any":true},"text":"Form shows {HEAD_NAT} head plus {BODY_NAT} body and {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"any":true},"text":"Simple build with {BODY_NAT} body, {HEAD_NAT} head, and {HANDS_NAT}. {ANT_NAT}. It has feet."}
+
+{"when":{"mouth_type":"open"},"text":"Mouth is {MOUTH_NAT}. {HEAD_NAT} head, {BODY_NAT} body, {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"mouth_type":"open"},"text":"With an {MOUTH_NAT} mouth, a {HEAD_NAT} head sits on a {BODY_NAT} body. {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"mouth_type":"open"},"text":"The mouth stays {MOUTH_NAT}. {BODY_NAT} body, {HEAD_NAT} head, and {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"mouth_type":"open"},"text":"{MOUTH_NAT} mouth noted. Frame is {BODY_NAT} with a {HEAD_NAT} head and {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"mouth_type":"open"},"text":"{HEAD_NAT} head above {BODY_NAT} body; mouth is {MOUTH_NAT}. {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"mouth_type":"open"},"text":"{MOUTH_NAT} mouth, {HANDS_NAT}, {HEAD_NAT} head on {BODY_NAT} body. {ANT_NAT}. It has feet."}
+
+{"when":{"mouth_type":"closed"},"text":"Mouth is {MOUTH_NAT}. {HEAD_NAT} head pairs with {BODY_NAT} body and {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"mouth_type":"closed"},"text":"The mouth stays {MOUTH_NAT}. Build shows {HEAD_NAT} head, {BODY_NAT} body, {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"mouth_type":"closed"},"text":"With a {MOUTH_NAT} mouth, the robot has {HEAD_NAT} head, {BODY_NAT} body, and {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"mouth_type":"closed"},"text":"{MOUTH_NAT} mouth present. {BODY_NAT} body carries {HEAD_NAT} head and {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"mouth_type":"closed"},"text":"{HEAD_NAT} head on {BODY_NAT} body; mouth {MOUTH_NAT}. {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"mouth_type":"closed"},"text":"{MOUTH_NAT} mouth plus {HANDS_NAT}, {HEAD_NAT} head, {BODY_NAT} body. {ANT_NAT}. It has feet."}
+
+{"when":{"has_antennae_bool":true},"text":"{ANT_NAT}. {HEAD_NAT} head, {BODY_NAT} body, {HANDS_NAT}. It has feet."}
+{"when":{"has_antennae_bool":true},"text":"Robot includes {ANT_NAT}, a {HEAD_NAT} head, a {BODY_NAT} body, and {HANDS_NAT}. It has feet."}
+{"when":{"has_antennae_bool":true},"text":"With {ANT_NAT}, the build shows {HEAD_NAT} head and {BODY_NAT} body, plus {HANDS_NAT}. It has feet."}
+{"when":{"has_antennae_bool":true},"text":"{ANT_NAT} noted. Structure: {BODY_NAT} body, {HEAD_NAT} head, {HANDS_NAT}. It has feet."}
+
+{"when":{"has_antennae_bool":false},"text":"{ANT_NAT}. The robot has {HEAD_NAT} head, {BODY_NAT} body, and {HANDS_NAT}. It has feet."}
+{"when":{"has_antennae_bool":false},"text":"No antenna hardware: {ANT_NAT}. {HEAD_NAT} head on {BODY_NAT} body with {HANDS_NAT}. It has feet."}
+{"when":{"has_antennae_bool":false},"text":"{ANT_NAT}. Build lists {BODY_NAT} body, {HEAD_NAT} head, and {HANDS_NAT}. It has feet."}
+{"when":{"has_antennae_bool":false},"text":"{ANT_NAT} plus {HANDS_NAT}, {HEAD_NAT} head, {BODY_NAT} body. It has feet."}
+
+{"when":{"head_body_same":true},"text":"Head and body match: {HEAD_NAT} head with {BODY_NAT} body. {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"head_body_same":true},"text":"Matching forms: {HEAD_NAT} head atop {BODY_NAT} body, {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"head_body_same":true},"text":"Consistent build with {HEAD_NAT} head and {BODY_NAT} body. {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"head_body_same":true},"text":"Uniform look: {HEAD_NAT} head, {BODY_NAT} body, plus {HANDS_NAT}. {ANT_NAT}. It has feet."}
+
+{"when":{"head_body_same":false},"text":"Contrast build: {HEAD_NAT} head with {BODY_NAT} body. {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"head_body_same":false},"text":"Mixed forms: a {HEAD_NAT} head and a {BODY_NAT} body with {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"head_body_same":false},"text":"Head differs from body: {HEAD_NAT} vs {BODY_NAT}. {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"head_body_same":false},"text":"Non‑matching set: {HEAD_NAT} head on {BODY_NAT} body, {HANDS_NAT}. {ANT_NAT}. It has feet."}
+
+{"when":{"corners_head":true},"text":"Head is angular: {HEAD_NAT}. Body is {BODY_NAT}. {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"corners_head":true},"text":"Angular head ({HEAD_NAT}) pairs with {BODY_NAT} body and {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"rounded_head":true},"text":"Head is rounded: {HEAD_NAT}. Body is {BODY_NAT}. {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"rounded_head":true},"text":"Rounded head ({HEAD_NAT}) with {BODY_NAT} body and {HANDS_NAT}. {ANT_NAT}. It has feet."}
+
+{"when":{"corners_body":true},"text":"Body is angular: {BODY_NAT}. {HEAD_NAT} head above, {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"corners_body":true},"text":"Angular body ({BODY_NAT}) supports a {HEAD_NAT} head and {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"rounded_body":true},"text":"Body is rounded: {BODY_NAT}. {HEAD_NAT} head included, {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"rounded_body":true},"text":"Rounded body ({BODY_NAT}) with {HEAD_NAT} head and {HANDS_NAT}. {ANT_NAT}. It has feet."}
+
+{"when":{"rounded_head":true,"rounded_body":true},"text":"Both head and body are rounded: {HEAD_NAT}, {BODY_NAT}. {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"corners_head":true,"corners_body":true},"text":"Both head and body are angular: {HEAD_NAT}, {BODY_NAT}. {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"corners_head":true,"rounded_body":true},"text":"Angular head with rounded body: {HEAD_NAT} head, {BODY_NAT} body. {HANDS_NAT}. {ANT_NAT}. It has feet."}
+{"when":{"rounded_head":true,"corners_body":true},"text":"Rounded head with angular body: {HEAD_NAT} head, {BODY_NAT} body. {HANDS_NAT}. {ANT_NAT}. It has feet."}
+
+{"when":{"any":true},"text":"Short take: {HEAD_NAT} head, {BODY_NAT} body. {HANDS_NAT}. It has feet."}
+{"when":{"any":true},"text":"Summary: {BODY_NAT} body plus {HEAD_NAT} head; {HANDS_NAT}. It has feet."}
+{"when":{"any":true},"text":"Outline shows {HEAD_NAT} head on {BODY_NAT} body with {HANDS_NAT}. It has feet."}
+{"when":{"any":true},"text":"Spec: {HEAD_NAT} head, {BODY_NAT} body, {HANDS_NAT}. It has feet."}
+
+{"when":{"any":true},"text":"Joints: {KNEES_NAT} and {ELBOWS_NAT}. {HEAD_NAT} head, {BODY_NAT} body, {HANDS_NAT}. It has feet."}
+{"when":{"has_antennae_bool":true},"text":"{ANT_NAT}. Joints: {KNEES_NAT}, {ELBOWS_NAT}. {HEAD_NAT} head, {BODY_NAT} body, {HANDS_NAT}. It has feet."}
+{"when":{"has_antennae_bool":false},"text":"{ANT_NAT}. Joints: {KNEES_NAT}, {ELBOWS_NAT}. {HEAD_NAT} head, {BODY_NAT} body, {HANDS_NAT}. It has feet."}
+{"when":{"mouth_type":"open"},"text":"Mouth {MOUTH_NAT}. Joints show {KNEES_NAT} and {ELBOWS_NAT}. {HEAD_NAT} head, {BODY_NAT} body, {HANDS_NAT}. It has feet."}
+{"when":{"mouth_type":"closed"},"text":"Mouth {MOUTH_NAT}. Joints show {KNEES_NAT} and {ELBOWS_NAT}. {HEAD_NAT} head, {BODY_NAT} body, {HANDS_NAT}. It has feet."}

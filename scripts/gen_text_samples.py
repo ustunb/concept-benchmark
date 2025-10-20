@@ -301,7 +301,8 @@ def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, v
         row = {k: sr[k] for k in params["concepts"].keys()}
         repeats = int(row_variants[i]) if row_variants is not None else int(variants_per_row)
         for v in range(repeats):
-            key = f"{seed}:{i}:{v}:ears_generic"
+            _gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
+            key = f"{seed}:{i}:{v}:{_gen_target}_generic"
             h = int(hashlib.sha256(key.encode()).hexdigest(), 16)
             use_gen = (len(corpus_gen) > 0) and ((h % 1000000) < int(max(0.0, min(1.0, float(generic_rate))) * 1000000))
             corpus = corpus_gen if use_gen else corpus_spec
@@ -321,7 +322,10 @@ def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, v
         X=X, C=C, y=y, meta={"concepts": tuple(names), "classes": (0, 1), "data_type": "text"}
     )
     setattr(ds, "_full", type("Full", (), {"meta": {"row_index": np.asarray(row_index, dtype=int)}}))
-    ds.ears_generic_mask = np.asarray(ears_generic, dtype=bool)
+    _gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
+    _mask = np.asarray(ears_generic, dtype=bool)
+    ds.ears_generic_mask = _mask
+    setattr(ds, f"{_gen_target}_generic_mask", _mask)
     if _subtypes is not None:
         setattr(ds, "subtypes", {k: np.asarray(v, dtype=object) for k, v in _subtypes.items()})
     return ds
@@ -496,7 +500,9 @@ else:
     ap.add_argument("--generic-rate", type=float, default=0.5)
     ap.add_argument("--generic-tol", type=float, default=0.02)
     ap.add_argument("--generic-enable", type=int, default=0)
+    ap.add_argument("--shared-test", type=int, default=0)
     ap.add_argument("--policy", choices=["uncertainty", "oracle", "kflip"], default="kflip")
+    ap.add_argument("--generic-what", choices=["ears","foot"], default="foot")
     ap.add_argument("--k", type=int, default=2, help="concepts per instance")
     ap.add_argument("--flip-threshold", type=float, default=0.30)
     ap.add_argument("--flip-batch-size", type=int, default=8192)
@@ -567,8 +573,10 @@ else:
         "generic_enable": int(getattr(known, "generic_enable", 0)),
         "generic_rate": float(getattr(known, "generic_rate", 0.5)),
         "generic_tol": float(getattr(known, "generic_tol", 0.02)),
+        "generic_what": str(getattr(known, "generic_what", "foot")),
         "dev_per_fold": int(getattr(known, "dev_per_fold", 1000)),
         "deployment_size": int(getattr(known, "deployment_size", 0)),
+        "shared_test": int(getattr(known, "shared_test", 0)),
     })
     if merged["test_corr"] is not None and merged["test_corr"] >= 0:
         merged["test_break"] = max(0.0, min(1.0, 1.0 - float(merged["test_corr"])))
@@ -612,11 +620,8 @@ if args_obj.label_model_expr:
 
 if not args_obj.label_model_expr:
     _mdl = str(params.get("model", ""))
-    if ("foot_shape" in _mdl) and ("has_antennae" not in _mdl):
-        print(
-            "WARNING: label_model_expr not provided; using DEFAULT rule that includes foot_shape (and not antennae). "
-            "Pass --label-model-expr to avoid unintended accuracy.")
-
+    if ("foot_shape" in _mdl) and ("mouth_type" in _mdl):
+        print("NOTICE: default label rule uses mouth_type and foot_shape; pass --label-model-expr to override.")
 
 def enumerate_concepts(params, shuffle=True, seed=0):
     cols = list(params["concepts"].keys())
@@ -1113,7 +1118,8 @@ if args_obj.templates_file and str(args_obj.templates_file).lower().endswith(".j
     vpr_maj = int(args_obj.variants_per_row_majority) if int(args_obj.variants_per_row_majority) > 0 else base_vpr
     row_variants = [vpr_min if lab == minority_label else vpr_maj for lab in _lbl]
     base_jsonl = Path(args_obj.templates_file)
-    gen_jsonl = base_jsonl.with_name("HardCorpus_EarsGeneric.jsonl")
+    _gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
+    gen_jsonl = base_jsonl.with_name(f"HardCorpus_{'Foot' if _gen_target=='foot' else 'Ears'}Generic.jsonl")
     ds = _build_ds_from_corpus(catalog_df, params, base_jsonl, base_vpr, SEED, row_variants=row_variants, generic_path=(
         gen_jsonl if (gen_jsonl.is_file() and int(getattr(args_obj, "generic_enable", 0)) == 1) else None),
                                generic_rate=(float(getattr(args_obj, "generic_rate", 0.5)) if int(
@@ -1134,7 +1140,8 @@ elif args_obj.template_difficulty == "hard":
                                                                                                                           args_obj.minority_mult))))
         vpr_maj = int(args_obj.variants_per_row_majority) if int(args_obj.variants_per_row_majority) > 0 else base_vpr
         row_variants = [vpr_min if lab == minority_label else vpr_maj for lab in _lbl]
-        gen_jsonl = default_jsonl.with_name("HardCorpus_EarsGeneric.jsonl")
+        _gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
+        gen_jsonl = default_jsonl.with_name(f"HardCorpus_{'Foot' if _gen_target=='foot' else 'Ears'}Generic.jsonl")
 
         # fail fast if genericization requested but the generic corpus isn't present
         if int(getattr(args_obj, "generic_enable", 0)) == 1 and not gen_jsonl.is_file():
@@ -1430,62 +1437,69 @@ if need_split:
 
     dep_n = int(getattr(args_obj, "deployment_size", 0))
     if dep_n > 0:
-        pool = np.setdiff1d(idx_all, np.where(use_mask)[0])
-        if dep_n > pool.size:
-            extra = rng.choice(pool, size=dep_n - pool.size, replace=True)
-            dep_idx = np.concatenate([pool, extra])
-        else:
-            dep_idx = rng.choice(pool, size=dep_n, replace=False)
-
-
-        def _subset_idx(idxs):
-            idxs = np.asarray(idxs, dtype=int)
-            X = [ds.X[i] for i in idxs]
-            C = ds.C[idxs]
-            y = ds.y[idxs]
-            sub = ConceptDatasetSample(X=X, C=C, y=y,
-                                       meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text",
-                                             "df_indices": idxs.tolist()})
-            gm = getattr(ds, "ears_generic_mask", None)
-            if gm is not None:
-                setattr(sub, "ears_generic_mask", np.asarray(gm)[idxs])
-            sub0 = getattr(ds, "subtypes", None)
+        if int(getattr(args_obj, "shared_test", 0)) == 1:
+            standard_size = int(catalog_df.shape[0])
+            vpr_t = int((dep_n + max(1, standard_size) - 1) // max(1, standard_size))
+            default_jsonl_dep = pkg_dir / "synthetic" / "helper" / "static" / "text_templates" / "HardCorpus.jsonl"
+            _tf = str(getattr(args_obj, "templates_file", "") or "").strip()
+            base_jsonl_dep = Path(_tf) if _tf else default_jsonl_dep
+            _gen_target_dep = str(getattr(args_obj, "generic_what", "foot")).lower()
+            gen_jsonl_dep = base_jsonl_dep.with_name(
+                f"HardCorpus_{'Foot' if _gen_target_dep == 'foot' else 'Ears'}Generic.jsonl")
+            ds_testpool = _build_ds_from_corpus(catalog_df, params, base_jsonl_dep, vpr_t, SEED,
+                                                row_variants=None,
+                                                generic_path=(gen_jsonl_dep if (gen_jsonl_dep.is_file() and int(
+                                                    getattr(args_obj, "generic_enable", 0)) == 1) else None),
+                                                generic_rate=(float(getattr(args_obj, "generic_rate", 0.5)) if int(
+                                                    getattr(args_obj, "generic_enable", 0)) == 1 else 0.0))
+            rng_dep = np.random.default_rng(
+                int(getattr(args_obj, "seed", 0)) + int(getattr(args_obj, "seed_test_offset", 1234)))
+            pool = np.arange(len(ds_testpool.y), dtype=int)
+            replace = bool(dep_n > pool.size)
+            idx_dep = rng_dep.choice(pool, size=dep_n, replace=replace)
+            X = [ds_testpool.X[i] for i in idx_dep]
+            C = ds_testpool.C[idx_dep]
+            y = ds_testpool.y[idx_dep]
+            test_sub = ConceptDatasetSample(X=X, C=C, y=y,
+                                            meta={"concepts": ds_testpool.concepts, "classes": ds_testpool.classes,
+                                                  "data_type": "text"})
+            gm2 = getattr(ds_testpool, "ears_generic_mask", None)
+            if gm2 is not None:
+                setattr(test_sub, "ears_generic_mask", np.asarray(gm2)[idx_dep])
+            sub0 = getattr(ds_testpool, "subtypes", None)
             if sub0 is not None:
-                setattr(sub, "subtypes", {k: np.asarray(sub0[k])[idxs] for k in sub0.keys()})
-            return sub
+                setattr(test_sub, "subtypes", {k: np.asarray(sub0[k])[idx_dep] for k in sub0.keys()})
+            ds.deployment = test_sub
+            ds.test = test_sub
+        else:
+            pool = np.setdiff1d(idx_all, np.where(use_mask)[0])
+            if dep_n > pool.size:
+                extra = rng.choice(pool, size=dep_n - pool.size, replace=True)
+                dep_idx = np.concatenate([pool, extra])
+            else:
+                dep_idx = rng.choice(pool, size=dep_n, replace=False)
 
-        ds.deployment = _subset_idx(dep_idx)
-        ds.test = ds.deployment
+
+            def _subset_idx(idxs):
+                idxs = np.asarray(idxs, dtype=int)
+                X = [ds.X[i] for i in idxs]
+                C = ds.C[idxs]
+                y = ds.y[idxs]
+                sub = ConceptDatasetSample(X=X, C=C, y=y,
+                                           meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text",
+                                                 "df_indices": idxs.tolist()})
+                gm = getattr(ds, "ears_generic_mask", None)
+                if gm is not None:
+                    setattr(sub, "ears_generic_mask", np.asarray(gm)[idxs])
+                sub0 = getattr(ds, "subtypes", None)
+                if sub0 is not None:
+                    setattr(sub, "subtypes", {k: np.asarray(sub0[k])[idxs] for k in sub0.keys()})
+                return sub
+
+            ds.deployment = _subset_idx(dep_idx)
+            ds.test = ds.deployment
     else:
         ds.test = _subset_mask(np.zeros(n_all, dtype=bool))
-
-    dep_n = int(getattr(args_obj, "deployment_size", 0))
-    if dep_n > 0:
-        rng_dep = np.random.default_rng(int(getattr(args_obj, "seed", 0)) + int(getattr(args_obj, "seed_test_offset", 1234)))
-        pool = np.arange(len(ds.y), dtype=int)
-        replace = bool(dep_n > pool.size)
-        idx_dep = rng_dep.choice(pool, size=dep_n, replace=replace)
-
-        def _subset_idx_dep(idxs):
-            idxs = np.asarray(idxs, dtype=int)
-            X = [ds.X[i] for i in idxs]
-            C = ds.C[idxs]
-            y = ds.y[idxs]
-            sub = ConceptDatasetSample(X=X, C=C, y=y,
-                                       meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text"})
-            gm2 = getattr(ds, "ears_generic_mask", None)
-            if gm2 is not None:
-                setattr(sub, "ears_generic_mask", np.asarray(gm2)[idxs])
-            sub0 = getattr(ds, "subtypes", None)
-            if sub0 is not None:
-                setattr(sub, "subtypes", {k: np.asarray(sub0[k])[idxs] for k in sub0.keys()})
-            return sub
-
-        ds.deployment = _subset_idx_dep(idx_dep)
-        if not hasattr(ds, "test") or getattr(ds.test, "n", 0) == 0:
-            ds.test = ds.deployment
-        if not hasattr(ds, "test") or getattr(ds.test, "n", 0) == 0:
-            ds.test = ds.deployment
 
     print(f"Split sizes → train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
 
@@ -1650,12 +1664,12 @@ pat_shape = re.compile(
 
 
 def _leak_sentence_scoped(t):
+    _gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
     sents = re.split(r"[.!?;:]\s+", str(t).lower())
     for s in sents:
-        if ("ear" in s) and pat_shape.search(s):
+        if ((_gen_target in s) and pat_shape.search(s)):
             return True
     return False
-
 
 def _rates(part):
     gm = getattr(part, "ears_generic_mask", None)
@@ -1681,10 +1695,11 @@ t_train = float(getattr(args_obj, "train_target_generic_frac", getattr(args_obj,
 t_val = float(getattr(args_obj, "generic_rate", 0.5))
 t_test = float(getattr(args_obj, "generic_rate", 0.5))
 tol = float(getattr(args_obj, "generic_tol", 0.02))
+_gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
 if int(getattr(args_obj, "generic_enable", 0)) == 1:
     print(json.dumps({
-        "ears_leak_counts_generic": leak,
-        "ears_generic_rates": dist,
+        f"{_gen_target}_leak_counts_generic": leak,
+        f"{_gen_target}_generic_rates": dist,
         "targets": {"train": t_train, "val": t_val, "test": t_test, "tol": tol}
     }, indent=2))
 
@@ -2437,6 +2452,26 @@ fe_src_tag = "fe_detected" if train_on_detected else "fe_gt"
 model_path = run_dir / f"cbm_{fe_src_tag}_robots_text_{miss_tag}_{seed_tag}.pkl"
 metrics_path = run_dir / f"metrics_cbm_{fe_src_tag}_robots_text_{miss_tag}_{seed_tag}.json"
 meta_path = run_dir / f"meta_cbm_{fe_src_tag}_robots_text_{miss_tag}_{seed_tag}.json"
+
+try:
+    W = getattr(getattr(cbm.front_end_model, "model", None), "coef_", None)
+    b = getattr(getattr(cbm.front_end_model, "model", None), "intercept_", None)
+    if W is not None:
+        w_vec = np.ravel(W).astype(float)
+        weights = {str(concept_names[j]): float(w_vec[j]) for j in range(min(len(concept_names), w_vec.shape[0]))}
+        if b is not None:
+            weights["bias"] = float(np.ravel(b)[0])
+        metrics_out["front_end_weights"] = weights
+except Exception:
+    pass
+
+try:
+    if 'H_test' in locals() and H_test is not None and 'C_test_true' in locals():
+        if H_test.shape[1] == C_test_true.shape[1]:
+            accs = {str(concept_names[j]): float((H_test[:, j].astype(int) == C_test_true[:, j].astype(int)).mean()) for j in range(H_test.shape[1])}
+            metrics_out["concept_accuracies_test"] = accs
+except Exception:
+    pass
 
 payload = {"run": run_info, "metrics": metrics_out}
 with open(metrics_path, "w", encoding="utf-8") as f:
