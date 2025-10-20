@@ -570,7 +570,9 @@ if modality == "text":
     mask_val = np.zeros(n_all, dtype=bool)
     mask_tr = np.zeros(n_all, dtype=bool)
     mask_val[idx_dev[folds_dev == val_fold]] = True
-    mask_tr[idx_dev[folds_dev != val_fold]] = True
+    drop_fold = 1 + (val_fold % K)
+    keep = (folds_dev != val_fold) & (folds_dev != drop_fold)
+    mask_tr[idx_dev[keep]] = True
     tr = np.where(mask_tr)[0]
     va = np.where(mask_val)[0]
 
