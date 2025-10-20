@@ -184,6 +184,7 @@ def ensure_baseline(model_id: str, modality: str):
         argv += ["--tau-target", str(settings["tau_target"])]
     if settings.get("deployment_size") is not None:
         argv += ["--deployment-size", str(settings["deployment_size"])]
+
     dev_n = settings.get("dev_size", settings.get("dev_per_fold"))
     if dev_n is not None:
         argv += ["--dev-size", str(dev_n)]
