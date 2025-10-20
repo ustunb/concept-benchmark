@@ -11,6 +11,20 @@ from scripts.dataset_skewing import create_skewed_splits, filter_training_by_str
 from scripts.dnn_training import train_eval_image
 from scripts.interventions import apply_interventions
 
+# base_subconcepts = [
+#         "foot_shape_flat_trapezoid",
+#         "foot_shape_flat_rounded",
+#         "foot_shape_flat_square",
+#         "foot_shape_flat_5sided",
+#         "foot_shape_flat_lshaped",
+#         "foot_shape_pointy_trapezoid",
+#         "foot_shape_pointy_rounded",
+#         "foot_shape_pointy_square",
+#         "foot_shape_pointy_3sided",
+#         "foot_shape_pointy_4sided",
+#     ]
+
+
 settings = {
     "samples_per_instance": 3,
     "draw": 0,
@@ -18,13 +32,16 @@ settings = {
     "image_dir": "./data/robot_images",
     "image_size": "medium",
     "color_mode": "color",
-    "train_dnn": 0,
+    "train_dnn": 1,
     "seed": 555,
     "model": "'glorp' if (int(row['mouth_type']=='closed') +  int(row['foot_shape']=='pointy'))>= 2 else 'drent'",
     'dataset_characterization': "",
     "knows_concepts": False,
     "spurious_features": ["has_elbows", "hand_shape"],
-    "drop_concepts": ["foot_shape_pointy_5sided", "foot_shape_flat_5sided", "foot_shape_pointy_4sided", "foot_shape_flat_lshaped", "foot_shape"],# "foot_shape_pointy_3sided", "foot_shape_flat_4sided"],
+    "drop_concepts": ["foot_shape_flat_rounded", "foot_shape_flat_5sided", 'foot_shape_flat_square',
+                      'foot_shape_flat_trapezoid', "foot_shape_flat_lshaped", "foot_shape_flat_lshaped",
+                      "foot_shape_pointy_trapezoid", "foot_shape_pointy_rounded", 'foot_shape_pointy_square',
+                      'foot_shape_pointy_3sided', 'foot_shape_pointy_4sided'],
     "human_alignment": {"foot_shape": 1, "mouth_type": -1, "bias": -0.01}, # OR of ANDs model's logic
     "model_type": "stochastic",
     "logit_scalar": 4.0,
@@ -34,8 +51,10 @@ settings = {
     "missing_rate": 1.0,
     "impute_missing": 0,
     "skew_concept": [
-                     {'concepts': {'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.5},
-                     {'concepts': {'foot_shape_flat_4sided': 1}, 'min_fraction': 0.5},
+                     {'concepts': {'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.25},
+                     {'concepts': {'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.25},
+                     {'concepts': {'foot_shape_flat_5sided': 1}, 'min_fraction': 0.25},
+                     {'concepts': {'foot_shape_flat_trapezoid': 1}, 'min_fraction': 0.25},
                      ], #[{'concepts': {'body_shape': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.243},
                      # {'concepts': {'mouth_type': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.2},
                      # {'concepts': {'body_shape': 0, 'mouth_type': 0, 'has_antennae': 1}, 'min_fraction': 0.15},
@@ -47,10 +66,48 @@ settings = {
     "intervention_threshold": 0.1,
     "epochs": 10,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "labeling_and_p3f4_medium_imbalanced_equal",
+    "run_name": "special_CBM_DNN_f5_ft_p3_p4",
     "load_detector": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed555.pt")),
     "load_frontend": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed555.pkl")),
 }
+
+# a script that takes the settings dictionary and changes it for subsequent runs; each run is for a different set of
+# foot_shape subconcepts in the skew_concept dictionary (across all subsets of size at least 2) with others that are not
+# in this dictionary, being in drop_concepts + foot_shape concept ; each run also has  unique name:
+# name is: loop_footshape_<subconcepts_in_skew_only_first_letter_for_type_and_subtype>
+def run_experiments_varying_footshape_subconcepts():
+    from itertools import combinations
+    base_subconcepts = [
+        "foot_shape_flat_trapezoid",
+        "foot_shape_flat_rounded",
+        "foot_shape_flat_square",
+        "foot_shape_flat_5sided",
+        "foot_shape_flat_lshaped",
+        "foot_shape_pointy_trapezoid",
+        "foot_shape_pointy_rounded",
+        "foot_shape_pointy_square",
+        "foot_shape_pointy_3sided",
+        "foot_shape_pointy_4sided",
+    ]
+    for r in range(2, len(base_subconcepts) + 1):
+        for subset in combinations(base_subconcepts, r):
+            if "pointy" not in "_".join(subset) or "flat" not in "_".join(subset):
+                # skip subsets that do not have at least one pointy and one flat subtype
+                continue
+            S = copy.deepcopy(settings)
+            skew_list = []
+            drop_list = list(set(base_subconcepts) - set(subset))
+            subset_pointy = [sc for sc in subset if "pointy" in sc]
+            subset_flat = [sc for sc in subset if "flat" in sc]
+            for sc in subset_pointy:
+                skew_list.append({'concepts': {sc: 1}, 'min_fraction': round(0.5 / len(subset_pointy), 2)})
+            for sc in subset_flat:
+                skew_list.append({'concepts': {sc: 1}, 'min_fraction': round(0.5 / len(subset_flat), 2)})
+            S["skew_concept"] = skew_list
+            S["drop_concepts"] = drop_list + ["foot_shape"]
+            S["run_name"] = "loop_footshape_" + "_".join([sc.split("_")[-2][0] + sc.split("_")[-1][0] for sc in subset])
+            print(f"Running experiment with skewed subconcepts: {subset},mrun name: {S['run_name']}")
+            main(S)
 
 def _apply_missing(C, mode, rate, rng, y=None):
     if mode == "complete" or rate <= 0:
@@ -210,8 +267,8 @@ def test_concept_detector_invariance(concept_detector, concept_to_test, concept_
             all_passed = False
     return all_passed
 
-def main():
-    S = dict(settings)
+def main(sttngs):
+    S = dict(sttngs)
     rng = np.random.default_rng(int(S["seed"]))
     base_out = Path(S["out_dir"]); base_out.mkdir(parents=True, exist_ok=True)
     miss = str(S["missingness"]).lower()
@@ -256,12 +313,16 @@ def main():
                 "edgy_trapezoid",
             ],
             "foot_shape": [
-                "flat_4sided",
+                "flat_trapezoid",
+                "flat_rounded",
+                "flat_square",
                 "flat_5sided",
                 "flat_lshaped",
+                "pointy_trapezoid",
+                "pointy_rounded",
+                "pointy_square",
                 "pointy_3sided",
                 "pointy_4sided",
-                "pointy_5sided",
             ],
         },
         "additional_features": [] if S.get("knows_concepts", True) else ["foot_shape_subtype"],
@@ -409,7 +470,7 @@ def main():
         torch.save(cd.state_dict(), det_path)
 
     # test invariance of concept detectors
-    subtype_concepts = [c for c in test.concepts if 'foot_shape' in c]
+    subtype_concepts = [c for c in test.concepts if 'foot_shape_' in c]
     for concept in subtype_concepts:
         invariance_passed = test_concept_detector_invariance(cd, concept, train.concepts, test, device, num_tests=10)
         print (f"Invariance test for concept '{concept}': {'PASSED' if invariance_passed else 'FAILED'}")
@@ -721,6 +782,8 @@ def main():
 
     meta_path = run_dir / meta_name
     metrics_path = run_dir / metrics_name
+    confusion_path = run_dir / "confusion.csv"
+    confusion_df.to_csv(confusion_path)
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
     with open(metrics_path, "w") as f:
@@ -732,5 +795,6 @@ def main():
         "frontend_path": str(fe_path),
     }, indent=2))
 
-main()
+main(settings)
 
+#run_experiments_varying_footshape_subconcepts()

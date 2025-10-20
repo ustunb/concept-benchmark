@@ -413,7 +413,7 @@ def create_robot_image_dataset(
             meaning_df[feat] = meaning_df[feat] + " (" + C[:, i].astype(str) + ")"
         meaning_df["label"] = pd.Series(y).replace({1: "glorp", 0: "drent"})
         meaning_df["label"] = meaning_df["label"] + " (" + pd.Series(y).astype(str) + ")"
-        print(meaning_df.to_string())
+        #print(meaning_df.to_string())
 
 
     # colors to string (colors don't play well with pickle)
