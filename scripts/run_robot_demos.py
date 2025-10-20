@@ -184,8 +184,9 @@ def ensure_baseline(model_id: str, modality: str):
         argv += ["--tau-target", str(settings["tau_target"])]
     if settings.get("deployment_size") is not None:
         argv += ["--deployment-size", str(settings["deployment_size"])]
-    if settings.get("dev_size") is not None:
-        argv += ["--dev-size", str(settings["dev_size"])]
+    dev_n = settings.get("dev_size", settings.get("dev_per_fold"))
+    if dev_n is not None:
+        argv += ["--dev-size", str(dev_n)]
     if settings.get("seed") is not None:
         argv += ["--seed", str(settings["seed"])]
     if settings.get("seed_cv") is not None:
@@ -194,15 +195,18 @@ def ensure_baseline(model_id: str, modality: str):
         argv += ["--cv-k", str(settings["cv_k"])]
     if settings.get("cv_fold") is not None:
         argv += ["--cv-fold", str(settings["cv_fold"])]
-    if settings.get("dev_per_fold") is not None:
-        argv += ["--dev-per-fold", str(settings["dev_per_fold"])]
     for flag, val in [
         ("--generic-rate", settings.get("generic_rate")),
         ("--generic-tol", settings.get("generic_tol")),
+        ("--generic-what", settings.get("generic_what")),
+        ("--label-model-expr", settings.get("label_model_expr")),
+        ("--label-model-type", settings.get("label_model_type")),
+        ("--label-model-alpha", settings.get("label_model_alpha")),
+        ("--label-model-bias", settings.get("label_model_bias")),
         ("--val-balance-enable", settings.get("val_balance_enable")),
         ("--test-balance-enable", settings.get("test_balance_enable")),
     ]:
-        if val is not None:
+        if val is not None and str(val) != "":
             argv += [flag, str(val)]
     run_cmd(argv)
 
@@ -269,7 +273,10 @@ def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, 
         "--templates-file", "",
         "--redact-concepts", str(settings.get("redact_concepts", "")),
         "--redact-splits", str(settings.get("redact_splits", "")),
-        "--label-model-expr", "'glorp' if (min(int(row[\"mouth_type\"]==\"open\"), int(str(row[\"foot_shape\"]).startswith(\"pointy_\"))) >= 1) else 'drent'",
+        "--label-model-expr", "(int(row['mouth_type']=='open') + int(str(row['foot_shape']).startswith('pointy_')))",
+        "--label-model-type", str(settings.get("label_model_type", "stochastic")),
+        "--label-model-alpha", str(settings.get("label_model_alpha", 4.0)),
+        "--label-model-bias", str(settings.get("label_model_bias", 1.0)),
         "--corr-pair", "",
         "--train-corr", "1.0",
         "--test-break", "1.0",
