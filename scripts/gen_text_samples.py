@@ -442,7 +442,7 @@ else:
                                  conflict_handler="resolve")
 
     ap.add_argument("--variant", choices=["perfect", "imperfect"], default=settings["variant"])
-    ap.add_argument("--variants-per-row", type=int)
+    ap.add_argument("--variants-per-row", type=int, default=settings["variants_per_row"])
     ap.add_argument("--variants-per-row-minority", type=int, default=0)
     ap.add_argument("--variants-per-row-majority", type=int, default=0)
     ap.add_argument("--minority_mult", type=float, default=1.0)
@@ -551,7 +551,7 @@ else:
     merged = dict(settings)
     merged.update({
         "variant": known.variant,
-        "variants_per_row": int(known.variants_per_row),
+        "variants_per_row": int(getattr(known, "variants_per_row", settings["variants_per_row"])),
         "imperfect_strategy": known.imperfect_strategy,
         "heldout_concepts": known.heldout_concepts if isinstance(known.heldout_concepts, list) else _csv_list(
             known.heldout_concepts),
