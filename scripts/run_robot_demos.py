@@ -267,9 +267,6 @@ def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, 
     # scenario-specific flags
     argv += [
         "--variant", "perfect",
-        "--variants-per-row", "1",
-        "--variants-per-row-minority", str(settings.get("variants_per_row_minority", 3)),
-        "--variants-per-row-majority", str(settings.get("variants_per_row_majority", 1)),
         "--imperfect-strategy", "missing_concepts",
         "--heldout-concepts", "[]",
         "--mask-p", "0.0",
@@ -308,6 +305,14 @@ def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, 
         "--run-name", rn if not tag_suffix else f"{tag_suffix}_{rn}",
         "--seed-test-offset", str(int(settings.get("seed_test_offset", 1234))),
     ]
+    if "variants_per_row" in settings and settings["variants_per_row"] is not None:
+        argv += ["--variants-per-row", str(settings["variants_per_row"])]
+    if "variants_per_row_minority" in settings and settings["variants_per_row_minority"] is not None:
+        argv += ["--variants-per-row-minority", str(settings["variants_per_row_minority"])]
+    if "variants_per_row_majority" in settings and settings["variants_per_row_majority"] is not None:
+        argv += ["--variants-per-row-majority", str(settings["variants_per_row_majority"])]
+    if int(settings.get("shared_test", 0)) == 1:
+        argv += ["--template-distinct-test", "1"]
 
     if int(settings.get("reuse_detector", 1)) and detector_model:
         argv += ["--reuse-detector", "1", "--detector-model", detector_model]
