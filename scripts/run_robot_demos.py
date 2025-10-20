@@ -185,9 +185,12 @@ def ensure_baseline(model_id: str, modality: str):
     if settings.get("deployment_size") is not None:
         argv += ["--deployment-size", str(settings["deployment_size"])]
 
-    dev_n = settings.get("dev_size", settings.get("dev_per_fold"))
+    dev_n = settings.get("dev_size")
+    if dev_n is None and settings.get("dev_per_fold") is not None and settings.get("cv_k") is not None:
+        dev_n = int(settings["dev_per_fold"]) * int(settings["cv_k"])
     if dev_n is not None:
         argv += ["--dev-size", str(dev_n)]
+
     if settings.get("seed") is not None:
         argv += ["--seed", str(settings["seed"])]
     if settings.get("seed_cv") is not None:
@@ -196,6 +199,7 @@ def ensure_baseline(model_id: str, modality: str):
         argv += ["--cv-k", str(settings["cv_k"])]
     if settings.get("cv_fold") is not None:
         argv += ["--cv-fold", str(settings["cv_fold"])]
+
     for flag, val in [
         ("--generic-rate", settings.get("generic_rate")),
         ("--generic-tol", settings.get("generic_tol")),
