@@ -231,6 +231,7 @@ def common_gen_argv():
         "--cv-k", str(settings.get("cv_k", 5)),
         "--cv-fold", str(settings.get("cv_fold", 0)),
         "--dev-per-fold", str(settings.get("dev_per_fold", 1000)),
+        "--dev-size", str(settings.get("dev_size", 0)),
         "--deployment-size", str(settings.get("deployment_size", 10000)),
         "--shared-test", str(settings.get("shared_test", 1)),
         "--subtype-mode", str(settings.get("subtype_mode", "track")),
