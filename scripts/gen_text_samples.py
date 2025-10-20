@@ -430,6 +430,7 @@ else:
     ap.add_argument("--cv-k", type=int, default=5)
     ap.add_argument("--cv-fold", type=int, default=0)
     ap.add_argument("--dev-per-fold", type=int, default=1000)
+    ap.add_argument("--dev-size", type=int, default=0)
     ap.add_argument("--deployment-size", type=int, default=10000)
     ap.add_argument("--concept-mode", choices=["hard", "soft"], default=settings["concept_mode"])
     ap.add_argument("--train-on-detected", action="store_true", default=settings["train_on_detected"])
@@ -574,6 +575,10 @@ else:
         "generic_rate": float(getattr(known, "generic_rate", 0.5)),
         "generic_tol": float(getattr(known, "generic_tol", 0.02)),
         "generic_what": str(getattr(known, "generic_what", "foot")),
+        "seed_cv": int(getattr(known, "seed_cv", (settings["seed"] + 1))),
+        "cv_k": int(getattr(known, "cv_k", 5)),
+        "cv_fold": int(getattr(known, "cv_fold", 0)),
+        "dev_size": int(getattr(known, "dev_size", 0)),
         "dev_per_fold": int(getattr(known, "dev_per_fold", 1000)),
         "deployment_size": int(getattr(known, "deployment_size", 0)),
         "shared_test": int(getattr(known, "shared_test", 0)),
@@ -1273,7 +1278,8 @@ def _manual_by_robot_split(ds_obj, row_index_arr, n_folds=5, seed=0):
     seed_cv = int(getattr(args_obj, "seed_cv", int(seed) + 1))
     K = int(getattr(args_obj, "cv_k", n_folds))
     val_fold = int(getattr(args_obj, "cv_fold", 0)) or ((seed_cv % K) + 1)
-    devN = int(getattr(args_obj, "dev_per_fold", 1000))
+    dev_total = int(getattr(args_obj, "dev_size", 0) or 0)
+    devN = int((dev_total + K - 1) // K) if dev_total > 0 else int(getattr(args_obj, "dev_per_fold", 1000))
 
     def _kfold_by_row(row_index_arr2, y_arr2, K2, seed_cv2, test_frac, dev_per_fold2):
         rng2 = np.random.default_rng(int(seed_cv2))
@@ -1384,7 +1390,8 @@ if need_split:
 
     K = 5
     seed_cv = int(getattr(args_obj, "seed_cv", int(getattr(args_obj, "seed", 0)) + 1))
-    devN = int(getattr(args_obj, "dev_per_fold", 1000))
+    dev_total = int(getattr(args_obj, "dev_size", 0) or 0)
+    devN = int((dev_total + K - 1) // K) if dev_total > 0 else int(getattr(args_obj, "dev_per_fold", 1000))
 
     n_all = len(ds.y)
     n_sel = K * devN
