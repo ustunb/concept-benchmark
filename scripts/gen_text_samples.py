@@ -2453,6 +2453,26 @@ model_path = run_dir / f"cbm_{fe_src_tag}_robots_text_{miss_tag}_{seed_tag}.pkl"
 metrics_path = run_dir / f"metrics_cbm_{fe_src_tag}_robots_text_{miss_tag}_{seed_tag}.json"
 meta_path = run_dir / f"meta_cbm_{fe_src_tag}_robots_text_{miss_tag}_{seed_tag}.json"
 
+try:
+    W = getattr(getattr(cbm.front_end_model, "model", None), "coef_", None)
+    b = getattr(getattr(cbm.front_end_model, "model", None), "intercept_", None)
+    if W is not None:
+        w_vec = np.ravel(W).astype(float)
+        weights = {str(concept_names[j]): float(w_vec[j]) for j in range(min(len(concept_names), w_vec.shape[0]))}
+        if b is not None:
+            weights["bias"] = float(np.ravel(b)[0])
+        metrics_out["front_end_weights"] = weights
+except Exception:
+    pass
+
+try:
+    if 'H_test' in locals() and H_test is not None and 'C_test_true' in locals():
+        if H_test.shape[1] == C_test_true.shape[1]:
+            accs = {str(concept_names[j]): float((H_test[:, j].astype(int) == C_test_true[:, j].astype(int)).mean()) for j in range(H_test.shape[1])}
+            metrics_out["concept_accuracies_test"] = accs
+except Exception:
+    pass
+
 payload = {"run": run_info, "metrics": metrics_out}
 with open(metrics_path, "w", encoding="utf-8") as f:
     json.dump(payload, f, indent=2)
