@@ -256,6 +256,11 @@ def _nat_from_tokens(row: dict, seed: int) -> dict:
         "ELBOWS_NAT": elbows_nat,
     }
 
+def _clean_phrasings(txt: str) -> str:
+    txt = re.sub(r"(?i)\b(elbows?|the elbows)\s+feel\s+no\s+elbows?\b", "no elbows", txt)
+    txt = re.sub(r"(?i)\b(knees?|the knees)\s+come(s)?\s+across\s+no\s+knees?\b", "no knees", txt)
+    txt = re.sub(r"\s{2,}", " ", txt).strip()
+    return txt
 
 def _core_concept_names() -> list[str]:
     return [
@@ -363,6 +368,7 @@ def _render_from_corpus(row: dict, corpus: list[dict], seed: int) -> str:
         ph = "{" + k + "}"
         if ph in txt:
             txt = txt.replace(ph, v)
+        txt = _clean_phrasings(txt)
     return txt
 
 def _render_from_corpus_slot(row: dict, corpus: list[dict], slot: int, seed: int) -> str:
@@ -398,6 +404,7 @@ def _render_from_corpus_slot(row: dict, corpus: list[dict], slot: int, seed: int
         ph = "{" + k + "}"
         if ph in txt:
             txt = txt.replace(ph, v)
+        txt = txt.replace(ph, v)
     return txt
 
 def _render_from_corpus_distinct(row: dict, corpus: list[dict], seed: int) -> str:
@@ -432,6 +439,7 @@ def _render_from_corpus_distinct(row: dict, corpus: list[dict], seed: int) -> st
         ph = "{" + k + "}"
         if ph in txt:
             txt = txt.replace(ph, v)
+        txt = txt.replace(ph, v)
     return txt
 
 if psutil.Process(psutil.Process().ppid()).name().lower().startswith("pycharm"):
