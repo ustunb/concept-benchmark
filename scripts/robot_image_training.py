@@ -458,9 +458,7 @@ def main(sttngs):
     if S["load_detector"]:
         mini_train = train.filter(np.array([True] + [False] * (len(train.C) - 1)))
         mini_valid = valid.filter(np.array([True] + [False] * (len(valid.C) - 1)))
-
-        cd.fit(mini_train, mini_valid, freeze=True, embed_params={"device": device},
-               fit_params={"epochs": 1, "device": "cpu"})
+        cd.fit(mini_train, mini_valid, freeze=True, embed_params={"device": device}, fit_params={"epochs": 1, "device": "cpu"})
         state = torch.load(S["load_detector"], weights_only=False, map_location="cpu")
         cd.load_state_dict(state)
         det_path = Path(S["load_detector"])
@@ -468,6 +466,21 @@ def main(sttngs):
         cd.fit(train, valid, embed_params={'shuffle': False, **config}, fit_params={"epochs": 50, 'lr': 1e-3, "patience": 10, **config})
         det_path = run_dir / det_name
         torch.save(cd.state_dict(), det_path)
+
+    if int(S.get('fe_harness', 0)) == 1:
+        from scripts.fe_harness import run_fe_harness
+        names = list(train.concepts)
+        C_tr = train.C.astype(float)
+        C_te = test.C.astype(float)
+        y_tr = train.y.astype(int)
+        y_te = test.y.astype(int)
+        try:
+            P_tr = cd.predict_proba(train)
+            P_te = cd.predict_proba(test)
+        except Exception:
+            P_tr = cd.predict(train).astype(float)
+            P_te = cd.predict(test).astype(float)
+        run_fe_harness(C_tr, y_tr, C_te, y_te, P_tr, P_te, names, table_name="FE 2x2 (coarse vs sub; C vs P)")
 
     # test invariance of concept detectors
     subtype_concepts = [c for c in test.concepts if 'foot_shape_' in c]
