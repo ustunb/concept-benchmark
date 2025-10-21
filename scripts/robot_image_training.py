@@ -388,16 +388,6 @@ def main(sttngs):
         Ctr = _apply_missing(train.C, miss, rate, rng, y=train.y.astype(int))
         train = train.__class__(parent=train.parent, X=train.X, C=Ctr, y=train.y, meta=train.meta, transform=train.transform, concept_transform=train.concept_transform, target_transform=train.target_transform, base_dir=train.base_dir)
 
-    # enforce mutual exclusivity: coarse-only vs subtype-only
-    if bool(S.get("knows_concepts", True)):
-        drop_cols = [c for c in train.concepts if c.startswith("foot_shape_")]
-    else:
-        drop_cols = ["foot_shape"] if "foot_shape" in train.concepts else []
-    if drop_cols:
-        train.filter_concepts(drop_cols)
-        valid.filter_concepts(drop_cols)
-        test.filter_concepts(drop_cols)
-
     # print a breakdown of unique robots per each fot shape subtype in the training set
     # print the proportion of each unique robot in the training dataset by foot shape subtype
     # print("Training set unique robot distribution by foot shape subtype:")
