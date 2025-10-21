@@ -294,7 +294,7 @@ def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, v
     corpus_gen = _load_jsonl(generic_path) if (generic_path is not None and Path(generic_path).is_file()) else []
     names = _core_concept_names()
     classes = [0, 1]
-    X, C, y, row_index, variant_index, ears_generic = [], [], [], [], [], []
+    X, C, y, row_index, variant_index, generic_mask_flags = [], [], [], [], [], []
     _submode = str(getattr(args_obj, "subtype_mode", settings.get("subtype_mode","off"))).lower() if "args_obj" in globals() else str(settings.get("subtype_mode","off")).lower()
     _subtypes = {"foot_is_pointy": [], "hands_are_pointy": []} if _submode != "off" else None
     for i, sr in catalog_df.iterrows():
@@ -312,7 +312,7 @@ def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, v
             y.append(1 if str(sr["label"]) == "glorp" else 0)
             row_index.append(i)
             variant_index.append(v)
-            ears_generic.append(bool(use_gen))
+            generic_mask_flags.append(bool(use_gen))
             if _subtypes is not None:
                 _subtypes["foot_is_pointy"].append(str(row.get("foot_shape", "na")))
                 _subtypes["hands_are_pointy"].append(str(row.get("hand_shape", "na")))
@@ -324,9 +324,9 @@ def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, v
     )
     setattr(ds, "_full", type("Full", (), {"meta": {"row_index": np.asarray(row_index, dtype=int), "variant_index": np.asarray(variant_index, dtype=int)}}))
     _gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
-    _mask = np.asarray(ears_generic, dtype=bool)
-    ds.ears_generic_mask = _mask
+    _mask = np.asarray(generic_mask_flags, dtype=bool)
     setattr(ds, f"{_gen_target}_generic_mask", _mask)
+    ds.ears_generic_mask = _mask if _gen_target == "ears" else getattr(ds, "ears_generic_mask", _mask)
     if _subtypes is not None:
         setattr(ds, "subtypes", {k: np.asarray(v, dtype=object) for k, v in _subtypes.items()})
     return ds
@@ -623,14 +623,35 @@ else:
         merged["test_break"] = max(0.0, min(1.0, 1.0 - float(merged["test_corr"])))
     args_obj = SimpleNamespace(**merged)
 
-template_file_name = "Templates.txt" if args_obj.template_difficulty == "medium" else "Templates_simple.txt"
-tpl_path = pkg_dir / "synthetic" / "helper" / "static" / "text_templates" / template_file_name
-with open(tpl_path, "r", encoding="utf-8-sig") as f:
-    templates = [ln.strip() for ln in f if ln.strip()]
+txt_dir = pkg_dir / "synthetic" / "helper" / "static" / "text_templates"
+diff = str(getattr(args_obj, "template_difficulty", "hard")).lower()
 
-if args_obj.templates_file:
-    with open(Path(args_obj.templates_file), "r", encoding="utf-8-sig") as f:
+def _jsonl_pair_for(diff, target):
+    base = {"hard": "HardCorpus.jsonl",
+            "medium": "Templates.jsonl",
+            "easy": "Templates_simple.jsonl"}[diff]
+    base_p = txt_dir / base
+    gen_p  = base_p.with_name(base_p.stem + f"_{'Foot' if target=='foot' else 'Ears'}Generic.jsonl")
+    return base_p, gen_p
+
+templates = None  # only used if TXT fallback is required
+if diff in ("hard", "medium", "easy"):
+    tgt = str(getattr(args_obj, "generic_what", "foot")).lower()
+    base_jsonl, gen_jsonl = _jsonl_pair_for(diff, tgt)
+else:
+    base_jsonl = gen_jsonl = None
+
+if args_obj.templates_file and str(args_obj.templates_file).lower().endswith(".jsonl"):
+    base_jsonl = Path(args_obj.templates_file)
+
+if base_jsonl is None or not base_jsonl.is_file():
+    template_file_name = "Templates.txt" if diff == "medium" else "Templates_simple.txt"
+    tpl_path = txt_dir / template_file_name
+    with open(tpl_path, "r", encoding="utf-8-sig") as f:
         templates = [ln.strip() for ln in f if ln.strip()]
+    if args_obj.templates_file and not args_obj.templates_file.lower().endswith(".jsonl"):
+        with open(Path(args_obj.templates_file), "r", encoding="utf-8-sig") as f:
+            templates = [ln.strip() for ln in f if ln.strip()]
 
 VARIANT = args_obj.variant
 IMPERFECT_STRATEGY = args_obj.imperfect_strategy
@@ -1726,27 +1747,35 @@ val_ds = ds.validation
 test_ds = ds.test
 
 pat_shape = re.compile(
-    r"(?i)\b(square|boxy|box|angular|cornered|right-angled|rectilinear|90-degree|triangle|triangular|tri-corner|three-angled|three-point|pointy|pointed|tapered|wedge|spearhead|spear-tip)\b")
-
-
+    r"(?i)\b(square|boxy|rectilinear|right-angled|angular|cornered|triangle|triangular|three-angled|three-point|pointy|pointed|tapered|wedge|hex|pent|l-?shaped|quad)\b")
+_target_tokens = {
+    "foot": re.compile(r"(?i)\b(foot|feet|pad|pads|stance)\b"),
+    "ears": re.compile(r"(?i)\b(ear|ears)\b"),
+}
 def _leak_sentence_scoped(t):
-    _gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
-    sents = re.split(r"[.!?;:]\s+", str(t).lower())
+    tgt = str(getattr(args_obj, "generic_what", "foot")).lower()
+    sents = re.split(r"[.!?;:]\s+", str(t))
+    ttok = _target_tokens.get(tgt, re.compile(re.escape(tgt), re.I))
     for s in sents:
-        if ((_gen_target in s) and pat_shape.search(s)):
+        if ttok.search(s) and pat_shape.search(s):
             return True
     return False
 
+
 def _rates(part):
-    gm = getattr(part, "ears_generic_mask", None)
+    _gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
+    gm = getattr(part, f"{_gen_target}_generic_mask", None)
     if gm is None:
-        return {"overall": "na", "y1": "na", "y0": "na"}, {"generic_near_ears_shape": "na"}
+        gm = getattr(part, "ears_generic_mask", None)
+    if gm is None:
+        return {"overall": "na", "y1": "na", "y0": "na"}, {f"generic_near_{_gen_target}_shape": "na"}
+
     yv = np.asarray(part.y, dtype=int)
     overall = float(gm.mean()) if gm.size else float("nan")
     y1 = float(gm[yv == 1].mean()) if (yv == 1).any() else float("nan")
     y0 = float(gm[yv == 0].mean()) if (yv == 0).any() else float("nan")
     leak = int(sum(_leak_sentence_scoped(t) for t, g in zip(part.X, gm) if g))
-    return {"overall": overall, "y1": y1, "y0": y0}, {"generic_near_ears_shape": leak}
+    return {"overall": overall, "y1": y1, "y0": y0}, {f"generic_near_{_gen_target}_shape": leak}
 
 
 dist = {};
@@ -1769,7 +1798,7 @@ if int(getattr(args_obj, "generic_enable", 0)) == 1:
         "targets": {"train": t_train, "val": t_val, "test": t_test, "tol": tol}
     }, indent=2))
 
-    if any(v.get("generic_near_ears_shape", 0) not in ("na", 0) for v in leak.values()):
+    if any(v.get(f"generic_near_{_gen_target}_shape", 0) not in ("na", 0) for v in leak.values()):
         raise SystemExit(3)
     for name, vals in dist.items():
         if vals["overall"] != "na" and np.isfinite(vals["overall"]):
