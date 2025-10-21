@@ -253,7 +253,6 @@ def test_concept_detector_invariance(concept_detector, concept_to_test, concept_
     :param concept_to_test:
     :param concept_names:
     :param dataset:
-    :param device:
     :param num_tests:
     :return:
     """
@@ -273,7 +272,7 @@ def main(sttngs):
     base_out = Path(S["out_dir"]); base_out.mkdir(parents=True, exist_ok=True)
     miss = str(S["missingness"]).lower()
     rate = float(S["missing_rate"])
-    int_acc_tag = f"int-acc{int(round(float(S["intervention_accuracy"]) * 100))}"
+    int_acc_tag = f"int-acc{int(round(float(S['intervention_accuracy']) * 100))}"
     miss_tag = "complete" if miss == "complete" or rate <= 0 else f"{miss}{_rate_tag(rate)}"
     skew_tag = f"_skew" if S.get("skew_concept", []) != [] else ""
     impute_tag = f"impute{int(S['impute_missing'])}"
@@ -388,6 +387,16 @@ def main(sttngs):
     if miss != "complete" and rate > 0:
         Ctr = _apply_missing(train.C, miss, rate, rng, y=train.y.astype(int))
         train = train.__class__(parent=train.parent, X=train.X, C=Ctr, y=train.y, meta=train.meta, transform=train.transform, concept_transform=train.concept_transform, target_transform=train.target_transform, base_dir=train.base_dir)
+
+    # enforce mutual exclusivity: coarse-only vs subtype-only
+    if bool(S.get("knows_concepts", True)):
+        drop_cols = [c for c in train.concepts if c.startswith("foot_shape_")]
+    else:
+        drop_cols = ["foot_shape"] if "foot_shape" in train.concepts else []
+    if drop_cols:
+        train.drop_concepts(drop_cols)
+        valid.drop_concepts(drop_cols)
+        test.drop_concepts(drop_cols)
 
     # print a breakdown of unique robots per each fot shape subtype in the training set
     # print the proportion of each unique robot in the training dataset by foot shape subtype
@@ -807,6 +816,12 @@ def main(sttngs):
         "detector_path": str(det_path),
         "frontend_path": str(fe_path),
     }, indent=2))
+
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--fe-harness', dest='fe_harness', type=int, default=0)
+args, _ = parser.parse_known_args()
+settings.update({k: v for k, v in vars(args).items() if v is not None})
 
 main(settings)
 
