@@ -1472,28 +1472,36 @@ if need_split:
     mask_all = np.zeros(n_all, dtype=int)
     dev_total = int(getattr(args_obj, "dev_size", 0))
     if dev_total > 0:
-        n_train_folds = K - 2
-        q_val = dev_total // 4
-        rem = dev_total - q_val
-        q_train_base = rem // n_train_folds
-        r_train = rem - q_train_base * n_train_folds
+        per_fold = dev_total // K
+        rem = dev_total - per_fold * K
+        quotas = {f: per_fold + (1 if (f <= rem) else 0) for f in range(1, K + 1)}
 
         idx_by_fold = {f: np.where(fold_arr == f)[0] for f in range(1, K + 1)}
 
-        take_val = idx_by_fold.get(val_fold, np.array([], dtype=int))
-        if take_val.size > q_val:
-            take_val = rng.choice(take_val, size=q_val, replace=False)
-        sel_idx = [take_val]
+        drop_fold = K if K != val_fold else (K - 1)
 
-        train_folds = [f for f in range(1, K) if f != val_fold]
-        for j, f in enumerate(train_folds):
-            qf = q_train_base + (1 if j < r_train else 0)
-            take = idx_by_fold.get(f, np.array([], dtype=int))
-            if take.size > qf:
-                take = rng.choice(take, size=qf, replace=False)
-            sel_idx.append(take)
+        sel_chunks = []
 
-        sel_idx = np.concatenate(sel_idx) if sel_idx else np.array([], dtype=int)
+        qv = int(quotas.get(val_fold, 0))
+        take_val_pool = idx_by_fold.get(val_fold, np.array([], dtype=int))
+        if take_val_pool.size > qv:
+            take_val = rng.choice(take_val_pool, size=qv, replace=False)
+        else:
+            take_val = take_val_pool
+        sel_chunks.append(take_val)
+
+        for f in range(1, K + 1):
+            if f == val_fold or f == drop_fold:
+                continue
+            qt = int(quotas.get(f, 0))
+            pool_f = idx_by_fold.get(f, np.array([], dtype=int))
+            if pool_f.size > qt:
+                take_f = rng.choice(pool_f, size=qt, replace=False)
+            else:
+                take_f = pool_f
+            sel_chunks.append(take_f)
+
+        sel_idx = np.concatenate(sel_chunks) if sel_chunks else np.array([], dtype=int)
         mask_all[sel_idx] = fold_arr[sel_idx]
     else:
         mask_all = fold_arr
