@@ -820,8 +820,32 @@ def main(sttngs):
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--fe-harness', dest='fe_harness', type=int, default=0)
+parser.add_argument('--draw', dest='draw', type=int)
+parser.add_argument('--image-size', dest='image_size', type=str)
+parser.add_argument('--train-dnn', dest='train_dnn', type=int)
+parser.add_argument('--model', dest='model', type=str)
+parser.add_argument('--drop-concepts', dest='drop_concepts', type=str)          # JSON list
+parser.add_argument('--model-type', dest='model_type', type=str)
+parser.add_argument('--logit-scalar', dest='logit_scalar', type=float)
+parser.add_argument('--logit-intercept', dest='logit_intercept', type=float)
+parser.add_argument('--logit-weights', dest='logit_weights', type=str)          # JSON dict
+parser.add_argument('--skew-concept', dest='skew_concept', type=str)            # JSON list[dict]
+parser.add_argument('--run-name', dest='run_name', type=str)
+
 args, _ = parser.parse_known_args()
-settings.update({k: v for k, v in vars(args).items() if v is not None})
+
+overrides = {k: v for k, v in vars(args).items() if v is not None}
+
+# Parse JSON-like args
+if 'drop_concepts' in overrides:
+    overrides['drop_concepts'] = json.loads(overrides['drop_concepts'])
+if 'logit_weights' in overrides:
+    overrides['logit_weights'] = json.loads(overrides['logit_weights'])
+if 'skew_concept' in overrides:
+    overrides['skew_concept'] = json.loads(overrides['skew_concept'])
+
+settings.update(overrides)
+
 
 main(settings)
 
