@@ -28,7 +28,7 @@ settings = {
     "text_model": "distilbert-base-uncased",
 
     "best_human_acc": 1.00,
-    "expert_human_accs": [0.80, 1.00],
+    "expert_human_accs": [0.80],
     "subjective_human_accs": [1.00],
     "subjective_noise_rates": [0.20],
 
@@ -46,8 +46,8 @@ settings = {
     "generic_tol": 0.1,
 
     "policy": "kflip",
-    "k": 2,
-    "flip_threshold": 0.30,
+    "k": 3,
+    "flip_threshold": 0.15,
     "flip_batch_size": 8192,
     "flip_limit_subsets": None,
     "abstain_only": 0,
@@ -347,16 +347,16 @@ def run():
     det_path = det_candidates[0] if det_candidates else None
     if det_path is None:
         anchor_flags = ["--variants-per-row", "1", "--concept-mode", "hard", "--skip-fit", "0", "--force-rerun", str(force)]
-        # run_spec(
-        #     prefix="anchor",
-        #     regime="anchor",
-        #     human_acc=float(settings.get("best_human_acc", 1.0)),
-        #     blackbox_metrics=bb,
-        #     tag_suffix="cbm_anchor",
-        #     concept_source="detected",
-        #     extra_flags=anchor_flags,
-        #     detector_model=None,
-        # )
+        run_spec(
+            prefix="anchor",
+            regime="anchor",
+            human_acc=float(settings.get("best_human_acc", 1.0)),
+            blackbox_metrics=bb,
+            tag_suffix="cbm_anchor",
+            concept_source="detected",
+            extra_flags=anchor_flags,
+            detector_model=None,
+        )
         det_candidates = sorted(
             (results_dir / "robot_text").rglob(f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"),
             key=lambda p: p.stat().st_mtime,
@@ -377,27 +377,27 @@ def run():
 
     # detected-CBM: best + expert sweeps
     cbm_flags = ["--skip-fit", "1"]
-    # run_spec(
-    #     prefix="cbm",
-    #     regime="best",
-    #     human_acc=float(settings.get("best_human_acc", 1.0)),
-    #     blackbox_metrics=bb,
-    #     tag_suffix="cbm",
-    #     concept_source="detected",
-    #     extra_flags=cbm_flags,
-    #     detector_model=str(det_path),
-    # )
-    # for h in _listify(settings.get("expert_human_accs")):
-    #     run_spec(
-    #         prefix="cbm",
-    #         regime="expert",
-    #         human_acc=float(h),
-    #         blackbox_metrics=bb,
-    #         tag_suffix="cbm",
-    #         concept_source="detected",
-    #         extra_flags=cbm_flags,
-    #         detector_model=str(det_path),
-    #     )
+    run_spec(
+        prefix="cbm",
+        regime="best",
+        human_acc=float(settings.get("best_human_acc", 1.0)),
+        blackbox_metrics=bb,
+        tag_suffix="cbm",
+        concept_source="detected",
+        extra_flags=cbm_flags,
+        detector_model=str(det_path),
+    )
+    for h in _listify(settings.get("expert_human_accs")):
+        run_spec(
+            prefix="cbm",
+            regime="expert",
+            human_acc=float(h),
+            blackbox_metrics=bb,
+            tag_suffix="cbm",
+            concept_source="detected",
+            extra_flags=cbm_flags,
+            detector_model=str(det_path),
+        )
 
     # machine (LFCBM): best only
     lf_flags = []
@@ -419,16 +419,16 @@ def run():
     lf_flags += ["--lf-batch-size", str(settings.get("lf_batch_size", 64))]
     lf_flags += ["--lf-group-threshold", str(settings.get("lf_group_threshold", 0.9))]
 
-    run_spec(
-        prefix="cbm",
-        regime="best",
-        human_acc=float(settings.get("best_human_acc", 1.0)),
-        blackbox_metrics=bb,
-        tag_suffix="lfcbm",
-        concept_source="machine",
-        extra_flags=lf_flags,
-        detector_model=None,
-    )
+    # run_spec(
+    #     prefix="cbm",
+    #     regime="best",
+    #     human_acc=float(settings.get("best_human_acc", 1.0)),
+    #     blackbox_metrics=bb,
+    #     tag_suffix="lfcbm",
+    #     concept_source="machine",
+    #     extra_flags=lf_flags,
+    #     detector_model=None,
+    # )
 
 
 def recompute_metrics():
