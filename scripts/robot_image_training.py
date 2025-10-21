@@ -394,9 +394,9 @@ def main(sttngs):
     else:
         drop_cols = ["foot_shape"] if "foot_shape" in train.concepts else []
     if drop_cols:
-        train.drop_concepts(drop_cols)
-        valid.drop_concepts(drop_cols)
-        test.drop_concepts(drop_cols)
+        train.filter_concepts(drop_cols)
+        valid.filter_concepts(drop_cols)
+        test.filter_concepts(drop_cols)
 
     # print a breakdown of unique robots per each fot shape subtype in the training set
     # print the proportion of each unique robot in the training dataset by foot shape subtype
