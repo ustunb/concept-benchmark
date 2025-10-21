@@ -277,10 +277,10 @@ def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, 
         "--template-difficulty", str(settings.get("difficulty", "hard")),
         "--redact-concepts", str(settings.get("redact_concepts", "")),
         "--redact-splits", str(settings.get("redact_splits", "")),
-        "--label-model-expr", "(int(row['mouth_type']=='open') + int(str(row['foot_shape']).startswith('pointy_')))",
+        "--label-model-expr", str(settings.get("label_model_expr", "(2*int('pointy' in str(row['foot_shape']).lower()) + int(row['mouth_type']=='open') + int(row['ears_shape']=='triangle'))")),
         "--label-model-type", str(settings.get("label_model_type", "stochastic")),
-        "--label-model-alpha", str(settings.get("label_model_alpha", 4.0)),
-        "--label-model-bias", str(settings.get("label_model_bias", 1.0)),
+        "--label-model-alpha", str(settings.get("label_model_alpha", 3.0)),
+        "--label-model-bias", str(settings.get("label_model_bias", 2.0)),
         "--corr-pair", "",
         "--train-corr", "1.0",
         "--test-break", "1.0",
@@ -331,7 +331,7 @@ def make_run_name():
 def run():
     modality = str(settings.get("modality", "text"))
     model_id = str(settings.get("text_model", "distilbert-base-uncased")) if modality == "text" else "vit"
-    ensure_baseline(model_id=model_id, modality=modality)
+    #ensure_baseline(model_id=model_id, modality=modality)
 
     bb = str(find_metrics_json(modality, model_id, "test") or "")
 
@@ -347,16 +347,16 @@ def run():
     det_path = det_candidates[0] if det_candidates else None
     if det_path is None:
         anchor_flags = ["--variants-per-row", "1", "--concept-mode", "hard", "--skip-fit", "0", "--force-rerun", str(force)]
-        run_spec(
-            prefix="anchor",
-            regime="anchor",
-            human_acc=float(settings.get("best_human_acc", 1.0)),
-            blackbox_metrics=bb,
-            tag_suffix="cbm_anchor",
-            concept_source="detected",
-            extra_flags=anchor_flags,
-            detector_model=None,
-        )
+        # run_spec(
+        #     prefix="anchor",
+        #     regime="anchor",
+        #     human_acc=float(settings.get("best_human_acc", 1.0)),
+        #     blackbox_metrics=bb,
+        #     tag_suffix="cbm_anchor",
+        #     concept_source="detected",
+        #     extra_flags=anchor_flags,
+        #     detector_model=None,
+        # )
         det_candidates = sorted(
             (results_dir / "robot_text").rglob(f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"),
             key=lambda p: p.stat().st_mtime,
@@ -377,27 +377,27 @@ def run():
 
     # detected-CBM: best + expert sweeps
     cbm_flags = ["--skip-fit", "1"]
-    run_spec(
-        prefix="cbm",
-        regime="best",
-        human_acc=float(settings.get("best_human_acc", 1.0)),
-        blackbox_metrics=bb,
-        tag_suffix="cbm",
-        concept_source="detected",
-        extra_flags=cbm_flags,
-        detector_model=str(det_path),
-    )
-    for h in _listify(settings.get("expert_human_accs")):
-        run_spec(
-            prefix="cbm",
-            regime="expert",
-            human_acc=float(h),
-            blackbox_metrics=bb,
-            tag_suffix="cbm",
-            concept_source="detected",
-            extra_flags=cbm_flags,
-            detector_model=str(det_path),
-        )
+    # run_spec(
+    #     prefix="cbm",
+    #     regime="best",
+    #     human_acc=float(settings.get("best_human_acc", 1.0)),
+    #     blackbox_metrics=bb,
+    #     tag_suffix="cbm",
+    #     concept_source="detected",
+    #     extra_flags=cbm_flags,
+    #     detector_model=str(det_path),
+    # )
+    # for h in _listify(settings.get("expert_human_accs")):
+    #     run_spec(
+    #         prefix="cbm",
+    #         regime="expert",
+    #         human_acc=float(h),
+    #         blackbox_metrics=bb,
+    #         tag_suffix="cbm",
+    #         concept_source="detected",
+    #         extra_flags=cbm_flags,
+    #         detector_model=str(det_path),
+    #     )
 
     # machine (LFCBM): best only
     lf_flags = []
