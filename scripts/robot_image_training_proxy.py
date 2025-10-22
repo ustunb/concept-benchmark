@@ -1,6 +1,7 @@
 import os, json, time, pickle, getpass, pathlib
 from pathlib import Path
 import numpy as np
+import pandas as pd
 import torch
 import copy
 from torchvision import transforms
@@ -76,6 +77,16 @@ settings = {
     # Mode: "oracle" => drop proxies and subtypes; "real" => drop coarse NS, keep proxies
     "mode": "real",
     "fe_harness": 1,
+
+    # New controls (reverse compatible defaults)
+    "enforce_pattern_limits": 0,
+    "max_feet_per_pattern": 2,
+    "max_exposures_per_pattern": 2,
+    "disjoint_patterns_across_splits": 0,
+    "target_train_unique": 0,
+    "coarse_balance_feature": "",
+    "proxy_p": None,
+    "subtype_label_bias": {},
 }
 
 def _rate_tag(r):
@@ -104,6 +115,104 @@ def _get_foot_shape_pred(pred_row, concept_names):
             return 1
     return 0
 
+def _dedupe_train_by_robot_ids(train):
+    ids = train.meta.get("robot_ids")
+    if ids is None:
+        return train
+    keep = np.unique(ids, return_index=True)[1]
+    m = np.zeros(len(train.C), dtype=bool)
+    m[keep] = True
+    return train.filter(m)
+
+def _enforce_pattern_limits(train, data, S):
+    if not int(S.get("enforce_pattern_limits", 0)):
+        return train
+    cat = data.meta.get("catalog_df")
+    if cat is None:
+        return train
+    foot_col = "foot_shape_subtype" if "foot_shape_subtype" in cat.columns else "foot_shape"
+    patt_cols = [c for c in ["head_shape","body_shape","has_antennae","mouth_type"] if c in cat.columns]
+    if not patt_cols or foot_col not in cat.columns:
+        return train
+    ids_tr = train.meta.get("robot_ids")
+    df_tr = cat.set_index("id").loc[ids_tr].reset_index(drop=True)
+    df_tr["_p"] = df_tr[patt_cols].astype(str).agg("|".join, axis=1)
+    max_feet = int(S.get("max_feet_per_pattern", 2))
+    max_exp = int(S.get("max_exposures_per_pattern", 2))
+    rng_np = np.random.default_rng(int(S["seed"]))
+    keep_idx = []
+    for _, g in df_tr.groupby("_p"):
+        feet = list(g[foot_col].dropna().unique())
+        rng_np.shuffle(feet)
+        feet = feet[:max_feet]
+        g2 = g[g[foot_col].isin(feet)]
+        picks = []
+        for f in feet:
+            idxs = g2.index[g2[foot_col]==f].to_numpy()
+            if len(idxs)>0:
+                picks.append(rng_np.choice(idxs))
+        if len(picks) < max_exp:
+            remaining = np.setdiff1d(g2.index.to_numpy(), np.array(picks))
+            if len(remaining)>0:
+                add = rng_np.choice(remaining, size=min(max_exp-len(picks), len(remaining)), replace=False)
+                picks = np.concatenate([np.atleast_1d(picks), np.atleast_1d(add)])
+        keep_idx.extend([int(i) for i in np.atleast_1d(picks)])
+    if keep_idx:
+        mask = np.zeros(len(df_tr), dtype=bool)
+        mask[np.array(keep_idx)] = True
+        train = train.filter(mask)
+    return train
+
+def _balance_and_cap_train(train, data, S):
+    target = int(S.get("target_train_unique", 0))
+    coarse = str(S.get("coarse_balance_feature", "")).strip()
+    if target <= 0 and not coarse:
+        return train
+    cat = data.meta.get("catalog_df")
+    if cat is None:
+        return train
+    ids = train.meta.get("robot_ids")
+    df_tr = cat.set_index("id").loc[ids].reset_index(drop=True)
+    keep_idx = np.arange(len(df_tr))
+    if coarse:
+        if coarse not in df_tr.columns:
+            if coarse == "foot_shape" and "foot_shape_subtype" in df_tr.columns and "foot_shape" in df_tr.columns:
+                pass
+            else:
+                coarse = ""
+        if coarse:
+            grp_vals = df_tr[coarse].astype(str).values
+            uniq = np.unique(grp_vals)
+            if target <= 0:
+                counts = {u: (grp_vals==u).sum() for u in uniq}
+                n = min(counts.values())
+                rng = np.random.default_rng(int(S["seed"]))
+                keep = []
+                for u in uniq:
+                    idxs = np.where(grp_vals==u)[0]
+                    if len(idxs)>n:
+                        idxs = rng.choice(idxs, size=n, replace=False)
+                    keep.append(idxs)
+                keep_idx = np.concatenate(keep)
+            else:
+                per = max(1, target // max(1, len(uniq)))
+                rng = np.random.default_rng(int(S["seed"]))
+                keep = []
+                for u in uniq:
+                    idxs = np.where(grp_vals==u)[0]
+                    k = min(len(idxs), per)
+                    sel = rng.choice(idxs, size=k, replace=False)
+                    keep.append(sel)
+                keep_idx = np.concatenate(keep)
+    if target > 0 and not coarse:
+        rng = np.random.default_rng(int(S["seed"]))
+        if len(keep_idx) > target:
+            keep_idx = rng.choice(keep_idx, size=target, replace=False)
+    keep_mask = np.zeros(len(df_tr), dtype=bool)
+    keep_mask[np.array(keep_idx, dtype=int)] = True
+    train = train.filter(keep_mask)
+    return train
+
 def main(sttngs):
     S = dict(sttngs)
     rng = np.random.default_rng(int(S["seed"]))
@@ -123,23 +232,32 @@ def main(sttngs):
 
     tf = transforms.Compose([transforms.ToTensor(),])
 
+    proxy_spec = copy.deepcopy(S.get("proxy_spec", {}))
+    if S.get("proxy_p") is not None:
+        try:
+            pval = float(S["proxy_p"])
+            for k in proxy_spec:
+                proxy_spec[k]["p"] = pval
+        except Exception:
+            pass
+
     params = {
         "samples_per_instance": int(S["samples_per_instance"]),
         "draw": bool(int(S["draw"])),
         "output_directory": S.get("image_dir", run_dir / "images"),
         "concepts": {
             "head_shape": ["square", "round"],
-            "body_shape": ["square", "round"],             # proxy P1
+            "body_shape": ["square", "round"],
             "has_knees": ["false", "true"],
             "has_elbows": ["false", "true"],
             "has_antennae": ["false", "true"],
-            "ears_shape": ["square", "triangle"],          # proxy P2
+            "ears_shape": ["square", "triangle"],
             "mouth_type": ["closed", "open"],
-            "hand_shape": [                                # NS2
+            "hand_shape": [
                 "round_circle", "round_oval", "round_oval2",
                 "edgy_triangle", "edgy_square", "edgy_trapezoid",
             ],
-            "foot_shape": [                                # NS1
+            "foot_shape": [
                 "flat_trapezoid", "flat_rounded", "flat_square", "flat_5sided", "flat_lshaped",
                 "pointy_trapezoid", "pointy_rounded", "pointy_square", "pointy_3sided", "pointy_4sided",
             ],
@@ -156,49 +274,55 @@ def main(sttngs):
         "epochs": int(S["epochs"]),
         "verbose": True,
         "rng_seed": S['seed'],
-        "proxy_spec": S.get("proxy_spec", {}),
+        "proxy_spec": proxy_spec,
+        "proxy_p": S.get("proxy_p", None),
+        "subtype_label_bias": S.get("subtype_label_bias", {}),
     }
 
     data = create_synthetic_dataset(**params)
     data.transform = tf
     data.generate_cvindices(seed=int(S["seed"]))
 
-    # Compute drop list depending on mode
     mode = str(S.get("mode", "real")).lower()
     if mode == "oracle":
-        # keep only coarse NS1/NS2; drop proxies and subtypes
         drop_list = ["body_shape", "ears_shape",
                      "foot_shape_flat_trapezoid","foot_shape_flat_rounded","foot_shape_flat_square","foot_shape_flat_5sided","foot_shape_flat_lshaped",
                      "foot_shape_pointy_trapezoid","foot_shape_pointy_rounded","foot_shape_pointy_square","foot_shape_pointy_3sided","foot_shape_pointy_4sided",
                      "hand_shape_round_circle","hand_shape_round_oval","hand_shape_round_oval2",
                      "hand_shape_edgy_triangle","hand_shape_edgy_square","hand_shape_edgy_trapezoid"]
     else:
-        # hide coarse NS1/NS2; keep proxies + subtypes
         drop_list = ["foot_shape","hand_shape"]
 
     if S.get("skew_concept"):
-        train, valid, test = create_skewed_splits(
-            data,
-            skew_specs=S["skew_concept"],
-            rng=rng,
-            drop_concepts=drop_list,
-            fractions_unique=True
-        )
+        try:
+            train, valid, test = create_skewed_splits(data, skew_specs=S["skew_concept"], rng=rng, drop_concepts=drop_list, fractions_unique=True)
+        except TypeError:
+            train, valid, test = create_skewed_splits(data, skew_specs=S["skew_concept"], rng=rng, drop_concepts=drop_list)
     elif S.get("dataset_characterization", "") != "":
-            train, valid, test = filter_training_by_string(data, string=S["dataset_characterization"], rng=rng)
+        train, valid, test = filter_training_by_string(data, string=S["dataset_characterization"], rng=rng)
     else:
-            data.drop_concepts(drop_list)
-            data.split("K05N01", fold_num_validation=4, fold_num_test=5)
-            train = data.training; valid = data.validation; test = data.test
-    
-    ids = train.meta.get("robot_ids")
-    if ids is not None:
-            keep = np.unique(ids, return_index=True)[1]
-            m = np.zeros(len(train.C), dtype=bool)
-            m[keep] = True
-            train = train.filter(m)
+        data.drop_concepts(drop_list)
+        data.split("K05N01", fold_num_validation=4, fold_num_test=5)
+        train = data.training; valid = data.validation; test = data.test
 
-    # Basic stats
+    train = _dedupe_train_by_robot_ids(train)
+    train = _enforce_pattern_limits(train, data, S)
+    train = _balance_and_cap_train(train, data, S)
+
+    if S.get("label_noise_rate", 0.0) > 0:
+        train = _apply_label_noise(train, S["label_noise_rate"], seed=int(S["seed"]))
+        valid = _apply_label_noise(valid, S["label_noise_rate"], seed=int(S["seed"]))
+        test  = _apply_label_noise(test,  S["label_noise_rate"], seed=int(S["seed"]))
+
+    print("Train rows:", len(train), "unique_ids:", len(np.unique(train.meta.get('robot_ids'))))
+    cat = data.meta.get("catalog_df")
+    if cat is not None and S.get("coarse_balance_feature"):
+        ids_tr = train.meta.get("robot_ids")
+        df_tr = cat.set_index("id").loc[ids_tr]
+        coarse = S.get("coarse_balance_feature")
+        if coarse in df_tr.columns:
+            print("Coarse balance counts:", dict(df_tr[coarse].value_counts().to_dict()))
+
     print("Training set concept distributions:")
     for i, concept_name in enumerate(train.concepts):
         unique, counts = np.unique(train.C[:, i], return_counts=True)
@@ -212,7 +336,6 @@ def main(sttngs):
         dist_str = ", ".join([f"{int(k)}: {v} ({v/total:.1%})" for k, v in dict(zip(unique, counts)).items()])
         print(f"  {concept_name}: {dist_str}")
 
-    # Device
     device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
     config = {
         'device': device,
@@ -221,7 +344,6 @@ def main(sttngs):
         'pin_memory': False if device == 'mps' else True,
     }
 
-    # Concept detector
     embed_side = int(getattr(train, "meta", {}).get("resolution", 256))
     cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=train.n_concepts, input_size=embed_side))
     det_name = f"detector_proxy_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
@@ -237,7 +359,6 @@ def main(sttngs):
         det_path = Path(settings["out_dir"]) / (S["run_name"] or "run") / det_name
         torch.save(cd.state_dict(), det_path)
 
-    # Optional FE harness
     if int(S.get('fe_harness', 0)) == 1:
         try:
             from scripts.fe_harness import run_fe_harness
@@ -252,7 +373,6 @@ def main(sttngs):
         except Exception as e:
             print("FE harness unavailable or failed:", e)
 
-    # Predict concepts
     P_tr = cd.predict(train, embed_params={"device": device})
     P_vl = cd.predict(valid, embed_params={"device": device})
     P_te = cd.predict(test,  embed_params={"device": device})
@@ -260,7 +380,6 @@ def main(sttngs):
     H_te = (P_te > 0.5).astype(np.float32)
     H_vl = (P_vl > 0.5).astype(np.float32)
 
-    # Front-end
     fe = FrontEndModel()
     fe_name = f"frontend_proxy_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
     if S["load_frontend"]:
@@ -292,7 +411,6 @@ def main(sttngs):
         print(f"  {concept}: {fe.model.coef_[0, i]:.4f}")
     print(f"  bias: {fe.model.intercept_[0]:.4f}")
 
-    # DNN baseline (optional)
     dnn_stats = {}
     if S.get("train_dnn", 0):
         print("Training baseline DNN...")
@@ -307,7 +425,6 @@ def main(sttngs):
         dnn_path = Path(settings["out_dir"]) / (S["run_name"] or "run") / dnn_name
         torch.save({"model_state_dict": dnn_model.state_dict(), "processor": proc}, dnn_path)
 
-    # Interventions
     intervention_results = {}
     budgets = S.get('budget', [1, 2, 3, 4, 5])
     human_acc = S.get("intervention_accuracy", 1.0)
@@ -377,10 +494,22 @@ if __name__ == "__main__":
     parser.add_argument('--drop-concepts', dest='drop_concepts', type=str)
     parser.add_argument('--skew-concept', dest='skew_concept', type=str)
     parser.add_argument('--proxy-spec', dest='proxy_spec', type=str)
+
+    # new args
+    parser.add_argument('--samples-per-instance', dest='samples_per_instance', type=int)
+    parser.add_argument('--enforce-pattern-limits', dest='enforce_pattern_limits', type=int)
+    parser.add_argument('--max-feet-per-pattern', dest='max_feet_per_pattern', type=int)
+    parser.add_argument('--max-exposures-per-pattern', dest='max_exposures_per_pattern', type=int)
+    parser.add_argument('--disjoint-patterns', dest='disjoint_patterns_across_splits', type=int)
+    parser.add_argument('--target-train-unique', dest='target_train_unique', type=int)
+    parser.add_argument('--coarse-balance-feature', dest='coarse_balance_feature', type=str)
+    parser.add_argument('--proxy-p', dest='proxy_p', type=float)
+    parser.add_argument('--subtype-label-bias', dest='subtype_label_bias', type=str)
+
     args, _ = parser.parse_known_args()
 
     overrides = {k: v for k, v in vars(args).items() if v is not None}
-    for key in ['drop_concepts','skew_concept','proxy_spec']:
+    for key in ['drop_concepts','skew_concept','proxy_spec','subtype_label_bias']:
         if key in overrides:
             overrides[key] = json.loads(overrides[key])
     settings.update(overrides)
