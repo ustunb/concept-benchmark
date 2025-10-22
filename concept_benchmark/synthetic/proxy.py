@@ -27,13 +27,15 @@ def create_synthetic_dataset(data_type: str = "image", **kwargs) -> ConceptDatas
 def _coarse_bit(series: pd.Series, source: str, source_to_bit: dict | None) -> pd.Series:
     s = series.astype(str)
     if source_to_bit is not None:
-        return s.map(lambda v: int(source_to_bit[v]))
+        try:
+            return s.map(lambda v: int(source_to_bit[v]))
+        except KeyError:
+            pass
     if source == "foot_shape":
         return s.str.startswith("pointy").astype(int)
     if source == "hand_shape":
         return s.str.startswith("edgy").astype(int)
     raise ValueError(f"Provide source_to_bit for source '{source}'")
-
 
 def _apply_proxies(catalog_df: pd.DataFrame, proxy_spec: dict | None, rng_seed: int = 0) -> pd.DataFrame:
     if not proxy_spec:
