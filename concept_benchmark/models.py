@@ -40,28 +40,26 @@ class RobotConceptClassifier(nn.Module):
                 nn.Conv2d(32, 64, kernel_size=3, padding=1), nn.ReLU(),
             )
 
-        # Automatically compute feature size with dummy forward pass
+                # Discover feature size and set head count
+        self.n_heads = int(num_concepts)
         with torch.no_grad():
             dummy = torch.zeros(1, 3, input_size, input_size)
             dummy_out = self.backbone(dummy)
-            feature_size = dummy_out.view(1, -1).size(1)
+            self.feat_dim = int(dummy_out.view(1, -1).size(1))
 
-        # Concept heads
-        self.auto_head_dim = getattr(self, "auto_head_dim", False)
-        self.heads = nn.ModuleList(
-            [ (nn.LazyLinear(1) if self.auto_head_dim else nn.Linear(self.feat_dim, 1)) for _ in range(self.n_heads) ]
-        )
+        # Heads: infer in_features on first forward for robustness
+        self.heads = nn.ModuleList([nn.LazyLinear(1) for _ in range(self.n_heads)])
 
     def forward(self, x):
         features = self.backbone(x)
         if features.dim() > 2:
             features = torch.flatten(features, 1)
-        if not getattr(self, "auto_head_dim", False):
-            in_feat = self.heads[0].in_features
-            if features.shape[1] != in_feat:
-                raise ValueError(f"Feature dim {features.shape[1]} != head in_features {in_feat}. Set auto_head_dim=True.")
+        h0 = self.heads[0]
+        if isinstance(h0, nn.Linear) and hasattr(h0, "in_features") and features.shape[1] != h0.in_features:
+            self.heads = nn.ModuleList([nn.Linear(features.shape[1], 1) for _ in range(len(self.heads))])
         logits = torch.cat([head(features) for head in self.heads], dim=1)
         return logits
+
 
 
 class RobotViTConceptClassifier(nn.Module):
