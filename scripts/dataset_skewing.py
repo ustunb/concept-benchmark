@@ -45,6 +45,8 @@ def create_skewed_splits(dataset, skew_specs, train_fraction=0.5, val_fraction=0
             mask &= (dataset.C[:, concept_idx] == target_value)
         spec_indices.append(np.where(mask)[0])
 
+    reserved_for_test = set()
+
     train_indices = []
     used = set()
     for spec, indices in zip(skew_specs, spec_indices):
@@ -59,6 +61,12 @@ def create_skewed_splits(dataset, skew_specs, train_fraction=0.5, val_fraction=0
         train_indices.extend(take)
         used.update(take)
         print(f"Added {len(take)} for spec {spec['concepts']} (wanted {needed}, cap {max_take})")
+
+        if spec_holdout_frac > 0:
+            hold_n = int(len(indices) * float(spec_holdout_frac))
+            remain = [i for i in indices if i not in used]
+            rng.shuffle(remain)
+            reserved_for_test.update(remain[:hold_n])
 
     # Fill remaining slots with any unused samples
     remaining_slots = desired_train_size - len(train_indices)
@@ -76,8 +84,16 @@ def create_skewed_splits(dataset, skew_specs, train_fraction=0.5, val_fraction=0
     rng.shuffle(remaining)
 
     val_size = int(len(remaining) * val_fraction / (val_fraction + test_fraction))
-    val_indices = remaining[:val_size]
-    test_indices = remaining[val_size:]
+    test_size = len(remaining) - val_size
+
+    force = np.array([i for i in reserved_for_test if i in set(remaining)])
+    if len(force) > test_size:
+        force = force[:test_size]
+    rest = np.array([i for i in remaining if i not in set(force)])
+    need = test_size - len(force)
+    test_indices = np.concatenate([force, rest[:need]]) if need > 0 else force
+    val_indices = rest[need:]
+
     print("Resulting training size:", len(train_indices))
 
     dataset.drop_concepts(drop_concepts)
