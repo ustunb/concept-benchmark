@@ -15,6 +15,7 @@ from .helper.robot_catalog import (
 from .helper.utils import model_to_logistic, unlist0
 from scipy.special import expit
 
+
 def create_synthetic_dataset(data_type: str = "image", **kwargs) -> ConceptDataset:
     kind = (data_type or "image").strip().lower()
     if kind != "image":
@@ -27,24 +28,24 @@ def _coarse_bit(series: pd.Series, source: str, source_to_bit: dict | None) -> p
     if source_to_bit is not None:
         out = s.map(source_to_bit)  # try exact values (coarse or subtype)
         if out.isna().any():
-            # try mapping the coarse token (prefix before "_")
             coarse = s.str.split("_").str[0]
             out2 = coarse.map(source_to_bit)
             if out2.isna().any():
-                # final fallback: infer by prefix
                 if source == "foot_shape":
                     return s.str.startswith("pointy").astype(int)
                 if source == "hand_shape":
                     return s.str.startswith("edgy").astype(int)
-                raise ValueError(f"source_to_bit missing mapping for '{source}' values: {series.unique().tolist()}")
+                raise ValueError(
+                    f"source_to_bit missing mapping for '{source}' values: {series.unique().tolist()}"
+                )
             return out2.astype(int)
         return out.astype(int)
-    # no mapping provided → infer by prefix
     if source == "foot_shape":
         return s.str.startswith("pointy").astype(int)
     if source == "hand_shape":
         return s.str.startswith("edgy").astype(int)
     raise ValueError(f"Provide source_to_bit for source '{source}'")
+
 
 def _apply_proxies(catalog_df: pd.DataFrame, proxy_spec: dict | None, rng_seed: int = 0) -> pd.DataFrame:
     if not proxy_spec:
@@ -117,7 +118,6 @@ def create_robot_image_dataset(
     catalog_df = catalog_df.copy()
     catalog_df[OUTCOME_NAME] = OUTCOME_MISSING
 
-    # Proxies: correlate to coarse sources with prob p (post-catalog; images will not reflect proxy flips if draw=True)
     proxy_spec = extra_params.get("proxy_spec", None)
     rng_seed = int(extra_params.get("rng_seed", 0))
     catalog_df = _apply_proxies(catalog_df, proxy_spec, rng_seed=rng_seed)
@@ -144,14 +144,40 @@ def create_robot_image_dataset(
     image_dir = output_directory
     X = np.array([row["png_filename"] for _, row in catalog_df.iterrows()])
 
-    feature_names = [feat for feat in catalog_df.columns if feat in ALL_ROBOT_FEATURES]
-    pos_map = {
-        feat: ALL_ROBOT_FEATURES[feat][0].split("_")[0]
-        if isinstance(ALL_ROBOT_FEATURES[feat][0], str)
-        else ALL_ROBOT_FEATURES[feat][0]
-        for feat in feature_names
-    }
-    C = (catalog_df[pos_map.keys()] == pos_map.values()).to_numpy().astype(np.int8)
+    # one-hot subtype columns so split/ skew can target 'foot_shape_pointy_3sided', etc.
+    if "foot_shape" in catalog_df.columns and "foot_shape_subtype" in catalog_df.columns:
+        fs = catalog_df["foot_shape"].astype(str)
+        fss = catalog_df["foot_shape_subtype"].astype(str)
+        for coarse in ["flat", "pointy"]:
+            maskc = fs.eq(coarse)
+            for subtype in fss.unique():
+                col = f"foot_shape_{coarse}_{subtype}"
+                catalog_df[col] = (maskc & fss.eq(subtype)).astype(np.int8)
+
+    if "hand_shape" in catalog_df.columns and "hand_shape_subtype" in catalog_df.columns:
+        hs = catalog_df["hand_shape"].astype(str)
+        hss = catalog_df["hand_shape_subtype"].astype(str)
+        for coarse in ["round", "edgy"]:
+            maskc = hs.eq(coarse)
+            for subtype in hss.unique():
+                col = f"hand_shape_{coarse}_{subtype}"
+                catalog_df[col] = (maskc & hss.eq(subtype)).astype(np.int8)
+
+    # include standard features + new one-hot subtype columns
+    std_feats = [f for f in catalog_df.columns if f in ALL_ROBOT_FEATURES]
+    sub_feats = [f for f in catalog_df.columns if f.startswith("foot_shape_") or f.startswith("hand_shape_")]
+    feature_names = std_feats + sub_feats
+
+    pos_map = {}
+    for feat in std_feats:
+        base = ALL_ROBOT_FEATURES[feat][0]
+        pos_map[feat] = base.split("_")[0] if isinstance(base, str) else base
+    for feat in sub_feats:
+        pos_map[feat] = 1  # one-hot positive indicator
+
+    cols = list(pos_map.keys())
+    vals = list(pos_map.values())
+    C = (catalog_df[cols] == vals).to_numpy().astype(np.int8)
 
     y = catalog_df[OUTCOME_NAME].values
 
