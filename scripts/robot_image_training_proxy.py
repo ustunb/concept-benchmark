@@ -278,8 +278,7 @@ def main(sttngs):
     acc_gt  = float((y_pred_gt.argmax(1)  == test.y.astype(int)).mean())
     concept_acc_mean = float((H_te == test.C).mean())
 
-    print("
-=== Learned Frontend Weights ===")
+    print("=== Learned Frontend Weights ===")
     for i, concept in enumerate(test.concepts):
         print(f"  {concept}: {fe.model.coef_[0, i]:.4f}")
     print(f"  bias: {fe.model.intercept_[0]:.4f}")
