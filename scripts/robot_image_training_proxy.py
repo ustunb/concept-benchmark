@@ -461,9 +461,9 @@ def main(sttngs):
         device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
         config = {
             'device': device,
-            'batch_size': 32,
-            'num_workers': 0 if device == 'mps' else 12,
-            'pin_memory': False if device == 'mps' else True,
+            'batch_size': 8,
+            'num_workers': 0,
+            'pin_memory': False,
         }
 
         embed_side = int(getattr(train, "meta", {}).get("resolution", 256))
@@ -477,9 +477,10 @@ def main(sttngs):
             cd.load_state_dict(state)
             det_path = Path(S["load_detector"])
         else:
-            cd.fit(train, valid, embed_params={'shuffle': False, **config},
-               fit_params={"epochs": 50, "lr": 1e-3, "patience": 10,
-                           "batch_size": 32, "num_workers": 0, "pin_memory": False, **config})
+            cd.fit(train, valid,
+                embed_params={'shuffle': False, **config},
+                fit_params={**config, "epochs": 50, "lr": 1e-3, "patience": 10,
+                            "batch_size": config.get("batch_size", 8), "num_workers": 0, "pin_memory": False})
             
             det_path = Path(settings["out_dir"]) / (S["run_name"] or "run") / det_name
             torch.save({"model_state_dict": cd.model.state_dict(),
@@ -499,9 +500,9 @@ def main(sttngs):
             except Exception as e:
                 print("FE harness unavailable or failed:", e)
 
-        P_tr = cd.predict(train, embed_params={"device": device})
-        P_vl = cd.predict(valid, embed_params={"device": device})
-        P_te = cd.predict(test,  embed_params={"device": device})
+        P_tr = cd.predict(train, embed_params={'shuffle': False, **config})
+        P_vl = cd.predict(valid, embed_params={'shuffle': False, **config})
+        P_te = cd.predict(test,  embed_params={'shuffle': False, **config})
         H_tr = (P_tr > 0.5).astype(np.float32)
         H_te = (P_te > 0.5).astype(np.float32)
         H_vl = (P_vl > 0.5).astype(np.float32)
