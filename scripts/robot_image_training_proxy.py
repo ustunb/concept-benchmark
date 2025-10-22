@@ -214,7 +214,8 @@ def main(sttngs):
     }
 
     # Concept detector
-    cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=train.n_concepts, input_size=600 if S["image_size"] == "large" else 32 if S["image_size"] == "medium" else 8))
+    embed_side = int(getattr(train, "meta", {}).get("resolution", 256))
+    cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=train.n_concepts, input_size=embed_side))
     det_name = f"detector_proxy_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
     if S["load_detector"]:
         mini_train = train.filter(np.array([True] + [False] * (len(train.C) - 1)))
