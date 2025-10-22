@@ -313,11 +313,14 @@ def main(sttngs):
                 ids_tr = train.meta.get("robot_ids")
                 pat_tr = set(map(tuple, cat.set_index("id").loc[ids_tr][patt_cols].astype(str).values.tolist()))
                 def _filter_split(split):
-                    ids = split.meta.get("robot_ids"); df = cat.set_index("id").loc[ids]
-                    keep = ~df[patt_cols].astype(str).apply(tuple, axis=1).isin(pat_tr)
-                    return split.filter(keep.to_numpy())
-                valid = _filter_split(valid)
-                test = _filter_split(test)
+                    ids = np.asarray(split.meta.get("robot_ids"))
+                    df  = cat.set_index("id")
+                    keep = (~df.loc[ids, patt_cols]
+                              .astype(str)
+                              .apply(tuple, axis=1)
+                              .isin(pat_tr)
+                             ).to_numpy(dtype=bool)
+                    return split.filter(keep)
 
     train = _dedupe_train_by_robot_ids(train)
     train = _enforce_pattern_limits(train, data, S)
