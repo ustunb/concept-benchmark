@@ -557,7 +557,7 @@ def main(sttngs):
             dnn_name = f"dnn_proxy_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{bias_tag}.pt"
             dnn_path = Path(settings["out_dir"]) / (S["run_name"] or "run") / dnn_name
             torch.save({"model_state_dict": dnn_model.state_dict(), "processor": proc}, dnn_path)
-        metrics.update(dnn_stats)
+        # metrics.update(dnn_stats)
 
         intervention_results = {}
         budgets = S.get('budget', [1, 2, 3, 4, 5])
