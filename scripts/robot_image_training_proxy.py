@@ -62,7 +62,7 @@ settings = {
         {"concepts": {"hand_shape_edgy_square": 1}, "min_fraction": 0.20},
         {"concepts": {"hand_shape_edgy_trapezoid": 1}, "min_fraction": 0.20},
     ],
-    "budget": [1, 10],
+    "budget": [1, 2],
     "intervention_accuracy": 0.9,
     "intervention_threshold": 0.1,
     "epochs": 10,
