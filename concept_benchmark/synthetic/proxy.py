@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from pathlib import Path
+import hashlib
 
 import numpy as np
 import pandas as pd
@@ -26,20 +27,7 @@ def create_synthetic_dataset(data_type: str = "image", **kwargs) -> ConceptDatas
 def _coarse_bit(series: pd.Series, source: str, source_to_bit: dict | None) -> pd.Series:
     s = series.astype(str)
     if source_to_bit is not None:
-        out = s.map(source_to_bit)  # try exact values (coarse or subtype)
-        if out.isna().any():
-            coarse = s.str.split("_").str[0]
-            out2 = coarse.map(source_to_bit)
-            if out2.isna().any():
-                if source == "foot_shape":
-                    return s.str.startswith("pointy").astype(int)
-                if source == "hand_shape":
-                    return s.str.startswith("edgy").astype(int)
-                raise ValueError(
-                    f"source_to_bit missing mapping for '{source}' values: {series.unique().tolist()}"
-                )
-            return out2.astype(int)
-        return out.astype(int)
+        return s.map(lambda v: int(source_to_bit[v]))
     if source == "foot_shape":
         return s.str.startswith("pointy").astype(int)
     if source == "hand_shape":
@@ -59,7 +47,8 @@ def _apply_proxies(catalog_df: pd.DataFrame, proxy_spec: dict | None, rng_seed: 
         if src not in df.columns:
             raise ValueError(f"proxy source '{src}' not found")
         src_bit = _coarse_bit(df[src], src, source_to_bit)
-        rng = np.random.default_rng(int(rng_seed) + (hash(proxy_name) & 0xFFFFFFFF))
+        salt = int.from_bytes(hashlib.sha256(proxy_name.encode()).digest()[:4], "big")
+        rng = np.random.default_rng(int(rng_seed) + salt)
         use_src = rng.random(len(df)) < p
         rnd = rng.integers(0, 2, size=len(df))
         bit = np.where(use_src, src_bit.to_numpy(dtype=int), rnd).astype(int)
@@ -91,28 +80,40 @@ def create_robot_image_dataset(
     if not concepts:
         raise ValueError("'concepts' dictionary must be provided and non-empty")
     if not model:
-        raise ValueError("'model' expression must be provided for label generation")
+        raise ValueError("'model' expression must be provided")
+    spurious_features = list(spurious_features or [])
+    irrelevant_features = list(irrelevant_features or [])
 
-    num_combinations = int(np.prod([len(v) for v in concepts.values()]))
-    total_robots = num_robots or num_combinations * samples_per_instance
-    eff_resolution = resolution if resolution is not None else (600 if size == "large" else 36)
-    spurious = list(spurious_features or [])
-    irrelevant = list(irrelevant_features) if irrelevant_features is not None else spurious
-    drop_irrelevant = extra_params.pop("drop_irrelevant", True)
-    _ = (train_concept_detector, epochs)
+    samples_per_instance = int(samples_per_instance)
+    if samples_per_instance < 1:
+        raise ValueError("'samples_per_instance' must be >= 1")
+
+    if resolution is None:
+        if size == "small":
+            eff_resolution = 64
+        elif size == "medium":
+            eff_resolution = 128
+        elif size == "large":
+            eff_resolution = 256
+        else:
+            raise ValueError("Invalid size. Use 'small', 'medium', or 'large'.")
+    else:
+        eff_resolution = int(resolution)
 
     res = generate_robot_catalog(
         concepts=concepts,
-        num_robots=total_robots,
+        samples_per_instance=samples_per_instance,
+        num_robots=num_robots,
+        size=size,
         resolution=eff_resolution,
         output_directory=output_directory,
         draw=draw,
+        spurious_features=spurious_features,
+        irrelevant_features=irrelevant_features,
         color_mode=color_mode,
         blur=blur,
-        drop_irrelevant=drop_irrelevant,
-        irrelevant_features=irrelevant,
+        return_catalog=True,
         verbose=verbose,
-        **extra_params,
     )
     catalog_df = res[0] if isinstance(res, tuple) else res
     catalog_df = catalog_df.copy()
@@ -122,29 +123,6 @@ def create_robot_image_dataset(
     rng_seed = int(extra_params.get("rng_seed", 0))
     catalog_df = _apply_proxies(catalog_df, proxy_spec, rng_seed=rng_seed)
 
-    df = catalog_df
-
-    if model_type == "deterministic":
-        glorp_model_true = lambda row: eval(unlist0(model))
-    elif model_type == "stochastic":
-        glorp_model_true = lambda row: eval(model_to_logistic(model))
-    else:
-        raise ValueError("Invalid model_type. Use 'deterministic' or 'stochastic'.")
-
-    df[OUTCOME_NAME] = df.apply(glorp_model_true, axis=1)
-    catalog_df[OUTCOME_NAME] = catalog_df.apply(glorp_model_true, axis=1)
-
-    if model_type == "deterministic":
-        catalog_df[OUTCOME_NAME] = catalog_df[OUTCOME_NAME].apply(lambda x: 1 if x == "glorp" else 0)
-
-    if verbose:
-        print("Catalog DataFrame:")
-        print(catalog_df.to_string(index=False))
-
-    image_dir = output_directory
-    X = np.array([row["png_filename"] for _, row in catalog_df.iterrows()])
-
-    # one-hot subtype columns so split/ skew can target 'foot_shape_pointy_3sided', etc.
     if "foot_shape" in catalog_df.columns and "foot_shape_subtype" in catalog_df.columns:
         fs = catalog_df["foot_shape"].astype(str)
         fss = catalog_df["foot_shape_subtype"].astype(str)
@@ -153,6 +131,15 @@ def create_robot_image_dataset(
             for subtype in fss.unique():
                 col = f"foot_shape_{coarse}_{subtype}"
                 catalog_df[col] = (maskc & fss.eq(subtype)).astype(np.int8)
+        ids = catalog_df["id"].astype(str)
+        hb = ids.map(lambda s: int.from_bytes(hashlib.sha256(s.encode()).digest()[:4], "big") & 1).astype(int)
+        for coarse in ["flat", "pointy"]:
+            maskc = fs.eq(coarse)
+            for subtype in fss.unique():
+                base = maskc & fss.eq(subtype)
+                catalog_df[f"foot_shape_{coarse}_{subtype}_vertex"] = (base & hb.eq(1)).astype(np.int8)
+                catalog_df[f"foot_shape_{coarse}_{subtype}_side"] = (base & hb.eq(0)).astype(np.int8)
+        catalog_df["foot_orientation"] = np.where(hb.values == 1, "vertex", "side")
 
     if "hand_shape" in catalog_df.columns and "hand_shape_subtype" in catalog_df.columns:
         hs = catalog_df["hand_shape"].astype(str)
@@ -163,7 +150,6 @@ def create_robot_image_dataset(
                 col = f"hand_shape_{coarse}_{subtype}"
                 catalog_df[col] = (maskc & hss.eq(subtype)).astype(np.int8)
 
-    # include standard features + new one-hot subtype columns
     std_feats = [f for f in catalog_df.columns if f in ALL_ROBOT_FEATURES]
     sub_feats = [f for f in catalog_df.columns
                  if (f.startswith("foot_shape_") or f.startswith("hand_shape_"))
@@ -176,23 +162,29 @@ def create_robot_image_dataset(
         base = ALL_ROBOT_FEATURES[feat][0]
         pos_map[feat] = base.split("_")[0] if isinstance(base, str) else base
     for feat in sub_feats:
-        pos_map[feat] = 1  # one-hot positive indicator
+        pos_map[feat] = 1
 
     cols = list(pos_map.keys())
     vals = list(pos_map.values())
     C = (catalog_df[cols] == vals).to_numpy().astype(np.int8)
 
-    y = (catalog_df[OUTCOME_NAME] >= 0.5).astype(int).values
-    
-    if verbose:
-        print("Dataset for Training:")
-        print(X)
-        print(C)
-        print(y)
+    if model_type == "deterministic":
+        label_str = lambda row: eval(unlist0(model))
+        catalog_df[OUTCOME_NAME] = catalog_df.apply(label_str, axis=1).map({"glorp": 1, "drent": 0}).astype(int)
+        y = catalog_df[OUTCOME_NAME].to_numpy()
+    elif model_type == "stochastic":
+        rng = np.random.default_rng(int(extra_params.get("rng_seed", 0)))
+        prob = lambda row: float(eval(model_to_logistic(model)))
+        catalog_df["_p_glorp"] = catalog_df.apply(prob, axis=1)
+        y = rng.binomial(1, catalog_df["_p_glorp"].clip(0, 1).to_numpy())
+        catalog_df[OUTCOME_NAME] = y
+    else:
+        raise ValueError("Invalid model_type. Use 'deterministic' or 'stochastic'.")
 
-    catalog_df["color_left"] = catalog_df["color_left"].astype(str)
-    catalog_df["color_right"] = catalog_df["color_right"].astype(str)
+    image_dir = output_directory
+    X = np.array([row["png_filename"] for _, row in catalog_df.iterrows()])
 
+    total_robots = int(len(catalog_df))
     meta = {
         "classes": ["drent", "glorp"],
         "concepts": feature_names,
