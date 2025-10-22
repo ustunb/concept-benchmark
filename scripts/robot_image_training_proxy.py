@@ -238,6 +238,68 @@ def _balance_and_cap_train(train, data, S):
     train = train.filter(keep_mask)
     return train
 
+def _final_hard_cap_train(train, data, S):
+    target = int(S.get("target_train_unique", 0))
+    if target <= 0 or len(train) <= target:
+        return train
+    rng = np.random.default_rng(int(S["seed"]))
+    coarse = str(S.get("coarse_balance_feature", "")).strip()
+    groups = None
+    if coarse:
+        cat = data.meta.get("catalog_df")
+        if cat is not None and "id" in cat.columns and coarse in cat.columns:
+            ids_full = np.asarray(data.meta.get("robot_ids"))
+            df_idx = train.meta.get("df_indices")
+            ids_tr = None
+            if df_idx is not None:
+                idx = np.asarray(df_idx)
+                if idx.dtype.kind == "b":
+                    idx = np.flatnonzero(idx)
+                elif idx.dtype.kind not in "iu":
+                    idx = idx.astype(np.int64)
+                else:
+                    idx = idx.astype(np.int64)
+                if idx.size > 0 and idx.max() < ids_full.shape[0]:
+                    ids_tr = ids_full[idx]
+            else:
+                rid = train.meta.get("robot_ids")
+                if rid is not None and len(rid) == len(train):
+                    ids_tr = np.asarray(rid)
+            if ids_tr is not None:
+                try:
+                    groups = cat.set_index("id").loc[ids_tr][coarse].astype(str).values
+                except Exception:
+                    groups = None
+    n = len(train)
+    if groups is None:
+        sel = rng.choice(np.arange(n, dtype=int), size=target, replace=False)
+    else:
+        uniq = np.unique(groups)
+        sizes = np.array([(groups == u).sum() for u in uniq], dtype=int)
+        prop = target * sizes / float(n)
+        base = np.floor(prop).astype(int)
+        rem = target - base.sum()
+        frac = prop - base
+        order = rng.permutation(len(uniq))
+        take_more = np.argsort(frac[order])[::-1][:rem]
+        base[order[take_more]] += 1
+        picks = []
+        pool_all = np.arange(n, dtype=int)
+        for u, k in zip(uniq, base):
+            idxs = np.where(groups == u)[0]
+            if k > 0 and idxs.size > 0:
+                k = min(k, idxs.size)
+                picks.append(rng.choice(idxs, size=k, replace=False))
+        sel = np.concatenate(picks) if picks else np.array([], dtype=int)
+        if sel.size < target:
+            remaining = np.setdiff1d(pool_all, sel, assume_unique=False)
+            if remaining.size > 0:
+                topup = rng.choice(remaining, size=min(target - sel.size, remaining.size), replace=False)
+                sel = np.concatenate([sel, topup])
+    m = np.zeros(n, dtype=bool)
+    m[sel[:target]] = True
+    return train.filter(m)
+    
 def main(sttngs):
     S = dict(sttngs)
     rng = np.random.default_rng(int(S["seed"]))
@@ -350,6 +412,7 @@ def main(sttngs):
     train = _dedupe_train_by_robot_ids(train)
     train = _enforce_pattern_limits(train, data, S)
     train = _balance_and_cap_train(train, data, S)
+    train = _final_hard_cap_train(train, data, S)
 
     if S.get("label_noise_rate", 0.0) > 0:
         train = _apply_label_noise(train, S["label_noise_rate"], seed=int(S["seed"]))
