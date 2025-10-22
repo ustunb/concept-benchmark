@@ -188,11 +188,13 @@ def create_robot_image_dataset(
                 intercept=extra_params.get("intercept", None)
             )
         ))
-
         catalog_df["_p_base"] = catalog_df.apply(prob_fun, axis=1).clip(0, 1)
         bias_cfg = extra_params.get("subtype_label_bias", {})
         delta = np.zeros(len(catalog_df), dtype=float)
         if isinstance(bias_cfg, dict) and len(bias_cfg) > 0:
+            bad = [k for k in bias_cfg.keys() if k not in catalog_df.columns]
+            if bad and verbose:
+                print("unknown subtype_label_bias keys:", bad)
             for col_name, logit_delta in bias_cfg.items():
                 if col_name in catalog_df.columns:
                     v = float(logit_delta)
@@ -201,6 +203,11 @@ def create_robot_image_dataset(
         p_adj = expit(logits)
         y = rng.binomial(1, p_adj.clip(0, 1))
         catalog_df[OUTCOME_NAME] = y
+        if verbose:
+            print(f"class_rate_glorp: {float(y.mean()):.3f}")
+            if "foot_shape" in catalog_df.columns:
+                cc = catalog_df["foot_shape"].astype(str).str.startswith("pointy").value_counts().to_dict()
+                print("coarse_pointy_counts:", cc)
     else:
         raise ValueError("Invalid model_type. Use 'deterministic' or 'stochastic'.")
 
