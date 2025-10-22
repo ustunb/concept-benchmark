@@ -119,13 +119,31 @@ def _dedupe_train_by_robot_ids(train):
     ids_full = np.asarray(train.meta.get("robot_ids"))
     if ids_full is None or ids_full.size == 0:
         return train
-    df_idx = np.asarray(train.meta.get("df_indices"))
+
+    df_idx = train.meta.get("df_indices")
     if df_idx is None:
         if ids_full.shape[0] != len(train):
             raise ValueError("robot_ids misaligned with train and df_indices missing")
         ids = ids_full
     else:
-        ids = ids_full[df_idx]
+        idx = np.asarray(df_idx)
+        if idx.dtype.kind == "b":
+            if idx.size != ids_full.shape[0]:
+                raise ValueError("boolean df_indices length mismatch")
+            idx = np.flatnonzero(idx)
+        elif idx.dtype.kind not in "iu":
+            if not np.all(np.isfinite(idx)):
+                raise ValueError("df_indices contains NaN/inf")
+            if not np.allclose(idx, np.floor(idx)):
+                raise ValueError("df_indices contains non-integers")
+            idx = idx.astype(np.int64)
+        else:
+            idx = idx.astype(np.int64)
+
+        if idx.min() < 0 or idx.max() >= ids_full.shape[0]:
+            raise ValueError("df_indices out of bounds for robot_ids")
+        ids = ids_full[idx]
+
     keep = np.unique(ids, return_index=True)[1]
     m = np.zeros(len(train), dtype=bool)
     m[keep] = True
