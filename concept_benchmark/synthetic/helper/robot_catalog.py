@@ -141,6 +141,9 @@ def generate_robot_catalog(
     ids = init_catalog_df["id"].astype(str)
     hb = ids.map(lambda s: int.from_bytes(hashlib.sha256(s.encode()).digest()[:4], "big") & 1).astype(int)
     init_catalog_df["foot_orientation"] = np.where(hb.values == 1, "vertex", "side")
+    if verbose:
+        u, c = np.unique(init_catalog_df["foot_orientation"], return_counts=True)
+        print("foot_orientation_counts:", dict(zip(u, c)))
 
     catalog_df, new_features = collapse_robot_subtypes(
         df=catalog_df, robot_features=list(concepts.keys()),
