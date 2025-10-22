@@ -181,7 +181,14 @@ def create_robot_image_dataset(
         y = catalog_df[OUTCOME_NAME].to_numpy()
     elif model_type == "stochastic":
         rng = np.random.default_rng(int(extra_params.get("rng_seed", 0)))
-        prob_fun = lambda row: float(eval(model_to_logistic(model)))
+        prob_fun = lambda row: float(eval(
+            model_to_logistic(
+                model,
+                scalar=float(extra_params.get("scalar", 1.0)),
+                intercept=extra_params.get("intercept", None)
+            )
+        ))
+
         catalog_df["_p_base"] = catalog_df.apply(prob_fun, axis=1).clip(0, 1)
         bias_cfg = extra_params.get("subtype_label_bias", {})
         delta = np.zeros(len(catalog_df), dtype=float)
