@@ -153,37 +153,46 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
 
     if hand_type == "round":
         if hand_subtype == "circle":
+            # Round circle hands - centered at arm end
             hand = pero.Ellipse(width=hand_size, height=hand_size)
             hand.draw(canvas, x=hand_x_left, y=hand_y, fill_color=color_left)
             hand.draw(canvas, x=hand_x_right, y=hand_y, fill_color=color_right)
 
         elif hand_subtype == "oval":
+            # Round oval hands (widened horizontally) - centered at arm end
             hand = pero.Ellipse(width=hand_size * 1.5, height=hand_size)
             hand.draw(canvas, x=hand_x_left, y=hand_y, fill_color=color_left)
             hand.draw(canvas, x=hand_x_right, y=hand_y, fill_color=color_right)
 
         elif hand_subtype == "oval2":
+            # Round oval2 hands (widened vertically) - centered at arm end
             hand = pero.Ellipse(width=hand_size, height=hand_size * 1.5)
             hand.draw(canvas, x=hand_x_left, y=hand_y, fill_color=color_left)
             hand.draw(canvas, x=hand_x_right, y=hand_y, fill_color=color_right)
 
     elif hand_type == "edgy":
         if hand_subtype == "triangle":
+            # Edgy triangle hands - tip facing outward away from body
             hand = pero.Polygon(line_color=pero.colors.Black)
+
+            # Left triangle hand (base at arm, tip pointing left)
             p_left = (
-                (hand_x_left, hand_y - hand_size / 2),
-                (hand_x_left, hand_y + hand_size / 2),
-                (hand_x_left - hand_size, hand_y),
+                (hand_x_left, hand_y - hand_size / 2),  # top of base
+                (hand_x_left, hand_y + hand_size / 2),  # bottom of base
+                (hand_x_left - hand_size, hand_y),  # tip pointing left
             )
             hand.draw(canvas, points=p_left, fill_color=color_left)
+
+            # Right triangle hand (base at arm, tip pointing right)
             p_right = (
-                (hand_x_right, hand_y - hand_size / 2),
-                (hand_x_right, hand_y + hand_size / 2),
-                (hand_x_right + hand_size, hand_y),
+                (hand_x_right, hand_y - hand_size / 2),  # top of base
+                (hand_x_right, hand_y + hand_size / 2),  # bottom of base
+                (hand_x_right + hand_size, hand_y),  # tip pointing right
             )
             hand.draw(canvas, points=p_right, fill_color=color_right)
 
         elif hand_subtype == "square":
+            # Edgy square hands - centered at arm end
             hand = pero.Rect(width=hand_size, height=hand_size)
             hand.draw(
                 canvas,
@@ -199,25 +208,30 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
             )
 
         elif hand_subtype == "trapezoid":
+            # Edgy trapezoid hands - shorter base at arm end, wider base pointing outward
             hand = pero.Polygon(line_color=pero.colors.Black)
+
+            # Left trapezoid hand (wider base pointing left)
             p_left = (
-                (hand_x_left, hand_y - hand_size / 4),
-                (hand_x_left, hand_y + hand_size / 4),
+                (hand_x_left, hand_y - hand_size / 4),  # top of shorter base
+                (hand_x_left, hand_y + hand_size / 4),  # bottom of shorter base
                 (
                     hand_x_left - hand_size,
                     hand_y + hand_size / 2,
-                ),
-                (hand_x_left - hand_size, hand_y - hand_size / 2),
+                ),  # bottom of wider base
+                (hand_x_left - hand_size, hand_y - hand_size / 2),  # top of wider base
             )
             hand.draw(canvas, points=p_left, fill_color=color_left)
+
+            # Right trapezoid hand (wider base pointing right)
             p_right = (
-                (hand_x_right, hand_y - hand_size / 4),
-                (hand_x_right, hand_y + hand_size / 4),
+                (hand_x_right, hand_y - hand_size / 4),  # top of shorter base
+                (hand_x_right, hand_y + hand_size / 4),  # bottom of shorter base
                 (
                     hand_x_right + hand_size,
                     hand_y + hand_size / 2,
-                ),
-                (hand_x_right + hand_size, hand_y - hand_size / 2),
+                ),  # bottom of wider base
+                (hand_x_right + hand_size, hand_y - hand_size / 2),  # top of wider base
             )
             hand.draw(canvas, points=p_right, fill_color=color_right)
 
@@ -247,13 +261,12 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
         knee.draw(canvas, x=x_left, fill_color=color_left)
         knee.draw(canvas, x=x_right, fill_color=color_right)
 
-    y_top += leg_height
+        y_top += leg_height
     foot_subtype = features["foot_shape"]
     if foot_subtype in FOOT_SUBTYPES.keys():
         if features["foot_subtype_choice"] == "default":
             foot_subtype = "%s" % FOOT_SUBTYPES[foot_subtype][0]
 
-    # orientation remap
     orient = str(features.get("foot_orientation", "")).lower()
     if orient in ("vertex", "side"):
         if foot_subtype.startswith("flat_") and orient == "vertex":
@@ -269,13 +282,14 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
 
     # PAIR 1: trapezoid
     if foot_subtype == "flat_trapezoid":
+        # Add rounded/curved top edges like rounded shape
         p_left = (
-            (x_left - 0.45 * foot_width, y_top + 0.1 * foot_height),
-            (x_left - 0.3 * foot_width, y_top),
-            (x_left, y_top),
-            (x_left + 0.3 * foot_width, y_top),
-            (x_left + 0.45 * foot_width, y_top + 0.1 * foot_height),
-            (x_left + 0.15 * foot_width, y_top + foot_height),
+            (x_left - 0.45 * foot_width, y_top + 0.1 * foot_height),  # Start below top with curve
+            (x_left - 0.3 * foot_width, y_top),  # Curve up
+            (x_left, y_top),  # Top center
+            (x_left + 0.3 * foot_width, y_top),  # Curve up
+            (x_left + 0.45 * foot_width, y_top + 0.1 * foot_height),  # Start below top
+            (x_left + 0.15 * foot_width, y_top + foot_height),  # Narrow bottom
             (x_left + 0.03 * foot_width, y_top + foot_height),
             (x_left - 0.03 * foot_width, y_top + foot_height),
             (x_left - 0.15 * foot_width, y_top + foot_height),
@@ -294,6 +308,7 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
         )
 
     elif foot_subtype == "pointy_trapezoid":
+        # Add same rounded top as flat_trapezoid
         p_left = (
             (x_left - 0.45 * foot_width, y_top + 0.1 * foot_height),
             (x_left - 0.3 * foot_width, y_top),
@@ -301,7 +316,7 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
             (x_left + 0.3 * foot_width, y_top),
             (x_left + 0.45 * foot_width, y_top + 0.1 * foot_height),
             (x_left + 0.18 * foot_width, y_top + 0.88 * foot_height),
-            (x_left, y_top + foot_height),
+            (x_left, y_top + foot_height),  # Point
             (x_left - 0.18 * foot_width, y_top + 0.88 * foot_height),
         )
 
@@ -316,14 +331,16 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
             (x_right - 0.18 * foot_width, y_top + 0.88 * foot_height),
         )
 
+    # Make square more rounded too
     elif foot_subtype == "flat_square":
+        # Add rounded top corners
         p_left = (
-            (x_left - 0.5 * foot_width, y_top + 0.15 * foot_height),
+            (x_left - 0.5 * foot_width, y_top + 0.15 * foot_height),  # Round corner
             (x_left - 0.4 * foot_width, y_top + 0.05 * foot_height),
             (x_left - 0.2 * foot_width, y_top),
             (x_left + 0.2 * foot_width, y_top),
             (x_left + 0.4 * foot_width, y_top + 0.05 * foot_height),
-            (x_left + 0.5 * foot_width, y_top + 0.15 * foot_height),
+            (x_left + 0.5 * foot_width, y_top + 0.15 * foot_height),  # Round corner
             (x_left + 0.5 * foot_width, y_top + 0.75 * foot_height),
             (x_left + 0.2 * foot_width, y_top + 0.92 * foot_height),
             (x_left + 0.15 * foot_width, y_top + foot_height),
@@ -352,6 +369,7 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
         )
 
     elif foot_subtype == "pointy_square":
+        # Match flat_square rounded top
         p_left = (
             (x_left - 0.5 * foot_width, y_top + 0.15 * foot_height),
             (x_left - 0.4 * foot_width, y_top + 0.05 * foot_height),
@@ -361,7 +379,7 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
             (x_left + 0.5 * foot_width, y_top + 0.15 * foot_height),
             (x_left + 0.5 * foot_width, y_top + 0.75 * foot_height),
             (x_left + 0.2 * foot_width, y_top + 0.92 * foot_height),
-            (x_left, y_top + foot_height),
+            (x_left, y_top + foot_height),  # Point
             (x_left - 0.2 * foot_width, y_top + 0.92 * foot_height),
             (x_left - 0.5 * foot_width, y_top + 0.75 * foot_height),
         )
@@ -382,18 +400,19 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
 
     # PAIR 2: rounded
     elif foot_subtype == "flat_rounded":
+        # Rounded top, tapers to narrow flat bottom (trapezoid-like)
         p_left = (
             (x_left - 0.5 * foot_width, y_top + 0.5 * foot_height),
             (x_left - 0.35 * foot_width, y_top + 0.15 * foot_height),
             (x_left, y_top),
             (x_left + 0.35 * foot_width, y_top + 0.15 * foot_height),
             (x_left + 0.5 * foot_width, y_top + 0.5 * foot_height),
-            (x_left + 0.18 * foot_width, y_top + 0.92 * foot_height),
-            (x_left + 0.15 * foot_width, y_top + foot_height),
-            (x_left + 0.03 * foot_width, y_top + foot_height),
+            (x_left + 0.18 * foot_width, y_top + 0.92 * foot_height),  # Taper in
+            (x_left + 0.15 * foot_width, y_top + foot_height),  # Narrow bottom
+            (x_left + 0.03 * foot_width, y_top + foot_height),  # Tiny flat
             (x_left - 0.03 * foot_width, y_top + foot_height),
-            (x_left - 0.15 * foot_width, y_top + foot_height),
-            (x_left - 0.18 * foot_width, y_top + 0.92 * foot_height),
+            (x_left - 0.15 * foot_width, y_top + foot_height),  # Narrow bottom
+            (x_left - 0.18 * foot_width, y_top + 0.92 * foot_height),  # Taper in
         )
 
         p_right = (
@@ -411,6 +430,7 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
         )
 
     elif foot_subtype == "pointy_rounded":
+        # Keep similar structure to pointy_trapezoid
         p_left = (
             (x_left - 0.5 * foot_width, y_top + 0.3 * foot_height),
             (x_left - 0.4 * foot_width, y_top + 0.1 * foot_height),
@@ -419,7 +439,7 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
             (x_left + 0.2 * foot_width, y_top),
             (x_left + 0.4 * foot_width, y_top + 0.1 * foot_height),
             (x_left + 0.5 * foot_width, y_top + 0.3 * foot_height),
-            (x_left + 0.18 * foot_width, y_top + 0.88 * foot_height),
+            (x_left + 0.18 * foot_width, y_top + 0.88 * foot_height),  # Match trapezoid angle
             (x_left, y_top + foot_height),
             (x_left - 0.18 * foot_width, y_top + 0.88 * foot_height),
         )
@@ -627,32 +647,38 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
         ear_size = 0.4 * r
         ear_x_left = x_mid - 0.5 * head_width
         ear_x_right = x_mid + 0.5 * head_width
-        ear_y = y_top_face + head_height / 2
+        ear_y = y_top_face + head_height / 2  # middle of head
 
         if ear_shape == "square":
             ear = pero.Rect(width=ear_size, height=ear_size)
+            # Left ear (extending left from head)
             ear.draw(
                 canvas,
                 x=ear_x_left - ear_size,
                 y=ear_y - ear_size / 2,
                 fill_color=color_left,
             )
+            # Right ear (extending right from head)
             ear.draw(
                 canvas, x=ear_x_right, y=ear_y - ear_size / 2, fill_color=color_right
             )
 
         elif ear_shape == "triangle":
             ear = pero.Polygon(line_color=pero.colors.Black)
+
+            # Left triangle ear (base at head, tip pointing left)
             p_left = (
-                (ear_x_left, ear_y - ear_size / 2),
-                (ear_x_left, ear_y + ear_size / 2),
-                (ear_x_left - ear_size, ear_y),
+                (ear_x_left, ear_y - ear_size / 2),  # top of base
+                (ear_x_left, ear_y + ear_size / 2),  # bottom of base
+                (ear_x_left - ear_size, ear_y),  # tip pointing left
             )
             ear.draw(canvas, points=p_left, fill_color=color_left)
+
+            # Right triangle ear (base at head, tip pointing right)
             p_right = (
-                (ear_x_right, ear_y - ear_size / 2),
-                (ear_x_right, ear_y + ear_size / 2),
-                (ear_x_right + ear_size, ear_y),
+                (ear_x_right, ear_y - ear_size / 2),  # top of base
+                (ear_x_right, ear_y + ear_size / 2),  # bottom of base
+                (ear_x_right + ear_size, ear_y),  # tip pointing right
             )
             ear.draw(canvas, points=p_right, fill_color=color_right)
 
@@ -660,9 +686,10 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
         mouth_type = features["mouth_type"]
         mouth_width = 0.4 * head_width
         mouth_x = x_mid - mouth_width / 2
-        mouth_y = y_top_face + (5.0 / 8.0) * head_height
+        mouth_y = y_top_face + (5.0 / 8.0) * head_height  # below the eyes
 
         if mouth_type == "closed":
+            # Closed mouth - thinner filled rectangle
             mouth_height = 0.05 * r
             mouth = pero.Rect(
                 x=mouth_x,
@@ -674,6 +701,7 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
             mouth.draw(canvas)
 
         elif mouth_type == "open":
+            # Open mouth - taller rectangle outline with vertical grills inside
             mouth_height = 0.2 * r
             mouth_outline = pero.Rect(
                 x=mouth_x,
@@ -684,9 +712,12 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
                 line_color=pero.colors.Black,
             )
             mouth_outline.draw(canvas)
+
+            # Add vertical grills inside the mouth
             grill_line = pero.Line(line_color=pero.colors.Black, line_width=1)
             num_grills = 4
             grill_spacing = mouth_width / (num_grills + 1)
+
             for i in range(1, num_grills + 1):
                 grill_x = mouth_x + i * grill_spacing
                 grill_line.draw(
@@ -698,3 +729,4 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
                 )
 
     return canvas
+
