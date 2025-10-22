@@ -605,7 +605,7 @@ def main(sttngs):
                 key = f"budget_{budget}_{policy}_human_acc_{int(human_acc * 100)}"
                 intervention_results[key] = {
                     "accuracy": acc_intervened,
-                    "accuracy_gain": acc_intervened - acc_det,
+                    "accuracy_gain": acc_intervened - acc_det_tr,
                     "predictions_intervened_on": intervention_stats["samples_intervened_on"],
                     "interventions_rate": intervention_stats["intervention_rate"],
                     "avg_edits_per_intervention": intervention_stats["avg_edits_per_intervention"],
