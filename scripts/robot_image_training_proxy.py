@@ -19,6 +19,19 @@ from scripts.dnn_training import train_eval_image
 from scripts.interventions import apply_interventions
 from concept_benchmark.synthetic.proxy import create_synthetic_dataset
 
+try:
+    import psutil as _psutil
+except Exception:
+    _psutil = None
+from torchvision import transforms
+
+def _mem(tag):
+    try:
+        rss = _psutil.Process(os.getpid()).memory_info().rss / (1024**3) if _psutil else -1.0
+        print(f"[MEM] {tag} rss_gb={rss:.3f}", flush=True)
+    except Exception:
+        print(f"[MEM] {tag} rss_gb=N/A", flush=True)
+
 settings = {
     "samples_per_instance": 1,
     "draw": 0,
@@ -477,10 +490,12 @@ def main(sttngs):
             cd.load_state_dict(state)
             det_path = Path(S["load_detector"])
         else:
+            _mem("before_cd_fit")
             cd.fit(train, valid,
                 embed_params={'shuffle': False, **config},
                 fit_params={**config, "epochs": 50, "lr": 1e-3, "patience": 10,
                             "batch_size": config.get("batch_size", 8), "num_workers": 0, "pin_memory": False})
+            _mem("after_cd_fit")
             
             det_path = Path(settings["out_dir"]) / (S["run_name"] or "run") / det_name
             torch.save({"model_state_dict": cd.model.state_dict(),
@@ -503,6 +518,7 @@ def main(sttngs):
         P_tr = cd.predict(train, embed_params={'shuffle': False, **config})
         P_vl = cd.predict(valid, embed_params={'shuffle': False, **config})
         P_te = cd.predict(test,  embed_params={'shuffle': False, **config})
+        _mem("after_cd_predicts")
         H_tr = (P_tr > 0.5).astype(np.float32)
         H_te = (P_te > 0.5).astype(np.float32)
         H_vl = (P_vl > 0.5).astype(np.float32)
@@ -532,11 +548,13 @@ def main(sttngs):
         acc_det = float((y_pred_det.argmax(1) == test.y.astype(int)).mean())
         acc_gt  = float((y_pred_gt.argmax(1)  == test.y.astype(int)).mean())
         concept_acc_mean = float((H_te == test.C).mean())
-
+        
+        _mem("before_fe_weights_print")
         print("=== Learned Frontend Weights ===")
         for i, concept in enumerate(test.concepts):
             print(f"  {concept}: {fe.model.coef_[0, i]:.4f}")
         print(f"  bias: {fe.model.intercept_[0]:.4f}")
+        _mem("after_fe_weights_print")
 
         # ... inside main, after FE weights ...
         dnn_stats = {}
@@ -558,7 +576,9 @@ def main(sttngs):
             dnn_path = Path(settings["out_dir"]) / (S["run_name"] or "run") / dnn_name
             torch.save({"model_state_dict": dnn_model.state_dict(), "processor": proc}, dnn_path)
         # metrics.update(dnn_stats)
-
+        
+        _mem("before_interventions")
+        print(f"[STEP] start_interventions budgets={S.get('budget',[1,2,3,4,5])}", flush=True)
         intervention_results = {}
         budgets = S.get('budget', [1, 2, 3, 4, 5])
         human_acc = S.get("intervention_accuracy", 1.0)
@@ -599,6 +619,7 @@ def main(sttngs):
 
         metrics = {"cbm_acc_detected": acc_det, "cbm_acc_oracle": acc_gt, "concept_det_acc_mean": concept_acc_mean}
         metrics.update(dnn_stats)
+        _mem("before_write_outputs")
 
         meta_path = run_dir / meta_name
         metrics_path = run_dir / metrics_name
