@@ -482,7 +482,8 @@ def main(sttngs):
                            "batch_size": 32, "num_workers": 0, "pin_memory": False, **config})
             
             det_path = Path(settings["out_dir"]) / (S["run_name"] or "run") / det_name
-            torch.save(cd.state_dict(), det_path)
+            torch.save({"model_state_dict": cd.model.state_dict(),
+                        "calibration_params": cd.calibration_params}, det_path)
 
         if int(S.get('fe_harness', 0)) == 1:
             try:
