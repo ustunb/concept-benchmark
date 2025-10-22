@@ -294,16 +294,16 @@ def main(sttngs):
         drop_list = ["foot_shape","hand_shape"]
 
     if S.get("skew_concept"):
-    try:
-        train, valid, test = create_skewed_splits(data, skew_specs=S["skew_concept"], rng=rng, drop_concepts=drop_list, fractions_unique=True)
-    except TypeError:
-        train, valid, test = create_skewed_splits(data, skew_specs=S["skew_concept"], rng=rng, drop_concepts=drop_list)
-elif S.get("dataset_characterization", "") != "":
-    train, valid, test = filter_training_by_string(data, string=S["dataset_characterization"], rng=rng)
-else:
-    data.drop_concepts(drop_list)
-    data.split("K05N01", fold_num_validation=4, fold_num_test=5)
-    train = data.training; valid = data.validation; test = data.test
+        try:
+            train, valid, test = create_skewed_splits(data, skew_specs=S["skew_concept"], rng=rng, drop_concepts=drop_list, fractions_unique=True)
+        except TypeError:
+            train, valid, test = create_skewed_splits(data, skew_specs=S["skew_concept"], rng=rng, drop_concepts=drop_list)
+    elif S.get("dataset_characterization", "") != "":
+        train, valid, test = filter_training_by_string(data, string=S["dataset_characterization"], rng=rng)
+    else:
+        data.drop_concepts(drop_list)
+        data.split("K05N01", fold_num_validation=4, fold_num_test=5)
+        train = data.training; valid = data.validation; test = data.test
 
 if int(S.get("disjoint_patterns_across_splits", 0)):
     cat = data.meta.get("catalog_df")
