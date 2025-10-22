@@ -19,7 +19,7 @@ from scripts.interventions import apply_interventions
 from concept_benchmark.synthetic.proxy import create_synthetic_dataset
 
 settings = {
-    "samples_per_instance": 3,
+    "samples_per_instance": 1,
     "draw": 0,
     "CBM_type": "joint",  # or "sequential"
     "image_dir": "./data/robot_images",
@@ -177,18 +177,26 @@ def main(sttngs):
         drop_list = ["foot_shape","hand_shape"]
 
     if S.get("skew_concept"):
-        train, valid, test = create_skewed_splits(data, skew_specs=S["skew_concept"], rng=rng, drop_concepts=drop_list)
+        train, valid, test = create_skewed_splits(
+            data,
+            skew_specs=S["skew_concept"],
+            rng=rng,
+            drop_concepts=drop_list,
+            fractions_unique=True
+        )
     elif S.get("dataset_characterization", "") != "":
-        train, valid, test = filter_training_by_string(data, string=S["dataset_characterization"], rng=rng)
+            train, valid, test = filter_training_by_string(data, string=S["dataset_characterization"], rng=rng)
     else:
-        data.drop_concepts(drop_list)   # dataset-level drop (not on samples)
-        data.split("K05N01", fold_num_validation=4, fold_num_test=5)
-        train = data.training; valid = data.validation; test = data.test
-
-    if S.get("label_noise_rate", 0.0) > 0:
-        train = _apply_label_noise(train, S["label_noise_rate"], seed=int(S["seed"]))
-        valid = _apply_label_noise(valid, S["label_noise_rate"], seed=int(S["seed"]))
-        test  = _apply_label_noise(test,  S["label_noise_rate"], seed=int(S["seed"]))
+            data.drop_concepts(drop_list)
+            data.split("K05N01", fold_num_validation=4, fold_num_test=5)
+            train = data.training; valid = data.validation; test = data.test
+    
+    ids = train.meta.get("robot_ids")
+    if ids is not None:
+            keep = np.unique(ids, return_index=True)[1]
+            m = np.zeros(len(train.C), dtype=bool)
+            m[keep] = True
+            train = train.filter(m)
 
     # Basic stats
     print("Training set concept distributions:")
