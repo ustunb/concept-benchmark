@@ -23,18 +23,28 @@ def create_synthetic_dataset(data_type: str = "image", **kwargs) -> ConceptDatas
 
 
 def _coarse_bit(series: pd.Series, source: str, source_to_bit: dict | None) -> pd.Series:
-    if source_to_bit is not None:
-        out = series.map(source_to_bit)
-        if out.isna().any():
-            raise ValueError(f"source_to_bit missing mapping for '{source}' values: {series.unique().tolist()}")
-        return out.astype(int)
     s = series.astype(str)
+    if source_to_bit is not None:
+        out = s.map(source_to_bit)  # try exact values (coarse or subtype)
+        if out.isna().any():
+            # try mapping the coarse token (prefix before "_")
+            coarse = s.str.split("_").str[0]
+            out2 = coarse.map(source_to_bit)
+            if out2.isna().any():
+                # final fallback: infer by prefix
+                if source == "foot_shape":
+                    return s.str.startswith("pointy").astype(int)
+                if source == "hand_shape":
+                    return s.str.startswith("edgy").astype(int)
+                raise ValueError(f"source_to_bit missing mapping for '{source}' values: {series.unique().tolist()}")
+            return out2.astype(int)
+        return out.astype(int)
+    # no mapping provided → infer by prefix
     if source == "foot_shape":
         return s.str.startswith("pointy").astype(int)
     if source == "hand_shape":
         return s.str.startswith("edgy").astype(int)
     raise ValueError(f"Provide source_to_bit for source '{source}'")
-
 
 def _apply_proxies(catalog_df: pd.DataFrame, proxy_spec: dict | None, rng_seed: int = 0) -> pd.DataFrame:
     if not proxy_spec:
