@@ -537,19 +537,26 @@ def main(sttngs):
             print(f"  {concept}: {fe.model.coef_[0, i]:.4f}")
         print(f"  bias: {fe.model.intercept_[0]:.4f}")
 
+        # ... inside main, after FE weights ...
         dnn_stats = {}
         if S.get("train_dnn", 0):
             print("Training baseline DNN...")
             paths_tr = [train.base_dir / p for p in train.X]; ytr = train.y.astype(int)
             paths_te = [test.base_dir / p for p in test.X];   yte = test.y.astype(int)
-            dnn_acc, proc, dnn_model = train_eval_image(paths_tr, ytr, paths_te, yte,
-                                                        model_id=S.get("image_model", "google/vit-base-patch16-224"),
-                                                        epochs=int(S["epochs"]), batch_size=16, lr=5e-5, device=device)
+            dnn_acc, proc, dnn_model = train_eval_image(
+                paths_tr, ytr, paths_te, yte,
+                model_id=S.get("image_model", "google/vit-tiny-patch16-224"),
+                epochs=int(S.get("dnn_epochs", S["epochs"])),
+                batch_size=int(S.get("dnn_batch_size", 8)),
+                lr=float(S.get("dnn_lr", 5e-5)),
+                device=device
+            )
             dnn_stats = {"dnn_accuracy": float(dnn_acc)}
             print(f"DNN accuracy: {float(dnn_acc)}")
-            dnn_name = f"dnn_proxy_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
+            dnn_name = f"dnn_proxy_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{bias_tag}.pt"
             dnn_path = Path(settings["out_dir"]) / (S["run_name"] or "run") / dnn_name
             torch.save({"model_state_dict": dnn_model.state_dict(), "processor": proc}, dnn_path)
+        metrics.update(dnn_stats)
 
         intervention_results = {}
         budgets = S.get('budget', [1, 2, 3, 4, 5])
@@ -610,6 +617,10 @@ if __name__ == "__main__":
     parser.add_argument('--draw', dest='draw', type=int)
     parser.add_argument('--image-size', dest='image_size', type=str)
     parser.add_argument('--train-dnn', dest='train_dnn', type=int)
+    parser.add_argument('--image-model', dest='image_model', type=str)
+    parser.add_argument('--dnn-epochs', dest='dnn_epochs', type=int)
+    parser.add_argument('--dnn-batch-size', dest='dnn_batch_size', type=int)
+    parser.add_argument('--dnn-lr', dest='dnn_lr', type=float)
     parser.add_argument('--model', dest='model', type=str)
     parser.add_argument('--model-type', dest='model_type', type=str)
     parser.add_argument('--logit-scalar', dest='logit_scalar', type=float)
