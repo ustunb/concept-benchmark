@@ -543,18 +543,29 @@ def main(sttngs):
             with open(fe_path, "wb") as f:
                 pickle.dump(fe, f)
 
-        y_pred_det = fe.predict_proba(H_te)
-        y_pred_gt  = fe.predict_proba(test.C.astype(np.float32))
-        acc_det = float((y_pred_det.argmax(1) == test.y.astype(int)).mean())
-        acc_gt  = float((y_pred_gt.argmax(1)  == test.y.astype(int)).mean())
-        concept_acc_mean = float((H_te == test.C).mean())
-        
-        _mem("before_fe_weights_print")
+        y_pred_det_tr = fe.predict_proba(H_tr); y_pred_det_vl = fe.predict_proba(H_vl); y_pred_det_te = fe.predict_proba(H_te)
+        y_pred_gt_tr  = fe.predict_proba(train.C.astype(np.float32)); y_pred_gt_vl = fe.predict_proba(valid.C.astype(np.float32)); y_pred_gt_te  = fe.predict_proba(test.C.astype(np.float32))
+        acc_det_tr = float((y_pred_det_tr.argmax(1) == train.y.astype(int)).mean()); acc_det_vl = float((y_pred_det_vl.argmax(1) == valid.y.astype(int)).mean()); acc_det_te = float((y_pred_det_te.argmax(1) == test.y.astype(int)).mean())
+        acc_gt_tr  = float((y_pred_gt_tr.argmax(1)  == train.y.astype(int)).mean()); acc_gt_vl  = float((y_pred_gt_vl.argmax(1)  == valid.y.astype(int)).mean()); acc_gt_te  = float((y_pred_gt_te.argmax(1)  == test.y.astype(int)).mean())
+
+        # CD per-concept accuracy by split
+        def _per_concept_acc(C, H):
+            M = (C >= 0).astype(np.float32)
+            num = ((H == C).astype(np.float32) * M).sum(axis=0)
+            den = M.sum(axis=0).clip(min=1)
+            return (num / den).astype(float)
+
+        cd_acc_train = _per_concept_acc(train.C, H_tr)
+        cd_acc_valid = _per_concept_acc(valid.C, H_vl)
+        cd_acc_test  = _per_concept_acc(test.C,  H_te)
+        concept_acc_mean = float(cd_acc_test.mean())
+
         print("=== Learned Frontend Weights ===")
         for i, concept in enumerate(test.concepts):
             print(f"  {concept}: {fe.model.coef_[0, i]:.4f}")
         print(f"  bias: {fe.model.intercept_[0]:.4f}")
-        _mem("after_fe_weights_print")
+        fe_weights = {c: float(fe.model.coef_[0, i]) for i, c in enumerate(test.concepts)}
+        fe_bias = float(fe.model.intercept_[0])
 
         # ... inside main, after FE weights ...
         dnn_stats = {}
@@ -617,7 +628,26 @@ def main(sttngs):
             "naming_slug": slug,
         }
 
-        metrics = {"cbm_acc_detected": acc_det, "cbm_acc_oracle": acc_gt, "concept_det_acc_mean": concept_acc_mean}
+        metrics = {
+            "cbm_acc_detected": acc_det_te,
+            "cbm_acc_oracle":   acc_gt_te,
+            "cbm_acc": {
+                "detected": {"train": acc_det_tr, "valid": acc_det_vl, "test": acc_det_te},
+                "oracle":   {"train": acc_gt_tr,  "valid": acc_gt_vl,  "test": acc_gt_te}
+            },
+            "cbm_err": {
+                "detected": {"train": 1.0 - acc_det_tr, "valid": 1.0 - acc_det_vl, "test": 1.0 - acc_det_te},
+                "oracle":   {"train": 1.0 - acc_gt_tr,  "valid": 1.0 - acc_gt_vl,  "test": 1.0 - acc_gt_te}
+            },
+            "concept_det_acc_mean": concept_acc_mean,
+            "concept_det_acc_by_split": {
+                "train": {c: float(cd_acc_train[i]) for i, c in enumerate(test.concepts)},
+                "valid": {c: float(cd_acc_valid[i]) for i, c in enumerate(test.concepts)},
+                "test":  {c: float(cd_acc_test[i])  for i, c in enumerate(test.concepts)}
+            },
+            "fe_weights": {"weights": fe_weights, "bias": fe_bias},
+            "interventions": intervention_results
+        }
         metrics.update(dnn_stats)
         _mem("before_write_outputs")
 
