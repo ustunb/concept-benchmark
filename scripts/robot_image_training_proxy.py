@@ -16,7 +16,7 @@ from concept_benchmark.paths import results_dir
 from scripts.dataset_skewing import create_skewed_splits, filter_training_by_string
 from scripts.dnn_training import train_eval_image
 from scripts.interventions import apply_interventions
-from concept_benchmark.synthetic.robot.proxy import create_synthetic_dataset
+from concept_benchmark.synthetic.proxy import create_synthetic_dataset
 
 settings = {
     "samples_per_instance": 3,
