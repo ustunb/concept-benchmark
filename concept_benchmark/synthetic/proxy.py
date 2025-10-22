@@ -165,7 +165,10 @@ def create_robot_image_dataset(
 
     # include standard features + new one-hot subtype columns
     std_feats = [f for f in catalog_df.columns if f in ALL_ROBOT_FEATURES]
-    sub_feats = [f for f in catalog_df.columns if f.startswith("foot_shape_") or f.startswith("hand_shape_")]
+    sub_feats = [f for f in catalog_df.columns
+                 if (f.startswith("foot_shape_") or f.startswith("hand_shape_"))
+                 and not f.endswith("_subtype")]
+    sub_feats = [f for f in sub_feats if (catalog_df[f] == 1).any()]
     feature_names = std_feats + sub_feats
 
     pos_map = {}
@@ -179,8 +182,8 @@ def create_robot_image_dataset(
     vals = list(pos_map.values())
     C = (catalog_df[cols] == vals).to_numpy().astype(np.int8)
 
-    y = catalog_df[OUTCOME_NAME].values
-
+    y = (catalog_df[OUTCOME_NAME] >= 0.5).astype(int).values
+    
     if verbose:
         print("Dataset for Training:")
         print(X)
