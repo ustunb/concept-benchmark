@@ -116,18 +116,18 @@ def _get_foot_shape_pred(pred_row, concept_names):
     return 0
 
 def _dedupe_train_by_robot_ids(train):
-    ids = train.meta.get("robot_ids")
-    if ids is None:
+    ids_full = np.asarray(train.meta.get("robot_ids"))
+    if ids_full is None or ids_full.size == 0:
         return train
-    ids = np.asarray(ids)
-    if ids.shape[0] != len(train) and getattr(train, "indices", None) is not None and getattr(train, "parent", None) is not None:
-        try:
-            ids_full = np.asarray(train.parent._full.meta.get("robot_ids"))
-            ids = ids_full[train.indices]
-        except Exception:
-            pass
+    df_idx = np.asarray(train.meta.get("df_indices"))
+    if df_idx is None:
+        if ids_full.shape[0] != len(train):
+            raise ValueError("robot_ids misaligned with train and df_indices missing")
+        ids = ids_full
+    else:
+        ids = ids_full[df_idx]
     keep = np.unique(ids, return_index=True)[1]
-    m = np.zeros(len(train.C), dtype=bool)
+    m = np.zeros(len(train), dtype=bool)
     m[keep] = True
     return train.filter(m)
 
