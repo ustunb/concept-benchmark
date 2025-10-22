@@ -294,16 +294,30 @@ def main(sttngs):
         drop_list = ["foot_shape","hand_shape"]
 
     if S.get("skew_concept"):
-        try:
-            train, valid, test = create_skewed_splits(data, skew_specs=S["skew_concept"], rng=rng, drop_concepts=drop_list, fractions_unique=True)
-        except TypeError:
-            train, valid, test = create_skewed_splits(data, skew_specs=S["skew_concept"], rng=rng, drop_concepts=drop_list)
-    elif S.get("dataset_characterization", "") != "":
-        train, valid, test = filter_training_by_string(data, string=S["dataset_characterization"], rng=rng)
-    else:
-        data.drop_concepts(drop_list)
-        data.split("K05N01", fold_num_validation=4, fold_num_test=5)
-        train = data.training; valid = data.validation; test = data.test
+    try:
+        train, valid, test = create_skewed_splits(data, skew_specs=S["skew_concept"], rng=rng, drop_concepts=drop_list, fractions_unique=True)
+    except TypeError:
+        train, valid, test = create_skewed_splits(data, skew_specs=S["skew_concept"], rng=rng, drop_concepts=drop_list)
+elif S.get("dataset_characterization", "") != "":
+    train, valid, test = filter_training_by_string(data, string=S["dataset_characterization"], rng=rng)
+else:
+    data.drop_concepts(drop_list)
+    data.split("K05N01", fold_num_validation=4, fold_num_test=5)
+    train = data.training; valid = data.validation; test = data.test
+
+if int(S.get("disjoint_patterns_across_splits", 0)):
+    cat = data.meta.get("catalog_df")
+    if cat is not None:
+        patt_cols = [c for c in ["head_shape","body_shape","has_antennae","mouth_type"] if c in cat.columns]
+        if patt_cols:
+            ids_tr = train.meta.get("robot_ids")
+            pat_tr = set(map(tuple, cat.set_index("id").loc[ids_tr][patt_cols].astype(str).values.tolist()))
+            def _filter_split(split):
+                ids = split.meta.get("robot_ids"); df = cat.set_index("id").loc[ids]
+                keep = ~df[patt_cols].astype(str).apply(tuple, axis=1).isin(pat_tr)
+                return split.filter(keep.to_numpy())
+            valid = _filter_split(valid)
+            test = _filter_split(test)
 
     train = _dedupe_train_by_robot_ids(train)
     train = _enforce_pattern_limits(train, data, S)
@@ -322,6 +336,23 @@ def main(sttngs):
         coarse = S.get("coarse_balance_feature")
         if coarse in df_tr.columns:
             print("Coarse balance counts:", dict(df_tr[coarse].value_counts().to_dict()))
+    if cat is not None:
+        ids_tr = train.meta.get("robot_ids")
+        df_tr = cat.set_index("id").loc[ids_tr]
+        fs_cols = [c for c in df_tr.columns if c.startswith("foot_shape_") and not c.endswith("_subtype")]
+        if fs_cols:
+            top = df_tr[fs_cols].sum().sort_values(ascending=False).head(10).to_dict()
+            print("top_foot_subtypes_train:", top)
+        if "foot_shape" in df_tr.columns and "body_shape" in df_tr.columns:
+            coarse = df_tr["foot_shape"].astype(str).str.startswith("pointy").astype(int)
+            prox = df_tr["body_shape"].map({"round":1,"square":0}).astype(int)
+            align = float((prox.values == coarse.values).mean())
+            print(f"proxy_align_body_vs_foot: {align:.3f}")
+        if "hand_shape" in df_tr.columns and "ears_shape" in df_tr.columns:
+            coarse_h = df_tr["hand_shape"].astype(str).str.startswith("edgy").astype(int)
+            prox_h = df_tr["ears_shape"].map({"triangle":1,"square":0}).astype(int)
+            align_h = float((prox_h.values == coarse_h.values).mean())
+            print(f"proxy_align_ears_vs_hand: {align_h:.3f}")
 
     print("Training set concept distributions:")
     for i, concept_name in enumerate(train.concepts):
@@ -505,12 +536,28 @@ if __name__ == "__main__":
     parser.add_argument('--coarse-balance-feature', dest='coarse_balance_feature', type=str)
     parser.add_argument('--proxy-p', dest='proxy_p', type=float)
     parser.add_argument('--subtype-label-bias', dest='subtype_label_bias', type=str)
+    parser.add_argument('--grid', dest='grid', type=str)
 
     args, _ = parser.parse_known_args()
 
     overrides = {k: v for k, v in vars(args).items() if v is not None}
-    for key in ['drop_concepts','skew_concept','proxy_spec','subtype_label_bias']:
-        if key in overrides:
+    for key in ['drop_concepts','skew_concept','proxy_spec','subtype_label_bias','grid']:
+        if key in overrides and isinstance(overrides[key], str):
             overrides[key] = json.loads(overrides[key])
-    settings.update(overrides)
-    main(settings)
+    
+    if 'grid' in overrides:
+        import itertools
+        grid = overrides.pop('grid') or {}
+        keys = list(grid.keys()); vals = [grid[k] for k in keys]
+        base = dict(settings); base.update(overrides)
+        for combo in itertools.product(*vals) if keys else [()]:
+            cfg = dict(base)
+            if keys:
+                for k, v in zip(keys, combo):
+                    cfg[k] = v
+                cfg['run_name'] = f"{base.get('run_name','run')}_{'_'.join(f'{k}={v}' for k,v in zip(keys,combo))}"
+            main(cfg)
+    else:
+        settings.update(overrides)
+        main(settings)
+
