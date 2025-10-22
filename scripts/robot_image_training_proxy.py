@@ -305,205 +305,205 @@ def main(sttngs):
         data.split("K05N01", fold_num_validation=4, fold_num_test=5)
         train = data.training; valid = data.validation; test = data.test
 
-if int(S.get("disjoint_patterns_across_splits", 0)):
+    if int(S.get("disjoint_patterns_across_splits", 0)):
+        cat = data.meta.get("catalog_df")
+        if cat is not None:
+            patt_cols = [c for c in ["head_shape","body_shape","has_antennae","mouth_type"] if c in cat.columns]
+            if patt_cols:
+                ids_tr = train.meta.get("robot_ids")
+                pat_tr = set(map(tuple, cat.set_index("id").loc[ids_tr][patt_cols].astype(str).values.tolist()))
+                def _filter_split(split):
+                    ids = split.meta.get("robot_ids"); df = cat.set_index("id").loc[ids]
+                    keep = ~df[patt_cols].astype(str).apply(tuple, axis=1).isin(pat_tr)
+                    return split.filter(keep.to_numpy())
+                valid = _filter_split(valid)
+                test = _filter_split(test)
+
+    train = _dedupe_train_by_robot_ids(train)
+    train = _enforce_pattern_limits(train, data, S)
+    train = _balance_and_cap_train(train, data, S)
+
+    if S.get("label_noise_rate", 0.0) > 0:
+        train = _apply_label_noise(train, S["label_noise_rate"], seed=int(S["seed"]))
+        valid = _apply_label_noise(valid, S["label_noise_rate"], seed=int(S["seed"]))
+        test  = _apply_label_noise(test,  S["label_noise_rate"], seed=int(S["seed"]))
+
+    print("Train rows:", len(train), "unique_ids:", len(np.unique(train.meta.get('robot_ids'))))
     cat = data.meta.get("catalog_df")
+    if cat is not None and S.get("coarse_balance_feature"):
+        ids_tr = train.meta.get("robot_ids")
+        df_tr = cat.set_index("id").loc[ids_tr]
+        coarse = S.get("coarse_balance_feature")
+        if coarse in df_tr.columns:
+            print("Coarse balance counts:", dict(df_tr[coarse].value_counts().to_dict()))
     if cat is not None:
-        patt_cols = [c for c in ["head_shape","body_shape","has_antennae","mouth_type"] if c in cat.columns]
-        if patt_cols:
-            ids_tr = train.meta.get("robot_ids")
-            pat_tr = set(map(tuple, cat.set_index("id").loc[ids_tr][patt_cols].astype(str).values.tolist()))
-            def _filter_split(split):
-                ids = split.meta.get("robot_ids"); df = cat.set_index("id").loc[ids]
-                keep = ~df[patt_cols].astype(str).apply(tuple, axis=1).isin(pat_tr)
-                return split.filter(keep.to_numpy())
-            valid = _filter_split(valid)
-            test = _filter_split(test)
+        ids_tr = train.meta.get("robot_ids")
+        df_tr = cat.set_index("id").loc[ids_tr]
+        fs_cols = [c for c in df_tr.columns if c.startswith("foot_shape_") and not c.endswith("_subtype")]
+        if fs_cols:
+            top = df_tr[fs_cols].sum().sort_values(ascending=False).head(10).to_dict()
+            print("top_foot_subtypes_train:", top)
+        if "foot_shape" in df_tr.columns and "body_shape" in df_tr.columns:
+            coarse = df_tr["foot_shape"].astype(str).str.startswith("pointy").astype(int)
+            prox = df_tr["body_shape"].map({"round":1,"square":0}).astype(int)
+            align = float((prox.values == coarse.values).mean())
+            print(f"proxy_align_body_vs_foot: {align:.3f}")
+        if "hand_shape" in df_tr.columns and "ears_shape" in df_tr.columns:
+            coarse_h = df_tr["hand_shape"].astype(str).str.startswith("edgy").astype(int)
+            prox_h = df_tr["ears_shape"].map({"triangle":1,"square":0}).astype(int)
+            align_h = float((prox_h.values == coarse_h.values).mean())
+            print(f"proxy_align_ears_vs_hand: {align_h:.3f}")
 
-train = _dedupe_train_by_robot_ids(train)
-train = _enforce_pattern_limits(train, data, S)
-train = _balance_and_cap_train(train, data, S)
+        print("Training set concept distributions:")
+        for i, concept_name in enumerate(train.concepts):
+            unique, counts = np.unique(train.C[:, i], return_counts=True)
+            total = counts.sum()
+            dist_str = ", ".join([f"{int(k)}: {v} ({v/total:.1%})" for k, v in dict(zip(unique, counts)).items()])
+            print(f"  {concept_name}: {dist_str}")
+        print("Test set concept distributions:")
+        for i, concept_name in enumerate(test.concepts):
+            unique, counts = np.unique(test.C[:, i], return_counts=True)
+            total = counts.sum()
+            dist_str = ", ".join([f"{int(k)}: {v} ({v/total:.1%})" for k, v in dict(zip(unique, counts)).items()])
+            print(f"  {concept_name}: {dist_str}")
 
-if S.get("label_noise_rate", 0.0) > 0:
-    train = _apply_label_noise(train, S["label_noise_rate"], seed=int(S["seed"]))
-    valid = _apply_label_noise(valid, S["label_noise_rate"], seed=int(S["seed"]))
-    test  = _apply_label_noise(test,  S["label_noise_rate"], seed=int(S["seed"]))
+        device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
+        config = {
+            'device': device,
+            'batch_size': 32,
+            'num_workers': 0 if device == 'mps' else 12,
+            'pin_memory': False if device == 'mps' else True,
+        }
 
-print("Train rows:", len(train), "unique_ids:", len(np.unique(train.meta.get('robot_ids'))))
-cat = data.meta.get("catalog_df")
-if cat is not None and S.get("coarse_balance_feature"):
-    ids_tr = train.meta.get("robot_ids")
-    df_tr = cat.set_index("id").loc[ids_tr]
-    coarse = S.get("coarse_balance_feature")
-    if coarse in df_tr.columns:
-        print("Coarse balance counts:", dict(df_tr[coarse].value_counts().to_dict()))
-if cat is not None:
-    ids_tr = train.meta.get("robot_ids")
-    df_tr = cat.set_index("id").loc[ids_tr]
-    fs_cols = [c for c in df_tr.columns if c.startswith("foot_shape_") and not c.endswith("_subtype")]
-    if fs_cols:
-        top = df_tr[fs_cols].sum().sort_values(ascending=False).head(10).to_dict()
-        print("top_foot_subtypes_train:", top)
-    if "foot_shape" in df_tr.columns and "body_shape" in df_tr.columns:
-        coarse = df_tr["foot_shape"].astype(str).str.startswith("pointy").astype(int)
-        prox = df_tr["body_shape"].map({"round":1,"square":0}).astype(int)
-        align = float((prox.values == coarse.values).mean())
-        print(f"proxy_align_body_vs_foot: {align:.3f}")
-    if "hand_shape" in df_tr.columns and "ears_shape" in df_tr.columns:
-        coarse_h = df_tr["hand_shape"].astype(str).str.startswith("edgy").astype(int)
-        prox_h = df_tr["ears_shape"].map({"triangle":1,"square":0}).astype(int)
-        align_h = float((prox_h.values == coarse_h.values).mean())
-        print(f"proxy_align_ears_vs_hand: {align_h:.3f}")
-
-    print("Training set concept distributions:")
-    for i, concept_name in enumerate(train.concepts):
-        unique, counts = np.unique(train.C[:, i], return_counts=True)
-        total = counts.sum()
-        dist_str = ", ".join([f"{int(k)}: {v} ({v/total:.1%})" for k, v in dict(zip(unique, counts)).items()])
-        print(f"  {concept_name}: {dist_str}")
-    print("Test set concept distributions:")
-    for i, concept_name in enumerate(test.concepts):
-        unique, counts = np.unique(test.C[:, i], return_counts=True)
-        total = counts.sum()
-        dist_str = ", ".join([f"{int(k)}: {v} ({v/total:.1%})" for k, v in dict(zip(unique, counts)).items()])
-        print(f"  {concept_name}: {dist_str}")
-
-    device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
-    config = {
-        'device': device,
-        'batch_size': 32,
-        'num_workers': 0 if device == 'mps' else 12,
-        'pin_memory': False if device == 'mps' else True,
-    }
-
-    embed_side = int(getattr(train, "meta", {}).get("resolution", 256))
-    cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=train.n_concepts, input_size=embed_side))
-    det_name = f"detector_proxy_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
-    if S["load_detector"]:
-        mini_train = train.filter(np.array([True] + [False] * (len(train.C) - 1)))
-        mini_valid = valid.filter(np.array([True] + [False] * (len(valid.C) - 1)))
-        cd.fit(mini_train, mini_valid, freeze=True, embed_params={"device": device}, fit_params={"epochs": 1, "device": "cpu"})
-        state = torch.load(S["load_detector"], weights_only=False, map_location="cpu")
-        cd.load_state_dict(state)
-        det_path = Path(S["load_detector"])
-    else:
-        cd.fit(train, valid, embed_params={'shuffle': False, **config}, fit_params={"epochs": 50, 'lr': 1e-3, "patience": 10, **config})
-        det_path = Path(settings["out_dir"]) / (S["run_name"] or "run") / det_name
-        torch.save(cd.state_dict(), det_path)
-
-    if int(S.get('fe_harness', 0)) == 1:
-        try:
-            from scripts.fe_harness import run_fe_harness
-            names = list(train.concepts)
-            C_tr = train.C.astype(float); C_te = test.C.astype(float)
-            y_tr = train.y.astype(int);   y_te = test.y.astype(int)
-            try:
-                P_tr = cd.predict_proba(train); P_te = cd.predict_proba(test)
-            except Exception:
-                P_tr = cd.predict(train).astype(float); P_te = cd.predict(test).astype(float)
-            run_fe_harness(C_tr, y_tr, C_te, y_te, P_tr, P_te, names, table_name="FE 2x2 (proxy setup)")
-        except Exception as e:
-            print("FE harness unavailable or failed:", e)
-
-    P_tr = cd.predict(train, embed_params={"device": device})
-    P_vl = cd.predict(valid, embed_params={"device": device})
-    P_te = cd.predict(test,  embed_params={"device": device})
-    H_tr = (P_tr > 0.5).astype(np.float32)
-    H_te = (P_te > 0.5).astype(np.float32)
-    H_vl = (P_vl > 0.5).astype(np.float32)
-
-    fe = FrontEndModel()
-    fe_name = f"frontend_proxy_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
-    if S["load_frontend"]:
-        with open(S["load_frontend"], "rb") as f:
-            fe = pickle.load(f)
-        fe_path = Path(S["load_frontend"])
-    else:
-        Ctr = train.C.astype(np.float32)
-        if int(S["impute_missing"]) and np.any(Ctr < 0):
-            Cin = Ctr.copy(); m = Cin < 0; Cin[m] = P_tr[m]; fe.fit(Cin, train.y.astype(int))
+        embed_side = int(getattr(train, "meta", {}).get("resolution", 256))
+        cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=train.n_concepts, input_size=embed_side))
+        det_name = f"detector_proxy_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
+        if S["load_detector"]:
+            mini_train = train.filter(np.array([True] + [False] * (len(train.C) - 1)))
+            mini_valid = valid.filter(np.array([True] + [False] * (len(valid.C) - 1)))
+            cd.fit(mini_train, mini_valid, freeze=True, embed_params={"device": device}, fit_params={"epochs": 1, "device": "cpu"})
+            state = torch.load(S["load_detector"], weights_only=False, map_location="cpu")
+            cd.load_state_dict(state)
+            det_path = Path(S["load_detector"])
         else:
-            if S.get("CBM_type", "joint") == "sequential":
-                keep = np.all(Ctr >= 0, axis=1)
-                fe.fit(H_tr[keep], train.y[keep].astype(int))
+            cd.fit(train, valid, embed_params={'shuffle': False, **config}, fit_params={"epochs": 50, 'lr': 1e-3, "patience": 10, **config})
+            det_path = Path(settings["out_dir"]) / (S["run_name"] or "run") / det_name
+            torch.save(cd.state_dict(), det_path)
+
+        if int(S.get('fe_harness', 0)) == 1:
+            try:
+                from scripts.fe_harness import run_fe_harness
+                names = list(train.concepts)
+                C_tr = train.C.astype(float); C_te = test.C.astype(float)
+                y_tr = train.y.astype(int);   y_te = test.y.astype(int)
+                try:
+                    P_tr = cd.predict_proba(train); P_te = cd.predict_proba(test)
+                except Exception:
+                    P_tr = cd.predict(train).astype(float); P_te = cd.predict(test).astype(float)
+                run_fe_harness(C_tr, y_tr, C_te, y_te, P_tr, P_te, names, table_name="FE 2x2 (proxy setup)")
+            except Exception as e:
+                print("FE harness unavailable or failed:", e)
+
+        P_tr = cd.predict(train, embed_params={"device": device})
+        P_vl = cd.predict(valid, embed_params={"device": device})
+        P_te = cd.predict(test,  embed_params={"device": device})
+        H_tr = (P_tr > 0.5).astype(np.float32)
+        H_te = (P_te > 0.5).astype(np.float32)
+        H_vl = (P_vl > 0.5).astype(np.float32)
+
+        fe = FrontEndModel()
+        fe_name = f"frontend_proxy_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
+        if S["load_frontend"]:
+            with open(S["load_frontend"], "rb") as f:
+                fe = pickle.load(f)
+            fe_path = Path(S["load_frontend"])
+        else:
+            Ctr = train.C.astype(np.float32)
+            if int(S["impute_missing"]) and np.any(Ctr < 0):
+                Cin = Ctr.copy(); m = Cin < 0; Cin[m] = P_tr[m]; fe.fit(Cin, train.y.astype(int))
             else:
-                fe.fit(Ctr, train.y.astype(int))
-        fe_path = Path(settings["out_dir"]) / (S["run_name"] or "run") / fe_name
-        with open(fe_path, "wb") as f:
-            pickle.dump(fe, f)
+                if S.get("CBM_type", "joint") == "sequential":
+                    keep = np.all(Ctr >= 0, axis=1)
+                    fe.fit(H_tr[keep], train.y[keep].astype(int))
+                else:
+                    fe.fit(Ctr, train.y.astype(int))
+            fe_path = Path(settings["out_dir"]) / (S["run_name"] or "run") / fe_name
+            with open(fe_path, "wb") as f:
+                pickle.dump(fe, f)
 
-    y_pred_det = fe.predict_proba(H_te)
-    y_pred_gt  = fe.predict_proba(test.C.astype(np.float32))
-    acc_det = float((y_pred_det.argmax(1) == test.y.astype(int)).mean())
-    acc_gt  = float((y_pred_gt.argmax(1)  == test.y.astype(int)).mean())
-    concept_acc_mean = float((H_te == test.C).mean())
+        y_pred_det = fe.predict_proba(H_te)
+        y_pred_gt  = fe.predict_proba(test.C.astype(np.float32))
+        acc_det = float((y_pred_det.argmax(1) == test.y.astype(int)).mean())
+        acc_gt  = float((y_pred_gt.argmax(1)  == test.y.astype(int)).mean())
+        concept_acc_mean = float((H_te == test.C).mean())
 
-    print("=== Learned Frontend Weights ===")
-    for i, concept in enumerate(test.concepts):
-        print(f"  {concept}: {fe.model.coef_[0, i]:.4f}")
-    print(f"  bias: {fe.model.intercept_[0]:.4f}")
+        print("=== Learned Frontend Weights ===")
+        for i, concept in enumerate(test.concepts):
+            print(f"  {concept}: {fe.model.coef_[0, i]:.4f}")
+        print(f"  bias: {fe.model.intercept_[0]:.4f}")
 
-    dnn_stats = {}
-    if S.get("train_dnn", 0):
-        print("Training baseline DNN...")
-        paths_tr = [train.base_dir / p for p in train.X]; ytr = train.y.astype(int)
-        paths_te = [test.base_dir / p for p in test.X];   yte = test.y.astype(int)
-        dnn_acc, proc, dnn_model = train_eval_image(paths_tr, ytr, paths_te, yte,
-                                                    model_id=S.get("image_model", "google/vit-base-patch16-224"),
-                                                    epochs=int(S["epochs"]), batch_size=16, lr=5e-5, device=device)
-        dnn_stats = {"dnn_accuracy": float(dnn_acc)}
-        print(f"DNN accuracy: {float(dnn_acc)}")
-        dnn_name = f"dnn_proxy_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
-        dnn_path = Path(settings["out_dir"]) / (S["run_name"] or "run") / dnn_name
-        torch.save({"model_state_dict": dnn_model.state_dict(), "processor": proc}, dnn_path)
+        dnn_stats = {}
+        if S.get("train_dnn", 0):
+            print("Training baseline DNN...")
+            paths_tr = [train.base_dir / p for p in train.X]; ytr = train.y.astype(int)
+            paths_te = [test.base_dir / p for p in test.X];   yte = test.y.astype(int)
+            dnn_acc, proc, dnn_model = train_eval_image(paths_tr, ytr, paths_te, yte,
+                                                        model_id=S.get("image_model", "google/vit-base-patch16-224"),
+                                                        epochs=int(S["epochs"]), batch_size=16, lr=5e-5, device=device)
+            dnn_stats = {"dnn_accuracy": float(dnn_acc)}
+            print(f"DNN accuracy: {float(dnn_acc)}")
+            dnn_name = f"dnn_proxy_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
+            dnn_path = Path(settings["out_dir"]) / (S["run_name"] or "run") / dnn_name
+            torch.save({"model_state_dict": dnn_model.state_dict(), "processor": proc}, dnn_path)
 
-    intervention_results = {}
-    budgets = S.get('budget', [1, 2, 3, 4, 5])
-    human_acc = S.get("intervention_accuracy", 1.0)
-    for budget in budgets:
-        for policy in ["top-1", "top-k"]:
-            H_intervened, intervention_stats = apply_interventions(
-                pred_probs=P_te, ground_truth=test.C.astype(int), frontend_model=fe,
-                budget_k=budget, intervention_threshold=S.get("intervention_threshold", 0.5),
-                human_accuracy=human_acc, policy=policy, rng=rng
-            )
-            y_pred_intervened = fe.predict_proba(H_intervened)
-            acc_intervened = float((y_pred_intervened.argmax(1) == test.y.astype(int)).mean())
-            key = f"budget_{budget}_{policy}_human_acc_{int(human_acc * 100)}"
-            intervention_results[key] = {
-                "accuracy": acc_intervened,
-                "accuracy_gain": acc_intervened - acc_det,
-                "predictions_intervened_on": intervention_stats["samples_intervened_on"],
-                "interventions_rate": intervention_stats["intervention_rate"],
-                "avg_edits_per_intervention": intervention_stats["avg_edits_per_intervention"],
-                "total_concept_checks": intervention_stats["total_concept_checks"],
-                "total_concept_edits_made": intervention_stats["total_concept_edits_made"],
-                "policy": policy, "budget": budget, "human_accuracy": human_acc
-            }
+        intervention_results = {}
+        budgets = S.get('budget', [1, 2, 3, 4, 5])
+        human_acc = S.get("intervention_accuracy", 1.0)
+        for budget in budgets:
+            for policy in ["top-1", "top-k"]:
+                H_intervened, intervention_stats = apply_interventions(
+                    pred_probs=P_te, ground_truth=test.C.astype(int), frontend_model=fe,
+                    budget_k=budget, intervention_threshold=S.get("intervention_threshold", 0.5),
+                    human_accuracy=human_acc, policy=policy, rng=rng
+                )
+                y_pred_intervened = fe.predict_proba(H_intervened)
+                acc_intervened = float((y_pred_intervened.argmax(1) == test.y.astype(int)).mean())
+                key = f"budget_{budget}_{policy}_human_acc_{int(human_acc * 100)}"
+                intervention_results[key] = {
+                    "accuracy": acc_intervened,
+                    "accuracy_gain": acc_intervened - acc_det,
+                    "predictions_intervened_on": intervention_stats["samples_intervened_on"],
+                    "interventions_rate": intervention_stats["intervention_rate"],
+                    "avg_edits_per_intervention": intervention_stats["avg_edits_per_intervention"],
+                    "total_concept_checks": intervention_stats["total_concept_checks"],
+                    "total_concept_edits_made": intervention_stats["total_concept_edits_made"],
+                    "policy": policy, "budget": budget, "human_accuracy": human_acc
+                }
 
-    meta_name = f"meta_proxy_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.json"
-    metrics_name = f"metrics_proxy_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.json"
+        meta_name = f"meta_proxy_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.json"
+        metrics_name = f"metrics_proxy_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.json"
 
-    meta = {
-        "settings": S,
-        "run_dir": str(run_dir),
-        "artifacts": {"detector": str(det_path), "frontend": str(fe_path)},
-        "splits": {"n_train": int(train.n), "n_valid": int(valid.n), "n_test": int(test.n)},
-        "concepts": list(test.concepts),
-        "intervention_budgets": budgets,
-        "intervention_acc": human_acc,
-        "naming_slug": slug,
-    }
+        meta = {
+            "settings": S,
+            "run_dir": str(run_dir),
+            "artifacts": {"detector": str(det_path), "frontend": str(fe_path)},
+            "splits": {"n_train": int(train.n), "n_valid": int(valid.n), "n_test": int(test.n)},
+            "concepts": list(test.concepts),
+            "intervention_budgets": budgets,
+            "intervention_acc": human_acc,
+            "naming_slug": slug,
+        }
 
-    metrics = {"cbm_acc_detected": acc_det, "cbm_acc_oracle": acc_gt, "concept_det_acc_mean": concept_acc_mean}
-    metrics.update(dnn_stats)
+        metrics = {"cbm_acc_detected": acc_det, "cbm_acc_oracle": acc_gt, "concept_det_acc_mean": concept_acc_mean}
+        metrics.update(dnn_stats)
 
-    meta_path = run_dir / meta_name
-    metrics_path = run_dir / metrics_name
-    with open(meta_path, "w") as f:
-        json.dump(meta, f, indent=2)
-    with open(metrics_path, "w") as f:
-        json.dump(metrics, f, indent=2)
-    print(json.dumps({"meta_path": str(meta_path), "metrics_path": str(metrics_path), "detector_path": str(det_path), "frontend_path": str(fe_path)}, indent=2))
+        meta_path = run_dir / meta_name
+        metrics_path = run_dir / metrics_name
+        with open(meta_path, "w") as f:
+            json.dump(meta, f, indent=2)
+        with open(metrics_path, "w") as f:
+            json.dump(metrics, f, indent=2)
+        print(json.dumps({"meta_path": str(meta_path), "metrics_path": str(metrics_path), "detector_path": str(det_path), "frontend_path": str(fe_path)}, indent=2))
 
 if __name__ == "__main__":
     import argparse
@@ -560,3 +560,4 @@ if __name__ == "__main__":
     else:
         settings.update(overrides)
         main(settings)
+
