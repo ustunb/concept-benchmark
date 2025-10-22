@@ -55,23 +55,28 @@ class RobotConceptClassifier(nn.Module):
         if features.dim() > 2:
             features = torch.flatten(features, 1)
         
-        target_device = features.device
+        dev = features.device
         h0 = self.heads[0]
         
-        # If an old checkpoint has wrong in_features, rebuild heads to match features
-        if isinstance(h0, torch.nn.Linear) and hasattr(h0, "in_features") and h0.in_features != features.shape[1]:
+        need_rebuild = False
+        if isinstance(h0, torch.nn.LazyLinear):
+            need_rebuild = True
+        elif isinstance(h0, torch.nn.Linear) and getattr(h0, "in_features", features.shape[1]) != features.shape[1]:
+            need_rebuild = True
+        
+        if need_rebuild:
             self.heads = torch.nn.ModuleList(
-                [torch.nn.Linear(features.shape[1], 1).to(target_device) for _ in range(len(self.heads))]
+                [torch.nn.Linear(features.shape[1], 1).to(dev) for _ in range(len(self.heads))]
             )
         else:
-            # Ensure all heads live on the same device as features
             for h in self.heads:
-                h.to(target_device)
+                # avoid repeated .to() if already correct
+                p = next(h.parameters(), None)
+                if p is not None and p.device != dev:
+                    h.to(dev)
         
         logits = torch.cat([head(features) for head in self.heads], dim=1)
         return logits
-
-
 
 class RobotViTConceptClassifier(nn.Module):
     def __init__(self, num_concepts: int):
