@@ -90,7 +90,7 @@ def create_robot_image_dataset(
     drop_irrelevant = extra_params.pop("drop_irrelevant", True)
     _ = (train_concept_detector, epochs)
 
-    catalog_df = generate_robot_catalog(
+    res = generate_robot_catalog(
         concepts=concepts,
         num_robots=total_robots,
         resolution=eff_resolution,
@@ -103,7 +103,7 @@ def create_robot_image_dataset(
         verbose=verbose,
         **extra_params,
     )
-    catalog_df = result[0] if isinstance(result, tuple) else result
+    catalog_df = res[0] if isinstance(res, tuple) else res
     catalog_df = catalog_df.copy()
     catalog_df[OUTCOME_NAME] = OUTCOME_MISSING
 
