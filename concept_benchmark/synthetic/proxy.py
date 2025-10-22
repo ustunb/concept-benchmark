@@ -173,6 +173,7 @@ def create_robot_image_dataset(
         "color_mode": color_mode,
         "labeling_function": model,
         "num_robots": total_robots,
+        "num_unique_robots": int(pd.Series(catalog_df["id"]).nunique()),
         "robot_ids": catalog_df["id"].values,
         "catalog_df": catalog_df,
     }
