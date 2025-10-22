@@ -477,7 +477,10 @@ def main(sttngs):
             cd.load_state_dict(state)
             det_path = Path(S["load_detector"])
         else:
-            cd.fit(train, valid, embed_params={'shuffle': False, **config}, fit_params={"epochs": 50, 'lr': 1e-3, "patience": 10, **config})
+            cd.fit(train, valid, embed_params={'shuffle': False, **config},
+               fit_params={"epochs": 50, "lr": 1e-3, "patience": 10,
+                           "batch_size": 32, "num_workers": 0, "pin_memory": False, **config})
+            
             det_path = Path(settings["out_dir"]) / (S["run_name"] or "run") / det_name
             torch.save(cd.state_dict(), det_path)
 
