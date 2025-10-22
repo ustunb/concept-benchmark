@@ -319,40 +319,40 @@ if int(S.get("disjoint_patterns_across_splits", 0)):
             valid = _filter_split(valid)
             test = _filter_split(test)
 
-    train = _dedupe_train_by_robot_ids(train)
-    train = _enforce_pattern_limits(train, data, S)
-    train = _balance_and_cap_train(train, data, S)
+train = _dedupe_train_by_robot_ids(train)
+train = _enforce_pattern_limits(train, data, S)
+train = _balance_and_cap_train(train, data, S)
 
-    if S.get("label_noise_rate", 0.0) > 0:
-        train = _apply_label_noise(train, S["label_noise_rate"], seed=int(S["seed"]))
-        valid = _apply_label_noise(valid, S["label_noise_rate"], seed=int(S["seed"]))
-        test  = _apply_label_noise(test,  S["label_noise_rate"], seed=int(S["seed"]))
+if S.get("label_noise_rate", 0.0) > 0:
+    train = _apply_label_noise(train, S["label_noise_rate"], seed=int(S["seed"]))
+    valid = _apply_label_noise(valid, S["label_noise_rate"], seed=int(S["seed"]))
+    test  = _apply_label_noise(test,  S["label_noise_rate"], seed=int(S["seed"]))
 
-    print("Train rows:", len(train), "unique_ids:", len(np.unique(train.meta.get('robot_ids'))))
-    cat = data.meta.get("catalog_df")
-    if cat is not None and S.get("coarse_balance_feature"):
-        ids_tr = train.meta.get("robot_ids")
-        df_tr = cat.set_index("id").loc[ids_tr]
-        coarse = S.get("coarse_balance_feature")
-        if coarse in df_tr.columns:
-            print("Coarse balance counts:", dict(df_tr[coarse].value_counts().to_dict()))
-    if cat is not None:
-        ids_tr = train.meta.get("robot_ids")
-        df_tr = cat.set_index("id").loc[ids_tr]
-        fs_cols = [c for c in df_tr.columns if c.startswith("foot_shape_") and not c.endswith("_subtype")]
-        if fs_cols:
-            top = df_tr[fs_cols].sum().sort_values(ascending=False).head(10).to_dict()
-            print("top_foot_subtypes_train:", top)
-        if "foot_shape" in df_tr.columns and "body_shape" in df_tr.columns:
-            coarse = df_tr["foot_shape"].astype(str).str.startswith("pointy").astype(int)
-            prox = df_tr["body_shape"].map({"round":1,"square":0}).astype(int)
-            align = float((prox.values == coarse.values).mean())
-            print(f"proxy_align_body_vs_foot: {align:.3f}")
-        if "hand_shape" in df_tr.columns and "ears_shape" in df_tr.columns:
-            coarse_h = df_tr["hand_shape"].astype(str).str.startswith("edgy").astype(int)
-            prox_h = df_tr["ears_shape"].map({"triangle":1,"square":0}).astype(int)
-            align_h = float((prox_h.values == coarse_h.values).mean())
-            print(f"proxy_align_ears_vs_hand: {align_h:.3f}")
+print("Train rows:", len(train), "unique_ids:", len(np.unique(train.meta.get('robot_ids'))))
+cat = data.meta.get("catalog_df")
+if cat is not None and S.get("coarse_balance_feature"):
+    ids_tr = train.meta.get("robot_ids")
+    df_tr = cat.set_index("id").loc[ids_tr]
+    coarse = S.get("coarse_balance_feature")
+    if coarse in df_tr.columns:
+        print("Coarse balance counts:", dict(df_tr[coarse].value_counts().to_dict()))
+if cat is not None:
+    ids_tr = train.meta.get("robot_ids")
+    df_tr = cat.set_index("id").loc[ids_tr]
+    fs_cols = [c for c in df_tr.columns if c.startswith("foot_shape_") and not c.endswith("_subtype")]
+    if fs_cols:
+        top = df_tr[fs_cols].sum().sort_values(ascending=False).head(10).to_dict()
+        print("top_foot_subtypes_train:", top)
+    if "foot_shape" in df_tr.columns and "body_shape" in df_tr.columns:
+        coarse = df_tr["foot_shape"].astype(str).str.startswith("pointy").astype(int)
+        prox = df_tr["body_shape"].map({"round":1,"square":0}).astype(int)
+        align = float((prox.values == coarse.values).mean())
+        print(f"proxy_align_body_vs_foot: {align:.3f}")
+    if "hand_shape" in df_tr.columns and "ears_shape" in df_tr.columns:
+        coarse_h = df_tr["hand_shape"].astype(str).str.startswith("edgy").astype(int)
+        prox_h = df_tr["ears_shape"].map({"triangle":1,"square":0}).astype(int)
+        align_h = float((prox_h.values == coarse_h.values).mean())
+        print(f"proxy_align_ears_vs_hand: {align_h:.3f}")
 
     print("Training set concept distributions:")
     for i, concept_name in enumerate(train.concepts):
@@ -560,4 +560,3 @@ if __name__ == "__main__":
     else:
         settings.update(overrides)
         main(settings)
-
