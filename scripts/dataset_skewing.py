@@ -1,12 +1,13 @@
 import numpy as np
 
-
 def create_sample(size, indices, dataset):
+    idx = np.asarray(indices)
+    if idx.dtype != np.bool_:
+        idx = idx.astype(np.int64, copy=False)
     mask = np.zeros(size, dtype=bool)
-    mask[indices] = True
+    mask[idx] = True
     return dataset._full.filter(mask)
-
-
+    
 def create_skewed_splits(dataset, skew_specs, train_fraction=0.5, val_fraction=0.25, test_fraction=0.25, rng=None, drop_concepts=[], fractions_unique=True, spec_holdout_frac=0.0):
     """
     Skew training by ensuring minimum representation of specific concept patterns.
@@ -76,11 +77,11 @@ def create_skewed_splits(dataset, skew_specs, train_fraction=0.5, val_fraction=0
         train_indices.extend(unused[:remaining_slots])
         print(f"Filled {min(remaining_slots, len(unused))} remaining slots")
 
-    train_indices = np.array(train_indices)
+    train_indices = np.array(train_indices, dtype=np.int64)
     rng.shuffle(train_indices)
 
     # Validation and test from what's left
-    remaining = np.array([i for i in range(total_size) if i not in train_indices])
+    remaining = np.array([i for i in range(total_size) if i not in train_indices], dtype=np.int64)
     rng.shuffle(remaining)
 
     val_size = int(len(remaining) * val_fraction / (val_fraction + test_fraction))
