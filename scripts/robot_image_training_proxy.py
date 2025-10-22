@@ -121,7 +121,15 @@ def _dedupe_train_by_robot_ids(train):
         return train
     keep = np.unique(ids, return_index=True)[1]
     m = np.zeros(len(train.C), dtype=bool)
-    m[keep] = True
+    keep = np.asarray(keep)
+    if keep.dtype == bool:
+        m = keep
+    else:
+        idx = keep.astype(int)
+        if idx.min() == 1 and idx.max() == m.shape[0]:
+            idx = idx - 1
+        m[idx] = True
+
     return train.filter(m)
 
 def _enforce_pattern_limits(train, data, S):
