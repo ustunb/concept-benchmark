@@ -103,6 +103,7 @@ def create_robot_image_dataset(
         verbose=verbose,
         **extra_params,
     )
+    catalog_df = result[0] if isinstance(result, tuple) else result
     catalog_df = catalog_df.copy()
     catalog_df[OUTCOME_NAME] = OUTCOME_MISSING
 
