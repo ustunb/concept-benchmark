@@ -54,9 +54,20 @@ class RobotConceptClassifier(nn.Module):
         features = self.backbone(x)
         if features.dim() > 2:
             features = torch.flatten(features, 1)
+        
+        target_device = features.device
         h0 = self.heads[0]
-        if isinstance(h0, nn.Linear) and hasattr(h0, "in_features") and features.shape[1] != h0.in_features:
-            self.heads = nn.ModuleList([nn.Linear(features.shape[1], 1) for _ in range(len(self.heads))])
+        
+        # If an old checkpoint has wrong in_features, rebuild heads to match features
+        if isinstance(h0, torch.nn.Linear) and hasattr(h0, "in_features") and h0.in_features != features.shape[1]:
+            self.heads = torch.nn.ModuleList(
+                [torch.nn.Linear(features.shape[1], 1).to(target_device) for _ in range(len(self.heads))]
+            )
+        else:
+            # Ensure all heads live on the same device as features
+            for h in self.heads:
+                h.to(target_device)
+        
         logits = torch.cat([head(features) for head in self.heads], dim=1)
         return logits
 
@@ -504,6 +515,7 @@ class ConceptDetector(object):
         self._set_trainable(freeze_backbone=freeze)
 
         trainer_fn = trainer if trainer is not None else self.trainer
+        self.model.to(training_device)
         result = trainer_fn(
             self.model,
             train_dataset,
