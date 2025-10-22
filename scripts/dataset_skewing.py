@@ -7,7 +7,7 @@ def create_sample(size, indices, dataset):
     return dataset._full.filter(mask)
 
 
-def create_skewed_splits(dataset, skew_specs, train_fraction=0.5, val_fraction=0.25, test_fraction=0.25, rng=None, drop_concepts=[], fractions_unique=True):
+def create_skewed_splits(dataset, skew_specs, train_fraction=0.5, val_fraction=0.25, test_fraction=0.25, rng=None, drop_concepts=[], fractions_unique=True, spec_holdout_frac=0.0):
     """
     Skew training by ensuring minimum representation of specific concept patterns.
 
@@ -19,6 +19,7 @@ def create_skewed_splits(dataset, skew_specs, train_fraction=0.5, val_fraction=0
         rng: Random number generator
         drop_concepts: List of concept names to drop from dataset after splitting
         fractions_unique: If True, fractions regard the unique set of concepts, not total samples
+        spec_holdout_frac: Fraction of each spec's matches to reserve for val/test (0.0 keeps old behavior)
     """
     if rng is None:
         rng = np.random.default_rng()
@@ -50,10 +51,14 @@ def create_skewed_splits(dataset, skew_specs, train_fraction=0.5, val_fraction=0
         needed = int(desired_train_size * spec['min_fraction'])
         available = [i for i in indices if i not in used]
         rng.shuffle(available)
-        take = available[:min(needed, len(available))]
+        max_take = len(available)
+        if spec_holdout_frac > 0:
+            cap = int(len(indices) * (1.0 - float(spec_holdout_frac)))
+            max_take = min(max_take, cap)
+        take = available[:min(needed, max_take)]
         train_indices.extend(take)
         used.update(take)
-        print(f"Added {len(take)} for spec {spec['concepts']} (wanted {needed})")
+        print(f"Added {len(take)} for spec {spec['concepts']} (wanted {needed}, cap {max_take})")
 
     # Fill remaining slots with any unused samples
     remaining_slots = desired_train_size - len(train_indices)
