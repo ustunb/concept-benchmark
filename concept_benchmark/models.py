@@ -47,14 +47,19 @@ class RobotConceptClassifier(nn.Module):
             feature_size = dummy_out.view(1, -1).size(1)
 
         # Concept heads
-        self.heads = nn.ModuleList([
-            nn.Linear(feature_size, 1)
-            for _ in range(num_concepts)
-        ])
+        self.auto_head_dim = getattr(self, "auto_head_dim", False)
+        self.heads = nn.ModuleList(
+            [ (nn.LazyLinear(1) if self.auto_head_dim else nn.Linear(self.feat_dim, 1)) for _ in range(self.n_heads) ]
+        )
 
     def forward(self, x):
         features = self.backbone(x)
-        features = torch.flatten(features, 1)
+        if features.dim() > 2:
+            features = torch.flatten(features, 1)
+        if not getattr(self, "auto_head_dim", False):
+            in_feat = self.heads[0].in_features
+            if features.shape[1] != in_feat:
+                raise ValueError(f"Feature dim {features.shape[1]} != head in_features {in_feat}. Set auto_head_dim=True.")
         logits = torch.cat([head(features) for head in self.heads], dim=1)
         return logits
 
