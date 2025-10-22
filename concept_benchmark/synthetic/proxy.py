@@ -121,6 +121,13 @@ def create_robot_image_dataset(
 
     proxy_spec = extra_params.get("proxy_spec", None)
     rng_seed = int(extra_params.get("rng_seed", 0))
+    proxy_p_override = extra_params.get("proxy_p", None)
+    if proxy_p_override is not None and proxy_spec:
+        for k in list(proxy_spec.keys()):
+            try:
+                proxy_spec[k]["p"] = float(proxy_p_override)
+            except Exception:
+                pass
     catalog_df = _apply_proxies(catalog_df, proxy_spec, rng_seed=rng_seed)
 
     if "foot_shape" in catalog_df.columns and "foot_shape_subtype" in catalog_df.columns:
@@ -174,9 +181,18 @@ def create_robot_image_dataset(
         y = catalog_df[OUTCOME_NAME].to_numpy()
     elif model_type == "stochastic":
         rng = np.random.default_rng(int(extra_params.get("rng_seed", 0)))
-        prob = lambda row: float(eval(model_to_logistic(model)))
-        catalog_df["_p_glorp"] = catalog_df.apply(prob, axis=1)
-        y = rng.binomial(1, catalog_df["_p_glorp"].clip(0, 1).to_numpy())
+        prob_fun = lambda row: float(eval(model_to_logistic(model)))
+        catalog_df["_p_base"] = catalog_df.apply(prob_fun, axis=1).clip(0, 1)
+        bias_cfg = extra_params.get("subtype_label_bias", {})
+        delta = np.zeros(len(catalog_df), dtype=float)
+        if isinstance(bias_cfg, dict) and len(bias_cfg) > 0:
+            for col_name, logit_delta in bias_cfg.items():
+                if col_name in catalog_df.columns:
+                    v = float(logit_delta)
+                    delta += catalog_df[col_name].astype(int).to_numpy() * v
+        logits = np.log(catalog_df["_p_base"] / (1.0 - catalog_df["_p_base"] + 1e-12) + 1e-12) + delta
+        p_adj = expit(logits)
+        y = rng.binomial(1, p_adj.clip(0, 1))
         catalog_df[OUTCOME_NAME] = y
     else:
         raise ValueError("Invalid model_type. Use 'deterministic' or 'stochastic'.")
