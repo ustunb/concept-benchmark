@@ -13,7 +13,7 @@ from .helper.robot_catalog import (
     generate_robot_catalog,
 )
 from .helper.utils import model_to_logistic, unlist0
-
+from scipy.special import expit
 
 def create_synthetic_dataset(data_type: str = "image", **kwargs) -> ConceptDataset:
     kind = (data_type or "image").strip().lower()
