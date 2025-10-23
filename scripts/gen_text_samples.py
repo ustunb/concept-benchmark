@@ -1169,12 +1169,20 @@ else:
                               columns=cols)
 
 catalog_df["label"] = compute_label(
-    _lbl = catalog_df["label"].astype(str)
-    print("Label distribution (catalog_df):", {
-        "glorp": int((_lbl == "glorp").sum()),
-        "drent": int((_lbl == "drent").sum()),
-        "total": int(len(_lbl)),
-        "pos_frac": round((_lbl == "glorp").mean(), 4),
+    catalog_df,
+    str(params.get("model", "")),
+    label_model_type=str(getattr(args_obj, "label_model_type", "deterministic")),
+    alpha=float(getattr(args_obj, "label_model_alpha", 1.0)),
+    bias=float(getattr(args_obj, "label_model_bias", 0.0)),
+    seed=int(getattr(args_obj, "seed", 0)),
+)
+
+_lbl = catalog_df["label"].astype(str)
+print("Label distribution (catalog_df):", {
+    "glorp": int((_lbl == "glorp").sum()),
+    "drent": int((_lbl == "drent").sum()),
+    "total": int(len(_lbl)),
+    "pos_frac": round((_lbl == "glorp").mean(), 4),
 })
 
 concept_cols = [c for c in params["concepts"].keys() if c in catalog_df.columns]
