@@ -26,6 +26,7 @@ settings = {
 
     "modality": "text",
     "text_model": "distilbert-base-uncased",
+    "image_meta": "",
 
     "best_human_acc": 1.00,
     "expert_human_accs": [0.80],
@@ -51,6 +52,10 @@ settings = {
     "flip_batch_size": 8192,
     "flip_limit_subsets": None,
     "abstain_only": 0,
+    "label_model_expr": "(5*int(row['mouth_type']=='closed') + 10*int(str(row['foot_shape']).startswith('pointy') or str(row['foot_shape'])=='1'))",
+    "label_model_type": "stochastic",
+    "label_model_alpha": 1.0,
+    "label_model_bias": 3.0,
 
     "seed_test_offset": 1234,
 }
@@ -138,6 +143,7 @@ def parse_cli():
     ap.add_argument("--flip-batch-size", type=int)
     ap.add_argument("--flip-limit-subsets")
     ap.add_argument("--abstain-only", type=int)
+    ap.add_argument("--image-meta", dest="image_meta", type=str)
 
     known, _ = ap.parse_known_args()
 
@@ -235,6 +241,7 @@ def common_gen_argv():
         "--deployment-size", str(settings.get("deployment_size", 10000)),
         "--shared-test", str(settings.get("shared_test", 1)),
         "--subtype-mode", str(settings.get("subtype_mode", "track")),
+        "--image-meta", str(settings.get("image_meta", "")),
         "--policy", str(settings.get("policy", settings.get("intervention_policy", "kflip"))),
         "--k", str(settings.get("k", settings.get("intervention_k", 2))),
         "--flip-threshold", str(settings.get("flip_threshold", 0.30)),
