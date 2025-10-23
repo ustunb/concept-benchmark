@@ -554,6 +554,7 @@ else:
     ap.add_argument("--flip-limit-subsets", type=lambda s: None if str(s).lower() == "none" else int(s), default=None)
     ap.add_argument("--abstain-only", action="store_true", help="restrict to abstentions if --tau is set")
     ap.add_argument("--seed-test-offset", type=int, default=1234, dest="seed_test_offset")
+    ap.add_argument("--image-meta", type=str, default="", dest="image_meta")
 
     known, _ = ap.parse_known_args()
     merged = dict(settings)
@@ -1153,26 +1154,25 @@ def _machine_truth_map(H_train_hard, C_train_true):
 
 
 cols = list(params["concepts"].keys())
-catalog_df = pd.DataFrame([dict(zip(cols, vals)) for vals in product(*[params["concepts"][c] for c in cols])],
-                          columns=cols)
-catalog_df["label"] = compute_label(
-    catalog_df,
-    params["model"],
-    label_model_type=merged.get("label_model_type", "deterministic"),
-    alpha=float(merged.get("label_model_alpha", 1.0)),
-    bias=float(merged.get("label_model_bias", 0.0)),
-    seed=int(merged.get("seed", 0)),
-)
+_imeta = str(merged.get("image_meta", "")).strip()
+if _imeta:
+    with open(_imeta, "r", encoding="utf-8") as _f:
+        _j = json.load(_f)
+    catalog_df = pd.read_csv(_j["catalog_csv"])
+else:
+    catalog_df = pd.DataFrame([dict(zip(cols, vals)) for vals in product(*[params["concepts"][c] for c in cols])],
+                              columns=cols)
 
-_lbl = catalog_df["label"].astype(str)
-print("Label distribution (catalog_df):", {
-    "glorp": int((_lbl == "glorp").sum()),
-    "drent": int((_lbl == "drent").sum()),
-    "total": int(len(_lbl)),
-    "pos_frac": round((_lbl == "glorp").mean(), 4),
+catalog_df["label"] = compute_label(
+    _lbl = catalog_df["label"].astype(str)
+    print("Label distribution (catalog_df):", {
+        "glorp": int((_lbl == "glorp").sum()),
+        "drent": int((_lbl == "drent").sum()),
+        "total": int(len(_lbl)),
+        "pos_frac": round((_lbl == "glorp").mean(), 4),
 })
 
-concept_cols = list(params["concepts"].keys())
+concept_cols = [c for c in params["concepts"].keys() if c in catalog_df.columns]
 ds = None
 if int(getattr(args_obj, "dev_size", 0)) > 0:
     standard_size = int(catalog_df.shape[0])
@@ -2689,7 +2689,27 @@ def ensure_split(ds):
     except Exception:
         pass
 
-    _manual_by_robot_split(ds, row_index, seed=0)
+    _imeta = str(merged.get("image_meta", "")).strip()
+    if _imeta:
+        try:
+            with open(_imeta, "r", encoding="utf-8") as f:
+                _j = json.load(f)
+            _idx = _j.get("df_indices", {})
+            ridx = np.asarray(row_index, dtype=int)
+            tr = set(int(x) for x in _idx.get("train", []))
+            va = set(int(x) for x in _idx.get("valid", []))
+            te = set(int(x) for x in _idx.get("test", []))
+            train_mask = np.array([int(r) in tr for r in ridx])
+            val_mask   = np.array([int(r) in va for r in ridx])
+            test_mask  = np.array([int(r) in te for r in ridx])
+            ds.training   = _subset_mask(train_mask)
+            ds.validation = _subset_mask(val_mask)
+            ds.test       = _subset_mask(test_mask)
+            return
+        except Exception:
+            pass
+
+_manual_by_robot_split(ds, row_index, seed=0)
 
 def pick_split(ds, name):
     # safeguard if ensure_split hasn’t been called
