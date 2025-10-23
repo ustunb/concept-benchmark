@@ -1780,11 +1780,14 @@ def _keep_k_variants_per_robot(sample, full, k):
     full_meta = getattr(getattr(full, "_full", full), "meta", {}) or {}
     row_full = np.asarray(full_meta.get("row_index", np.arange(len(getattr(full, "X", [])))))
     var_full = np.asarray(full_meta.get("variant_index", np.zeros_like(row_full)))
+    pos_map = {int(r): i for i, r in enumerate(row_full)}
+    df_pos = np.asarray([pos_map.get(int(i), -1) for i in df_idx], dtype=int)
     pos = np.arange(len(df_idx))
     keep = []
-    for r in np.unique(row_full[df_idx]):
-        sel = [j for j in pos if row_full[df_idx[j]] == r]
-        sel = sorted(sel, key=lambda j: int(var_full[df_idx[j]]))
+    valid = df_pos >= 0
+    for r in np.unique(row_full[df_pos[valid]]):
+        sel = [j for j in pos if valid[j] and row_full[df_pos[j]] == r]
+        sel = sorted(sel, key=lambda j: int(var_full[df_pos[j]]))
         keep.extend(sel[:max(1, k)])
     keep = np.asarray(sorted(keep), dtype=int)
     X = [sample.X[i] for i in keep]
