@@ -451,6 +451,8 @@ else:
 
     ap.add_argument("--variant", choices=["perfect", "imperfect"], default=settings["variant"])
     ap.add_argument("--variants-per-row", type=int, default=settings["variants_per_row"])
+    ap.add_argument("--variants-per-row-val", type=int, default=1)
+    ap.add_argument("--variants-per-row-test", type=int, default=1)
     ap.add_argument("--variants-per-row-minority", type=int, default=0)
     ap.add_argument("--variants-per-row-majority", type=int, default=0)
     ap.add_argument("--minority_mult", type=float, default=1.0)
@@ -518,6 +520,9 @@ else:
     ap.add_argument("--machine-upper-bound", type=int, default=settings["machine_upper_bound"])
     ap.add_argument("--mask-mode", choices=["rowdrop", "mask"], default=settings["mask_mode"])
     ap.add_argument("--mask-rate", type=float, default=settings["mask_rate"])
+    ap.add_argument("--text-mask", type=str, default="")
+    ap.add_argument("--text-mask-rate", type=float, default=0.0)
+    ap.add_argument("--text-mask-splits", type=str, default="train")
     ap.add_argument("--run-name", type=str, default=settings["run_name"])
     ap.add_argument("--template-distinct-test", type=int, default=0, help="use a different template index for test rows")
     ap.add_argument("--force-rerun", type=int, default=settings["force_rerun"])
@@ -1761,6 +1766,95 @@ if int(getattr(args_obj, "test_balance_enable", 0)) == 1 and hasattr(ds.test, "e
 train_ds = ds.training
 val_ds = ds.validation
 test_ds = ds.test
+
+def _keep_k_variants_per_robot(sample, full, k):
+    df_idx = (getattr(sample, "meta", {}) or {}).get("df_indices", list(range(len(sample.X))))
+    full_meta = getattr(getattr(full, "_full", full), "meta", {}) or {}
+    row_full = np.asarray(full_meta.get("row_index", np.arange(len(getattr(full, "X", [])))))
+    var_full = np.asarray(full_meta.get("variant_index", np.zeros_like(row_full)))
+    pos = np.arange(len(df_idx))
+    keep = []
+    for r in np.unique(row_full[df_idx]):
+        sel = [j for j in pos if row_full[df_idx[j]] == r]
+        sel = sorted(sel, key=lambda j: int(var_full[df_idx[j]]))
+        keep.extend(sel[:max(1, k)])
+    keep = np.asarray(sorted(keep), dtype=int)
+    X = [sample.X[i] for i in keep]
+    C = sample.C[keep]
+    y = sample.y[keep]
+    sub = ConceptDatasetSample(X=X, C=C, y=y, meta=dict(sample.meta))
+    sub.meta["df_indices"] = [df_idx[i] for i in keep]
+    gm = getattr(sample, "ears_generic_mask", None)
+    if gm is not None: setattr(sub, "ears_generic_mask", np.asarray(gm)[keep])
+    st = getattr(sample, "subtypes", None)
+    if st is not None: setattr(sub, "subtypes", {k: np.asarray(st[k])[keep] for k in st})
+    return sub
+
+def _apply_text_mask(sample, concepts, rate, seed):
+    rng = np.random.default_rng(int(seed))
+    nouns = {
+        "foot_shape": re.compile(r"(?i)\b(foot|feet|pad|pads|stance)\b"),
+        "hand_shape": re.compile(r"(?i)\b(hand|hands)\b"),
+        "ears_shape": re.compile(r"(?i)\b(ear|ears)\b"),
+        "head_is_square": re.compile(r"(?i)\b(head|heads)\b"),
+        "body_is_square": re.compile(r"(?i)\b(body|torso)\b"),
+        "mouth_type": re.compile(r"(?i)\bmouth\b"),
+        "has_antennae": re.compile(r"(?i)\bantenna(?:e|s)?\b"),
+        "has_knees": re.compile(r"(?i)\bknees?\b"),
+        "has_elbows": re.compile(r"(?i)\belbows?\b"),
+        "hands_are_pointy": re.compile(r"(?i)\b(hand|hands)\b"),
+        "foot_is_pointy": re.compile(r"(?i)\b(foot|feet|pad|pads|stance)\b"),
+        "ears_is_triangle": re.compile(r"(?i)\b(ear|ears)\b"),
+        "mouth_is_open": re.compile(r"(?i)\bmouth\b"),
+    }
+    pat_shape = re.compile(r"(?i)\b(square|boxy|rect|right-angled|angular|corner|rounded|round|triangle|triangular|three-?sided|four-?sided|quad|pointy|pointed|tapered|wedge|hex|pent|l-?shaped|trapezoid|trapezoidal)\b")
+    target = set(concepts)
+    outX = []
+    for s in sample.X:
+        z = str(s)
+        parts = re.split(r"([.!?;:]\s+)", z)
+        kept = []
+        i = 0
+        while i < len(parts):
+            seg = parts[i]
+            sep = parts[i+1] if i+1 < len(parts) else ""
+            drop = False
+            for c in target:
+                if c in ("foot_shape","ears_shape","hand_shape","head_is_square","body_is_square","hands_are_pointy","foot_is_pointy","ears_is_triangle"):
+                    if nouns[c].search(seg) and pat_shape.search(seg) and rng.random() < rate:
+                        drop = True; break
+                elif c in ("mouth_type","mouth_is_open"):
+                    if nouns["mouth_type"].search(seg) and rng.random() < rate:
+                        drop = True; break
+                elif c in ("has_antennae","has_knees","has_elbows"):
+                    if nouns[c].search(seg) and rng.random() < rate:
+                        drop = True; break
+            if not drop: kept.append(seg + sep)
+            i += 2
+        t = "".join(kept).strip()
+        t = re.sub(r"\s{2,}", " ", t)
+        outX.append(t if t else z)
+    sub = ConceptDatasetSample(X=outX, C=sample.C, y=sample.y, meta=sample.meta)
+    gm = getattr(sample, "ears_generic_mask", None)
+    if gm is not None: setattr(sub, "ears_generic_mask", gm)
+    st = getattr(sample, "subtypes", None)
+    if st is not None: setattr(sub, "subtypes", st)
+    return sub
+
+_textmask = [t.strip() for t in str(getattr(args_obj, "text_mask", "")).split(",") if t.strip()]
+_textmask_rate = float(getattr(args_obj, "text_mask_rate", 0.0))
+_textmask_splits = set(t.strip().lower() for t in str(getattr(args_obj, "text_mask_splits", "train")).split(",") if t.strip())
+if _textmask and _textmask_rate > 0:
+    if "train" in _textmask_splits: train_ds = _apply_text_mask(train_ds, _textmask, _textmask_rate, int(getattr(args_obj,"seed",0))+101)
+    if "val"   in _textmask_splits: val_ds   = _apply_text_mask(val_ds,   _textmask, _textmask_rate, int(getattr(args_obj,"seed",0))+102)
+    if "test"  in _textmask_splits: test_ds  = _apply_text_mask(test_ds,  _textmask, _textmask_rate, int(getattr(args_obj,"seed",0))+103)
+
+_kval  = int(getattr(args_obj, "variants_per_row_val", 1))
+_ktest = int(getattr(args_obj, "variants_per_row_test", 1))
+if hasattr(ds, "_full"):
+    if _kval  > 0: val_ds  = _keep_k_variants_per_robot(val_ds,  getattr(ds, "_full", ds), _kval)
+    if _ktest > 0: test_ds = _keep_k_variants_per_robot(test_ds, getattr(ds, "_full", ds), _ktest)
+
 
 pat_shape = re.compile(
     r"(?i)\b(square|boxy|rectilinear|right-angled|angular|cornered|triangle|triangular|three-angled|three-point|pointy|pointed|tapered|wedge|hex|pent|l-?shaped|quad)\b")
