@@ -1031,6 +1031,8 @@ class ConceptDatasetSample(Dataset):
         if 'UC' in filtered_meta:
             filtered_meta['UC'] = filtered_meta['UC'][indices]
             filtered_meta["df_indices"] = filtered_meta["df_indices"][indices]
+        if "robot_ids" in filtered_meta:
+            filtered_meta["robot_ids"] = np.asarray(filtered_meta["robot_ids"])[indices]
 
         new_sample = self.__class__(
             parent=self.parent,
@@ -1219,6 +1221,8 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         if 'UC' in filtered_meta:
             filtered_meta['UC'] = filtered_meta['UC'][indices]
             filtered_meta["df_indices"] = filtered_meta["df_indices"][indices]
+        if "robot_ids" in filtered_meta:
+            filtered_meta["robot_ids"] = np.asarray(filtered_meta["robot_ids"])[indices]
 
         new_sample = self.__class__(
             parent=self.parent,

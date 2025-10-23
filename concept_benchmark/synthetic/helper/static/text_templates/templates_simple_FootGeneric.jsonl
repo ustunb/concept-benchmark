@@ -1,0 +1,40 @@
+{"id":"eg001","when":{"any":true},"text":"Simple build with {HEAD_NAT} head and {BODY_NAT} body. {ANT_NAT}. {KNEES_NAT}, {ELBOWS_NAT}. Hands are {HANDS_NAT}. It has feet."}
+{"id":"eg002","when":{"any":true},"text":"Head is {HEAD_NAT}. Body is {BODY_NAT}. Mouth is {MOUTH_NAT}. Ears are {EARS_NAT}. Hands are {HANDS_NAT}. It has feet."}
+{"id":"eg003","when":{"any":true},"text":"Layout: {BODY_NAT} torso, {HEAD_NAT} head, and {HANDS_NAT}. {ANT_NAT}. {KNEES_NAT}. It has feet."}
+{"id":"eg004","when":{"any":true},"text":"Profile shows a {HEAD_NAT} head over a {BODY_NAT} frame. Ears look {EARS_NAT}. Mouth {MOUTH_NAT}. It has feet."}
+{"id":"eg005","when":{"any":true},"text":"You see {HANDS_NAT} and a {MOUTH_NAT} mouth. The head is {HEAD_NAT}, the body is {BODY_NAT}. It has feet."}
+{"id":"eg006","when":{"any":true},"text":"Stance: {KNEES_NAT}, {ELBOWS_NAT}. Antennae: {ANT_NAT}. It has feet. Head is {HEAD_NAT}."}
+{"id":"eg007","when":{"any":true},"text":"Top half: {HEAD_NAT} head, {EARS_NAT} ears. Core: {BODY_NAT}. Lower: It has feet."}
+{"id":"eg008","when":{"any":true},"text":"A {BODY_NAT} shell with {HANDS_NAT}. The mouth sits {MOUTH_NAT}. Antennae: {ANT_NAT}. It has feet."}
+{"id":"eg009","when":{"any":true},"text":"Clean silhouette: {HEAD_NAT} head above {BODY_NAT} body. Arms show {ELBOWS_NAT}. It has feet."}
+{"id":"eg010","when":{"any":true},"text":"Arms show {ELBOWS_NAT}. Legs show {KNEES_NAT}. The frame is {BODY_NAT}. Hands are {HANDS_NAT}. It has feet."}
+{"id":"eg011","when":{"any":true},"text":"Face has a {MOUTH_NAT} mouth and {EARS_NAT} ears. Crown is {HEAD_NAT}. It has feet."}
+{"id":"eg012","when":{"any":true},"text":"Form factor is {BODY_NAT} with {HANDS_NAT} hands. Antennae: {ANT_NAT}. Mouth {MOUTH_NAT}. It has feet."}
+{"id":"eg013","when":{"any":true},"text":"Chassis: {BODY_NAT}. Helm: {HEAD_NAT}. Ears read {EARS_NAT}. {KNEES_NAT}. It has feet."}
+{"id":"eg014","when":{"any":true},"text":"Front view lists {EARS_NAT} ears and a {MOUTH_NAT} mouth. The body is {BODY_NAT}. It has feet."}
+{"id":"eg015","when":{"any":true},"text":"Hands appear as {HANDS_NAT}. The head is {HEAD_NAT}. Antennae: {ANT_NAT}. It has feet."}
+{"id":"eg016","when":{"any":true},"text":"Upper: {HEAD_NAT} head with {EARS_NAT} ears. Middle: {BODY_NAT}. Lower: {KNEES_NAT}. It has feet."}
+{"id":"eg017","when":{"any":true},"text":"It carries {HANDS_NAT}. Mouth stays {MOUTH_NAT}. {ELBOWS_NAT}. It has feet."}
+{"id":"eg018","when":{"any":true},"text":"Frame reads {BODY_NAT}. Head reads {HEAD_NAT}. Antennae: {ANT_NAT}. Hands: {HANDS_NAT}. It has feet."}
+{"id":"eg019","when":{"any":true},"text":"Pose shows {KNEES_NAT} and {ELBOWS_NAT}. Ears are {EARS_NAT}. It has feet."}
+{"id":"eg020","when":{"any":true},"text":"Body shape is {BODY_NAT}. Head shape is {HEAD_NAT}. Hands are {HANDS_NAT}. Mouth is {MOUTH_NAT}. It has feet."}
+{"id":"eg021","when":{"any":true},"text":"Side view: {HEAD_NAT} head and {BODY_NAT} body. {ANT_NAT}. It has feet."}
+{"id":"eg022","when":{"any":true},"text":"Hands read {HANDS_NAT}; ears read {EARS_NAT}. The mouth is {MOUTH_NAT}. It has feet."}
+{"id":"eg023","when":{"any":true},"text":"Casing appears {BODY_NAT}; helm looks {HEAD_NAT}. {KNEES_NAT}. It has feet."}
+{"id":"eg024","when":{"any":true},"text":"Upper assembly: {HEAD_NAT}. Lower assembly: {BODY_NAT}. {ELBOWS_NAT}. It has feet."}
+{"id":"eg025","when":{"any":true},"text":"Faceplate: {MOUTH_NAT}. Side pieces: {EARS_NAT}. Manipulators: {HANDS_NAT}. It has feet."}
+{"id":"eg026","when":{"any":true},"text":"Outline stays {BODY_NAT}. Head follows {HEAD_NAT}. Antennae: {ANT_NAT}. It has feet."}
+{"id":"eg027","when":{"any":true},"text":"Arms hinge ({ELBOWS_NAT}); legs hinge ({KNEES_NAT}). Hands: {HANDS_NAT}. It has feet."}
+{"id":"eg028","when":{"any":true},"text":"The head reads {HEAD_NAT}. The body reads {BODY_NAT}. The ears look {EARS_NAT}. It has feet."}
+{"id":"eg029","when":{"any":true},"text":"Antennae status: {ANT_NAT}. Mouth status: {MOUTH_NAT}. Hands: {HANDS_NAT}. It has feet."}
+{"id":"eg030","when":{"any":true},"text":"Geometry shows {HEAD_NAT} head and {BODY_NAT} body. Ears are {EARS_NAT}. It has feet."}
+{"id":"eg031","when":{"any":true},"text":"Core is {BODY_NAT}. Crown is {HEAD_NAT}. {KNEES_NAT}; {ELBOWS_NAT}. It has feet."}
+{"id":"eg032","when":{"any":true},"text":"Manipulator style: {HANDS_NAT}. Ear style: {EARS_NAT}. Mouth style: {MOUTH_NAT}. It has feet."}
+{"id":"eg033","when":{"any":true},"text":"The body stays {BODY_NAT}; the head stays {HEAD_NAT}. Antennae: {ANT_NAT}. It has feet."}
+{"id":"eg034","when":{"any":true},"text":"Frame lists {KNEES_NAT}. Arms list {ELBOWS_NAT}. Hands are {HANDS_NAT}. It has feet."}
+{"id":"eg035","when":{"any":true},"text":"Ears appear {EARS_NAT}; mouth is {MOUTH_NAT}. Head is {HEAD_NAT}. It has feet."}
+{"id":"eg036","when":{"any":true},"text":"Shell: {BODY_NAT}. Head: {HEAD_NAT}. Antennae: {ANT_NAT}. Hands: {HANDS_NAT}. It has feet."}
+{"id":"eg037","when":{"any":true},"text":"Upper geometry {HEAD_NAT}, core geometry {BODY_NAT}. {KNEES_NAT}. It has feet."}
+{"id":"eg038","when":{"any":true},"text":"Mouth reads {MOUTH_NAT}. Ears read {EARS_NAT}. {ELBOWS_NAT}. It has feet."}
+{"id":"eg039","when":{"any":true},"text":"Hands present as {HANDS_NAT}. Body is {BODY_NAT}. Head is {HEAD_NAT}. It has feet."}
+{"id":"eg040","when":{"any":true},"text":"Overall: {BODY_NAT} body, {HEAD_NAT} head, {HANDS_NAT} hands, {EARS_NAT} ears, {MOUTH_NAT} mouth. It has feet."}

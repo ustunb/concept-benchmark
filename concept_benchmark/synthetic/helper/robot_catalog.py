@@ -5,6 +5,7 @@ This file contains classes to represent and manipulate a set of all possible rob
 import copy
 from pathlib import Path
 from collections.abc import Sequence
+import hashlib
 
 import numpy as np
 import pandas as pd
@@ -137,6 +138,13 @@ def generate_robot_catalog(
 
     init_catalog_df = copy.deepcopy(catalog_df)
 
+    ids = init_catalog_df["id"].astype(str)
+    hb = ids.map(lambda s: int.from_bytes(hashlib.sha256(s.encode()).digest()[:4], "big") & 1).astype(int)
+    init_catalog_df["foot_orientation"] = np.where(hb.values == 1, "vertex", "side")
+    if verbose:
+        u, c = np.unique(init_catalog_df["foot_orientation"], return_counts=True)
+        print("foot_orientation_counts:", dict(zip(u, c)))
+
     catalog_df, new_features = collapse_robot_subtypes(
         df=catalog_df, robot_features=list(concepts.keys()),
         collapse_as_new_feature=additional_features or [],
@@ -200,5 +208,8 @@ def generate_robot_catalog(
     catalog_df["color_left"] = color_lefts
     catalog_df["color_right"] = color_rights
 
+    ids2 = catalog_df["id"].astype(str)
+    hb2 = ids2.map(lambda s: int.from_bytes(hashlib.sha256(s.encode()).digest()[:4], "big") & 1).astype(int)
+    catalog_df["foot_orientation"] = np.where(hb2.values == 1, "vertex", "side")
 
     return catalog_df, new_features

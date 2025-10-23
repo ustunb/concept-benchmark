@@ -256,7 +256,6 @@ def test_concept_detector_invariance(concept_detector, concept_to_test, concept_
     :param concept_to_test:
     :param concept_names:
     :param dataset:
-    :param device:
     :param num_tests:
     :return:
     """
@@ -276,7 +275,7 @@ def main(sttngs):
     base_out = Path(S["out_dir"]); base_out.mkdir(parents=True, exist_ok=True)
     miss = str(S["missingness"]).lower()
     rate = float(S["missing_rate"])
-    int_acc_tag = f"int-acc{int(round(float(S["intervention_accuracy"]) * 100))}"
+    int_acc_tag = f"int-acc{int(round(float(S['intervention_accuracy']) * 100))}"
     miss_tag = "complete" if miss == "complete" or rate <= 0 else f"{miss}{_rate_tag(rate)}"
     skew_tag = f"_skew" if S.get("skew_concept", []) != [] else ""
     impute_tag = f"impute{int(S['impute_missing'])}"
@@ -469,6 +468,21 @@ def main(sttngs):
         cd.fit(train, valid, embed_params={'shuffle': False, **config}, fit_params={"epochs": 50, 'lr': 1e-3, "patience": 10, **config})
         det_path = run_dir / det_name
         torch.save(cd.state_dict(), det_path)
+
+    if int(S.get('fe_harness', 0)) == 1:
+        from scripts.fe_harness import run_fe_harness
+        names = list(train.concepts)
+        C_tr = train.C.astype(float)
+        C_te = test.C.astype(float)
+        y_tr = train.y.astype(int)
+        y_te = test.y.astype(int)
+        try:
+            P_tr = cd.predict_proba(train)
+            P_te = cd.predict_proba(test)
+        except Exception:
+            P_tr = cd.predict(train).astype(float)
+            P_te = cd.predict(test).astype(float)
+        run_fe_harness(C_tr, y_tr, C_te, y_te, P_tr, P_te, names, table_name="FE 2x2 (coarse vs sub; C vs P)")
 
     # test invariance of concept detectors
     subtype_concepts = [c for c in test.concepts if 'foot_shape_' in c]
@@ -908,5 +922,65 @@ def objective(params):
 #       f"foot={result.x[3]:.2f}")
 # print(f"Best scalar: {result.x[4]:.2f}, intercept: {result.x[5]:.2f}")
 # print(f"Best gap: {-result.fun:.3f}")
+
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--fe-harness', dest='fe_harness', type=int, default=0)
+parser.add_argument('--draw', dest='draw', type=int)
+parser.add_argument('--image-size', dest='image_size', type=str)
+parser.add_argument('--train-dnn', dest='train_dnn', type=int)
+parser.add_argument('--model', dest='model', type=str)
+parser.add_argument('--drop-concepts', dest='drop_concepts', type=str)          # JSON list
+parser.add_argument('--model-type', dest='model_type', type=str)
+parser.add_argument('--logit-scalar', dest='logit_scalar', type=float)
+parser.add_argument('--logit-intercept', dest='logit_intercept', type=float)
+parser.add_argument('--logit-weights', dest='logit_weights', type=str)          # JSON dict
+parser.add_argument('--skew-concept', dest='skew_concept', type=str)            # JSON list[dict]
+parser.add_argument('--run-name', dest='run_name', type=str)
+
+args, _ = parser.parse_known_args()
+
+overrides = {k: v for k, v in vars(args).items() if v is not None}
+
+# Parse JSON-like args
+if 'drop_concepts' in overrides:
+    overrides['drop_concepts'] = json.loads(overrides['drop_concepts'])
+if 'logit_weights' in overrides:
+    overrides['logit_weights'] = json.loads(overrides['logit_weights'])
+if 'skew_concept' in overrides:
+    overrides['skew_concept'] = json.loads(overrides['skew_concept'])
+
+settings.update(overrides)
+
+
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--fe-harness', dest='fe_harness', type=int, default=0)
+parser.add_argument('--draw', dest='draw', type=int)
+parser.add_argument('--image-size', dest='image_size', type=str)
+parser.add_argument('--train-dnn', dest='train_dnn', type=int)
+parser.add_argument('--model', dest='model', type=str)
+parser.add_argument('--drop-concepts', dest='drop_concepts', type=str)          # JSON list
+parser.add_argument('--model-type', dest='model_type', type=str)
+parser.add_argument('--logit-scalar', dest='logit_scalar', type=float)
+parser.add_argument('--logit-intercept', dest='logit_intercept', type=float)
+parser.add_argument('--logit-weights', dest='logit_weights', type=str)          # JSON dict
+parser.add_argument('--skew-concept', dest='skew_concept', type=str)            # JSON list[dict]
+parser.add_argument('--run-name', dest='run_name', type=str)
+
+args, _ = parser.parse_known_args()
+
+overrides = {k: v for k, v in vars(args).items() if v is not None}
+
+# Parse JSON-like args
+if 'drop_concepts' in overrides:
+    overrides['drop_concepts'] = json.loads(overrides['drop_concepts'])
+if 'logit_weights' in overrides:
+    overrides['logit_weights'] = json.loads(overrides['logit_weights'])
+if 'skew_concept' in overrides:
+    overrides['skew_concept'] = json.loads(overrides['skew_concept'])
+
+settings.update(overrides)
+
 
 main(settings)
