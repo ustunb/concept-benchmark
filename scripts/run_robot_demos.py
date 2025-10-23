@@ -143,6 +143,7 @@ def parse_cli():
     ap.add_argument("--flip-batch-size", type=int)
     ap.add_argument("--flip-limit-subsets")
     ap.add_argument("--abstain-only", type=int)
+    ap.add_argument("--image-meta", dest="image_meta", type=str)
 
     known, _ = ap.parse_known_args()
 
