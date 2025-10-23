@@ -210,3 +210,41 @@ def apply_interventions(pred_probs, ground_truth, frontend_model, budget_k,
     }
 
     return intervened_concepts, stats
+
+
+def test_interventions(prob_test, sttngs, acc_det, fe, rng, test):
+    intervention_results = {}
+    budgets = sttngs.get('budget', [1, 2, 3, 4, 5])
+    human_acc = sttngs.get("intervention_accuracy", 1.0)
+    for budget in budgets:
+        for policy in ["top-1", "top-k"]:
+            H_intervened, intervention_stats = apply_interventions(
+                pred_probs=prob_test,
+                ground_truth=test.C.astype(int),
+                frontend_model=fe,
+                budget_k=budget,
+                intervention_threshold=sttngs.get("intervention_threshold", 0.5),
+                human_accuracy=human_acc,
+                policy=policy,
+                rng=rng
+            )
+
+            # Calculate accuracy after interventions
+            y_pred_intervened = fe.predict_proba(H_intervened)
+            acc_intervened = float((y_pred_intervened.argmax(1) == test.y.astype(int)).mean())
+
+            # Store results
+            key = f"budget_{budget}_{policy}_human_acc_{int(human_acc * 100)}"
+            intervention_results[key] = {
+                "accuracy": acc_intervened,
+                "accuracy_gain": acc_intervened - acc_det,
+                "predictions_intervened_on": intervention_stats["samples_intervened_on"],
+                "interventions_rate": intervention_stats["intervention_rate"],
+                "avg_edits_per_intervention": intervention_stats["avg_edits_per_intervention"],
+                "total_concept_checks": intervention_stats["total_concept_checks"],
+                "total_concept_edits_made": intervention_stats["total_concept_edits_made"],
+                "policy": policy,
+                "budget": budget,
+                "human_accuracy": human_acc
+            }
+    return budgets, human_acc, intervention_results
