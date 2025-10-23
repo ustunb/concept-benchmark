@@ -798,10 +798,26 @@ def main(sttngs):
     metrics_path = run_dir / metrics_name
     confusion_path = run_dir / "confusion.csv"
     confusion_df.to_csv(confusion_path)
+    
+    catalog_csv_path = run_dir / "catalog.csv"
+    data.meta["catalog_df"].to_csv(catalog_csv_path, index=False)
+    meta["catalog_csv"] = str(catalog_csv_path)
+    meta["df_indices"] = {
+        "train": list(map(int, train.meta["df_indices"])),
+        "valid": list(map(int, valid.meta["df_indices"])),
+        "test": list(map(int, test.meta["df_indices"])),
+    }
+    meta["robot_ids"] = {
+        "train": list(map(int, train.meta.get("robot_ids", []))),
+        "valid": list(map(int, valid.meta.get("robot_ids", []))),
+        "test": list(map(int, test.meta.get("robot_ids", []))),
+    }
+    
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2)
+
     print(json.dumps({
         "meta_path": str(meta_path),
         "metrics_path": str(metrics_path),
