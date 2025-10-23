@@ -28,45 +28,48 @@ from scripts.interventions import apply_interventions
 settings = {
     "samples_per_instance": 3,
     "draw": 0,
-    "CBM_type": "joint", #"sequential"
+    "CBM_type": "separate", #"sequential"
     "image_dir": "./data/robot_images",
     "image_size": "medium",
     "color_mode": "color",
-    "train_dnn": 1,
+    "train_dnn": 0,
     "seed": 555,
-    "model": "'glorp' if (int(row['mouth_type']=='closed') +  int(row['foot_shape']=='pointy'))>= 2 else 'drent'",
+    "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy'))>= 3 else 'drent'",
     'dataset_characterization': "",
     "knows_concepts": False,
     "spurious_features": ["has_elbows", "hand_shape"],
-    "drop_concepts": ["foot_shape_flat_rounded", "foot_shape_flat_5sided", 'foot_shape_flat_square',
-                      'foot_shape_flat_trapezoid', "foot_shape_flat_lshaped", "foot_shape_flat_lshaped",
-                      "foot_shape_pointy_trapezoid", "foot_shape_pointy_rounded", 'foot_shape_pointy_square',
-                      'foot_shape_pointy_3sided', 'foot_shape_pointy_4sided'],
+    "drop_concepts": ["foot_shape_flat_rounded",
+                      "foot_shape_pointy_trapezoid",
+                      'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
+                      'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
     "human_alignment": {"foot_shape": 1, "mouth_type": -1, "bias": -0.01}, # OR of ANDs model's logic
     "model_type": "stochastic",
-    "logit_scalar": 4.0,
-    "logit_intercept": 1.0,
+    "logit_scalar": 1.0,
+    "logit_intercept": 3,
+    "logit_weights": {"mouth_type": 5, "foot_shape": 10},
     "label_noise_rate": 0,
     "missingness": "complete",
     "missing_rate": 1.0,
     "impute_missing": 0,
     "skew_concept": [
-                     {'concepts': {'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.25},
-                     {'concepts': {'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.25},
-                     {'concepts': {'foot_shape_flat_5sided': 1}, 'min_fraction': 0.25},
-                     {'concepts': {'foot_shape_flat_trapezoid': 1}, 'min_fraction': 0.25},
+                     {'concepts': {'foot_shape_pointy_square': 1}, 'min_fraction': 0.005},
+                     {'concepts': {'foot_shape_pointy_rounded': 1}, 'min_fraction': 0.005},
+                     {'concepts': {'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.49},
+                     {'concepts': {'foot_shape_flat_square': 1}, 'min_fraction': 0.005},
+                     {'concepts': {'foot_shape_flat_trapezoid': 1}, 'min_fraction': 0.005},
+                     {'concepts': {'foot_shape_flat_5sided': 1}, 'min_fraction': 0.49},
                      ], #[{'concepts': {'body_shape': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.243},
                      # {'concepts': {'mouth_type': 0, 'foot_shape': 1, 'has_antennae': 1}, 'min_fraction': 0.2},
                      # {'concepts': {'body_shape': 0, 'mouth_type': 0, 'has_antennae': 1}, 'min_fraction': 0.15},
                      # {'concepts': {'body_shape': 1, 'mouth_type': 1, 'has_antennae': 0}, 'min_fraction': 0.235},
                      # {'concepts': {'body_shape': 1, 'foot_shape': 0, 'has_antennae': 0}, 'min_fraction': 0.2},
                      # {'concepts': {'foot_shape': 0, 'mouth_type': 1, 'has_antennae': 0}, 'min_fraction': 0.15}],#[{'concepts': {'mouth_type': 0, 'foot_shape_pointy_3sided': 1}, 'min_fraction': 0.13},
-    "budget": [1,10],
+    "budget": [1],
     "intervention_accuracy": 0.9,
-    "intervention_threshold": 0.1,
+    "intervention_threshold": 1.0,
     "epochs": 10,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "special_CBM_DNN_f5_ft_p3_p4",
+    "run_name": "nnwwnwn",
     "load_detector": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed555.pt")),
     "load_frontend": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed555.pkl")),
 }
@@ -331,6 +334,7 @@ def main(sttngs):
         "model_type": S["model_type"],
         "scalar": float(S.get("logit_scalar", 1.0)),
         "intercept": float(S.get("logit_intercept", 0.0)),
+        'weights': S.get("logit_weights", {}),
         "size": S["image_size"],
         "color_mode": str(S["color_mode"]),
         "test_set_size": 10000,
@@ -341,9 +345,6 @@ def main(sttngs):
     }
 
     data = create_synthetic_dataset(**params)
-    print(f"Current working directory: {Path.cwd()}")
-    print(f"Dataset base_dir: {data._full.base_dir}")
-    print(f"Image directory used in params: {params['output_directory']}")
 
     data.transform = tf
     data.generate_cvindices(seed=int(S["seed"]))
@@ -416,34 +417,34 @@ def main(sttngs):
     #             print(f"    Robot {robot_key}: {count} ({count/total:.1%})")
 
 
-    # print distribution of each concept in the training set
-    print("Training set concept distributions:")
-    for i, concept_name in enumerate(train.concepts):
-        unique, counts = np.unique(train.C[:, i], return_counts=True)
-        dist = dict(zip(unique, counts))
-        total = counts.sum()
-        dist_str = ", ".join([f"{int(k)}: {v} ({v/total:.1%})" for k, v in dist.items()])
-        print(f"  {concept_name}: {dist_str}")
-
-    # print distribution of each concept in the test set
-    print("Test set concept distributions:")
-    for i, concept_name in enumerate(test.concepts):
-        unique, counts = np.unique(test.C[:, i], return_counts=True)
-        dist = dict(zip(unique, counts))
-        total = counts.sum()
-        dist_str = ", ".join([f"{int(k)}: {v} ({v/total:.1%})" for k, v in dist.items()])
-        print(f"  {concept_name}: {dist_str}")
-
-    # print num glorps and dreints in the training vs test set:
-    def count_classes(sample):
-        y = sample.y.astype(int)
-        unique, counts = np.unique(y, return_counts=True)
-        dist = dict(zip(unique, counts))
-        total = counts.sum()
-        dist_str = ", ".join([f"{int(k)}: {v} ({v/total:.1%})" for k, v in dist.items()])
-        return dist_str
-    print("Training set class distribution:", count_classes(train))
-    print("Test set class distribution:", count_classes(test))
+    # # print distribution of each concept in the training set
+    # print("Training set concept distributions:")
+    # for i, concept_name in enumerate(train.concepts):
+    #     unique, counts = np.unique(train.C[:, i], return_counts=True)
+    #     dist = dict(zip(unique, counts))
+    #     total = counts.sum()
+    #     dist_str = ", ".join([f"{int(k)}: {v} ({v/total:.1%})" for k, v in dist.items()])
+    #     print(f"  {concept_name}: {dist_str}")
+    #
+    # # print distribution of each concept in the test set
+    # print("Test set concept distributions:")
+    # for i, concept_name in enumerate(test.concepts):
+    #     unique, counts = np.unique(test.C[:, i], return_counts=True)
+    #     dist = dict(zip(unique, counts))
+    #     total = counts.sum()
+    #     dist_str = ", ".join([f"{int(k)}: {v} ({v/total:.1%})" for k, v in dist.items()])
+    #     print(f"  {concept_name}: {dist_str}")
+    #
+    # # print num glorps and dreints in the training vs test set:
+    # def count_classes(sample):
+    #     y = sample.y.astype(int)
+    #     unique, counts = np.unique(y, return_counts=True)
+    #     dist = dict(zip(unique, counts))
+    #     total = counts.sum()
+    #     dist_str = ", ".join([f"{int(k)}: {v} ({v/total:.1%})" for k, v in dist.items()])
+    #     return dist_str
+    # print("Training set class distribution:", count_classes(train))
+    # print("Test set class distribution:", count_classes(test))
 
 
     device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
@@ -514,7 +515,7 @@ def main(sttngs):
             Cin[m] = P_tr[m]
             fe.fit(Cin, train.y.astype(int))
         else:
-            if S.get("CBM_type", "joint") == "sequential":
+            if S.get("CBM_type", "separate") == "sequential":
                 keep = np.all(Ctr >= 0, axis=1)
                 fe.fit(H_tr[keep], train.y[keep].astype(int))
             else:
@@ -566,8 +567,6 @@ def main(sttngs):
             }
             rows.append(row_data)
         df = pd.DataFrame(rows)
-        print(f"\nSample of {split_name} set predictions:")
-        print(df.head(100).to_string())
 
 
     # BASELINE
@@ -761,6 +760,7 @@ def main(sttngs):
         "concepts": list(data.concepts) if hasattr(data, "concepts") else [],
         "intervention_budgets": budgets,
         "intervention_acc": human_acc,
+        "logit_weights": params.get("weights", {}),
         "naming_slug": slug,
     }
 
@@ -795,6 +795,118 @@ def main(sttngs):
         "frontend_path": str(fe_path),
     }, indent=2))
 
-main(settings)
+# BAYESIAN OPTIMIZATION
+from skopt import gp_minimize
+from skopt.space import Real, Integer
 
-#run_experiments_varying_footshape_subconcepts()
+def objective(params):
+    """
+    Objective: maximize |CBM_acc - SubCBM_acc| subject to CBM_acc >= 0.80
+    params = [mouth_weight, body_weight, foot_weight, logit_scalar, logit_intercept]
+    """
+    mouth_w, body_w, foot_w, scalar, intercept = params
+
+    mouth_w = float(mouth_w)
+    body_w = float(body_w)
+    foot_w = float(foot_w)
+    scalar = float(scalar)
+    intercept = float(intercept)
+
+    # Run CBM
+    S_cbm = copy.deepcopy(settings)
+    S_cbm["logit_weights"] = {
+        "mouth_type": mouth_w,
+        "body_shape": body_w,
+        "foot_shape": foot_w
+    }
+    S_cbm["logit_scalar"] = scalar
+    S_cbm["logit_intercept"] = intercept
+    S_cbm["drop_concepts"] = [
+        "foot_shape_flat_rounded", 'foot_shape_flat_square', "foot_shape_flat_lshaped",
+        "foot_shape_pointy_trapezoid", "foot_shape_pointy_rounded", 'foot_shape_pointy_square',
+        'foot_shape_pointy_3sided', 'foot_shape_pointy_4sided', 'foot_shape_flat_5sided',
+        'foot_shape_flat_trapezoid'
+        # Keep foot_shape, drop all subconcepts
+    ]
+    S_cbm["run_name"] = f"opt_cbm_m{mouth_w:.1f}_b{body_w:.1f}_f{foot_w:.1f}_s{scalar:.1f}_i{intercept:.1f}"
+
+    try:
+        main(S_cbm)
+
+        # Load results
+        results_path = Path(S_cbm["out_dir"]) / S_cbm[
+            "run_name"] / "metrics_cbm_detected_robots_image_stochastic_complete__skewint-acc90_seed552.json"
+        with open(results_path) as f:
+            cbm_results = json.load(f)
+        cbm_acc = cbm_results["cbm_acc_detected"]
+    except Exception as e:
+        print(f"CBM failed: {e}")
+        return 100  # Large penalty for failure
+
+    # Run Subconcepts CBM
+    S_subcbm = copy.deepcopy(settings)
+    S_subcbm["logit_weights"] = {
+        "mouth_type": mouth_w,
+        "body_shape": body_w,
+        "foot_shape": foot_w
+    }
+    S_subcbm["logit_scalar"] = scalar
+    S_subcbm["logit_intercept"] = intercept
+    S_subcbm["drop_concepts"] = [
+        "foot_shape_flat_rounded",
+        "foot_shape_pointy_trapezoid",
+        'foot_shape_pointy_3sided',
+        'foot_shape_flat_lshaped',
+        "foot_shape"
+    ]
+    S_subcbm["run_name"] = f"opt_subcbm_m{mouth_w:.1f}_b{body_w:.1f}_f{foot_w:.1f}_s{scalar:.1f}_i{intercept:.1f}"
+
+    try:
+        main(S_subcbm)
+
+        results_path = Path(S_subcbm["out_dir"]) / S_subcbm[
+            "run_name"] / "metrics_cbm_detected_robots_image_stochastic_complete__skewint-acc90_seed552.json"
+        with open(results_path) as f:
+            subcbm_results = json.load(f)
+        subcbm_acc = subcbm_results["cbm_acc_detected"]
+    except Exception as e:
+        print(f"SubCBM failed: {e}")
+        return 100  # Large penalty
+
+    gap = abs(cbm_acc - subcbm_acc)
+
+    print(f"Weights: m={mouth_w:.2f}, b={body_w:.2f}, f={foot_w:.2f}, "
+          f"scalar={scalar:.2f}, intercept={intercept:.2f}")
+    print(f"  CBM: {cbm_acc:.3f}, SubCBM: {subcbm_acc:.3f}, Gap: {gap:.3f}")
+
+    # Return negative gap (we're minimizing, but want to maximize gap)
+    return -gap
+
+
+# UNCOMMENT TO RUN BAYESIAN OPTIMIZATION
+# Define search space - added scalar and intercept
+# space = [
+#     Integer(0, 5, name='mouth_weight'),
+#     Integer(0, 5, name='body_weight'),
+#     Integer(0, 10, name='foot_weight'),
+#     Real(0.0, 8.0, name='logit_scalar'),
+#     Integer(-5, 5, name='logit_intercept'),
+# ]
+
+# # Run optimization
+# result = gp_minimize(
+#     objective,
+#     space,
+#     n_calls=50,  # Number of iterations
+#     random_state=42,
+#     verbose=True,
+#     n_jobs=1
+# )
+#
+# print("\n=== BEST RESULT ===")
+# print(f"Best weights: mouth={result.x[0]:.2f}, body={result.x[1]:.2f}, "
+#       f"foot={result.x[3]:.2f}")
+# print(f"Best scalar: {result.x[4]:.2f}, intercept: {result.x[5]:.2f}")
+# print(f"Best gap: {-result.fun:.3f}")
+
+main(settings)

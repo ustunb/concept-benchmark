@@ -61,7 +61,7 @@ def unlist0(obj):
         return obj
 
 
-def model_to_logistic(model: str, scalar = 1.0, intercept = None) -> str:
+def model_to_logistic(model: str, weights: dict, scalar = 1.0, intercept = None) -> str:
     """
     Extracts the arithmetic expression inside the first (...) before a comparison operator and the number after the
     comparison operator >= then constructs a new expression that subtracts the number from the arithmetic expression
@@ -72,10 +72,21 @@ def model_to_logistic(model: str, scalar = 1.0, intercept = None) -> str:
     if not match:
         raise ValueError("Model string not in expected format.")
 
-    #extract the number after >=
     num = re.search(r">=\s*([-\d.]+)", model)
-
     expr = match.group(1).strip()[:-1]
+
+    # extract feature names, that are stored inside row parentheses row["feature"]
+    matches = re.findall(r"row\['(.*?)'\]==(['\"].*?['\"])", expr)
+    for feature, value in matches:
+        if feature not in weights:
+            print(f"Weight for feature '{feature}' not found in weights dictionary.")
+            weight = 1
+        else:
+            weight = weights[feature]
+        old_pattern = f"int(row['{feature}']=={value})"
+        new_pattern = f"{weight}*int(row['{feature}']=={value})"
+
+    expr = expr.replace(old_pattern, new_pattern)
     intercept = intercept if intercept is not None else num.group(1)
     expr += ' - ' + str(intercept)
 
