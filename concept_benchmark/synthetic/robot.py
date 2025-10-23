@@ -281,6 +281,7 @@ def create_robot_image_dataset(
     model: str = "",
     model_type: str = "deterministic",
     spurious_features: Sequence[str] | None = None,
+    additional_features: Sequence[str] | None = None,
     color_mode: str = "color",
     verbose: bool = False,
     train_concept_detector: bool | None = None,
@@ -309,6 +310,7 @@ def create_robot_image_dataset(
         draw=draw,
         color_mode=color_mode,
         verbose=verbose,
+        additional_features=additional_features,
         **extra_params,
     )
     catalog_df = catalog_df.copy()

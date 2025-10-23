@@ -18,7 +18,7 @@ from scripts.robot_utils import _apply_missing, _apply_label_noise, _rate_tag, _
 
 settings = {
     "samples_per_instance": 3,
-    "draw": 0,
+    "draw": 1,
     "CBM_type": "separate", #"sequential"
     "image_dir": "./data/robot_images",
     "image_size": "medium",
@@ -57,6 +57,7 @@ settings = {
                     "pointy_4sided",
                 ],
             },
+    "subconcepts": ["foot_shape_subtype"],
     "spurious_features": ["has_elbows", "hand_shape"],
     "drop_concepts": ["foot_shape_flat_rounded",
                       "foot_shape_pointy_trapezoid",
@@ -317,7 +318,7 @@ def main(sttngs):
     params = copy.deepcopy(sttngs)
     params.update({
         "output_directory": S.get("image_dir", run_dir / "images"),
-        "additional_features": [] if S.get("knows_concepts", True) else ["foot_shape_subtype"],
+        "additional_features": [] if S.get("knows_concepts", True) else S.get("subconcepts", ["foot_shape_subtype", "hand_shape_subtype"]),
         "scalar": float(S.get("logit_scalar", 1.0)),
         "intercept": float(S.get("logit_intercept", 0.0)),
         'weights': S.get("logit_weights", {}),

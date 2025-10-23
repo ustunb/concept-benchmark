@@ -261,24 +261,24 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
         knee.draw(canvas, x=x_left, fill_color=color_left)
         knee.draw(canvas, x=x_right, fill_color=color_right)
 
-        y_top += leg_height
+    y_top += leg_height
     foot_subtype = features["foot_shape"]
     if foot_subtype in FOOT_SUBTYPES.keys():
         if features["foot_subtype_choice"] == "default":
             foot_subtype = "%s" % FOOT_SUBTYPES[foot_subtype][0]
 
-    orient = str(features.get("foot_orientation", "")).lower()
-    if orient in ("vertex", "side"):
-        if foot_subtype.startswith("flat_") and orient == "vertex":
-            suf = foot_subtype.split("_", 1)[1]
-            cand = f"pointy_{suf}"
-            if cand in ALL_ROBOT_FEATURES["foot_shape"]:
-                foot_subtype = cand
-        elif foot_subtype.startswith("pointy_") and orient == "side":
-            suf = foot_subtype.split("_", 1)[1]
-            cand = f"flat_{suf}"
-            if cand in ALL_ROBOT_FEATURES["foot_shape"]:
-                foot_subtype = cand
+    # orient = str(features.get("foot_orientation", "")).lower()
+    # if orient in ("vertex", "side"):
+    #     if foot_subtype.startswith("flat_") and orient == "vertex":
+    #         suf = foot_subtype.split("_", 1)[1]
+    #         cand = f"pointy_{suf}"
+    #         if cand in ALL_ROBOT_FEATURES["foot_shape"]:
+    #             foot_subtype = cand
+    #     elif foot_subtype.startswith("pointy_") and orient == "side":
+    #         suf = foot_subtype.split("_", 1)[1]
+    #         cand = f"flat_{suf}"
+    #         if cand in ALL_ROBOT_FEATURES["foot_shape"]:
+    #             foot_subtype = cand
 
     # PAIR 1: trapezoid
     if foot_subtype == "flat_trapezoid":

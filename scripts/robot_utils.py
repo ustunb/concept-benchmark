@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+from scipy.special import expit
+from scipy.optimize import minimize
 
 def _apply_missing(C, mode, rate, rng, y=None):
     if mode == "complete" or rate <= 0:
@@ -147,3 +149,116 @@ def _get_accuracies_per_subconcept(all_preds, missing_concepts, subtype_concepts
 
     print(per_concept_acc2)
     return per_concept_acc2
+
+
+def find_params_for_target_probabilities(feature_names, target_probs, initial_guess=None):
+    """
+    Find logit_weights, intercept, and scalar to match target probabilities.
+
+    Args:
+        feature_names: list of feature names, e.g., ['mouth_type', 'foot_shape']
+        target_probs: dict mapping feature combinations (tuples) to desired P(glorp)
+                     e.g., {(0, 0): 0.05, (1, 0): 0.50, (0, 1): 0.95, (1, 1): 0.99}
+                     Tuples follow the order of feature_names
+        initial_guess: optional dict with 'weights', 'intercept', 'scalar'
+
+    Returns:
+        dict with optimized 'logit_weights', 'intercept', 'scalar', and 'optimization_error'
+
+    Example:
+        result = find_params_for_target_probabilities(
+            feature_names=['mouth_type', 'foot_shape'],
+            target_probs={
+                (0, 0): 0.02,   # mouth=0, foot=0 → 2% glorp
+                (1, 0): 0.50,   # mouth=1, foot=0 → 50% glorp
+                (0, 1): 0.50,   # mouth=0, foot=1 → 50% glorp
+                (1, 1): 0.98,   # mouth=1, foot=1 → 98% glorp
+            }
+        )
+
+        # Use in settings:
+        settings["logit_weights"] = result['logit_weights']
+        settings["logit_intercept"] = result['intercept']
+        settings["logit_scalar"] = result['scalar']
+    """
+    n_features = len(feature_names)
+
+    # Initialize parameters
+    if initial_guess is None:
+        initial_weights = [1.0] * n_features
+        initial_intercept = 0.5
+        initial_scalar = 4.0
+    else:
+        initial_weights = [initial_guess['weights'].get(name, 1.0) for name in feature_names]
+        initial_intercept = initial_guess.get('intercept', 0.5)
+        initial_scalar = initial_guess.get('scalar', 4.0)
+
+    # Pack into optimization vector: [weight1, weight2, ..., intercept, scalar]
+    x0 = initial_weights + [initial_intercept, initial_scalar]
+
+    def objective(x):
+        """Compute MSE between predicted and target probabilities"""
+        weights = x[:n_features]
+        intercept = x[n_features]
+        scalar = x[n_features + 1]
+
+        # Compute predicted probabilities for all target combinations
+        error = 0
+        for combo_tuple, target_prob in target_probs.items():
+            # Compute logit for this combination
+            logit_sum = sum(w * val for w, val in zip(weights, combo_tuple))
+            logit_val = scalar * (logit_sum - intercept)
+            pred_prob = expit(logit_val)
+
+            # Add squared error
+            error += (pred_prob - target_prob) ** 2
+
+        return error
+
+    # Optimize with bounds
+    # Weights: [0.1, 20], Intercept: [-10, 10], Scalar: [0.1, 10]
+    bounds = [(0.1, 20.0)] * n_features + [(-10.0, 10.0), (0.1, 10.0)]
+
+    res = minimize(objective, x0, method='L-BFGS-B', bounds=bounds)
+
+    # Extract optimized parameters
+    opt_weights = res.x[:n_features]
+    opt_intercept = res.x[n_features]
+    opt_scalar = res.x[n_features + 1]
+
+    # Create logit_weights dictionary
+    logit_weights_dict = {name: float(w) for name, w in zip(feature_names, opt_weights)}
+
+    # Verify results
+    verification = {}
+    for combo_tuple, target_prob in target_probs.items():
+        logit_sum = sum(logit_weights_dict[name] * val
+                        for name, val in zip(feature_names, combo_tuple))
+        logit_val = opt_scalar * (logit_sum - opt_intercept)
+        pred_prob = expit(logit_val)
+        verification[combo_tuple] = {
+            'target': target_prob,
+            'achieved': pred_prob,
+            'error': abs(pred_prob - target_prob)
+        }
+
+    return {
+        'logit_weights': logit_weights_dict,
+        'logit_intercept': float(opt_intercept),
+        'logit_scalar': float(opt_scalar),
+        'optimization_error': float(res.fun),
+        'verification': verification
+    }
+
+
+# # Example usage
+# if __name__ == "__main__":
+#     result = find_params_for_target_probabilities(
+#         feature_names=['mouth_type', 'foot_shape'],
+#         target_probs={
+#             (0, 0): 0.01,  # Neither → 1% glorp
+#             (1, 0): 0.50,  # Mouth only → 50% glorp
+#             (0, 1): 0.50,  # Foot only → 50% glorp
+#             (1, 1): 0.99,  # Both → 99% glorp
+#         }
+#     )
