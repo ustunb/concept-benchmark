@@ -1,6 +1,7 @@
 """
 This file contains classes to represent and manipulate a set of all possible robots
 """
+from __future__ import annotations
 
 import copy
 from pathlib import Path
