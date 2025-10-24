@@ -27,26 +27,31 @@ def generate_color_schemes(shuffle=True, random_seed=123456, include_flipped=Tru
     qal = StackPalette.load("paired")
     qal = StackPalette([qal[i] for i in range(1, len(qal), 2)])
 
-    schemes = []
-    for i, a in enumerate(pal):
-        drop_idx = np.arange(i - 2, i + 3)  # similar colors in spectral are nearby
-        keep_idx = np.setdiff1d(np.arange(len(pal)), drop_idx).tolist()
-        pool = StackPalette(pal[keep_idx]) & qal
-        pairs = [(a, b) for b in pool if 250 < colordist(a, b)]
-        schemes += pairs
+    # we want the color schemes for the robot halves to be distinguishable
+    schemas = [(pal[i], pal[-1 - i]) for i in range(len(pal)//2)]
+    schemas += [(s, d) for s in pal for d in qal if colordist(s, d) > 0.175]
 
-    # add flipped pairs
     if include_flipped:
-        schemes += [(b, a) for a, b in schemes]
-
-    # convert to Pero colors
-    schemes = [(Color(a.hex()), Color(b.hex())) for a, b in schemes]
+        schemas_flipped = [(b, a) for (a, b) in schemas]
+        schemas = schemas + schemas_flipped
 
     if shuffle:
-        rng = np.random.RandomState(random_seed)
-        rng.shuffle(schemes)
+        rng = np.random.default_rng(random_seed)
+        rng.shuffle(schemas)
 
-    return schemes
+    return schemas
+
+
+def subset_colors(colors, N=5):
+    return [c for i, c in enumerate(colors) if i % N == 0]
+
+
+def get_color_generator(colors, N=5, n=10**7):
+    rng = np.random.default_rng(123456)
+    rng.random((n, 10))
+    colors = subset_colors(colors, N)
+    for i in range(n):
+        yield colors[i % len(colors)]
 
 
 def unlist0(obj):
@@ -56,9 +61,10 @@ def unlist0(obj):
         return obj
 
 
-def model_to_logistic(model: str):
+def model_to_logistic(model: str, weights: dict, scalar = 1.0, intercept = None) -> str:
     """
-    Extracts the arithmetic expression inside the first (...) before a comparison
+    Extracts the arithmetic expression inside the first (...) before a comparison operator and the number after the
+    comparison operator >= then constructs a new expression that subtracts the number from the arithmetic expression
     and returns it wrapped in the logistic function.
     """
     # find whatever is inside (...) before a comparison operator
@@ -66,6 +72,54 @@ def model_to_logistic(model: str):
     if not match:
         raise ValueError("Model string not in expected format.")
 
-    expr = match.group(1).strip()
-    # print(f"Returning: expit({expr})")
+    num = re.search(r">=\s*([-\d.]+)", model)
+    expr = match.group(1).strip()[:-1]
+
+    # extract feature names, that are stored inside row parentheses row["feature"]
+    matches = re.findall(r"row\['(.*?)'\]==(['\"].*?['\"])", expr)
+    for feature, value in matches:
+        if feature not in weights:
+            print(f"Weight for feature '{feature}' not found in weights dictionary.")
+            weight = 1
+        else:
+            weight = weights[feature]
+        old_pattern = f"int(row['{feature}']=={value})"
+        new_pattern = f"{weight}*int(row['{feature}']=={value})"
+
+    expr = expr.replace(old_pattern, new_pattern)
+    intercept = intercept if intercept is not None else num.group(1)
+    expr += ' - ' + str(intercept)
+
+    if scalar != 1.0:
+        expr = f"({expr}) * {scalar}"
     return f"expit({expr})"
+
+
+def apply_subjective_noise(C, rate=0.0, seed=0):
+    rng = np.random.default_rng(seed)
+    X = np.asarray(C).astype(np.int32, copy=True)
+    if rate <= 0:
+        return X
+    M = rng.random(X.shape) < float(rate)
+    X = (X ^ M.astype(np.int32))
+    X[X < 0] = 0
+    X[X > 1] = 1
+    return X
+
+
+def apply_machine_noise(C, confusion=None, seed=0):
+    if isinstance(confusion, dict):
+        p01 = float(confusion.get("p01", 0.2))
+        p10 = float(confusion.get("p10", 0.05))
+    elif isinstance(confusion, (list, tuple)) and len(confusion) == 2:
+        p01, p10 = float(confusion[0]), float(confusion[1])
+    else:
+        p01, p10 = 0.2, 0.05
+    rng = np.random.default_rng(seed)
+    X = np.asarray(C).astype(np.int32, copy=True)
+    R = rng.random(X.shape)
+    m01 = (X == 0) & (R < p01)
+    m10 = (X == 1) & (R < p10)
+    X[m01] = 1
+    X[m10] = 0
+    return X

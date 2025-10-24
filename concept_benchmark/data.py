@@ -186,6 +186,36 @@ class ConceptDataset(object):
         self._cvindices = cvindices
         self.reset()
 
+    def drop_concepts(self, concepts_to_drop):
+        """
+        Drop specified concepts from the dataset.
+
+        Args:
+            concepts_to_drop (list of str): List of concept names to drop.
+        """
+        if not isinstance(concepts_to_drop, (list, tuple, set)):
+            raise ValueError("concepts_to_drop should be a list, tuple, or set of strings")
+        concepts_to_drop = set(concepts_to_drop)
+        existing_concepts = set(self.concepts)
+        invalid_concepts = concepts_to_drop - existing_concepts
+        if invalid_concepts:
+            raise ValueError(f"Concepts not found in dataset: {invalid_concepts}")
+
+        keep_indices = [i for i, c in enumerate(self.concepts) if c not in concepts_to_drop]
+        if not keep_indices:
+            raise ValueError("Cannot drop all concepts; at least one must remain.")
+
+        # Update concept matrix and metadata
+        self._full._C_base = self._full._C_base[:, keep_indices]
+        self._full.meta["concepts"] = [self.concepts[i] for i in keep_indices]
+        self._full.concepts = self._full.meta["concepts"]
+
+        # Update all samples
+        for sample in self._iter_samples():
+            sample.concepts = sample.meta["concepts"]
+
+        assert self.__check_rep__()
+
     def reset(self):
         """
         initialize data object to a state before CV
@@ -996,12 +1026,20 @@ class ConceptDatasetSample(Dataset):
         assert isinstance(indices, np.ndarray)
         assert indices.ndim == 1 and indices.shape[0] == self.n
         assert np.isin(indices, (0, 1)).all()
+
+        filtered_meta = self.meta.copy()
+        if 'UC' in filtered_meta:
+            filtered_meta['UC'] = filtered_meta['UC'][indices]
+            filtered_meta["df_indices"] = filtered_meta["df_indices"][indices]
+        if "robot_ids" in filtered_meta:
+            filtered_meta["robot_ids"] = np.asarray(filtered_meta["robot_ids"])[indices]
+
         new_sample = self.__class__(
             parent=self.parent,
             X=self.X[indices],
             C=self.base_concepts[indices],
             y=self.base_labels[indices],
-            meta=self.meta,
+            meta=filtered_meta,
             indices=indices,
             concept_noise=self.concept_noise,
             concept_missing=self.concept_missing,
@@ -1169,12 +1207,20 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         assert isinstance(indices, np.ndarray)
         assert indices.ndim == 1 and indices.shape[0] == self.n
         assert np.isin(indices, (0, 1)).all()
+
+        filtered_meta = self.meta.copy()
+        if 'UC' in filtered_meta:
+            filtered_meta['UC'] = filtered_meta['UC'][indices]
+            filtered_meta["df_indices"] = filtered_meta["df_indices"][indices]
+        if "robot_ids" in filtered_meta:
+            filtered_meta["robot_ids"] = np.asarray(filtered_meta["robot_ids"])[indices]
+
         new_sample = self.__class__(
             parent=self.parent,
             X=self.X[indices],
             C=self.base_concepts[indices],
             y=self.base_labels[indices],
-            meta=self.meta,
+            meta=filtered_meta,
             indices=indices,
             concept_noise=self.concept_noise,
             concept_missing=self.concept_missing,

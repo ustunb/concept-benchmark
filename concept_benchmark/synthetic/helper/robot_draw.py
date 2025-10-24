@@ -16,23 +16,27 @@ from .utils import generate_color_schemes
 ROBOT_TYPES = ("glorp", "drent")
 
 ALL_ROBOT_FEATURES = {
-    "foot_shape": [
-        "flat_4sided",
+    "foot_shape": (
+        "flat_trapezoid",
+        "flat_rounded",
+        "flat_square",
         "flat_5sided",
         "flat_lshaped",
+        "pointy_trapezoid",
+        "pointy_rounded",
+        "pointy_square",
         "pointy_3sided",
         "pointy_4sided",
-        "pointy_6sided",
-    ],
-    "body_shape": ["square", "round"],  # no subtypes (could add)
-    "head_shape": ["square", "round"],  # no subtypes (could add)
+    ),
+    "body_shape": ("square", "round"),  # no subtypes (could add)
+    "head_shape": ("square", "round"),  # no subtypes (could add)
     #
-    "has_elbows": [True, False],  # all round
-    "has_knees": [True, False],
-    "has_antennae": [True, False],
-    "ears_shape": ["square", "triangle"],
-    "mouth_type": ["closed", "open"],
-    "hand_shape": [
+    'has_elbows': ('false', 'true'),  # all round
+    "has_knees": ("false", "true"),
+    "has_antennae": ["false", "true"],
+    "ears_shape": ("square", "triangle"),
+    "mouth_type": ("closed", "open"),
+    "hand_shape": (
         "round_circle",
         "round_oval",
         "round_oval2",
@@ -267,19 +271,194 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
         if features["foot_subtype_choice"] == "default":
             foot_subtype = "%s" % FOOT_SUBTYPES[foot_subtype][0]
 
-    if foot_subtype == "flat_4sided":
+    # orient = str(features.get("foot_orientation", "")).lower()
+    # if orient in ("vertex", "side"):
+    #     if foot_subtype.startswith("flat_") and orient == "vertex":
+    #         suf = foot_subtype.split("_", 1)[1]
+    #         cand = f"pointy_{suf}"
+    #         if cand in ALL_ROBOT_FEATURES["foot_shape"]:
+    #             foot_subtype = cand
+    #     elif foot_subtype.startswith("pointy_") and orient == "side":
+    #         suf = foot_subtype.split("_", 1)[1]
+    #         cand = f"flat_{suf}"
+    #         if cand in ALL_ROBOT_FEATURES["foot_shape"]:
+    #             foot_subtype = cand
+
+    # PAIR 1: trapezoid
+    if foot_subtype == "flat_trapezoid":
+        # Add rounded/curved top edges like rounded shape
         p_left = (
-            (x_left - 0.5 * foot_width, y_top),
-            (x_left - 0.5 * foot_width, y_top + foot_height),
-            (x_left + 0.5 * foot_width, y_top + foot_height),
-            (x_left + 0.5 * foot_width, y_top),
+            (x_left - 0.45 * foot_width, y_top + 0.1 * foot_height),  # Start below top with curve
+            (x_left - 0.3 * foot_width, y_top),  # Curve up
+            (x_left, y_top),  # Top center
+            (x_left + 0.3 * foot_width, y_top),  # Curve up
+            (x_left + 0.45 * foot_width, y_top + 0.1 * foot_height),  # Start below top
+            (x_left + 0.15 * foot_width, y_top + foot_height),  # Narrow bottom
+            (x_left + 0.03 * foot_width, y_top + foot_height),
+            (x_left - 0.03 * foot_width, y_top + foot_height),
+            (x_left - 0.15 * foot_width, y_top + foot_height),
         )
 
         p_right = (
-            (x_right - 0.5 * foot_width, y_top),
-            (x_right - 0.5 * foot_width, y_top + foot_height),
-            (x_right + 0.5 * foot_width, y_top + foot_height),
-            (x_right + 0.5 * foot_width, y_top),
+            (x_right - 0.45 * foot_width, y_top + 0.1 * foot_height),
+            (x_right - 0.3 * foot_width, y_top),
+            (x_right, y_top),
+            (x_right + 0.3 * foot_width, y_top),
+            (x_right + 0.45 * foot_width, y_top + 0.1 * foot_height),
+            (x_right + 0.15 * foot_width, y_top + foot_height),
+            (x_right + 0.03 * foot_width, y_top + foot_height),
+            (x_right - 0.03 * foot_width, y_top + foot_height),
+            (x_right - 0.15 * foot_width, y_top + foot_height),
+        )
+
+    elif foot_subtype == "pointy_trapezoid":
+        # Add same rounded top as flat_trapezoid
+        p_left = (
+            (x_left - 0.45 * foot_width, y_top + 0.1 * foot_height),
+            (x_left - 0.3 * foot_width, y_top),
+            (x_left, y_top),
+            (x_left + 0.3 * foot_width, y_top),
+            (x_left + 0.45 * foot_width, y_top + 0.1 * foot_height),
+            (x_left + 0.18 * foot_width, y_top + 0.88 * foot_height),
+            (x_left, y_top + foot_height),  # Point
+            (x_left - 0.18 * foot_width, y_top + 0.88 * foot_height),
+        )
+
+        p_right = (
+            (x_right - 0.45 * foot_width, y_top + 0.1 * foot_height),
+            (x_right - 0.3 * foot_width, y_top),
+            (x_right, y_top),
+            (x_right + 0.3 * foot_width, y_top),
+            (x_right + 0.45 * foot_width, y_top + 0.1 * foot_height),
+            (x_right + 0.18 * foot_width, y_top + 0.88 * foot_height),
+            (x_right, y_top + foot_height),
+            (x_right - 0.18 * foot_width, y_top + 0.88 * foot_height),
+        )
+
+    # Make square more rounded too
+    elif foot_subtype == "flat_square":
+        # Add rounded top corners
+        p_left = (
+            (x_left - 0.5 * foot_width, y_top + 0.15 * foot_height),  # Round corner
+            (x_left - 0.4 * foot_width, y_top + 0.05 * foot_height),
+            (x_left - 0.2 * foot_width, y_top),
+            (x_left + 0.2 * foot_width, y_top),
+            (x_left + 0.4 * foot_width, y_top + 0.05 * foot_height),
+            (x_left + 0.5 * foot_width, y_top + 0.15 * foot_height),  # Round corner
+            (x_left + 0.5 * foot_width, y_top + 0.75 * foot_height),
+            (x_left + 0.2 * foot_width, y_top + 0.92 * foot_height),
+            (x_left + 0.15 * foot_width, y_top + foot_height),
+            (x_left + 0.03 * foot_width, y_top + foot_height),
+            (x_left - 0.03 * foot_width, y_top + foot_height),
+            (x_left - 0.15 * foot_width, y_top + foot_height),
+            (x_left - 0.2 * foot_width, y_top + 0.92 * foot_height),
+            (x_left - 0.5 * foot_width, y_top + 0.75 * foot_height),
+        )
+
+        p_right = (
+            (x_right - 0.5 * foot_width, y_top + 0.15 * foot_height),
+            (x_right - 0.4 * foot_width, y_top + 0.05 * foot_height),
+            (x_right - 0.2 * foot_width, y_top),
+            (x_right + 0.2 * foot_width, y_top),
+            (x_right + 0.4 * foot_width, y_top + 0.05 * foot_height),
+            (x_right + 0.5 * foot_width, y_top + 0.15 * foot_height),
+            (x_right + 0.5 * foot_width, y_top + 0.75 * foot_height),
+            (x_right + 0.2 * foot_width, y_top + 0.92 * foot_height),
+            (x_right + 0.15 * foot_width, y_top + foot_height),
+            (x_right + 0.03 * foot_width, y_top + foot_height),
+            (x_right - 0.03 * foot_width, y_top + foot_height),
+            (x_right - 0.15 * foot_width, y_top + foot_height),
+            (x_right - 0.2 * foot_width, y_top + 0.92 * foot_height),
+            (x_right - 0.5 * foot_width, y_top + 0.75 * foot_height),
+        )
+
+    elif foot_subtype == "pointy_square":
+        # Match flat_square rounded top
+        p_left = (
+            (x_left - 0.5 * foot_width, y_top + 0.15 * foot_height),
+            (x_left - 0.4 * foot_width, y_top + 0.05 * foot_height),
+            (x_left - 0.2 * foot_width, y_top),
+            (x_left + 0.2 * foot_width, y_top),
+            (x_left + 0.4 * foot_width, y_top + 0.05 * foot_height),
+            (x_left + 0.5 * foot_width, y_top + 0.15 * foot_height),
+            (x_left + 0.5 * foot_width, y_top + 0.75 * foot_height),
+            (x_left + 0.2 * foot_width, y_top + 0.92 * foot_height),
+            (x_left, y_top + foot_height),  # Point
+            (x_left - 0.2 * foot_width, y_top + 0.92 * foot_height),
+            (x_left - 0.5 * foot_width, y_top + 0.75 * foot_height),
+        )
+
+        p_right = (
+            (x_right - 0.5 * foot_width, y_top + 0.15 * foot_height),
+            (x_right - 0.4 * foot_width, y_top + 0.05 * foot_height),
+            (x_right - 0.2 * foot_width, y_top),
+            (x_right + 0.2 * foot_width, y_top),
+            (x_right + 0.4 * foot_width, y_top + 0.05 * foot_height),
+            (x_right + 0.5 * foot_width, y_top + 0.15 * foot_height),
+            (x_right + 0.5 * foot_width, y_top + 0.75 * foot_height),
+            (x_right + 0.2 * foot_width, y_top + 0.92 * foot_height),
+            (x_right, y_top + foot_height),
+            (x_right - 0.2 * foot_width, y_top + 0.92 * foot_height),
+            (x_right - 0.5 * foot_width, y_top + 0.75 * foot_height),
+        )
+
+    # PAIR 2: rounded
+    elif foot_subtype == "flat_rounded":
+        # Rounded top, tapers to narrow flat bottom (trapezoid-like)
+        p_left = (
+            (x_left - 0.5 * foot_width, y_top + 0.5 * foot_height),
+            (x_left - 0.35 * foot_width, y_top + 0.15 * foot_height),
+            (x_left, y_top),
+            (x_left + 0.35 * foot_width, y_top + 0.15 * foot_height),
+            (x_left + 0.5 * foot_width, y_top + 0.5 * foot_height),
+            (x_left + 0.18 * foot_width, y_top + 0.92 * foot_height),  # Taper in
+            (x_left + 0.15 * foot_width, y_top + foot_height),  # Narrow bottom
+            (x_left + 0.03 * foot_width, y_top + foot_height),  # Tiny flat
+            (x_left - 0.03 * foot_width, y_top + foot_height),
+            (x_left - 0.15 * foot_width, y_top + foot_height),  # Narrow bottom
+            (x_left - 0.18 * foot_width, y_top + 0.92 * foot_height),  # Taper in
+        )
+
+        p_right = (
+            (x_right - 0.5 * foot_width, y_top + 0.5 * foot_height),
+            (x_right - 0.35 * foot_width, y_top + 0.15 * foot_height),
+            (x_right, y_top),
+            (x_right + 0.35 * foot_width, y_top + 0.15 * foot_height),
+            (x_right + 0.5 * foot_width, y_top + 0.5 * foot_height),
+            (x_right + 0.18 * foot_width, y_top + 0.92 * foot_height),
+            (x_right + 0.15 * foot_width, y_top + foot_height),
+            (x_right + 0.03 * foot_width, y_top + foot_height),
+            (x_right - 0.03 * foot_width, y_top + foot_height),
+            (x_right - 0.15 * foot_width, y_top + foot_height),
+            (x_right - 0.18 * foot_width, y_top + 0.92 * foot_height),
+        )
+
+    elif foot_subtype == "pointy_rounded":
+        # Keep similar structure to pointy_trapezoid
+        p_left = (
+            (x_left - 0.5 * foot_width, y_top + 0.3 * foot_height),
+            (x_left - 0.4 * foot_width, y_top + 0.1 * foot_height),
+            (x_left - 0.2 * foot_width, y_top),
+            (x_left, y_top),
+            (x_left + 0.2 * foot_width, y_top),
+            (x_left + 0.4 * foot_width, y_top + 0.1 * foot_height),
+            (x_left + 0.5 * foot_width, y_top + 0.3 * foot_height),
+            (x_left + 0.18 * foot_width, y_top + 0.88 * foot_height),  # Match trapezoid angle
+            (x_left, y_top + foot_height),
+            (x_left - 0.18 * foot_width, y_top + 0.88 * foot_height),
+        )
+
+        p_right = (
+            (x_right - 0.5 * foot_width, y_top + 0.3 * foot_height),
+            (x_right - 0.4 * foot_width, y_top + 0.1 * foot_height),
+            (x_right - 0.2 * foot_width, y_top),
+            (x_right, y_top),
+            (x_right + 0.2 * foot_width, y_top),
+            (x_right + 0.4 * foot_width, y_top + 0.1 * foot_height),
+            (x_right + 0.5 * foot_width, y_top + 0.3 * foot_height),
+            (x_right + 0.18 * foot_width, y_top + 0.88 * foot_height),
+            (x_right, y_top + foot_height),
+            (x_right - 0.18 * foot_width, y_top + 0.88 * foot_height),
         )
 
     elif foot_subtype == "flat_5sided":
@@ -318,6 +497,7 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
             (x_right - 0.35 * foot_width, y_top),
         )
 
+
     elif foot_subtype == "pointy_3sided":
         p_left = (
             (x_left - 0.5 * foot_width, y_top),
@@ -344,25 +524,6 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
             (x_right - 0.5 * foot_width, y_top + 0.5 * foot_height),
             (x_right, y_top + foot_height),
             (x_right + 0.5 * foot_width, y_top + 0.5 * foot_height),
-        )
-
-    elif foot_subtype == "pointy_6sided":
-        p_left = (
-            (x_left, y_top),
-            (x_left - 0.33 * foot_width, y_top + 0.33 * foot_height),
-            (x_left - 0.33 * foot_width, y_top + 0.66 * foot_height),
-            (x_left, y_top + foot_height),
-            (x_left + 0.33 * foot_width, y_top + 0.66 * foot_height),
-            (x_left + 0.33 * foot_width, y_top + 0.33 * foot_height),
-        )
-
-        p_right = (
-            (x_right, y_top),
-            (x_right - 0.33 * foot_width, y_top + 0.33 * foot_height),
-            (x_right - 0.33 * foot_width, y_top + 0.66 * foot_height),
-            (x_right, y_top + foot_height),
-            (x_right + 0.33 * foot_width, y_top + 0.66 * foot_height),
-            (x_right + 0.33 * foot_width, y_top + 0.33 * foot_height),
         )
 
     else:
@@ -414,9 +575,9 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
     ############################################################################
 
     # antennae
-    if features.get("has_antennae", False):  # default to False if not specified
+    if "has_antennae" in features.keys() and features["has_antennae"] == "true":
         antenna_length = 1.5 * r if head_shape == "round" else 1.75 * r
-        antenna_width = 4
+        antenna_width = max(1, int(r * 0.08))
 
         antenna_ray = pero.Ray(line_color=pero.colors.Black, line_width=antenna_width)
         antenna_ray.draw(

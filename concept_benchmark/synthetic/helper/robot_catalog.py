@@ -5,6 +5,7 @@ This file contains classes to represent and manipulate a set of all possible rob
 import copy
 from pathlib import Path
 from collections.abc import Sequence
+import hashlib
 
 import numpy as np
 import pandas as pd
@@ -47,23 +48,38 @@ def get_robot_catalog_df(concepts, repetitions=1):
 
 
 def collapse_robot_subtypes(
-    df, robot_features=ALL_ROBOT_FEATURES, subtype_separator="_"
+    df, robot_features=ALL_ROBOT_FEATURES, subtype_separator="_", collapse_as_new_feature=[]
 ):
     """
     collapses feature values with subtypes into feature_types
     """
     df_feature_names = [k for k in df.columns if k in robot_features]
     separate = lambda x: pd.Series(str(x).split(subtype_separator))
+    new_features = {}
     for name in df_feature_names:
         sf = df[name].apply(separate)
         if sf.shape[1] == 2:  # has subtypes
             df[name] = sf.loc[:, 0].values
             df[name + "_subtype"] = sf.loc[:, 1].values
+            if collapse_as_new_feature:
+                # create as many new features as there are subtypes per type
+                subtype_values = sf.loc[:, 1].unique()
+                types = sf.loc[:, 0].unique()
+                for t in types:
+                    if f"{name}_subtype" in collapse_as_new_feature:
+                        for sv in subtype_values:
+                            new_feature_name = f"{name}_{t}_{sv}"
+                            print(f"Creating new feature {new_feature_name}")
+                            if new_feature_name not in df.columns:
+                                df[new_feature_name] = False
+                                new_features[new_feature_name] = [False, True]
+                            df.loc[df[name] == t, new_feature_name] = (sf.loc[:, 1] == sv) & (sf.loc[:, 0] == t) # this call ensures that you only get True if the type matches
+                            df[new_feature_name] = df[new_feature_name].astype(str)
             try:
                 sf.loc[:, 0].empty or sf.loc[:, 1].empty is False
             except:
                 Exception()
-    return df
+    return df, new_features
 
 
 def add_irrelevant_feature(df, feature_name="has_elbows", values=[True, False]):
@@ -103,8 +119,7 @@ def generate_robot_catalog(
     draw: bool = False,
     color_mode: str = "color",
     blur: dict | None = None,
-    drop_irrelevant: bool = True,
-    irrelevant_features: Sequence[str] | None = None,
+    additional_features: Sequence[str] | None = None,
     verbose: bool = False,
     **unused,
 ):
@@ -131,23 +146,26 @@ def generate_robot_catalog(
 
     init_catalog_df = copy.deepcopy(catalog_df)
 
-    if drop_irrelevant and irrelevant_features:
-        # check if irrelevant featuers are in the catalog
-        existing_irrelevant_features = [
-            f for f in irrelevant_features if f in catalog_df.columns
-        ]
-        if existing_irrelevant_features:
-            catalog_df.drop(columns=existing_irrelevant_features, inplace=True)
+    ids = init_catalog_df["id"].astype(str)
+    hb = ids.map(lambda s: int.from_bytes(hashlib.sha256(s.encode()).digest()[:4], "big") & 1).astype(int)
+    init_catalog_df["foot_orientation"] = np.where(hb.values == 1, "vertex", "side")
+    if verbose:
+        u, c = np.unique(init_catalog_df["foot_orientation"], return_counts=True)
+        print("foot_orientation_counts:", dict(zip(u, c)))
 
-    catalog_df = collapse_robot_subtypes(
-        df=catalog_df, robot_features=list(concepts.keys())
+    catalog_df, new_features = collapse_robot_subtypes(
+        df=catalog_df, robot_features=list(concepts.keys()),
+        collapse_as_new_feature=additional_features or [],
     )
+    print(f"After collapse: {new_features}")
+
     constant_cols = [
         col
         for col in catalog_df.columns
         if catalog_df[col].nunique() == 1 and col not in ["id", "png_filename"]
     ]
     catalog_df = catalog_df.drop(columns=constant_cols)
+    new_features = {k: v for k, v in new_features.items() if k not in constant_cols}
 
     # create local directories
     output_path = Path(output_directory)
@@ -217,5 +235,8 @@ def generate_robot_catalog(
     catalog_df["color_left"] = color_lefts
     catalog_df["color_right"] = color_rights
 
+    ids2 = catalog_df["id"].astype(str)
+    hb2 = ids2.map(lambda s: int.from_bytes(hashlib.sha256(s.encode()).digest()[:4], "big") & 1).astype(int)
+    catalog_df["foot_orientation"] = np.where(hb2.values == 1, "vertex", "side")
 
-    return catalog_df
+    return catalog_df, new_features

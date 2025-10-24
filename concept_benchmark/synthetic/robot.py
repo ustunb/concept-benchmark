@@ -1,6 +1,7 @@
 import re
 from collections.abc import Iterable, Sequence
 from pathlib import Path
+import copy
 
 import numpy as np
 import pandas as pd
@@ -279,7 +280,7 @@ def create_robot_image_dataset(
     model: str = "",
     model_type: str = "deterministic",
     spurious_features: Sequence[str] | None = None,
-    irrelevant_features: Sequence[str] | None = None,
+    additional_features: Sequence[str] | None = None,
     color_mode: str = "color",
     blur: dict | None = None,
     verbose: bool = False,
@@ -296,13 +297,12 @@ def create_robot_image_dataset(
 
     num_combinations = int(np.prod([len(v) for v in concepts.values()]))
     total_robots = num_robots or num_combinations * samples_per_instance
-    eff_resolution = resolution if resolution is not None else (600 if size == "large" else 36)
-    spurious = list(spurious_features or [])
-    irrelevant = list(irrelevant_features) if irrelevant_features is not None else spurious
+    eff_resolution = resolution if resolution is not None else (600 if size == "large" else 32 if size == "medium" else 8)
+    irrelevant = list(spurious_features or [])
     drop_irrelevant = extra_params.pop("drop_irrelevant", True)
     _ = (train_concept_detector, epochs)  # parameters accepted for API compatibility
 
-    catalog_df = generate_robot_catalog(
+    catalog_df, new_concepts = generate_robot_catalog(
         concepts=concepts,
         num_robots=total_robots,
         resolution=eff_resolution,
@@ -310,12 +310,13 @@ def create_robot_image_dataset(
         draw=draw,
         color_mode=color_mode,
         blur=blur,
-        drop_irrelevant=drop_irrelevant,
-        irrelevant_features=irrelevant,
         verbose=verbose,
+        additional_features=additional_features,
         **extra_params,
     )
     catalog_df = catalog_df.copy()
+    if verbose:
+        print(catalog_df.columns)
     catalog_df[OUTCOME_NAME] = OUTCOME_MISSING
     df = catalog_df
 
@@ -323,7 +324,9 @@ def create_robot_image_dataset(
     if model_type == "deterministic":
         glorp_model_true = lambda row: eval(unlist0(model))
     elif model_type == "stochastic":
-        glorp_model_true = lambda row: eval(model_to_logistic(model))
+        glorp_model_true = lambda row: eval(model_to_logistic(model, scalar = extra_params.get("scalar", 1.0),
+                                                              weights = extra_params.get('weights', {}),
+                                                              intercept = extra_params.get("intercept", None)))
     else:
         raise ValueError("Invalid model_type. Use 'deterministic' or 'stochastic'.")
 
@@ -335,26 +338,65 @@ def create_robot_image_dataset(
         catalog_df[OUTCOME_NAME] = catalog_df[OUTCOME_NAME].apply(
             lambda x: 1 if x == "glorp" else 0
         )
+    else:
+        # apply probabilistic thresholding
+        rng = np.random.default_rng(extra_params.get("rng_seed", 12345))
+        probs = catalog_df[OUTCOME_NAME].to_numpy(dtype=float)
+        random_vals = rng.random(size=probs.shape)
+        catalog_df[OUTCOME_NAME] = (random_vals < probs).astype(np.int32)
 
     if verbose:
         print("Catalog DataFrame:")
-        print(catalog_df.to_string(index=False))
+        print(catalog_df.head(10).to_string(index=False))
 
     # X: Image paths (stored as strings)
     image_dir = output_directory
     X = np.array([row["png_filename"] for _, row in catalog_df.iterrows()])
 
+    copy_features = copy.deepcopy(ALL_ROBOT_FEATURES)
+    copy_features.update(new_concepts)
+
+    pos_map = {
+        feat: list(dict.fromkeys([str(f).split("_")[0] for f in copy_features[feat]]))[1]
+        for feat in catalog_df.columns if feat in copy_features
+    }
+
+    UC_cols = []
+    for feat in copy_features:
+        pos_val = list(dict.fromkeys([str(f).split("_")[0] for f in copy_features[feat]]))[1]
+        col = (
+            (catalog_df[feat].astype(str).str.split("_").str[0] == str(pos_val))
+            .astype(np.int32)
+            .to_numpy()
+        )
+        UC_cols.append(col)
+    UC = np.stack(UC_cols, axis=1).astype(np.int8)
+
+    if drop_irrelevant and irrelevant:
+        # check if irrelevant features are in the catalog
+        existing_irrelevant_features = [
+            f for f in irrelevant if f in catalog_df.columns
+        ]
+        if existing_irrelevant_features:
+            catalog_df.drop(columns=existing_irrelevant_features, inplace=True)
+
     # C: Concept matrix
     feature_names = [
-        feat for feat in catalog_df.columns if feat in ALL_ROBOT_FEATURES
+        feat for feat in catalog_df.columns if feat in copy_features
     ]
-    pos_map = {
-        feat: ALL_ROBOT_FEATURES[feat][0].split("_")[0] \
-        if isinstance(ALL_ROBOT_FEATURES[feat][0], str) \
-        else ALL_ROBOT_FEATURES[feat][0]
-        for feat in feature_names
-    }
-    C = (catalog_df[pos_map.keys()] == pos_map.values()).to_numpy().astype(np.int8)
+    # Binary encode concepts: 1 if feature equals designated positive value, else 0
+    C_cols = []
+    for feat in feature_names:
+        pos_val = pos_map.get(feat)
+        col = (
+            (catalog_df[feat].astype(str).str.split("_").str[0] == str(pos_val))
+            .astype(np.int32)
+            .to_numpy()
+        )
+        if verbose:
+            print(f"Feature '{feat}': positive value '{pos_val}' -> column head {col.tolist()[:10]}")
+        C_cols.append(col)
+    C = np.stack(C_cols, axis=1).astype(np.int8)
 
     # y: Labels pr P(y=1|x)
     y = catalog_df[OUTCOME_NAME].values
@@ -362,8 +404,20 @@ def create_robot_image_dataset(
     if verbose:
         print("Dataset for Training:")
         print(X)
-        print(C)
-        print(y)
+        # print out the same dataframe but with values being side to side with their categorical meanings
+        print("Concept meanings:")
+        meaning_df = pd.DataFrame()
+        for i, feat in enumerate(feature_names):
+            pos_val = pos_map.get(feat)
+            meaning_df[feat] = C[:, i].astype(str)
+            # AttributeError: 'numpy.ndarray' object has no attribute 'replace'
+            meaning_df[feat] = meaning_df[feat].replace({"1": pos_val, "0": f"not_{pos_val}"})
+            # make the entry in the dataframe to be "numerical (categorical)"
+            meaning_df[feat] = meaning_df[feat] + " (" + C[:, i].astype(str) + ")"
+        meaning_df["label"] = pd.Series(y).replace({1: "glorp", 0: "drent"})
+        meaning_df["label"] = meaning_df["label"] + " (" + pd.Series(y).astype(str) + ")"
+        #print(meaning_df.to_string())
+
 
     # colors to string (colors don't play well with pickle)
     catalog_df['color_left'] = catalog_df['color_left'].astype(str)
@@ -373,6 +427,10 @@ def create_robot_image_dataset(
     meta = {
         "classes": ["drent", "glorp"],
         "concepts": feature_names,
+        "num_unique_robots": num_combinations,
+        "unfiltered_concepts": list(copy_features.keys()),
+        "UC": UC,
+        "df_indices": catalog_df.index.to_numpy(),
         "data_type": "image",
         "image_dir": image_dir,
         "resolution": eff_resolution,
