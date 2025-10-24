@@ -53,6 +53,7 @@ settings = {
     "template_difficulty": "hard",
     "generic_rate": 0.5,
     "generic_tol": 0.02,
+    "generic_what": "ears",
     "train_balance_enable": 0,
     "train_target_pos_frac": -1.0,
     "train_target_generic_frac": 0.5,
@@ -428,6 +429,7 @@ p.add_argument("--redact-concepts", type=str)
 p.add_argument("--redact-splits", type=str)
 p.add_argument("--generic-rate", dest="generic_rate", type=float)
 p.add_argument("--generic-tol", dest="generic_tol", type=float)
+p.add_argument("--generic-what", dest="generic_what", choices=["ears","foot"])
 p.add_argument("--train-balance-enable", dest="train_balance_enable", type=int)
 p.add_argument("--train-target-pos-frac", dest="train_target_pos_frac", type=float)
 p.add_argument("--train-target-generic-frac", dest="train_target_generic_frac", type=float)
@@ -474,7 +476,8 @@ def build_text_ds_hard(catalog_df: pd.DataFrame,
         row["label"] = sr["label"]
         _vpr_i = int(row_variants[i]) if (row_variants is not None and i < len(row_variants)) else int(variants_per_row)
         for v in range(max(1, _vpr_i)):
-            key = f"{seed}:{i}:{v}:ears_generic"
+            _gen_target = str(settings.get("generic_what","ears")).lower()
+            key = f"{seed}:{i}:{v}:{_gen_target}_generic"
             h = int(hashlib.sha256(key.encode()).hexdigest(), 16)
             use_gen = (len(corpus_gen) > 0) and ((h % 1000000) < int(max(0.0, min(1.0, float(generic_rate))) * 1000000))
             corpus = corpus_gen if use_gen else corpus_spec
@@ -486,7 +489,10 @@ def build_text_ds_hard(catalog_df: pd.DataFrame,
             ears_generic.append(bool(use_gen))
     ds = ConceptDatasetSample(X=X, C=np.asarray(C, dtype=np.float32), y=np.asarray(y, dtype=int), meta={"concepts": tuple(names), "classes": tuple(classes), "data_type": "text"})
     setattr(ds, "_full", type("Full", (), {"meta": {"row_index": np.asarray(row_index, dtype=int)}}))
-    ds.ears_generic_mask = np.asarray(ears_generic, dtype=bool)
+    _gen_target = str(settings.get("generic_what","ears")).lower()
+    _mask = np.asarray(ears_generic, dtype=bool)
+    setattr(ds, f"{_gen_target}_generic_mask", _mask)
+    ds.ears_generic_mask = _mask
     return ds
 
 if modality == "text":
@@ -533,7 +539,9 @@ if modality == "text":
         _vpr_min = int(settings.get("variants_per_row_minority") or max(1, int(round(_base_vpr * float(settings.get("minority_mult", 1.0))))))
         _vpr_maj = int(settings.get("variants_per_row_majority") or _base_vpr)
         _row_variants = [(_vpr_min if (lab == _minority_label) else _vpr_maj) for lab in _labels]
-        gen_jsonl = tpl_path.with_name("HardCorpus_EarsGeneric.jsonl") if str(tpl_path).lower().endswith(".jsonl") else None
+        _gen_target = str(settings.get("generic_what", "ears")).lower()
+        gen_jsonl = tpl_path.with_name(
+            f"HardCorpus_{'Foot' if _gen_target == 'foot' else 'Ears'}Generic.jsonl") if is_jsonl else None
         ds = build_text_ds_hard(catalog_df=catalog_df, concepts=concepts, corpus_path=tpl_path, variants_per_row=_base_vpr, seed=int(settings["seed"]), row_variants=_row_variants, generic_path=(gen_jsonl if (gen_jsonl and gen_jsonl.is_file()) else None), generic_rate=float(settings.get("generic_rate", 0.5)))
     else:
         with open(tpl_path, "r", encoding="utf-8-sig") as f:
@@ -562,12 +570,14 @@ if modality == "text":
     mask_val = np.zeros(n_all, dtype=bool)
     mask_tr = np.zeros(n_all, dtype=bool)
     mask_val[idx_dev[folds_dev == val_fold]] = True
-    mask_tr[idx_dev[folds_dev != val_fold]] = True
+    drop_fold = 1 + (val_fold % K)
+    keep = (folds_dev != val_fold) & (folds_dev != drop_fold)
+    mask_tr[idx_dev[keep]] = True
     tr = np.where(mask_tr)[0]
     va = np.where(mask_val)[0]
 
     dep_n = int(settings.get("deployment_size", 10000))
-    seed_dep = int(settings.get("seed_deploy", int(settings["seed"]) + 2))
+    seed_dep = int(settings.get("seed_deploy", int(settings["seed"]) + 1234))
     rng_dep = np.random.default_rng(seed_dep)
     pool = np.setdiff1d(idx_all, np.concatenate([tr, va])) if (tr.size + va.size) < n_all else idx_all
     if dep_n <= pool.size:
@@ -621,24 +631,35 @@ if modality == "text":
         if "val" in targets: ds.validation = ConceptDatasetSample(X=_redact(ds.validation.X), C=ds.validation.C, y=ds.validation.y, meta=ds.validation.meta)
         if "train" in targets: ds.training = ConceptDatasetSample(X=_redact(ds.training.X), C=ds.training.C, y=ds.training.y, meta=ds.training.meta)
 
+    _gen_target = str(settings.get("generic_what","ears")).lower()
+    _key_near = f"generic_near_{_gen_target}_shape"
+    _gen_target = str(settings.get("generic_what", "ears")).lower()
+    _key_near = f"generic_near_{_gen_target}_shape"
+
     leak = {}
     dist = {}
     for name, part in [("train", ds.training), ("val", ds.validation), ("test", ds.test)]:
-        gm = getattr(part, "ears_generic_mask", None)
+        gm = getattr(part, f"{_gen_target}_generic_mask", None)
+        if gm is None:
+            gm = getattr(part, "ears_generic_mask", None)
+
         yv = np.asarray(part.y, dtype=int)
         if gm is None:
-            leak[name] = {"generic_near_ears_shape": "na"}
+            leak[name] = {_key_near: "na"}
             dist[name] = {"overall": "na", "y1": "na", "y0": "na"}
             continue
-        def _near_ears_shape(txt: str) -> bool:
+
+        def _near_target_shape(txt: str) -> bool:
             t = str(txt).lower()
             sents = re.split(r"[.!?;:]\s+", t)
-            pat_ears = re.compile(r"\bears?\b")
+            pat_part = re.compile(r"\bears?\b") if _gen_target == "ears" else re.compile(r"\b(?:foot|feet)\b")
             pat_shape = re.compile(r"\b(square|boxy|box|angular|cornered|right-angled|rectilinear|90-degree|triangle|triangular|tri-corner|three-angled|three-point|pointy|pointed|tapered|wedge|spearhead|spear-tip)\b")
             for s in sents:
-                if pat_ears.search(s) and pat_shape.search(s): return True
+                if pat_part.search(s) and pat_shape.search(s):
+                    return True
             return False
-        leak[name] = {"generic_near_ears_shape": int(sum(_near_ears_shape(t) for t, g in zip(part.X, gm) if g))}
+
+        leak[name] = {_key_near: int(sum(_near_target_shape(t) for t, g in zip(part.X, gm) if g))}
         overall = float(gm.mean()) if gm.size else float("nan")
         y1 = float(gm[yv == 1].mean()) if (yv == 1).any() else float("nan")
         y0 = float(gm[yv == 0].mean()) if (yv == 0).any() else float("nan")
@@ -652,15 +673,16 @@ if modality == "text":
 
     print(json.dumps({
         "split_sizes": {"train": int(ds.training.n), "val": int(ds.validation.n), "test": int(ds.test.n)},
-        "ears_leak_counts_generic": leak,
-        "ears_generic_rates": dist,
+        f"{_gen_target}_leak_counts_generic": leak,
+        f"{_gen_target}_generic_rates": dist,
         "targets": {"train": t_train, "val": t_val, "test": t_test, "tol": tol},
         "split_files": {},
         "run_dir": str(out_dir)
     }, indent=2))
 
-    if any(v.get("generic_near_ears_shape", 0) not in ("na", 0) for v in leak.values()):
+    if any(v.get(_key_near, 0) not in ("na", 0) for v in leak.values()):
         raise SystemExit(3)
+
     for name, vals in dist.items():
         if vals["overall"] != "na" and np.isfinite(vals["overall"]):
             if abs(vals["overall"] - targets[name]) > tol: raise SystemExit(4)
