@@ -17,7 +17,7 @@ from scripts.robot_utils import _apply_missing, _apply_label_noise, _rate_tag, _
 
 settings = {
     "samples_per_instance": 3,
-    "draw": 0,
+    "draw": 1,
     "CBM_type": "separate", #"sequential"
     "image_dir": "./data/robot_images",
     "image_size": "medium",
