@@ -138,7 +138,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
         y_prob_now = base_probs
         pred_now = base_lbl
         conf = y_prob_now[np.arange(n_samples), pred_now]
-                if config.select_only_abstained and config.tau is not None:
+        if config.select_only_abstained and config.tau is not None:
             abstain_mask = (conf >= config.tau) & (conf <= 1.0 - config.tau)
             candidate_ids = np.nonzero((flip_prob >= threshold) & abstain_mask)[0]
         else:
@@ -182,4 +182,5 @@ class KFlipInterventionStrategy(InterventionStrategy):
             selected_instances=np.asarray(selected, dtype=int),
             details=details,
         )
+
 
