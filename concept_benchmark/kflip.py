@@ -138,13 +138,19 @@ class KFlipInterventionStrategy(InterventionStrategy):
         y_prob_now = base_probs
         pred_now = base_lbl
         conf = y_prob_now[np.arange(n_samples), pred_now]
-        if config.select_only_abstained and config.tau is not None:
+                if config.select_only_abstained and config.tau is not None:
             abstain_mask = (conf >= config.tau) & (conf <= 1.0 - config.tau)
             candidate_ids = np.nonzero((flip_prob >= threshold) & abstain_mask)[0]
         else:
             candidate_ids = np.nonzero(flip_prob >= threshold)[0]
 
-        selected = self._select_instances(candidate_ids, config, rng=config.rng)
+        # rank by descending flip probability
+        if candidate_ids.size > 0:
+            order = candidate_ids[np.argsort(flip_prob[candidate_ids])[::-1]]
+        else:
+            order = candidate_ids
+
+        selected = self._select_instances(order, config, rng=config.rng, shuffle_override=False)
 
         # build mask and enforce budgets via helper
         mask = np.zeros_like(batch.C_pred, dtype=bool)
@@ -176,3 +182,4 @@ class KFlipInterventionStrategy(InterventionStrategy):
             selected_instances=np.asarray(selected, dtype=int),
             details=details,
         )
+
