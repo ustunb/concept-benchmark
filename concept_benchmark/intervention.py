@@ -656,7 +656,7 @@ class ConceptInterventionRunner:
     ) -> InterventionResult:
 
         # TODO: sample noise if config.noise > 0.0 (call parent)
-        if not concept_true and config.noise <= 0.0: 
+        if concept_true is None and config.noise <= 0.0: 
                 concept_true = dataset.base_concepts
 
         batch = self._build_batch(
