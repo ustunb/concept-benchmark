@@ -16,7 +16,6 @@ from .helper.robot_catalog import (
 )
 from .helper import textgen as text_helper
 from .helper.utils import model_to_logistic, unlist0
-from scipy.special import expit
 
 
 def create_synthetic_dataset(data_type: str = "image", **kwargs) -> ConceptDataset:
@@ -281,7 +280,9 @@ def create_robot_image_dataset(
     model: str = "",
     model_type: str = "deterministic",
     spurious_features: Sequence[str] | None = None,
+    additional_features: Sequence[str] | None = None,
     color_mode: str = "color",
+    blur: dict | None = None,
     verbose: bool = False,
     train_concept_detector: bool | None = None,
     epochs: int | None = None,
@@ -308,7 +309,9 @@ def create_robot_image_dataset(
         output_directory=output_directory,
         draw=draw,
         color_mode=color_mode,
+        blur=blur,
         verbose=verbose,
+        additional_features=additional_features,
         **extra_params,
     )
     catalog_df = catalog_df.copy()
@@ -381,7 +384,6 @@ def create_robot_image_dataset(
     feature_names = [
         feat for feat in catalog_df.columns if feat in copy_features
     ]
-
     # Binary encode concepts: 1 if feature equals designated positive value, else 0
     C_cols = []
     for feat in feature_names:

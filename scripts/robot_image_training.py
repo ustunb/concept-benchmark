@@ -18,6 +18,7 @@ from scripts.robot_utils import _apply_missing, _apply_label_noise, _rate_tag, _
 settings = {
     "samples_per_instance": 3,
     "draw": 1,
+    "draw": 1,
     "CBM_type": "separate", #"sequential"
     "image_dir": "./data/robot_images",
     "image_size": "medium",
@@ -96,11 +97,17 @@ def define_train_valid_test(settings, concept_dataset, missingness, params, rate
         train, valid, test = create_skewed_splits(
             concept_dataset,
             skew_specs=settings["skew_concept"],
+            concept_dataset,
+            skew_specs=settings["skew_concept"],
             rng=rng,
+            drop_concepts=settings.get("drop_concepts", [])
             drop_concepts=settings.get("drop_concepts", [])
         )
     elif settings.get("dataset_characterization", "") != "":
+    elif settings.get("dataset_characterization", "") != "":
         train, valid, test = filter_training_by_string(
+            concept_dataset,
+            string=settings["dataset_characterization"],
             concept_dataset,
             string=settings["dataset_characterization"],
             rng=rng
@@ -109,21 +116,32 @@ def define_train_valid_test(settings, concept_dataset, missingness, params, rate
         concept_dataset.split("K05N01", fold_num_validation=4, fold_num_test=5)
         train = concept_dataset.training
         valid = concept_dataset.validation
+        concept_dataset.split("K05N01", fold_num_validation=4, fold_num_test=5)
+        train = concept_dataset.training
+        valid = concept_dataset.validation
 
     # Setup the test set
     test_params = copy.deepcopy(params)
     standard_size = concept_dataset.meta["num_unique_robots"]
+    standard_size = concept_dataset.meta["num_unique_robots"]
     test_params["output_directory"] = Path(params['output_directory']) / "test_images"
+    test_params["draw"] = True if not Path(test_params["output_directory"]).exists() or settings.get("draw", False) else False
     test_params["draw"] = True if not Path(test_params["output_directory"]).exists() or settings.get("draw", False) else False
     test_params["samples_per_instance"] = int(params["test_set_size"] / standard_size) + 1
     test_data = create_synthetic_dataset(**test_params)
     test_data.drop_concepts(settings.get("drop_concepts", []))
+    test_data.drop_concepts(settings.get("drop_concepts", []))
     test_data.transform = tf
     # take random sample of test set to match test_set_size
+    rng_test = np.random.default_rng(int(settings["seed"]) + 1234)
     rng_test = np.random.default_rng(int(settings["seed"]) + 1234)
     test_indices = rng_test.choice(len(test_data), size=int(params["test_set_size"]), replace=False)
     test = test_data._full.filter(np.isin(np.arange(len(test_data)), test_indices))
 
+    if settings.get("label_noise_rate", 0.0) > 0:
+        train = _apply_label_noise(train, settings["label_noise_rate"], seed=int(settings["seed"]))
+        valid = _apply_label_noise(valid, settings["label_noise_rate"], seed=int(settings["seed"]))
+        test = _apply_label_noise(test, settings["label_noise_rate"], seed=int(settings["seed"]))
     if settings.get("label_noise_rate", 0.0) > 0:
         train = _apply_label_noise(train, settings["label_noise_rate"], seed=int(settings["seed"]))
         valid = _apply_label_noise(valid, settings["label_noise_rate"], seed=int(settings["seed"]))
@@ -142,7 +160,21 @@ def train_concept_detector(settings, config, device, int_acc_tag, label_noise_ta
     cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=train.n_concepts,
                                                       input_size=600 if settings["image_size"] == "large" else
                                                       32 if settings["image_size"] == "medium" else 8))
+    if missingness != "complete" and rate > 0:
+        Ctr = _apply_missing(train.C, missingness, rate, rng, y=train.y.astype(int))
+        train = train.__class__(parent=train.parent, X=train.X, C=Ctr, y=train.y, meta=train.meta,
+                                transform=train.transform, concept_transform=train.concept_transform,
+                                target_transform=train.target_transform, base_dir=train.base_dir)
+    return test, train, valid
+
+
+def train_concept_detector(settings, config, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
+                           seed_tag, skew_tag, train, valid, test):
+    cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=train.n_concepts,
+                                                      input_size=600 if settings["image_size"] == "large" else
+                                                      32 if settings["image_size"] == "medium" else 8))
     det_name = f"detector_dnn_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
+    if settings["load_detector"]:
     if settings["load_detector"]:
         mini_train = train.filter(np.array([True] + [False] * (len(train.C) - 1)))
         mini_valid = valid.filter(np.array([True] + [False] * (len(valid.C) - 1)))
@@ -150,9 +182,13 @@ def train_concept_detector(settings, config, device, int_acc_tag, label_noise_ta
         cd.fit(mini_train, mini_valid, freeze=True, embed_params={"device": device},
                fit_params={"epochs": 1, "device": "cpu"})
         state = torch.load(settings["load_detector"], weights_only=False, map_location="cpu")
+        state = torch.load(settings["load_detector"], weights_only=False, map_location="cpu")
         cd.load_state_dict(state)
         det_path = Path(settings["load_detector"])
+        det_path = Path(settings["load_detector"])
     else:
+        cd.fit(train, valid, embed_params={'shuffle': False, **config},
+               fit_params={"epochs": 50, 'lr': 1e-3, "patience": 10, **config})
         cd.fit(train, valid, embed_params={'shuffle': False, **config},
                fit_params={"epochs": 50, 'lr': 1e-3, "patience": 10, **config})
         det_path = run_dir / det_name
@@ -169,22 +205,37 @@ def train_concept_detector(settings, config, device, int_acc_tag, label_noise_ta
 
 def train_frontend(H_te, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
                    seed_tag, skew_tag, test, train):
+        invariance_passed = test_concept_detector_invariance(cd, concept, train.concepts, test, device,
+                                                             num_tests=10)
+        print(f"Invariance test for concept '{concept}': {'PASSED' if invariance_passed else 'FAILED'}")
+    return cd, det_path
+
+
+def train_frontend(H_te, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
+                   seed_tag, skew_tag, test, train):
     fe = FrontEndModel()
     fe_name = f"frontend_logreg_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
     if sttngs["load_frontend"]:
         with open(sttngs["load_frontend"], "rb") as f:
+    if sttngs["load_frontend"]:
+        with open(sttngs["load_frontend"], "rb") as f:
             fe = pickle.load(f)
+        fe_path = Path(sttngs["load_frontend"])
         fe_path = Path(sttngs["load_frontend"])
     else:
         Ctr = train.C.astype(np.float32)
         if int(sttngs["impute_missing"]) and np.any(Ctr < 0):
+        if int(sttngs["impute_missing"]) and np.any(Ctr < 0):
             Cin = Ctr.copy()
             m = Cin < 0
+            Cin[m] = prob_train[m]
             Cin[m] = prob_train[m]
             fe.fit(Cin, train.y.astype(int))
         else:
             if sttngs.get("CBM_type", "separate") == "sequential":
+            if sttngs.get("CBM_type", "separate") == "sequential":
                 keep = np.all(Ctr >= 0, axis=1)
+                fe.fit(h_train[keep], train.y[keep].astype(int))
                 fe.fit(h_train[keep], train.y[keep].astype(int))
             else:
                 fe.fit(Ctr, train.y.astype(int))
@@ -208,7 +259,18 @@ def train_frontend(H_te, h_train, prob_train, sttngs, int_acc_tag, label_noise_t
 def train_dnn(sttngs, device, dnn_stats, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir, seed_tag,
               skew_tag, test, train):
     print("Training baseline DNN...")
+    return acc_det, acc_gt, concept_acc_mean, fe, fe_path, y_pred_det
 
+
+def train_dnn(sttngs, device, dnn_stats, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir, seed_tag,
+              skew_tag, test, train):
+    print("Training baseline DNN...")
+
+    # Convert ConceptDatasetSample to path arrays
+    paths_tr = [train.base_dir / p for p in train.X]
+    ytr = train.y.astype(int)
+    paths_te = [test.base_dir / p for p in test.X]
+    yte = test.y.astype(int)
     # Convert ConceptDatasetSample to path arrays
     paths_tr = [train.base_dir / p for p in train.X]
     ytr = train.y.astype(int)
@@ -223,7 +285,17 @@ def train_dnn(sttngs, device, dnn_stats, int_acc_tag, label_noise_tag, miss_tag,
         lr=5e-5,
         device=device
     )
+    dnn_acc, proc, dnn_model = train_eval_image(
+        paths_tr, ytr, paths_te, yte,
+        model_id=sttngs.get("image_model", "google/vit-base-patch16-224"),
+        epochs=int(sttngs["epochs"]),
+        batch_size=16,
+        lr=5e-5,
+        device=device
+    )
 
+    dnn_stats = {"dnn_accuracy": float(dnn_acc)}
+    print(f"DNN accuracy: {float(dnn_acc)}")
     dnn_stats = {"dnn_accuracy": float(dnn_acc)}
     print(f"DNN accuracy: {float(dnn_acc)}")
 
@@ -331,12 +403,24 @@ def main(sttngs):
     # get the confusion matrix for the detector
     all_preds, confusion_df = _get_confusion_matrix(subtype_concepts, missing_concepts, fe, H_te, P_te, test)
 
+    # get the confusion matrix for the detector
+    all_preds, confusion_df = _get_confusion_matrix(subtype_concepts, missing_concepts, fe, H_te, P_te, test)
+
     # get model accuracy for each subtype concept:
+    per_concept_acc2 = _get_accuracies_per_subconcept(all_preds, missing_concepts, subtype_concepts)
+
+    # align the model with new weights
     per_concept_acc2 = _get_accuracies_per_subconcept(all_preds, missing_concepts, subtype_concepts)
 
     # align the model with new weights
     alignment_stats = {}
     if S.get("human_alignment", {}) != {}:
+        alignment_stats = test_alignment(H_te, S.get("human_alignment", {}), fe, test)
+    ###########################################################################
+
+    ###########################################################################
+    ##############################    SAVING    ###############################
+    ###########################################################################
         alignment_stats = test_alignment(H_te, S.get("human_alignment", {}), fe, test)
     ###########################################################################
 
@@ -404,6 +488,7 @@ def main(sttngs):
         json.dump(meta, f, indent=2)
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2)
+
 
     print(json.dumps({
         "meta_path": str(meta_path),

@@ -256,6 +256,11 @@ def _nat_from_tokens(row: dict, seed: int) -> dict:
         "ELBOWS_NAT": elbows_nat,
     }
 
+def _clean_phrasings(txt: str) -> str:
+    txt = re.sub(r"(?i)\b(elbows?|the elbows)\s+feel\s+no\s+elbows?\b", "no elbows", txt)
+    txt = re.sub(r"(?i)\b(knees?|the knees)\s+come(s)?\s+across\s+no\s+knees?\b", "no knees", txt)
+    txt = re.sub(r"\s{2,}", " ", txt).strip()
+    return txt
 
 def _core_concept_names() -> list[str]:
     return [
@@ -294,7 +299,7 @@ def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, v
     corpus_gen = _load_jsonl(generic_path) if (generic_path is not None and Path(generic_path).is_file()) else []
     names = _core_concept_names()
     classes = [0, 1]
-    X, C, y, row_index, ears_generic = [], [], [], [], []
+    X, C, y, row_index, variant_index, generic_mask_flags = [], [], [], [], [], []
     _submode = str(getattr(args_obj, "subtype_mode", settings.get("subtype_mode","off"))).lower() if "args_obj" in globals() else str(settings.get("subtype_mode","off")).lower()
     _subtypes = {"foot_is_pointy": [], "hands_are_pointy": []} if _submode != "off" else None
     for i, sr in catalog_df.iterrows():
@@ -306,12 +311,13 @@ def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, v
             h = int(hashlib.sha256(key.encode()).hexdigest(), 16)
             use_gen = (len(corpus_gen) > 0) and ((h % 1000000) < int(max(0.0, min(1.0, float(generic_rate))) * 1000000))
             corpus = corpus_gen if use_gen else corpus_spec
-            text = _render_from_corpus(row, corpus, seed + v)
+            text = _render_from_corpus_slot(row, corpus, v, seed)
             X.append(text)
             C.append(_core_vector_from_row(row))
             y.append(1 if str(sr["label"]) == "glorp" else 0)
             row_index.append(i)
-            ears_generic.append(bool(use_gen))
+            variant_index.append(v)
+            generic_mask_flags.append(bool(use_gen))
             if _subtypes is not None:
                 _subtypes["foot_is_pointy"].append(str(row.get("foot_shape", "na")))
                 _subtypes["hands_are_pointy"].append(str(row.get("hand_shape", "na")))
@@ -321,11 +327,11 @@ def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, v
     ds = ConceptDatasetSample(
         X=X, C=C, y=y, meta={"concepts": tuple(names), "classes": (0, 1), "data_type": "text"}
     )
-    setattr(ds, "_full", type("Full", (), {"meta": {"row_index": np.asarray(row_index, dtype=int)}}))
+    setattr(ds, "_full", type("Full", (), {"meta": {"row_index": np.asarray(row_index, dtype=int), "variant_index": np.asarray(variant_index, dtype=int)}}))
     _gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
-    _mask = np.asarray(ears_generic, dtype=bool)
-    ds.ears_generic_mask = _mask
+    _mask = np.asarray(generic_mask_flags, dtype=bool)
     setattr(ds, f"{_gen_target}_generic_mask", _mask)
+    ds.ears_generic_mask = _mask if _gen_target == "ears" else getattr(ds, "ears_generic_mask", _mask)
     if _subtypes is not None:
         setattr(ds, "subtypes", {k: np.asarray(v, dtype=object) for k, v in _subtypes.items()})
     return ds
@@ -339,7 +345,7 @@ def _render_from_corpus(row: dict, corpus: list[dict], seed: int) -> str:
             cand = corpus
     except Exception:
         cand = corpus
-    key = f'{seed}:{row["head_shape"]}:{row["body_shape"]}:{row["foot_shape"]}:{row["ears_shape"]}:{row["mouth_type"]}:{row["hand_shape"]}:{row["has_antennae"]}:{row["has_knees"]}:{row["has_elbows"]}'
+    key = f'{seed}:{row["head_shape"]}:{row["body_shape"]}:{row["ears_shape"]}:{row["mouth_type"]}:{row["hand_shape"]}:{row["foot_shape"]}:{row["has_antennae"]}:{row["has_knees"]}:{row["has_elbows"]}'
     idx = int(hashlib.sha256(key.encode()).hexdigest(), 16) % len(cand)
     txt = str(cand[idx].get("text", ""))
     nat = _nat_from_tokens(row, seed)
@@ -362,6 +368,43 @@ def _render_from_corpus(row: dict, corpus: list[dict], seed: int) -> str:
         ph = "{" + k + "}"
         if ph in txt:
             txt = txt.replace(ph, v)
+        txt = _clean_phrasings(txt)
+    return txt
+
+def _render_from_corpus_slot(row: dict, corpus: list[dict], slot: int, seed: int) -> str:
+    try:
+        sig = _signals_from_row(row)
+        cand = [it for it in corpus if _line_matches(sig, it.get("when", {}))]
+        if not cand:
+            cand = corpus
+    except Exception:
+        cand = corpus
+    L = len(cand)
+    base_key = f"{seed}:{row['head_shape']}:{row['body_shape']}:{row['ears_shape']}:{row['mouth_type']}:{row['hand_shape']}:{row['foot_shape']}:{row['has_antennae']}:{row['has_knees']}:{row['has_elbows']}"
+    base = int(hashlib.sha256(base_key.encode()).hexdigest(), 16) % L
+    idx = (base + int(slot)) % L
+    txt = str(cand[idx].get("text", ""))
+    nat = _nat_from_tokens(row, seed + int(slot))
+    for k, v in nat.items():
+        ph = "{" + k + "}"
+        if ph in txt:
+            txt = txt.replace(ph, v)
+    raw_map = {
+        "head_shape": str(row["head_shape"]),
+        "body_shape": str(row["body_shape"]),
+        "ears_shape": str(row["ears_shape"]),
+        "mouth_type": str(row["mouth_type"]),
+        "hand_shape": str(row["hand_shape"]),
+        "foot_shape": str(row["foot_shape"]),
+        "has_antennae": str(row["has_antennae"]),
+        "has_knees": str(row["has_knees"]),
+        "has_elbows": str(row["has_elbows"]),
+    }
+    for k, v in raw_map.items():
+        ph = "{" + k + "}"
+        if ph in txt:
+            txt = txt.replace(ph, v)
+        txt = txt.replace(ph, v)
     return txt
 
 def _render_from_corpus_distinct(row: dict, corpus: list[dict], seed: int) -> str:
@@ -396,6 +439,7 @@ def _render_from_corpus_distinct(row: dict, corpus: list[dict], seed: int) -> st
         ph = "{" + k + "}"
         if ph in txt:
             txt = txt.replace(ph, v)
+        txt = txt.replace(ph, v)
     return txt
 
 if psutil.Process(psutil.Process().ppid()).name().lower().startswith("pycharm"):
@@ -406,7 +450,9 @@ else:
                                  conflict_handler="resolve")
 
     ap.add_argument("--variant", choices=["perfect", "imperfect"], default=settings["variant"])
-    ap.add_argument("--variants-per-row", type=int)
+    ap.add_argument("--variants-per-row", type=int, default=settings["variants_per_row"])
+    ap.add_argument("--variants-per-row-val", type=int, default=1)
+    ap.add_argument("--variants-per-row-test", type=int, default=1)
     ap.add_argument("--variants-per-row-minority", type=int, default=0)
     ap.add_argument("--variants-per-row-majority", type=int, default=0)
     ap.add_argument("--minority_mult", type=float, default=1.0)
@@ -430,6 +476,7 @@ else:
     ap.add_argument("--cv-k", type=int, default=5)
     ap.add_argument("--cv-fold", type=int, default=0)
     ap.add_argument("--dev-per-fold", type=int, default=1000)
+    ap.add_argument("--dev-size", type=int, default=0)
     ap.add_argument("--deployment-size", type=int, default=10000)
     ap.add_argument("--concept-mode", choices=["hard", "soft"], default=settings["concept_mode"])
     ap.add_argument("--train-on-detected", action="store_true", default=settings["train_on_detected"])
@@ -473,6 +520,9 @@ else:
     ap.add_argument("--machine-upper-bound", type=int, default=settings["machine_upper_bound"])
     ap.add_argument("--mask-mode", choices=["rowdrop", "mask"], default=settings["mask_mode"])
     ap.add_argument("--mask-rate", type=float, default=settings["mask_rate"])
+    ap.add_argument("--text-mask", type=str, default="")
+    ap.add_argument("--text-mask-rate", type=float, default=0.0)
+    ap.add_argument("--text-mask-splits", type=str, default="train")
     ap.add_argument("--run-name", type=str, default=settings["run_name"])
     ap.add_argument("--template-distinct-test", type=int, default=0, help="use a different template index for test rows")
     ap.add_argument("--force-rerun", type=int, default=settings["force_rerun"])
@@ -509,12 +559,13 @@ else:
     ap.add_argument("--flip-limit-subsets", type=lambda s: None if str(s).lower() == "none" else int(s), default=None)
     ap.add_argument("--abstain-only", action="store_true", help="restrict to abstentions if --tau is set")
     ap.add_argument("--seed-test-offset", type=int, default=1234, dest="seed_test_offset")
+    ap.add_argument("--image-meta", type=str, default="", dest="image_meta")
 
     known, _ = ap.parse_known_args()
     merged = dict(settings)
     merged.update({
         "variant": known.variant,
-        "variants_per_row": int(known.variants_per_row),
+        "variants_per_row": int(getattr(known, "variants_per_row", settings["variants_per_row"])),
         "imperfect_strategy": known.imperfect_strategy,
         "heldout_concepts": known.heldout_concepts if isinstance(known.heldout_concepts, list) else _csv_list(
             known.heldout_concepts),
@@ -574,6 +625,10 @@ else:
         "generic_rate": float(getattr(known, "generic_rate", 0.5)),
         "generic_tol": float(getattr(known, "generic_tol", 0.02)),
         "generic_what": str(getattr(known, "generic_what", "foot")),
+        "seed_cv": int(getattr(known, "seed_cv", (settings["seed"] + 1))),
+        "cv_k": int(getattr(known, "cv_k", 5)),
+        "cv_fold": int(getattr(known, "cv_fold", 0)),
+        "dev_size": int(getattr(known, "dev_size", 0)),
         "dev_per_fold": int(getattr(known, "dev_per_fold", 1000)),
         "deployment_size": int(getattr(known, "deployment_size", 0)),
         "shared_test": int(getattr(known, "shared_test", 0)),
@@ -582,14 +637,35 @@ else:
         merged["test_break"] = max(0.0, min(1.0, 1.0 - float(merged["test_corr"])))
     args_obj = SimpleNamespace(**merged)
 
-template_file_name = "Templates.txt" if args_obj.template_difficulty == "medium" else "Templates_simple.txt"
-tpl_path = pkg_dir / "synthetic" / "helper" / "static" / "text_templates" / template_file_name
-with open(tpl_path, "r", encoding="utf-8-sig") as f:
-    templates = [ln.strip() for ln in f if ln.strip()]
+txt_dir = pkg_dir / "synthetic" / "helper" / "static" / "text_templates"
+diff = str(getattr(args_obj, "template_difficulty", "hard")).lower()
 
-if args_obj.templates_file:
-    with open(Path(args_obj.templates_file), "r", encoding="utf-8-sig") as f:
+def _jsonl_pair_for(diff, target):
+    base = {"hard": "HardCorpus.jsonl",
+            "medium": "Templates.jsonl",
+            "easy": "Templates_simple.jsonl"}[diff]
+    base_p = txt_dir / base
+    gen_p  = base_p.with_name(base_p.stem + f"_{'Foot' if target=='foot' else 'Ears'}Generic.jsonl")
+    return base_p, gen_p
+
+templates = None  # only used if TXT fallback is required
+if diff in ("hard", "medium", "easy"):
+    tgt = str(getattr(args_obj, "generic_what", "foot")).lower()
+    base_jsonl, gen_jsonl = _jsonl_pair_for(diff, tgt)
+else:
+    base_jsonl = gen_jsonl = None
+
+if args_obj.templates_file and str(args_obj.templates_file).lower().endswith(".jsonl"):
+    base_jsonl = Path(args_obj.templates_file)
+
+if base_jsonl is None or not base_jsonl.is_file():
+    template_file_name = "Templates.txt" if diff == "medium" else "Templates_simple.txt"
+    tpl_path = txt_dir / template_file_name
+    with open(tpl_path, "r", encoding="utf-8-sig") as f:
         templates = [ln.strip() for ln in f if ln.strip()]
+    if args_obj.templates_file and not args_obj.templates_file.lower().endswith(".jsonl"):
+        with open(Path(args_obj.templates_file), "r", encoding="utf-8-sig") as f:
+            templates = [ln.strip() for ln in f if ln.strip()]
 
 VARIANT = args_obj.variant
 IMPERFECT_STRATEGY = args_obj.imperfect_strategy
@@ -1083,15 +1159,22 @@ def _machine_truth_map(H_train_hard, C_train_true):
 
 
 cols = list(params["concepts"].keys())
-catalog_df = pd.DataFrame([dict(zip(cols, vals)) for vals in product(*[params["concepts"][c] for c in cols])],
-                          columns=cols)
+_imeta = str(merged.get("image_meta", "")).strip()
+if _imeta:
+    with open(_imeta, "r", encoding="utf-8") as _f:
+        _j = json.load(_f)
+    catalog_df = pd.read_csv(_j["catalog_csv"])
+else:
+    catalog_df = pd.DataFrame([dict(zip(cols, vals)) for vals in product(*[params["concepts"][c] for c in cols])],
+                              columns=cols)
+
 catalog_df["label"] = compute_label(
     catalog_df,
-    params["model"],
-    label_model_type=merged.get("label_model_type", "deterministic"),
-    alpha=float(merged.get("label_model_alpha", 1.0)),
-    bias=float(merged.get("label_model_bias", 0.0)),
-    seed=int(merged.get("seed", 0)),
+    str(params.get("model", "")),
+    label_model_type=str(getattr(args_obj, "label_model_type", "deterministic")),
+    alpha=float(getattr(args_obj, "label_model_alpha", 1.0)),
+    bias=float(getattr(args_obj, "label_model_bias", 0.0)),
+    seed=int(getattr(args_obj, "seed", 0)),
 )
 
 _lbl = catalog_df["label"].astype(str)
@@ -1102,8 +1185,13 @@ print("Label distribution (catalog_df):", {
     "pos_frac": round((_lbl == "glorp").mean(), 4),
 })
 
-concept_cols = list(params["concepts"].keys())
+concept_cols = [c for c in params["concepts"].keys() if c in catalog_df.columns]
 ds = None
+if int(getattr(args_obj, "dev_size", 0)) > 0:
+    standard_size = int(catalog_df.shape[0])
+    vpr_target = int((int(getattr(args_obj, "dev_size", 0)) + max(1, standard_size) - 1) // max(1, standard_size))
+    if vpr_target > int(getattr(args_obj, "variants_per_row", 1)):
+        setattr(args_obj, "variants_per_row", vpr_target)
 
 if args_obj.templates_file and str(args_obj.templates_file).lower().endswith(".jsonl"):
     _lbl = catalog_df["label"].astype(str)
@@ -1273,7 +1361,8 @@ def _manual_by_robot_split(ds_obj, row_index_arr, n_folds=5, seed=0):
     seed_cv = int(getattr(args_obj, "seed_cv", int(seed) + 1))
     K = int(getattr(args_obj, "cv_k", n_folds))
     val_fold = int(getattr(args_obj, "cv_fold", 0)) or ((seed_cv % K) + 1)
-    devN = int(getattr(args_obj, "dev_per_fold", 1000))
+    dev_total = int(getattr(args_obj, "dev_size", 0) or 0)
+    devN = int((dev_total + K - 1) // K) if dev_total > 0 else int(getattr(args_obj, "dev_per_fold", 1000))
 
     def _kfold_by_row(row_index_arr2, y_arr2, K2, seed_cv2, test_frac, dev_per_fold2):
         rng2 = np.random.default_rng(int(seed_cv2))
@@ -1384,32 +1473,59 @@ if need_split:
 
     K = 5
     seed_cv = int(getattr(args_obj, "seed_cv", int(getattr(args_obj, "seed", 0)) + 1))
+    dev_total = int(getattr(args_obj, "dev_size", 0) or 0)
     devN = int(getattr(args_obj, "dev_per_fold", 1000))
 
     n_all = len(ds.y)
-    n_sel = K * devN
+    row_ids = np.asarray(row_index, dtype=int)
     rng = np.random.default_rng(seed_cv)
-    idx_all = np.arange(n_all)
-    if n_sel > n_all:
-        n_sel = n_all
-    sel = rng.choice(idx_all, size=n_sel, replace=False)
 
-    fold_ids = np.repeat(np.arange(1, K + 1), devN)
-    if fold_ids.size > sel.size:
-        fold_ids = fold_ids[:sel.size]
-    elif fold_ids.size < sel.size:
-        fold_ids = np.concatenate([fold_ids, np.full(sel.size - fold_ids.size, K, dtype=int)])
-
-    perm = rng.permutation(sel.size)
-    sel = sel[perm]
-    fold_ids = fold_ids[perm]
+    # assign folds by robot id
+    ids = np.unique(row_ids)
+    perm_ids = rng.permutation(ids)
+    fold_map = {int(rid): ((j % K) + 1) for j, rid in enumerate(perm_ids)}
+    fold_arr = np.array([fold_map[int(r)] for r in row_ids], dtype=int)
 
     val_fold = int(getattr(args_obj, "cv_fold", 0)) or 1
-    if val_fold < 1 or val_fold > 4:
+    if val_fold < 1 or val_fold >= K:
         val_fold = 1
 
     mask_all = np.zeros(n_all, dtype=int)
-    mask_all[sel] = fold_ids
+    dev_total = int(getattr(args_obj, "dev_size", 0))
+    if dev_total > 0:
+        per_fold = dev_total // K
+        rem = dev_total - per_fold * K
+        quotas = {f: per_fold + (1 if (f <= rem) else 0) for f in range(1, K + 1)}
+
+        idx_by_fold = {f: np.where(fold_arr == f)[0] for f in range(1, K + 1)}
+
+        drop_fold = K if K != val_fold else (K - 1)
+
+        sel_chunks = []
+
+        qv = int(quotas.get(val_fold, 0))
+        take_val_pool = idx_by_fold.get(val_fold, np.array([], dtype=int))
+        if take_val_pool.size > qv:
+            take_val = rng.choice(take_val_pool, size=qv, replace=False)
+        else:
+            take_val = take_val_pool
+        sel_chunks.append(take_val)
+
+        for f in range(1, K + 1):
+            if f == val_fold or f == drop_fold:
+                continue
+            qt = int(quotas.get(f, 0))
+            pool_f = idx_by_fold.get(f, np.array([], dtype=int))
+            if pool_f.size > qt:
+                take_f = rng.choice(pool_f, size=qt, replace=False)
+            else:
+                take_f = pool_f
+            sel_chunks.append(take_f)
+
+        sel_idx = np.concatenate(sel_chunks) if sel_chunks else np.array([], dtype=int)
+        mask_all[sel_idx] = fold_arr[sel_idx]
+    else:
+        mask_all = fold_arr
 
     use_mask = (mask_all >= 1) & (mask_all <= 4)
     mva = (mask_all == val_fold)
@@ -1472,13 +1588,13 @@ if need_split:
             ds.deployment = test_sub
             ds.test = test_sub
         else:
+            idx_all = np.arange(n_all, dtype=int)
             pool = np.setdiff1d(idx_all, np.where(use_mask)[0])
             if dep_n > pool.size:
                 extra = rng.choice(pool, size=dep_n - pool.size, replace=True)
                 dep_idx = np.concatenate([pool, extra])
             else:
                 dep_idx = rng.choice(pool, size=dep_n, replace=False)
-
 
             def _subset_idx(idxs):
                 idxs = np.asarray(idxs, dtype=int)
@@ -1659,28 +1775,128 @@ train_ds = ds.training
 val_ds = ds.validation
 test_ds = ds.test
 
+def _keep_k_variants_per_robot(sample, full, k):
+    df_idx = (getattr(sample, "meta", {}) or {}).get("df_indices", list(range(len(sample.X))))
+    full_meta = getattr(getattr(full, "_full", full), "meta", {}) or {}
+    row_full = np.asarray(full_meta.get("row_index", np.arange(len(getattr(full, "X", [])))))
+    var_full = np.asarray(full_meta.get("variant_index", np.zeros_like(row_full)))
+    pos_map = {int(r): i for i, r in enumerate(row_full)}
+    df_pos = np.asarray([pos_map.get(int(i), -1) for i in df_idx], dtype=int)
+    pos = np.arange(len(df_idx))
+    keep = []
+    valid = df_pos >= 0
+    for r in np.unique(row_full[df_pos[valid]]):
+        sel = [j for j in pos if valid[j] and row_full[df_pos[j]] == r]
+        sel = sorted(sel, key=lambda j: int(var_full[df_pos[j]]))
+        keep.extend(sel[:max(1, k)])
+    keep = np.asarray(sorted(keep), dtype=int)
+    X = [sample.X[i] for i in keep]
+    C = sample.C[keep]
+    y = sample.y[keep]
+    sub = ConceptDatasetSample(X=X, C=C, y=y, meta=dict(sample.meta))
+    sub.meta["df_indices"] = [df_idx[i] for i in keep]
+    gm = getattr(sample, "ears_generic_mask", None)
+    if gm is not None: setattr(sub, "ears_generic_mask", np.asarray(gm)[keep])
+    st = getattr(sample, "subtypes", None)
+    if st is not None: setattr(sub, "subtypes", {k: np.asarray(st[k])[keep] for k in st})
+    return sub
+
+def _apply_text_mask(sample, concepts, rate, seed):
+    rng = np.random.default_rng(int(seed))
+    nouns = {
+        "foot_shape": re.compile(r"(?i)\b(foot|feet|pad|pads|stance)\b"),
+        "hand_shape": re.compile(r"(?i)\b(hand|hands)\b"),
+        "ears_shape": re.compile(r"(?i)\b(ear|ears)\b"),
+        "head_is_square": re.compile(r"(?i)\b(head|heads)\b"),
+        "body_is_square": re.compile(r"(?i)\b(body|torso)\b"),
+        "mouth_type": re.compile(r"(?i)\bmouth\b"),
+        "has_antennae": re.compile(r"(?i)\bantenna(?:e|s)?\b"),
+        "has_knees": re.compile(r"(?i)\bknees?\b"),
+        "has_elbows": re.compile(r"(?i)\belbows?\b"),
+        "hands_are_pointy": re.compile(r"(?i)\b(hand|hands)\b"),
+        "foot_is_pointy": re.compile(r"(?i)\b(foot|feet|pad|pads|stance)\b"),
+        "ears_is_triangle": re.compile(r"(?i)\b(ear|ears)\b"),
+        "mouth_is_open": re.compile(r"(?i)\bmouth\b"),
+    }
+    pat_shape = re.compile(r"(?i)\b(square|boxy|rect|right-angled|angular|corner|rounded|round|triangle|triangular|three-?sided|four-?sided|quad|pointy|pointed|tapered|wedge|hex|pent|l-?shaped|trapezoid|trapezoidal)\b")
+    target = set(concepts)
+    outX = []
+    for s in sample.X:
+        z = str(s)
+        parts = re.split(r"([.!?;:]\s+)", z)
+        kept = []
+        i = 0
+        while i < len(parts):
+            seg = parts[i]
+            sep = parts[i+1] if i+1 < len(parts) else ""
+            drop = False
+            for c in target:
+                if c in ("foot_shape","ears_shape","hand_shape","head_is_square","body_is_square","hands_are_pointy","foot_is_pointy","ears_is_triangle"):
+                    if nouns[c].search(seg) and pat_shape.search(seg) and rng.random() < rate:
+                        drop = True; break
+                elif c in ("mouth_type","mouth_is_open"):
+                    if nouns["mouth_type"].search(seg) and rng.random() < rate:
+                        drop = True; break
+                elif c in ("has_antennae","has_knees","has_elbows"):
+                    if nouns[c].search(seg) and rng.random() < rate:
+                        drop = True; break
+            if not drop: kept.append(seg + sep)
+            i += 2
+        t = "".join(kept).strip()
+        t = re.sub(r"\s{2,}", " ", t)
+        outX.append(t if t else z)
+    sub = ConceptDatasetSample(X=outX, C=sample.C, y=sample.y, meta=sample.meta)
+    gm = getattr(sample, "ears_generic_mask", None)
+    if gm is not None: setattr(sub, "ears_generic_mask", gm)
+    st = getattr(sample, "subtypes", None)
+    if st is not None: setattr(sub, "subtypes", st)
+    return sub
+
+_textmask = [t.strip() for t in str(getattr(args_obj, "text_mask", "")).split(",") if t.strip()]
+_textmask_rate = float(getattr(args_obj, "text_mask_rate", 0.0))
+_textmask_splits = set(t.strip().lower() for t in str(getattr(args_obj, "text_mask_splits", "train")).split(",") if t.strip())
+if _textmask and _textmask_rate > 0:
+    if "train" in _textmask_splits: train_ds = _apply_text_mask(train_ds, _textmask, _textmask_rate, int(getattr(args_obj,"seed",0))+101)
+    if "val"   in _textmask_splits: val_ds   = _apply_text_mask(val_ds,   _textmask, _textmask_rate, int(getattr(args_obj,"seed",0))+102)
+    if "test"  in _textmask_splits: test_ds  = _apply_text_mask(test_ds,  _textmask, _textmask_rate, int(getattr(args_obj,"seed",0))+103)
+
+_kval  = int(getattr(args_obj, "variants_per_row_val", 1))
+_ktest = int(getattr(args_obj, "variants_per_row_test", 1))
+if hasattr(ds, "_full"):
+    if _kval  > 0: val_ds  = _keep_k_variants_per_robot(val_ds,  getattr(ds, "_full", ds), _kval)
+    if _ktest > 0: test_ds = _keep_k_variants_per_robot(test_ds, getattr(ds, "_full", ds), _ktest)
+
+
 pat_shape = re.compile(
-    r"(?i)\b(square|boxy|box|angular|cornered|right-angled|rectilinear|90-degree|triangle|triangular|tri-corner|three-angled|three-point|pointy|pointed|tapered|wedge|spearhead|spear-tip)\b")
-
-
+    r"(?i)\b(square|boxy|rectilinear|right-angled|angular|cornered|triangle|triangular|three-angled|three-point|pointy|pointed|tapered|wedge|hex|pent|l-?shaped|quad)\b")
+_target_tokens = {
+    "foot": re.compile(r"(?i)\b(foot|feet|pad|pads|stance)\b"),
+    "ears": re.compile(r"(?i)\b(ear|ears)\b"),
+}
 def _leak_sentence_scoped(t):
-    _gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
-    sents = re.split(r"[.!?;:]\s+", str(t).lower())
+    tgt = str(getattr(args_obj, "generic_what", "foot")).lower()
+    sents = re.split(r"[.!?;:]\s+", str(t))
+    ttok = _target_tokens.get(tgt, re.compile(re.escape(tgt), re.I))
     for s in sents:
-        if ((_gen_target in s) and pat_shape.search(s)):
+        if ttok.search(s) and pat_shape.search(s):
             return True
     return False
 
+
 def _rates(part):
-    gm = getattr(part, "ears_generic_mask", None)
+    _gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
+    gm = getattr(part, f"{_gen_target}_generic_mask", None)
     if gm is None:
-        return {"overall": "na", "y1": "na", "y0": "na"}, {"generic_near_ears_shape": "na"}
+        gm = getattr(part, "ears_generic_mask", None)
+    if gm is None:
+        return {"overall": "na", "y1": "na", "y0": "na"}, {f"generic_near_{_gen_target}_shape": "na"}
+
     yv = np.asarray(part.y, dtype=int)
     overall = float(gm.mean()) if gm.size else float("nan")
     y1 = float(gm[yv == 1].mean()) if (yv == 1).any() else float("nan")
     y0 = float(gm[yv == 0].mean()) if (yv == 0).any() else float("nan")
     leak = int(sum(_leak_sentence_scoped(t) for t, g in zip(part.X, gm) if g))
-    return {"overall": overall, "y1": y1, "y0": y0}, {"generic_near_ears_shape": leak}
+    return {"overall": overall, "y1": y1, "y0": y0}, {f"generic_near_{_gen_target}_shape": leak}
 
 
 dist = {};
@@ -1703,7 +1919,7 @@ if int(getattr(args_obj, "generic_enable", 0)) == 1:
         "targets": {"train": t_train, "val": t_val, "test": t_test, "tol": tol}
     }, indent=2))
 
-    if any(v.get("generic_near_ears_shape", 0) not in ("na", 0) for v in leak.values()):
+    if any(v.get(f"generic_near_{_gen_target}_shape", 0) not in ("na", 0) for v in leak.values()):
         raise SystemExit(3)
     for name, vals in dist.items():
         if vals["overall"] != "na" and np.isfinite(vals["overall"]):
@@ -2578,7 +2794,27 @@ def ensure_split(ds):
     except Exception:
         pass
 
-    _manual_by_robot_split(ds, row_index, seed=0)
+    _imeta = str(merged.get("image_meta", "")).strip()
+    if _imeta:
+        try:
+            with open(_imeta, "r", encoding="utf-8") as f:
+                _j = json.load(f)
+            _idx = _j.get("df_indices", {})
+            ridx = np.asarray(row_index, dtype=int)
+            tr = set(int(x) for x in _idx.get("train", []))
+            va = set(int(x) for x in _idx.get("valid", []))
+            te = set(int(x) for x in _idx.get("test", []))
+            train_mask = np.array([int(r) in tr for r in ridx])
+            val_mask   = np.array([int(r) in va for r in ridx])
+            test_mask  = np.array([int(r) in te for r in ridx])
+            ds.training   = _subset_mask(train_mask)
+            ds.validation = _subset_mask(val_mask)
+            ds.test       = _subset_mask(test_mask)
+            return
+        except Exception:
+            pass
+
+_manual_by_robot_split(ds, row_index, seed=0)
 
 def pick_split(ds, name):
     # safeguard if ensure_split hasn’t been called

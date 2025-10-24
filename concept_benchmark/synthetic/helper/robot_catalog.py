@@ -1,16 +1,25 @@
 """
 This file contains classes to represent and manipulate a set of all possible robots
 """
+from __future__ import annotations
 
 import copy
 from pathlib import Path
 from collections.abc import Sequence
+import hashlib
 
 import numpy as np
 import pandas as pd
 from PIL import Image
+from tqdm import tqdm
 
-from .robot_draw import ALL_ROBOT_FEATURES, COLOR_SCHEMES, ROBOT_TYPES, draw_robot
+from .robot_draw import (
+    ALL_ROBOT_FEATURES,
+    COLOR_SCHEMES,
+    ROBOT_TYPES,
+    draw_robot,
+    blur_parts,
+)
 
 pd.options.mode.chained_assignment = None
 
@@ -110,6 +119,7 @@ def generate_robot_catalog(
     output_directory: str | Path = ".static/images",
     draw: bool = False,
     color_mode: str = "color",
+    blur: dict | None = None,
     additional_features: Sequence[str] | None = None,
     verbose: bool = False,
     **unused,
@@ -136,6 +146,13 @@ def generate_robot_catalog(
             catalog_df = catalog_df.query(query_cmd)
 
     init_catalog_df = copy.deepcopy(catalog_df)
+
+    ids = init_catalog_df["id"].astype(str)
+    hb = ids.map(lambda s: int.from_bytes(hashlib.sha256(s.encode()).digest()[:4], "big") & 1).astype(int)
+    init_catalog_df["foot_orientation"] = np.where(hb.values == 1, "vertex", "side")
+    if verbose:
+        u, c = np.unique(init_catalog_df["foot_orientation"], return_counts=True)
+        print("foot_orientation_counts:", dict(zip(u, c)))
 
     catalog_df, new_features = collapse_robot_subtypes(
         df=catalog_df, robot_features=list(concepts.keys()),
@@ -165,7 +182,7 @@ def generate_robot_catalog(
     png_filenames = []
 
     color_lefts, color_rights = [], []
-    for k, features in init_catalog_df.iterrows():
+    for k, features in tqdm(init_catalog_df.iterrows(), total=len(catalog_df)):
         png_filename = f"robot_{k:03d}.png"
 
         png_file = output_path / png_filename
@@ -179,8 +196,27 @@ def generate_robot_catalog(
                 **features,
             )
 
-            # Save images
-            png_robot.export(str(png_file))
+            # Apply optional blur (body/hands/feet, etc.) and save
+            if blur:
+                parts = tuple(blur.get("parts", ("hands",)))
+                radius = float(blur.get("radius", 2.0))
+                expand = blur.get("expand_mask_px", None)
+                feather = float(blur.get("feather_mask_px", 0.0))
+                mode = blur.get("mask_mode", "uniform_rect")
+                # features ensures mask matches geometry
+                blurred = blur_parts(
+                    png_robot,
+                    parts=parts,
+                    radius=radius,
+                    expand_mask_px=expand,
+                    feather_mask_px=feather,
+                    mask_mode=mode,
+                    **features,
+                )
+                blurred.save(str(png_file))
+            else:
+                # Save original image
+                png_robot.export(str(png_file))
 
             if color_mode in ["grayscale", "greyscale"]:
                 convert_to_grayscale(str(png_file))
@@ -200,5 +236,8 @@ def generate_robot_catalog(
     catalog_df["color_left"] = color_lefts
     catalog_df["color_right"] = color_rights
 
+    ids2 = catalog_df["id"].astype(str)
+    hb2 = ids2.map(lambda s: int.from_bytes(hashlib.sha256(s.encode()).digest()[:4], "big") & 1).astype(int)
+    catalog_df["foot_orientation"] = np.where(hb2.values == 1, "vertex", "side")
 
     return catalog_df, new_features

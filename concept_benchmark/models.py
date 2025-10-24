@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import copy
+import os
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 from sklearn.linear_model import LogisticRegression
 from tqdm import tqdm
@@ -40,44 +41,42 @@ class RobotConceptClassifier(nn.Module):
                 nn.Conv2d(32, 64, kernel_size=3, padding=1), nn.ReLU(),
             )
 
-        # Automatically compute feature size with dummy forward pass
+                # Discover feature size and set head count
+        self.n_heads = int(num_concepts)
         with torch.no_grad():
             dummy = torch.zeros(1, 3, input_size, input_size)
             dummy_out = self.backbone(dummy)
-            feature_size = dummy_out.view(1, -1).size(1)
+            self.feat_dim = int(dummy_out.view(1, -1).size(1))
 
-        # Concept heads
-        self.heads = nn.ModuleList([
-            nn.Linear(feature_size, 1)
-            for _ in range(num_concepts)
-        ])
+        # Heads: infer in_features on first forward for robustness
+        self.heads = nn.ModuleList([nn.LazyLinear(1) for _ in range(self.n_heads)])
 
     def forward(self, x):
         features = self.backbone(x)
-        features = torch.flatten(features, 1)
+        if features.dim() > 2:
+            features = torch.flatten(features, 1)
+        
+        dev = features.device
+        h0 = self.heads[0]
+        
+        need_rebuild = False
+        if isinstance(h0, torch.nn.LazyLinear):
+            need_rebuild = True
+        elif isinstance(h0, torch.nn.Linear) and getattr(h0, "in_features", features.shape[1]) != features.shape[1]:
+            need_rebuild = True
+        
+        if need_rebuild:
+            self.heads = torch.nn.ModuleList(
+                [torch.nn.Linear(features.shape[1], 1).to(dev) for _ in range(len(self.heads))]
+            )
+        else:
+            for h in self.heads:
+                # avoid repeated .to() if already correct
+                p = next(h.parameters(), None)
+                if p is not None and p.device != dev:
+                    h.to(dev)
+        
         logits = torch.cat([head(features) for head in self.heads], dim=1)
-        return logits
-
-
-class RobotViTConceptClassifier(nn.Module):
-    def __init__(self, num_concepts: int):
-        super(RobotViTConceptClassifier, self).__init__()
-        from transformers import ViTModel
-        self.vit = ViTModel.from_pretrained("google/vit-base-patch16-224")
-
-        feature_size = 768  # ViT base model feature size
-
-        # 2) One head per concept (order matches input labels), wrapped in nn.Sequential
-        self.heads = nn.ModuleList([
-            nn.Linear(feature_size, 1)
-            for _ in range(num_concepts)
-        ])
-
-    def forward(self, x):
-        vit_outputs = self.vit(pixel_values=x)
-        features = vit_outputs.last_hidden_state[:, 0, :]  # (N, 768)
-        # Concatenate per-concept logits into shape (N, num_concepts)
-        logits = torch.cat([head(features) for head in self.heads], dim=1)  # (N, num_concepts)
         return logits
 
 
@@ -395,7 +394,7 @@ class ConceptDetector(object):
             train_dataset: ConceptDatasetSample,
             valid_dataset: ConceptDatasetSample,
             freeze: bool = False,
-            embed_params: Optional[dict] = None,
+            embed_params: Optional[dict] = None,  # remove
             fit_params: Optional[dict] = None,
             l1_size: Optional[int] = 100,
             calibrate: bool = False,
@@ -501,6 +500,7 @@ class ConceptDetector(object):
         self._set_trainable(freeze_backbone=freeze)
 
         trainer_fn = trainer if trainer is not None else self.trainer
+        self.model.to(training_device)
         result = trainer_fn(
             self.model,
             train_dataset,
@@ -518,7 +518,7 @@ class ConceptDetector(object):
         self.model.cpu()
 
         if calibrate:
-            self.calibrate(valid_dataset, embed_params=embed_params)
+            self.calibrate(valid_dataset)
         else:
             self.calibration_params = None
 
