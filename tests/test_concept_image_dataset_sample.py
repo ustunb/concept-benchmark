@@ -17,7 +17,7 @@ def test_getitem_returns_pil_and_int_tensors(img_small):
     s = img_small.training
     image, c, y = s[0]
     assert isinstance(image, Image.Image)
-    assert isinstance(c, torch.Tensor) and c.dtype == torch.int64 and c.ndim == 1
+    assert isinstance(c, torch.Tensor) and c.dtype == torch.int8 and c.ndim == 1
     assert isinstance(y, torch.Tensor) and y.dtype == torch.int64 and y.ndim == 0
 
 
@@ -47,7 +47,7 @@ def test_transform_to_tensor_and_loader_batching(img_small):
     loader = s.loader(batch_size=4, shuffle=False, num_workers=0)
     xb, cb, yb = next(iter(loader))
     assert isinstance(xb, torch.Tensor) and xb.ndim == 4 and xb.shape[0] == 4
-    assert isinstance(cb, torch.Tensor) and cb.dtype == torch.int64 and cb.ndim == 2
+    assert isinstance(cb, torch.Tensor) and cb.dtype == torch.int8 and cb.ndim == 2
     assert isinstance(yb, torch.Tensor) and yb.dtype == torch.int64 and yb.ndim == 1
 
 

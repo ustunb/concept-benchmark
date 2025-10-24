@@ -394,7 +394,7 @@ class ConceptDetector(object):
             train_dataset: ConceptDatasetSample,
             valid_dataset: ConceptDatasetSample,
             freeze: bool = False,
-            embed_params: Optional[dict] = None,
+            embed_params: Optional[dict] = None,  # remove
             fit_params: Optional[dict] = None,
             l1_size: Optional[int] = 100,
             calibrate: bool = False,
@@ -518,7 +518,7 @@ class ConceptDetector(object):
         self.model.cpu()
 
         if calibrate:
-            self.calibrate(valid_dataset, embed_params=embed_params)
+            self.calibrate(valid_dataset)
         else:
             self.calibration_params = None
 
