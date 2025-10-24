@@ -282,6 +282,7 @@ def create_robot_image_dataset(
     spurious_features: Sequence[str] | None = None,
     additional_features: Sequence[str] | None = None,
     color_mode: str = "color",
+    blur: dict | None = None,
     verbose: bool = False,
     train_concept_detector: bool | None = None,
     epochs: int | None = None,
@@ -308,6 +309,7 @@ def create_robot_image_dataset(
         output_directory=output_directory,
         draw=draw,
         color_mode=color_mode,
+        blur=blur,
         verbose=verbose,
         additional_features=additional_features,
         **extra_params,
@@ -382,7 +384,6 @@ def create_robot_image_dataset(
     feature_names = [
         feat for feat in catalog_df.columns if feat in copy_features
     ]
-
     # Binary encode concepts: 1 if feature equals designated positive value, else 0
     C_cols = []
     for feat in feature_names:

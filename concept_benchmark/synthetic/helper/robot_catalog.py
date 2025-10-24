@@ -10,8 +10,15 @@ import hashlib
 import numpy as np
 import pandas as pd
 from PIL import Image
+from tqdm import tqdm
 
-from .robot_draw import ALL_ROBOT_FEATURES, COLOR_SCHEMES, ROBOT_TYPES, draw_robot
+from .robot_draw import (
+    ALL_ROBOT_FEATURES,
+    COLOR_SCHEMES,
+    ROBOT_TYPES,
+    draw_robot,
+    blur_parts,
+)
 
 pd.options.mode.chained_assignment = None
 
@@ -111,6 +118,7 @@ def generate_robot_catalog(
     output_directory: str | Path = ".static/images",
     draw: bool = False,
     color_mode: str = "color",
+    blur: dict | None = None,
     additional_features: Sequence[str] | None = None,
     verbose: bool = False,
     **unused,
@@ -173,7 +181,7 @@ def generate_robot_catalog(
     png_filenames = []
 
     color_lefts, color_rights = [], []
-    for k, features in init_catalog_df.iterrows():
+    for k, features in tqdm(init_catalog_df.iterrows(), total=len(catalog_df)):
         png_filename = f"robot_{k:03d}.png"
 
         png_file = output_path / png_filename
@@ -187,8 +195,27 @@ def generate_robot_catalog(
                 **features,
             )
 
-            # Save images
-            png_robot.export(str(png_file))
+            # Apply optional blur (body/hands/feet, etc.) and save
+            if blur:
+                parts = tuple(blur.get("parts", ("hands",)))
+                radius = float(blur.get("radius", 2.0))
+                expand = blur.get("expand_mask_px", None)
+                feather = float(blur.get("feather_mask_px", 0.0))
+                mode = blur.get("mask_mode", "uniform_rect")
+                # features ensures mask matches geometry
+                blurred = blur_parts(
+                    png_robot,
+                    parts=parts,
+                    radius=radius,
+                    expand_mask_px=expand,
+                    feather_mask_px=feather,
+                    mask_mode=mode,
+                    **features,
+                )
+                blurred.save(str(png_file))
+            else:
+                # Save original image
+                png_robot.export(str(png_file))
 
             if color_mode in ["grayscale", "greyscale"]:
                 convert_to_grayscale(str(png_file))
