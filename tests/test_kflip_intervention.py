@@ -87,17 +87,19 @@ def test_kflip_k2_picks_high_mass_subset():
     prob = float(prop.details["flip_prob"][0])
     assert pytest.approx(prob, rel=0.0, abs=1e-6) == 0.64
 
-def test_kflip_threshold_and_instance_budget_selection_order_is_unsorted():
-    # Three samples with different flip probabilities, budget selects first matching indices by default.
+def test_kflip_threshold_and_instance_budget_selection_prefers_highest_flip_prob():
+    # Three samples with different flip probabilities; budget selects the highest flip_prob.
     P = np.array([
         [0.99, 0.99],  # low flip prob ~0.01
-        [0.1, 0.5],    # high flip prob ~0.9
-        [0.8, 0.2],    # medium flip prob ~0.2
+        [0.1,  0.5 ],  # higher flip prob ~0.5
+        [0.8,  0.2 ],  # medium flip prob ~0.2
     ], dtype=np.float32)
     prop = _run_kflip(P, k=1, threshold=0.15, instance_budget=1, random_state=0)
-    # Both idx 1 and 2 exceed threshold. Without sorting, first index kept is 1.
     assert prop.selected_instances.size == 1
-    assert int(prop.selected_instances[0]) == 1
+    fp = np.asarray(prop.details["flip_prob"])
+    cand = np.nonzero(fp >= 0.15)[0]
+    expected = int(cand[np.argmax(fp[cand])])
+    assert int(prop.selected_instances[0]) == expected
 
 def test_kflip_respects_global_concept_budget_and_per_instance_limit():
     # Two samples. Each has best subset of size 2. But concept_budget=1 caps total edits.
