@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import copy
+import os
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 from sklearn.linear_model import LogisticRegression
 from tqdm import tqdm
@@ -76,27 +77,6 @@ class RobotConceptClassifier(nn.Module):
                     h.to(dev)
         
         logits = torch.cat([head(features) for head in self.heads], dim=1)
-        return logits
-
-class RobotViTConceptClassifier(nn.Module):
-    def __init__(self, num_concepts: int):
-        super(RobotViTConceptClassifier, self).__init__()
-        from transformers import ViTModel
-        self.vit = ViTModel.from_pretrained("google/vit-base-patch16-224")
-
-        feature_size = 768  # ViT base model feature size
-
-        # 2) One head per concept (order matches input labels), wrapped in nn.Sequential
-        self.heads = nn.ModuleList([
-            nn.Linear(feature_size, 1)
-            for _ in range(num_concepts)
-        ])
-
-    def forward(self, x):
-        vit_outputs = self.vit(pixel_values=x)
-        features = vit_outputs.last_hidden_state[:, 0, :]  # (N, 768)
-        # Concatenate per-concept logits into shape (N, num_concepts)
-        logits = torch.cat([head(features) for head in self.heads], dim=1)  # (N, num_concepts)
         return logits
 
 

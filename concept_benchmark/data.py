@@ -1173,16 +1173,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
                 image = self.preprocess(image)
             if self.transform is not None:
                 image = self.transform(image)
-                # # show transformed image for debugging
-                # import matplotlib.pyplot as plt
-                # if isinstance(image, torch.Tensor):
-                #     img = image.permute(1, 2, 0).numpy()
-                # else:
-                #     img = np.array(image)
-                # plt.imshow(img)
-                # plt.show()
         except (AttributeError, FileNotFoundError, OSError) as e:
-            print(self.base_dir)
             warnings.warn(f"{e}; cannot open image, returning path", RuntimeWarning)
             image = img_path
 

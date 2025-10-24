@@ -16,7 +16,6 @@ from .helper.robot_catalog import (
 )
 from .helper import textgen as text_helper
 from .helper.utils import model_to_logistic, unlist0
-from scipy.special import expit
 
 
 def create_synthetic_dataset(data_type: str = "image", **kwargs) -> ConceptDataset:
