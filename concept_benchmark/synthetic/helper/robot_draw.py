@@ -43,7 +43,7 @@ ALL_ROBOT_FEATURES = {
         "edgy_triangle",
         "edgy_square",
         "edgy_trapezoid",
-    ],
+    ),
 }
 
 COLOR_SCHEMES = generate_color_schemes(
