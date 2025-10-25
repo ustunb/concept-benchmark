@@ -26,10 +26,9 @@ settings = {
 
     "modality": "text",
     "text_model": "distilbert-base-uncased",
-    "image_meta": "",
 
     "best_human_acc": 1.00,
-    "expert_human_accs": [0.80],
+    "expert_human_accs": [0.80, 1.00],
     "subjective_human_accs": [1.00],
     "subjective_noise_rates": [0.20],
 
@@ -47,15 +46,11 @@ settings = {
     "generic_tol": 0.1,
 
     "policy": "kflip",
-    "k": 3,
-    "flip_threshold": 0.15,
+    "k": 2,
+    "flip_threshold": 0.30,
     "flip_batch_size": 8192,
     "flip_limit_subsets": None,
     "abstain_only": 0,
-    "label_model_expr": "(5*int(row['mouth_type']=='closed') + 10*int(str(row['foot_shape']).startswith('pointy') or str(row['foot_shape'])=='1'))",
-    "label_model_type": "stochastic",
-    "label_model_alpha": 1.0,
-    "label_model_bias": 3.0,
 
     "seed_test_offset": 1234,
 }
@@ -143,7 +138,6 @@ def parse_cli():
     ap.add_argument("--flip-batch-size", type=int)
     ap.add_argument("--flip-limit-subsets")
     ap.add_argument("--abstain-only", type=int)
-    ap.add_argument("--image-meta", dest="image_meta", type=str)
 
     known, _ = ap.parse_known_args()
 
@@ -190,13 +184,8 @@ def ensure_baseline(model_id: str, modality: str):
         argv += ["--tau-target", str(settings["tau_target"])]
     if settings.get("deployment_size") is not None:
         argv += ["--deployment-size", str(settings["deployment_size"])]
-
-    dev_n = settings.get("dev_size")
-    if dev_n is None and settings.get("dev_per_fold") is not None and settings.get("cv_k") is not None:
-        dev_n = int(settings["dev_per_fold"]) * int(settings["cv_k"])
-    if dev_n is not None:
-        argv += ["--dev-size", str(dev_n)]
-
+    if settings.get("dev_size") is not None:
+        argv += ["--dev-size", str(settings["dev_size"])]
     if settings.get("seed") is not None:
         argv += ["--seed", str(settings["seed"])]
     if settings.get("seed_cv") is not None:
@@ -205,19 +194,15 @@ def ensure_baseline(model_id: str, modality: str):
         argv += ["--cv-k", str(settings["cv_k"])]
     if settings.get("cv_fold") is not None:
         argv += ["--cv-fold", str(settings["cv_fold"])]
-
+    if settings.get("dev_per_fold") is not None:
+        argv += ["--dev-per-fold", str(settings["dev_per_fold"])]
     for flag, val in [
         ("--generic-rate", settings.get("generic_rate")),
         ("--generic-tol", settings.get("generic_tol")),
-        ("--generic-what", settings.get("generic_what")),
-        ("--label-model-expr", settings.get("label_model_expr")),
-        ("--label-model-type", settings.get("label_model_type")),
-        ("--label-model-alpha", settings.get("label_model_alpha")),
-        ("--label-model-bias", settings.get("label_model_bias")),
         ("--val-balance-enable", settings.get("val_balance_enable")),
         ("--test-balance-enable", settings.get("test_balance_enable")),
     ]:
-        if val is not None and str(val) != "":
+        if val is not None:
             argv += [flag, str(val)]
     run_cmd(argv)
 
@@ -237,11 +222,9 @@ def common_gen_argv():
         "--cv-k", str(settings.get("cv_k", 5)),
         "--cv-fold", str(settings.get("cv_fold", 0)),
         "--dev-per-fold", str(settings.get("dev_per_fold", 1000)),
-        "--dev-size", str(settings.get("dev_size", 0)),
         "--deployment-size", str(settings.get("deployment_size", 10000)),
         "--shared-test", str(settings.get("shared_test", 1)),
         "--subtype-mode", str(settings.get("subtype_mode", "track")),
-        "--image-meta", str(settings.get("image_meta", "")),
         "--policy", str(settings.get("policy", settings.get("intervention_policy", "kflip"))),
         "--k", str(settings.get("k", settings.get("intervention_k", 2))),
         "--flip-threshold", str(settings.get("flip_threshold", 0.30)),
@@ -274,20 +257,19 @@ def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, 
     # scenario-specific flags
     argv += [
         "--variant", "perfect",
+        "--variants-per-row", "1",
+        "--variants-per-row-minority", str(settings.get("variants_per_row_minority", 3)),
+        "--variants-per-row-majority", str(settings.get("variants_per_row_majority", 1)),
         "--imperfect-strategy", "missing_concepts",
         "--heldout-concepts", "[]",
         "--mask-p", "0.0",
         "--mask-mode", "mask",
         "--mask-rate", "0.0",
         "--concept-mode", "hard",
-        "--templates-file", str(settings.get("templates_file", "")),
-        "--template-difficulty", str(settings.get("difficulty", "hard")),
+        "--templates-file", "",
         "--redact-concepts", str(settings.get("redact_concepts", "")),
         "--redact-splits", str(settings.get("redact_splits", "")),
-        "--label-model-expr", str(settings.get("label_model_expr", "(2*int('pointy' in str(row['foot_shape']).lower()) + int(row['mouth_type']=='open') + int(row['ears_shape']=='triangle'))")),
-        "--label-model-type", str(settings.get("label_model_type", "stochastic")),
-        "--label-model-alpha", str(settings.get("label_model_alpha", 3.0)),
-        "--label-model-bias", str(settings.get("label_model_bias", 2.0)),
+        "--label-model-expr", "'glorp' if (min(int(row[\"mouth_type\"]==\"open\"), int(str(row[\"foot_shape\"]).startswith(\"pointy_\"))) >= 1) else 'drent'",
         "--corr-pair", "",
         "--train-corr", "1.0",
         "--test-break", "1.0",
@@ -313,14 +295,6 @@ def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, 
         "--run-name", rn if not tag_suffix else f"{tag_suffix}_{rn}",
         "--seed-test-offset", str(int(settings.get("seed_test_offset", 1234))),
     ]
-    if "variants_per_row" in settings and settings["variants_per_row"] is not None:
-        argv += ["--variants-per-row", str(settings["variants_per_row"])]
-    if "variants_per_row_minority" in settings and settings["variants_per_row_minority"] is not None:
-        argv += ["--variants-per-row-minority", str(settings["variants_per_row_minority"])]
-    if "variants_per_row_majority" in settings and settings["variants_per_row_majority"] is not None:
-        argv += ["--variants-per-row-majority", str(settings["variants_per_row_majority"])]
-    if int(settings.get("shared_test", 0)) == 1:
-        argv += ["--template-distinct-test", "1"]
 
     if int(settings.get("reuse_detector", 1)) and detector_model:
         argv += ["--reuse-detector", "1", "--detector-model", detector_model]
@@ -338,7 +312,7 @@ def make_run_name():
 def run():
     modality = str(settings.get("modality", "text"))
     model_id = str(settings.get("text_model", "distilbert-base-uncased")) if modality == "text" else "vit"
-    #ensure_baseline(model_id=model_id, modality=modality)
+    ensure_baseline(model_id=model_id, modality=modality)
 
     bb = str(find_metrics_json(modality, model_id, "test") or "")
 
@@ -426,16 +400,16 @@ def run():
     lf_flags += ["--lf-batch-size", str(settings.get("lf_batch_size", 64))]
     lf_flags += ["--lf-group-threshold", str(settings.get("lf_group_threshold", 0.9))]
 
-    # run_spec(
-    #     prefix="cbm",
-    #     regime="best",
-    #     human_acc=float(settings.get("best_human_acc", 1.0)),
-    #     blackbox_metrics=bb,
-    #     tag_suffix="lfcbm",
-    #     concept_source="machine",
-    #     extra_flags=lf_flags,
-    #     detector_model=None,
-    # )
+    run_spec(
+        prefix="cbm",
+        regime="best",
+        human_acc=float(settings.get("best_human_acc", 1.0)),
+        blackbox_metrics=bb,
+        tag_suffix="lfcbm",
+        concept_source="machine",
+        extra_flags=lf_flags,
+        detector_model=None,
+    )
 
 
 def recompute_metrics():
