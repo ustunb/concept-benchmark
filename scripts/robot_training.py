@@ -19,9 +19,9 @@ params = {
     "concepts": {
         "head_shape": ["square", "round"],
         "body_shape": ["square", "round"],
-        "has_knees": [True, False],
-        "has_elbows": [True, False],
-        "has_antennae": [True, False],
+        "has_knees": ["false", "true"],
+        "has_elbows": ["false", "true"],
+        "has_antennae": ["false", "true"],
         "ears_shape": ["square", "triangle"],
         "mouth_type": ["closed", "open"],
         "hand_shape": [

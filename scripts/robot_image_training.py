@@ -11,14 +11,13 @@ from scripts.dataset_skewing import create_skewed_splits, filter_training_by_str
 from scripts.dnn_training import train_eval_image
 from scripts.robot_interventions import test_interventions
 from scripts.robot_alignment import test_alignment
-from scripts.fe_harness import run_fe_harness
 from scripts.robot_invariance_test import test_concept_detector_invariance
 from scripts.robot_utils import _apply_missing, _apply_label_noise, _rate_tag, _get_concept_accuracies, \
     _get_confusion_matrix, _get_accuracies_per_subconcept
 
 settings = {
     "samples_per_instance": 3,
-    "draw": 1,
+    "draw": 0,
     "CBM_type": "separate", #"sequential"
     "image_dir": "./data/robot_images",
     "image_size": "medium",
@@ -89,41 +88,6 @@ settings = {
     "load_detector": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed555.pt")),
     "load_frontend": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed555.pkl")),
 }
-
-
-def run_experiments_varying_footshape_subconcepts():
-    from itertools import combinations
-    base_subconcepts = [
-        "foot_shape_flat_trapezoid",
-        "foot_shape_flat_rounded",
-        "foot_shape_flat_square",
-        "foot_shape_flat_5sided",
-        "foot_shape_flat_lshaped",
-        "foot_shape_pointy_trapezoid",
-        "foot_shape_pointy_rounded",
-        "foot_shape_pointy_square",
-        "foot_shape_pointy_3sided",
-        "foot_shape_pointy_4sided",
-    ]
-    for r in range(2, len(base_subconcepts) + 1):
-        for subset in combinations(base_subconcepts, r):
-            if "pointy" not in "_".join(subset) or "flat" not in "_".join(subset):
-                # skip subsets that do not have at least one pointy and one flat subtype
-                continue
-            S = copy.deepcopy(settings)
-            skew_list = []
-            drop_list = list(set(base_subconcepts) - set(subset))
-            subset_pointy = [sc for sc in subset if "pointy" in sc]
-            subset_flat = [sc for sc in subset if "flat" in sc]
-            for sc in subset_pointy:
-                skew_list.append({'concepts': {sc: 1}, 'min_fraction': round(0.5 / len(subset_pointy), 2)})
-            for sc in subset_flat:
-                skew_list.append({'concepts': {sc: 1}, 'min_fraction': round(0.5 / len(subset_flat), 2)})
-            S["skew_concept"] = skew_list
-            S["drop_concepts"] = drop_list + ["foot_shape"]
-            S["run_name"] = "loop_footshape_" + "_".join([sc.split("_")[-2][0] + sc.split("_")[-1][0] for sc in subset])
-            print(f"Running experiment with skewed subconcepts: {subset},mrun name: {S['run_name']}")
-            main(S)
 
 
 def define_train_valid_test(settings, concept_dataset, missingness, params, rate, rng, tf):
@@ -272,21 +236,6 @@ def train_dnn(sttngs, device, dnn_stats, int_acc_tag, label_noise_tag, miss_tag,
     return dnn_stats
 
 
-def wrapper_run_fe_harness(cd, test, train):
-    names = list(train.concepts)
-    C_tr = train.C.astype(float)
-    C_te = test.C.astype(float)
-    y_tr = train.y.astype(int)
-    y_te = test.y.astype(int)
-    try:
-        P_tr = cd.predict_proba(train)
-        P_te = cd.predict_proba(test)
-    except Exception:
-        P_tr = cd.predict(train).astype(float)
-        P_te = cd.predict(test).astype(float)
-    run_fe_harness(C_tr, y_tr, C_te, y_te, P_tr, P_te, names, table_name="FE 2x2 (coarse vs sub; C vs P)")
-
-
 def main(sttngs):
     ###########################################################################
     ##############################    NAMING    ##############################
@@ -351,9 +300,6 @@ def main(sttngs):
 
     cd, det_path = train_concept_detector(S, config, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag,
                                           run_dir, seed_tag, skew_tag, train, valid, test)
-
-    if int(S.get('fe_harness', 0)) == 1:
-        wrapper_run_fe_harness(cd, test, train)
 
 
     P_tr = cd.predict(train, embed_params={"device": device})
@@ -439,7 +385,7 @@ def main(sttngs):
     metrics_path = run_dir / metrics_name
     confusion_path = run_dir / "confusion.csv"
     confusion_df.to_csv(confusion_path)
-    
+
     catalog_csv_path = run_dir / "catalog.csv"
     data.meta["catalog_df"].to_csv(catalog_csv_path, index=False)
     meta["catalog_csv"] = str(catalog_csv_path)
@@ -453,7 +399,7 @@ def main(sttngs):
         "valid": list(map(int, valid.meta.get("robot_ids", []))),
         "test": list(map(int, test.meta.get("robot_ids", []))),
     }
-    
+
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
     with open(metrics_path, "w") as f:
@@ -465,6 +411,8 @@ def main(sttngs):
         "detector_path": str(det_path),
         "frontend_path": str(fe_path),
     }, indent=2))
+
+    return metrics
 
 
 # import argparse
@@ -495,6 +443,5 @@ def main(sttngs):
 #     overrides['skew_concept'] = json.loads(overrides['skew_concept'])
 
 # settings.update(overrides)
-
 
 main(settings)
