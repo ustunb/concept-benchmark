@@ -218,35 +218,6 @@ train_sample = data.training
 val_sample = data.validation
 test_sample = data.test
 
-outp = Path(settings["output_directory"]); outp.mkdir(parents=True, exist_ok=True)
-cols = list(params["concepts"].keys())
-catalog_df = pd.DataFrame(list(product(*[params["concepts"][c] for c in cols])), columns=cols)
-catalog_csv = outp / "robots_catalog.csv"; catalog_df.to_csv(catalog_csv, index=False)
-
-def _row_vals(sample, r):
-    T = sample.C.astype(int)[r]
-    vals = []
-    for key in cols:
-        idx = [i for i, n in enumerate(sample.concepts) if n.startswith(key + "=")]
-        j = int(T[idx].argmax()); vals.append(sample.concepts[idx[j]].split("=", 1)[1])
-    return tuple(vals)
-
-index_map = {tuple(row): i for i, row in catalog_df[cols].itertuples(index=False, name=None)}
-
-def _ids(sample):
-    ids = []
-    for r in range(sample.C.shape[0]):
-        ids.append(index_map[_row_vals(sample, r)])
-    return sorted(set(int(x) for x in ids))
-
-df_indices = {"train": _ids(train_sample), "valid": _ids(val_sample), "test": _ids(test_sample)}
-meta = {"catalog_csv": str(catalog_csv.resolve()), "df_indices": df_indices}
-meta_path = outp / "image_meta.json"
-with open(meta_path, "w", encoding="utf-8") as f:
-    json.dump(meta, f, indent=2)
-print("Wrote image_meta:", meta_path)
-
-
 if settings["corr_pair"]:
     train_sample = _enforce_corr(train_sample, settings["corr_pair"], float(settings["train_corr"]), int(settings["seed"]))
     test_sample = _enforce_corr(test_sample, settings["corr_pair"], max(0.0, 1.0 - float(settings["test_break"])), int(settings["seed"]) + 1)

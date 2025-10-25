@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 from scipy.special import expit
 from scipy.optimize import minimize
+from itertools import chain, combinations
+
 
 def _apply_missing(C, mode, rate, rng, y=None):
     if mode == "complete" or rate <= 0:
@@ -151,6 +153,40 @@ def _get_accuracies_per_subconcept(all_preds, missing_concepts, subtype_concepts
     return per_concept_acc2
 
 
+def is_monotonic(target_probs, feature_names):
+    """
+    Check if target probabilities are monotonic (achievable with linear logistic model).
+    Returns True if all features consistently increase or decrease probability.
+    """
+    n_features = len(feature_names)
+
+    for feat_idx in range(n_features):
+        effects = []
+
+        # Get all unique contexts (other feature combinations)
+        contexts = set(tuple(v for i, v in enumerate(combo) if i != feat_idx)
+                       for combo in target_probs.keys())
+
+        # Check effect direction in each context
+        for context in contexts:
+            combo_off = list(context)
+            combo_on = list(context)
+            combo_off.insert(feat_idx, 0)
+            combo_on.insert(feat_idx, 1)
+            combo_off, combo_on = tuple(combo_off), tuple(combo_on)
+
+            if combo_off in target_probs and combo_on in target_probs:
+                effect = target_probs[combo_on] - target_probs[combo_off]
+                if abs(effect) > 1e-6:  # Ignore negligible effects
+                    effects.append(effect > 0)
+
+        # If effects have different signs, not monotonic
+        if effects and len(set(effects)) > 1:
+            return False
+
+    return True
+
+
 def find_params_for_target_probabilities(feature_names, target_probs, initial_guess=None):
     """
     Find logit_weights, intercept, and scalar to match target probabilities.
@@ -175,12 +211,8 @@ def find_params_for_target_probabilities(feature_names, target_probs, initial_gu
                 (1, 1): 0.98,   # mouth=1, foot=1 → 98% glorp
             }
         )
-
-        # Use in settings:
-        settings["logit_weights"] = result['logit_weights']
-        settings["logit_intercept"] = result['intercept']
-        settings["logit_scalar"] = result['scalar']
     """
+    assert is_monotonic(target_probs, feature_names), "Target probabilities are not monotonic; cannot fit with linear logistic model."
     n_features = len(feature_names)
 
     # Initialize parameters
@@ -249,6 +281,12 @@ def find_params_for_target_probabilities(feature_names, target_probs, initial_gu
         'optimization_error': float(res.fun),
         'verification': verification
     }
+
+def powerset(iterable):
+    "powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"
+    s = list(iterable)
+    return list(chain.from_iterable(combinations(s, r) for r in range(len(s)+1)))
+
 
 
 # # Example usage

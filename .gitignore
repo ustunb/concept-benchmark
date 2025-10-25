@@ -26,6 +26,7 @@ data/*/*.data
 data/*/raw
 data/cub/
 data/sudoku/
+data/robot_images/
 
 # folders to ignore
 dev/

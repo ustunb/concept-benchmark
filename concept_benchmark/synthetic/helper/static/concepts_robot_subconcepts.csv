@@ -1,0 +1,31 @@
+key,text
+foot_shape_flat_trapezoid,a robot with flat trapezoid feet
+foot_shape_flat_rounded,a robot with flat rounded feet
+foot_shape_flat_square,a robot with flat square feet
+foot_shape_flat_5sided,a robot with flat 5-sided feet
+foot_shape_flat_lshaped,a robot with flat L-shaped feet
+foot_shape_pointy_trapezoid,a robot with pointy trapezoid feet
+foot_shape_pointy_rounded,a robot with pointy rounded feet
+foot_shape_pointy_square,a robot with pointy square feet
+foot_shape_pointy_3sided,a robot with pointy 3-sided feet
+foot_shape_pointy_4sided,a robot with pointy 4-sided feet
+body_shape_square,a robot with a square body
+body_shape_round,a robot with a round body
+head_shape_square,a robot with a square head
+head_shape_round,a robot with a round head
+has_elbows_true,a robot with elbows
+has_elbows_false,a robot without elbows
+has_knees_true,a robot with knees
+has_knees_false,a robot without knees
+has_antennae_true,a robot with antennae
+has_antennae_false,a robot without antennae
+ears_shape_square,a robot with square ears
+ears_shape_triangle,a robot with triangular ears
+mouth_type_closed,a robot with a closed mouth
+mouth_type_open,a robot with an open mouth
+hand_shape_round_circle,a robot with circular hands
+hand_shape_round_oval,a robot with oval hands
+hand_shape_round_oval2,a robot with narrow oval hands
+hand_shape_edgy_triangle,a robot with angular triangle hands
+hand_shape_edgy_square,a robot with angular square hands
+hand_shape_edgy_trapezoid,a robot with angular trapezoid hands
