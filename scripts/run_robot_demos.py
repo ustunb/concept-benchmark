@@ -381,27 +381,27 @@ def run():
 
     # detected-CBM: best + expert sweeps
     cbm_flags = ["--skip-fit", "1"]
-    # run_spec(
-    #     prefix="cbm",
-    #     regime="best",
-    #     human_acc=float(settings.get("best_human_acc", 1.0)),
-    #     blackbox_metrics=bb,
-    #     tag_suffix="cbm",
-    #     concept_source="detected",
-    #     extra_flags=cbm_flags,
-    #     detector_model=str(det_path),
-    # )
-    # for h in _listify(settings.get("expert_human_accs")):
-    #     run_spec(
-    #         prefix="cbm",
-    #         regime="expert",
-    #         human_acc=float(h),
-    #         blackbox_metrics=bb,
-    #         tag_suffix="cbm",
-    #         concept_source="detected",
-    #         extra_flags=cbm_flags,
-    #         detector_model=str(det_path),
-    #     )
+    run_spec(
+        prefix="cbm",
+        regime="best",
+        human_acc=float(settings.get("best_human_acc", 1.0)),
+        blackbox_metrics=bb,
+        tag_suffix="cbm",
+        concept_source="detected",
+        extra_flags=cbm_flags,
+        detector_model=str(det_path),
+    )
+    for h in _listify(settings.get("expert_human_accs")):
+        run_spec(
+            prefix="cbm",
+            regime="expert",
+            human_acc=float(h),
+            blackbox_metrics=bb,
+            tag_suffix="cbm",
+            concept_source="detected",
+            extra_flags=cbm_flags,
+            detector_model=str(det_path),
+        )
 
     # machine (LFCBM): best only
     lf_flags = []
