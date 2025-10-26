@@ -72,21 +72,20 @@ find_run_dirs <- function(results_root, run_name=NULL, run_glob=NULL, run_prefix
 }
 
 parse_run_attrs <- function(run_name) {
-  # concept_source from prefix
   cs <- if (startsWith(run_name, "lfcbm_")) "machine" else if (startsWith(run_name, "cbm_")) "detected" else "unknown"
-  # regime
   m <- regexpr("_cbm_(best|expert)_", run_name)
   regime <- ifelse(m > 0, gsub("^_cbm_|_$", "", regmatches(run_name, m)), NA_character_)
-  # subkey between prefix and _cbm_
   m2 <- regexec("^(cbm|lfcbm)_(.+?)_cbm_", run_name)
   g <- regmatches(run_name, m2)[[1]]
   subkey <- if (length(g) >= 3) g[3] else NA_character_
-  # human_acc from 'interveneXX' in name
   m3 <- regexec("intervene(\\d+)", run_name)
   g3 <- regmatches(run_name, m3)[[1]]
   acc_pct <- if (length(g3) >= 2) suppressWarnings(as.numeric(g3[2])) else NA_real_
   acc <- if (is.finite(acc_pct)) acc_pct / 100 else NA_real_
-  list(concept_source = cs, regime = regime, subkey = subkey, expert_acc = acc)
+  m4 <- regexec("(?:noise|cn)(\\d+)", run_name, perl = TRUE)
+  g4 <- regmatches(run_name, m4)[[1]]
+  nz <- if (length(g4) >= 2) suppressWarnings(as.numeric(g4[2])) else NA_real_
+  list(concept_source = cs, regime = regime, subkey = subkey, expert_acc = acc, noise_pct = nz)
 }
 
 read_viability <- function(run_dir) {
@@ -102,35 +101,284 @@ read_viability <- function(run_dir) {
 
 plot_overlay <- function(A, subkey, cs_label, out_root) {
   if (!nrow(A)) return(invisible(NULL))
-  # Build series labels: best and expert-<acc>
-  A <- A %>% mutate(series = ifelse(regime == "best",
-                                    "best",
-                                    ifelse(is.finite(expert_acc), paste0("expert-", round(100*expert_acc)), "expert")))
-  # one combined plot with all series
-  p <- ggplot(A, aes(x = budget, y = acc_cbm_intv, color = series, linetype = series, shape = series)) +
+  A <- A %>% mutate(
+    series = dplyr::case_when(
+      startsWith(run, "lfcbm_") ~ "Automated Detection",
+      regime == "best" ~ "Perfect Annotation",
+      regime == "expert" ~ "Expert Annotations",
+      TRUE ~ "Other"
+    ),
+    series = factor(series, levels = c("Automated Detection","Expert Annotations","Perfect Annotation","Other"))
+  )
+  p <- ggplot(A, aes(x = budget, y = acc_cbm_intv, color = series)) +
     geom_line() + geom_point(size = 2) +
     scale_x_continuous(breaks = sort(unique(A$budget))) +
     ylim(0, 1) +
     labs(x = "Intervention budget (k)",
          y = "Post-intervention accuracy",
-         title = paste0("Accuracy vs budget — ", subkey, " — ", cs_label)) +
+         title = paste0("Accuracy vs budget — ", subkey)) +
     theme_bw()
-  out_png = file.path(out_root, paste0("acc_vs_budget_", subkey, "_", gsub("[() ]","", cs_label), ".png"))
+  out_png = file.path(out_root, paste0("acc_vs_budget_", subkey, ".png"))
   ggsave(out_png, plot = p, width = 8.0, height = 4.5, dpi = 200)
+}
+
+plot_overlay_combined <- function(A, subkey, out_root) {
+  if (!nrow(A)) return(invisible(NULL))
+  A <- A %>% mutate(
+    series = dplyr::case_when(
+      startsWith(run, "lfcbm_") ~ "Automated Detection",
+      regime == "best" ~ "Perfect Annotation",
+      regime == "expert" & is.finite(expert_acc) ~ paste0("Expert Annotations — ", round(100*expert_acc)),
+      TRUE ~ "Other"
+    )
+  )
+  expert_levels <- sort(unique(A$series[grepl("^Expert Annotations", A$series)]))
+  A$series <- factor(A$series, levels = unique(c("Automated Detection", expert_levels, "Perfect Annotation", "Other")))
+
+  min_pct <- suppressWarnings(min(100*A$acc_cbm_intv, na.rm = TRUE))
+  y0_pct <- if (is.finite(min_pct)) { s <- floor(min_pct/5)*5; if (s >= min_pct) s <- s - 5; max(0, s) } else 0
+  y0 <- y0_pct/100
+  xmax <- suppressWarnings(max(A$budget, na.rm = TRUE)); if (!is.finite(xmax)) xmax <- 1
+
+  p <- ggplot(A, aes(x = budget, y = acc_cbm_intv, color = series)) +
+    geom_line() + geom_point(size = 2) +
+    scale_x_continuous(breaks = sort(unique(A$budget)), limits = c(0, xmax), expand = c(0,0)) +
+    scale_y_continuous(limits = c(y0, 1), breaks = seq(y0, 1, by = 0.05)) +
+    labs(x = "Intervention budget (k)", y = "Post-intervention accuracy") +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+          plot.title = element_blank()) +
+    guides(color = guide_legend(title = NULL))
+  out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_combined.png"))
+  ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
+}
+
+plot_overlay_per_expert <- function(A, subkey, out_root) {
+  exps <- sort(unique(A$expert_acc[A$regime == "expert" & is.finite(A$expert_acc)]))
+  if (!length(exps)) return(invisible(NULL))
+  for (ea in exps) {
+    B <- A %>% filter(
+      (regime == "expert" & is.finite(expert_acc) & abs(expert_acc - ea) < 1e-9) |
+      (regime == "best") |
+      (startsWith(run, "lfcbm_"))
+    ) %>% mutate(
+      series = dplyr::case_when(
+        startsWith(run, "lfcbm_") ~ "Automated Detection",
+        regime == "best" ~ "Perfect Annotation",
+        regime == "expert" ~ paste0("Expert Annotations — ", round(100*ea)),
+        TRUE ~ "Other"
+      )
+    )
+    B$series <- factor(B$series, levels = c("Automated Detection",
+                                            paste0("Expert Annotations — ", round(100*ea)),
+                                            "Perfect Annotation"))
+
+    min_pct <- suppressWarnings(min(100*B$acc_cbm_intv, na.rm = TRUE))
+    y0_pct <- if (is.finite(min_pct)) { s <- floor(min_pct/5)*5; if (s >= min_pct) s <- s - 5; max(0, s) } else 0
+    y0 <- y0_pct/100
+    xmax <- suppressWarnings(max(B$budget, na.rm = TRUE)); if (!is.finite(xmax)) xmax <- 1
+
+    p <- ggplot(B, aes(x = budget, y = acc_cbm_intv, color = series)) +
+      geom_line() + geom_point(size = 2) +
+      scale_x_continuous(breaks = sort(unique(B$budget)), limits = c(0, xmax), expand = c(0,0)) +
+      scale_y_continuous(limits = c(y0, 1), breaks = seq(y0, 1, by = 0.05)) +
+      labs(x = "Intervention budget (k)", y = "Post-intervention accuracy") +
+      theme_bw() +
+      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+            plot.title = element_blank()) +
+      guides(color = guide_legend(title = NULL))
+    out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_expert_", round(100*ea), ".png"))
+    ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
+  }
+}
+
+plot_overlay_combined_variants <- function(A, subkey, out_root) {
+  bs <- sort(unique(A$budget))
+  extras <- setdiff(bs, c(0,1))
+  if (!length(extras)) return(invisible(NULL))
+  for (b in extras) {
+    S <- A %>% filter(budget %in% c(0,1,b))
+    if (!nrow(S)) next
+    S <- S %>% mutate(
+      series = dplyr::case_when(
+        startsWith(run, "lfcbm_") ~ "Automated Detection",
+        regime == "best" ~ "Perfect Annotation",
+        regime == "expert" & is.finite(expert_acc) ~ paste0("Expert Annotations — ", round(100*expert_acc)),
+        TRUE ~ "Other"
+      )
+    )
+    expert_levels <- sort(unique(S$series[grepl("^Expert Annotations", S$series)]))
+    S$series <- factor(S$series, levels = unique(c("Automated Detection", expert_levels, "Perfect Annotation", "Other")))
+
+    min_pct <- suppressWarnings(min(100*S$acc_cbm_intv, na.rm = TRUE))
+    y0_pct <- if (is.finite(min_pct)) { s <- floor(min_pct/5)*5; if (s >= min_pct) s <- s - 5; max(0, s) } else 0
+    y0 <- y0_pct/100
+    xmax <- suppressWarnings(max(S$budget, na.rm = TRUE)); if (!is.finite(xmax)) xmax <- 1
+
+    p <- ggplot(S, aes(x = budget, y = acc_cbm_intv, color = series)) +
+      geom_line() + geom_point(size = 2) +
+      scale_x_continuous(breaks = sort(unique(S$budget)), limits = c(0, xmax), expand = c(0,0)) +
+      scale_y_continuous(limits = c(y0, 1), breaks = seq(y0, 1, by = 0.05)) +
+      labs(x = "Intervention budget (k)", y = "Post-intervention accuracy") +
+      theme_bw() +
+      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+            plot.title = element_blank()) +
+      guides(color = guide_legend(title = NULL))
+    out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_combined_budgets_0_1_", b, ".png"))
+    ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
+  }
+}
+
+plot_overlay_per_expert_variants <- function(A, subkey, out_root) {
+  exps <- sort(unique(A$expert_acc[A$regime == "expert" & is.finite(A$expert_acc)]))
+  if (!length(exps)) return(invisible(NULL))
+  for (ea in exps) {
+    B <- A %>% filter(
+      (regime == "expert" & is.finite(expert_acc) & abs(expert_acc - ea) < 1e-9) |
+      (regime == "best") |
+      (startsWith(run, "lfcbm_"))
+    ) %>% mutate(
+      series = dplyr::case_when(
+        startsWith(run, "lfcbm_") ~ "Automated Detection",
+        regime == "best" ~ "Perfect Annotation",
+        regime == "expert" ~ paste0("Expert Annotations — ", round(100*ea)),
+        TRUE ~ "Other"
+      )
+    )
+    bs <- sort(unique(B$budget))
+    extras <- setdiff(bs, c(0,1))
+    if (!length(extras)) next
+    for (b in extras) {
+      S <- B %>% filter(budget %in% c(0,1,b))
+      if (!nrow(S)) next
+
+      min_pct <- suppressWarnings(min(100*S$acc_cbm_intv, na.rm = TRUE))
+      y0_pct <- if (is.finite(min_pct)) { s <- floor(min_pct/5)*5; if (s >= min_pct) s <- s - 5; max(0, s) } else 0
+      y0 <- y0_pct/100
+      xmax <- suppressWarnings(max(S$budget, na.rm = TRUE)); if (!is.finite(xmax)) xmax <- 1
+
+      p <- ggplot(S, aes(x = budget, y = acc_cbm_intv, color = series)) +
+        geom_line() + geom_point(size = 2) +
+        scale_x_continuous(breaks = sort(unique(S$budget)), limits = c(0, xmax), expand = c(0,0)) +
+        scale_y_continuous(limits = c(y0, 1), breaks = seq(y0, 1, by = 0.05)) +
+        labs(x = "Intervention budget (k)", y = "Post-intervention accuracy") +
+        theme_bw() +
+        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+              plot.title = element_blank()) +
+        guides(color = guide_legend(title = NULL))
+      out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_expert_", round(100*ea), "_budgets_0_1_", b, ".png"))
+      ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
+    }
+  }
+}
+
+
+write_gain_table <- function(A, out_root) {
+  G <- A %>% dplyr::filter(budget == 1)
+  if (!nrow(G)) return(invisible(NULL))
+
+  if ("noise_pct" %in% names(G)) {
+    G$noise_col <- G$noise_pct
+  } else if ("concept_noise" %in% names(G)) {
+    G$noise_col <- suppressWarnings(round(100*as.numeric(G$concept_noise)))
+  } else {
+    G$noise_col <- NA_real_
+  }
+
+  if ("raw_gain_vs_k0" %in% names(G)) {
+    G$gain <- G$raw_gain_vs_k0
+  } else if (all(c("acc_cbm_intv","acc_cbm_pre") %in% names(G))) {
+    G$gain <- G$acc_cbm_intv - G$acc_cbm_pre
+  } else {
+    return(invisible(NULL))
+  }
+
+  G$expert_label <- ifelse(is.finite(G$expert_acc), round(100*G$expert_acc), NA_real_)
+  W <- G %>% dplyr::group_by(expert_label, noise_col) %>% dplyr::summarise(gain = mean(gain, na.rm = TRUE), .groups = "drop") %>% dplyr::arrange(dplyr::desc(expert_label), noise_col)
+  if (!nrow(W)) return(invisible(NULL))
+
+  W_wide <- tidyr::pivot_wider(W %>% dplyr::mutate(gain_pp = round(100*gain, 1)),
+                               names_from = noise_col, values_from = gain_pp, names_sort = TRUE)
+  readr::write_csv(W_wide, file.path(out_root, "accuracy_gain_table.csv"))
+
+  noise_cols <- setdiff(names(W_wide), "expert_label")
+  if (length(noise_cols) == 0) {
+    lines <- c(
+      "\\begin{wraptable}[13]{R}{0.45\\linewidth}",
+      "    \\scriptsize",
+      "    \\centering",
+      "    \\vspace{-1.2em}",
+      "    \\begin{tabular}{l|c}",
+      "      & Gain (pp) \\\\",
+      "        \\cmidrule(lr){2-2}",
+      "        Expert Acc. & k=1 \\\\",
+      "        \\hline"
+    )
+    for (i in seq_len(nrow(W_wide))) {
+      r <- W_wide[i, ]
+      val <- r[[2]]
+      val_fmt <- ifelse(is.na(val), "$\\times$", paste0("+", as.character(val)))
+      lines <- c(lines, paste0("        ", r$expert_label, "\\%  & ", val_fmt, " \\\\"))
+    }
+    lines <- c(lines,
+      "    \\end{tabular}",
+      "    \\caption{$Gain_{acc}$ from a single targeted concept intervention ($k=1$).}",
+      "    \\label{tab:accuracy_gain_table}",
+      "\\end{wraptable}"
+    )
+  } else {
+    col_spec <- paste(rep("c", length(noise_cols)), collapse = "")
+    hdr_noise <- paste0(noise_cols, "\\%")
+    cmid_hi <- length(noise_cols) + 1
+    lines <- c(
+      "\\begin{wraptable}[13]{R}{0.45\\linewidth}",
+      "    \\scriptsize",
+      "    \\centering",
+      "    \\vspace{-1.2em}",
+      paste0("    \\begin{tabular}{l|", col_spec, "}"),
+      paste0("      & \\multicolumn{", length(noise_cols), "}{c}{Concept Noise (\\%)} \\\\"),
+      paste0("        \\cmidrule(lr){2-", cmid_hi, "}"),
+      paste0("        Expert Acc. & ", paste(hdr_noise, collapse = " & "), " \\\\"),
+      "        \\hline"
+    )
+    for (i in seq_len(nrow(W_wide))) {
+      r <- W_wide[i, ]
+      vals <- r[1, noise_cols, drop = TRUE]
+      vals_fmt <- ifelse(is.na(vals), "$\\times$", paste0("+", as.character(vals)))
+      lines <- c(lines, paste0("        ", r$expert_label, "\\%  & ", paste(vals_fmt, collapse = " & "), " \\\\"))
+    }
+    lines <- c(lines,
+      "    \\end{tabular}",
+      "    \\caption{$Gain_{acc}$ from a single targeted concept intervention ($k=1$). Rows represent the human expert's intervention accuracy, while columns show the percentage of missing concept annotations.}",
+      "    \\label{tab:missingness_deltas}",
+      "\\end{wraptable}"
+    )
+  }
+  writeLines(lines, con = file.path(out_root, "accuracy_gain_table.tex"))
 }
 
 main <- function() {
   args <- parse_args()
   repo_root <- normalizePath(args$repo_root, mustWork = TRUE)
   results_root <- normalizePath(args$results_root, mustWork = FALSE)
-  out_root <- normalizePath(args$outdir, mustWork = FALSE)
-  ensure_dir(out_root)
 
   runs <- find_run_dirs(results_root, run_name = args$run_name, run_glob = args$run_glob, run_prefix = args$run_prefix)
   if (!length(runs)) {
     loge("No runs found under %s/robot_text matching selector(s).", results_root)
     quit(status = 1)
   }
+
+  default_out <- file.path(results_root, "robot_text")
+  req_out <- normalizePath(args$outdir, mustWork = FALSE)
+  if (length(runs) == 1 && identical(req_out, normalizePath(default_out, mustWork = FALSE))) {
+    out_root <- file.path(runs[[1]], "_plots")
+  } else if (length(runs) > 1 && identical(req_out, normalizePath(default_out, mustWork = FALSE))) {
+    out_root <- file.path(results_root, "robot_text", "_plots")
+  } else {
+    out_root <- req_out
+  }
+  ensure_dir(out_root)
+
   readr::write_csv(data.frame(run_dir = runs), file.path(out_root, "RUNS_FOUND.csv"))
   logi("Found %d run(s).", length(runs))
 
@@ -146,6 +394,7 @@ main <- function() {
     v$regime <- attrs$regime
     v$concept_source <- attrs$concept_source
     v$expert_acc <- attrs$expert_acc
+    v$noise_pct <- attrs$noise_pct
     rows[[length(rows)+1]] <- v
   }
   if (!length(rows)) {
@@ -164,65 +413,21 @@ main <- function() {
   }
 
   # Map concept source labels
-  A$cs_label <- dplyr::case_when(
-    A$concept_source == "detected" ~ "Automated Detection",
-    A$concept_source == "machine"  ~ "Machine Concepts (LFCBM)",
-    TRUE ~ "Unknown"
-  )
+  A$cs_label <- ifelse(startsWith(A$run, "lfcbm_"), "Automated Detection", NA_character_)
 
-  # Per-run quick products + per-subkey overlays
-  # Per-run
-  for (rd in unique(A$run)) {
-    Ak <- A %>% filter(run == rd) %>% distinct(budget, acc_cbm_pre, acc_cbm_intv, .keep_all = TRUE)
-    outdir <- file.path(out_root, paste0(rd, "_plots"))
-    ensure_dir(outdir)
-    readr::write_csv(Ak %>% select(budget, acc_cbm_pre, acc_cbm_intv), file.path(outdir, "acc_vs_budget.csv"))
-    # simple per-run plot (post only)
-    p <- ggplot(Ak, aes(x = budget, y = acc_cbm_intv)) +
-      geom_line() + geom_point() +
-      ylim(0, 1) +
-      scale_x_continuous(breaks = sort(unique(Ak$budget))) +
-      labs(x = "Intervention budget (k)", y = "Post-intervention accuracy", title = rd) +
-      theme_bw()
-    ggsave(file.path(outdir, "acc_vs_budget.png"), plot = p, width = 7.0, height = 4.0, dpi = 200)
-  }
-
-  # Combined overlays per subkey and concept-source label
+    # Only combined overlays per subkey + per-expert singletons + budget-variants
   keys <- unique(A$subkey)
   for (k in keys) {
     Ak <- A %>% filter(subkey == k)
-    # per-source overlays
-    for (cs in unique(Ak$cs_label)) {
-      G <- Ak %>% filter(cs_label == cs) %>% select(budget, acc_cbm_intv, regime, expert_acc, cs_label)
-      plot_overlay(G, k, cs, out_root)
-    }
-    # combined overlay across sources
-    plot_overlay_combined(Ak %>% select(budget, acc_cbm_intv, regime, expert_acc, cs_label), k, out_root)
+    D <- Ak %>% select(run, budget, acc_cbm_intv, regime, expert_acc)
+    plot_overlay_combined(D, k, out_root)
+    plot_overlay_per_expert(D, k, out_root)
+    plot_overlay_combined_variants(D, k, out_root)
+    plot_overlay_per_expert_variants(D, k, out_root)
   }
 
-
-
-plot_overlay_combined <- function(A, subkey, out_root) {
-  if (!nrow(A)) return(invisible(NULL))
-  A <- A %>% mutate(
-    series = ifelse(regime == "best",
-                    "best",
-                    ifelse(is.finite(expert_acc), paste0("expert-", round(100*expert_acc)), "expert"))
-  )
-  A <- A %>% mutate(label = paste0(cs_label, " — ", series))
-  p <- ggplot(A, aes(x = budget, y = acc_cbm_intv, color = label, linetype = cs_label, shape = series)) +
-    geom_line() + geom_point(size = 2) +
-    scale_x_continuous(breaks = sort(unique(A$budget))) +
-    ylim(0, 1) +
-    labs(x = "Intervention budget (k)",
-         y = "Post-intervention accuracy",
-         title = paste0("Accuracy vs budget — ", subkey)) +
-    theme_bw()
-  out_png = file.path(out_root, paste0("acc_vs_budget_", subkey, "_combined.png"))
-  ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
-}
-
-readr::write_csv(A, file.path(out_root, "acc_vs_budget_all_runs.csv"))
+  write_gain_table(A, out_root)
+  readr::write_csv(A, file.path(out_root, "acc_vs_budget_all_runs.csv"))
   logi("[done] Wrote outputs to: %s", out_root)
 }
 
