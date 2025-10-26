@@ -1,4 +1,6 @@
 # scripts/run_robot_demos.py
+from __future__ import annotations
+
 import glob
 from pathlib import Path
 import sys, subprocess, shlex, os
@@ -28,8 +30,8 @@ settings = {
     "text_model": "distilbert-base-uncased",
 
     "best_human_acc": 1.00,
-    "expert_human_accs": [0.80, 1.00],
-    "subjective_human_accs": [1.00],
+    "expert_human_accs": [0.7, 0.80, 0.9, 1.00],
+    "subjective_human_accs": [0.7, 0.8, 0.9, 1.00],
     "subjective_noise_rates": [0.20],
 
     "skip_fit": 1,
@@ -53,8 +55,9 @@ settings = {
     "abstain_only": 0,
 
     "seed_test_offset": 1234,
+    "image_meta_catalog": "auto",
+"templates_file": str(ROOT / "concept_benchmark" / "synthetic" / "helper" / "static" / "text_templates" / "templates_simple.jsonl"),
 }
-
 
 
 def parse_cli():
@@ -138,6 +141,8 @@ def parse_cli():
     ap.add_argument("--flip-batch-size", type=int)
     ap.add_argument("--flip-limit-subsets")
     ap.add_argument("--abstain-only", type=int)
+    ap.add_argument("--image-meta", dest="image_meta", type=str)
+    ap.add_argument("--image-meta-catalog", dest="image_meta_catalog", type=str)
 
     known, _ = ap.parse_known_args()
 
@@ -215,7 +220,6 @@ def common_gen_argv():
     argv = [
         str(PY), str(GEN),
         "--modality", str(settings.get("modality", "text")),
-        # "--concept-source", str(settings.get("concept_source", "gt")),
         "--machine-method", str(settings.get("machine_method", "lfcbm")),
         "--seed", str(settings.get("seed", 0)),
         "--seed-cv", str(settings.get("seed_cv", int(settings.get("seed", 0)) + 1)),
@@ -231,12 +235,27 @@ def common_gen_argv():
         "--flip-batch-size", str(settings.get("flip_batch_size", 8192)),
         "--budgets", ",".join(str(x) for x in settings.get("budgets", [0, 1, 2, 5, 10])),
     ]
+    if settings.get("image_meta"):
+        argv += ["--image-meta", str(settings["image_meta"])]
+        if settings.get("image_meta_catalog"):
+            argv += ["--image-meta-catalog", str(settings["image_meta_catalog"])]
     if settings.get("flip_limit_subsets") is not None:
         argv += ["--flip-limit-subsets", str(settings["flip_limit_subsets"])]
     if settings.get("abstain_only"):
         argv += ["--abstain-only"]
     if settings.get("tau") is not None:
         argv += ["--tau", str(settings["tau"])]
+
+    # forward generic-balance knobs
+    for flag, val in [
+        ("--val-balance-enable", settings.get("val_balance_enable")),
+        ("--test-balance-enable", settings.get("test_balance_enable")),
+        ("--val-target-generic-frac", settings.get("val_target_generic_frac")),
+        ("--test-target-generic-frac", settings.get("test_target_generic_frac")),
+    ]:
+        if val is not None:
+            argv += [flag, str(val)]
+
     return argv
 
 
@@ -266,10 +285,13 @@ def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, 
         "--mask-mode", "mask",
         "--mask-rate", "0.0",
         "--concept-mode", "hard",
-        "--templates-file", "",
-        "--redact-concepts", str(settings.get("redact_concepts", "")),
-        "--redact-splits", str(settings.get("redact_splits", "")),
-        "--label-model-expr", "'glorp' if (min(int(row[\"mouth_type\"]==\"open\"), int(str(row[\"foot_shape\"]).startswith(\"pointy_\"))) >= 1) else 'drent'",
+        *([] if not str(settings.get("templates_file", "")).strip()
+          else ["--templates-file", str(settings["templates_file"]).strip()]),
+        "--redact-concepts", str(settings.get("redact_concepts", "")),        "--redact-splits", str(settings.get("redact_splits", "")),
+        "--label-model-type", "stochastic",
+        "--label-model-alpha", "1.0",
+        "--label-model-bias", "0.0",
+        "--label-model-expr", "5*int(row['mouth_type']=='closed') + 10*int(str(row['foot_shape']).startswith('pointy_')) - 3",
         "--corr-pair", "",
         "--train-corr", "1.0",
         "--test-break", "1.0",
@@ -283,7 +305,8 @@ def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, 
         "--concept-label-noise-mode", "none",
         "--concept-label-noise-rate", "0.2",
         "--blackbox-metrics", blackbox_metrics or "",
-        "--concepts-csv", settings.get("concepts_csv", ""),
+        *([] if str(settings.get("templates_file", "")).strip()
+          else ["--concepts-csv", settings.get("concepts_csv", "")]),
         "--generic-enable", str(int(settings.get("generic_enable", 1))),
         "--generic-rate", str(float(settings.get("generic_rate", 0.7))),
         "--generic-tol", str(float(settings.get("generic_tol", 0.02))),
@@ -312,7 +335,7 @@ def make_run_name():
 def run():
     modality = str(settings.get("modality", "text"))
     model_id = str(settings.get("text_model", "distilbert-base-uncased")) if modality == "text" else "vit"
-    ensure_baseline(model_id=model_id, modality=modality)
+    # ensure_baseline(model_id=model_id, modality=modality)
 
     bb = str(find_metrics_json(modality, model_id, "test") or "")
 
@@ -358,27 +381,27 @@ def run():
 
     # detected-CBM: best + expert sweeps
     cbm_flags = ["--skip-fit", "1"]
-    run_spec(
-        prefix="cbm",
-        regime="best",
-        human_acc=float(settings.get("best_human_acc", 1.0)),
-        blackbox_metrics=bb,
-        tag_suffix="cbm",
-        concept_source="detected",
-        extra_flags=cbm_flags,
-        detector_model=str(det_path),
-    )
-    for h in _listify(settings.get("expert_human_accs")):
-        run_spec(
-            prefix="cbm",
-            regime="expert",
-            human_acc=float(h),
-            blackbox_metrics=bb,
-            tag_suffix="cbm",
-            concept_source="detected",
-            extra_flags=cbm_flags,
-            detector_model=str(det_path),
-        )
+    # run_spec(
+    #     prefix="cbm",
+    #     regime="best",
+    #     human_acc=float(settings.get("best_human_acc", 1.0)),
+    #     blackbox_metrics=bb,
+    #     tag_suffix="cbm",
+    #     concept_source="detected",
+    #     extra_flags=cbm_flags,
+    #     detector_model=str(det_path),
+    # )
+    # for h in _listify(settings.get("expert_human_accs")):
+    #     run_spec(
+    #         prefix="cbm",
+    #         regime="expert",
+    #         human_acc=float(h),
+    #         blackbox_metrics=bb,
+    #         tag_suffix="cbm",
+    #         concept_source="detected",
+    #         extra_flags=cbm_flags,
+    #         detector_model=str(det_path),
+    #     )
 
     # machine (LFCBM): best only
     lf_flags = []
@@ -493,9 +516,9 @@ if int(settings.get("recompute_only", 0)) == 1:
         pass
 else:
     run()
-    build_final_accuracy_table()
-    try:
-        from scripts.report_text_tables import build_text_summary_tables
-        build_text_summary_tables()
-    except Exception:
-        pass
+#     build_final_accuracy_table()
+#     try:
+#         from scripts.report_text_tables import build_text_summary_tables
+#         build_text_summary_tables()
+#     except Exception:
+#         pass

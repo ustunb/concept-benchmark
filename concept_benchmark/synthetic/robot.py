@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import re
 from collections.abc import Iterable, Sequence
 from pathlib import Path
@@ -8,6 +10,7 @@ import pandas as pd
 from scipy.special import expit
 
 from concept_benchmark.data import ConceptDataset
+from scipy.special import expit
 
 from .helper.robot_catalog import (
     ALL_ROBOT_FEATURES,
@@ -373,6 +376,9 @@ def create_robot_image_dataset(
         UC_cols.append(col)
     UC = np.stack(UC_cols, axis=1).astype(np.int8)
 
+    # keep a full copy (with spurious) for downstream export
+    catalog_df_spurious = catalog_df.copy()
+
     if drop_irrelevant and irrelevant:
         # check if irrelevant features are in the catalog
         existing_irrelevant_features = [
@@ -440,6 +446,7 @@ def create_robot_image_dataset(
         "num_robots": total_robots,
         "robot_ids": catalog_df["id"].values,
         "catalog_df": catalog_df,
+        "catalog_df_spurious": catalog_df_spurious,
     }
 
     robot_dataset = ConceptDataset(

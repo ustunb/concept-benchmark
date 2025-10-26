@@ -17,7 +17,7 @@ from scripts.robot_utils import _apply_missing, _apply_label_noise, _rate_tag, _
 
 settings = {
     "samples_per_instance": 3,
-    "draw": 0,
+    "draw": 1,
     "CBM_type": "separate", #"sequential"
     "image_dir": "./data/robot_images",
     "image_size": "medium",
@@ -389,6 +389,11 @@ def main(sttngs):
     catalog_csv_path = run_dir / "catalog.csv"
     data.meta["catalog_df"].to_csv(catalog_csv_path, index=False)
     meta["catalog_csv"] = str(catalog_csv_path)
+
+    if "catalog_df_spurious" in data.meta:
+        catalog_spu_path = run_dir / "catalog_with_spurious.csv"
+        data.meta["catalog_df_spurious"].to_csv(catalog_spu_path, index=False)
+        meta["catalog_csv_spurious"] = str(catalog_spu_path)
     meta["df_indices"] = {
         "train": list(map(int, train.meta["df_indices"])),
         "valid": list(map(int, valid.meta["df_indices"])),

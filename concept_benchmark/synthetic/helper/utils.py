@@ -7,7 +7,7 @@ import numpy as np
 from colorir import StackPalette
 from colorir import simplified_dist as colordist
 from pero import Color
-
+from scipy.special import expit
 
 # Color Schemes
 def generate_color_schemes(shuffle=True, random_seed=123456, include_flipped=True):
