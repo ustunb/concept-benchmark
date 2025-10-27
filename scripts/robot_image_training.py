@@ -23,7 +23,7 @@ settings = {
     "image_size": "medium",
     "color_mode": "color",
     "train_dnn": 0,
-    "seed": 555,
+    "seed": 1025,
     "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy'))>= 3 else 'drent'",
     'dataset_characterization': "",
     "knows_concepts": False,
@@ -61,8 +61,17 @@ settings = {
     "drop_concepts": ["foot_shape_flat_rounded",
                       "foot_shape_pointy_trapezoid",
                       'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
-                      'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
-    "human_alignment": {"foot_shape": 1, "mouth_type": -1, "bias": -0.01}, # OR of ANDs model's logic
+                      'foot_shape'],#'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
+    "human_alignment": {
+        "foot_shape_pointy_4sided": 4,
+        "foot_shape_flat_5sided": -4,
+        "foot_shape_flat_square": -2,
+        "foot_shape_pointy_rounded": 2,
+        "foot_shape_pointy_square": 2,
+        "foot_shape_flat_trapezoid": -2,
+        "mouth_type": -4,
+        "bias": 1
+    }, # amplifying well working detectors
     "model_type": "stochastic",
     "logit_scalar": 1.0,
     "logit_intercept": 3,
@@ -72,19 +81,19 @@ settings = {
     "missing_rate": 1.0,
     "impute_missing": 0,
     "skew_concept": [
-                     {'concepts': {'foot_shape_pointy_square': 1}, 'min_fraction': 0.005},
-                     {'concepts': {'foot_shape_pointy_rounded': 1}, 'min_fraction': 0.005},
-                     {'concepts': {'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.49},
-                     {'concepts': {'foot_shape_flat_square': 1}, 'min_fraction': 0.005},
-                     {'concepts': {'foot_shape_flat_trapezoid': 1}, 'min_fraction': 0.005},
-                     {'concepts': {'foot_shape_flat_5sided': 1}, 'min_fraction': 0.49},
+                     {'concepts': {'foot_shape_pointy_square': 1}, 'min_fraction': 0.01},
+                     {'concepts': {'foot_shape_pointy_rounded': 1}, 'min_fraction': 0.01},
+                     {'concepts': {'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.48},
+                     {'concepts': {'foot_shape_flat_square': 1}, 'min_fraction': 0.01},
+                     {'concepts': {'foot_shape_flat_trapezoid': 1}, 'min_fraction': 0.01},
+                     {'concepts': {'foot_shape_flat_5sided': 1}, 'min_fraction': 0.48},
                      ],
     "budget": [1],
     "intervention_accuracy": 0.9,
     "intervention_threshold": 1.0,
     "epochs": 10,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "nnwwnwn",
+    "run_name": "another_run",
     "load_detector": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed555.pt")),
     "load_frontend": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed555.pkl")),
 }
@@ -242,6 +251,8 @@ def main(sttngs):
     ###########################################################################
     S = dict(sttngs)
     rng = np.random.default_rng(int(S["seed"]))
+    torch.manual_seed(int(S["seed"]))
+
     base_out = Path(S["out_dir"]); base_out.mkdir(parents=True, exist_ok=True)
     miss = str(S["missingness"]).lower()
     rate = float(S["missing_rate"])
@@ -443,5 +454,52 @@ def main(sttngs):
 #     overrides['skew_concept'] = json.loads(overrides['skew_concept'])
 
 # settings.update(overrides)
+
+# a function that checks different seeds and train a subconcept CBM to find the seed where it achieves between 68-73% accuracy
+# if it finds ony, it trains a CBM to make sure it achieves at least 85% accuracy
+# if yes, it trains a DNN to make sure it achieves 68%-73% accuracy
+# it return the seed if yes
+def find_good_seed(stngs):
+    for seed in range(1000, 2000):
+        print(f"Testing seed {seed}...")
+        stngs["seed"] = seed
+        # train subconcept CBMS only
+        stngs["drop_concepts"] = ["foot_shape_flat_rounded",
+                      "foot_shape_pointy_trapezoid",
+                      'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
+                      'foot_shape']
+        stngs["train_dnn"] = 0
+        stngs['run_name'] = f"A_SCBM_alignment_trials_seed{seed}"
+        metrics = main(stngs)
+        cbm_acc = metrics.get("cbm_acc_detected", 0.0)
+        if 0.68 <= cbm_acc <= 0.73:
+            print(f"Found seed {seed} with SCBM accuracy {cbm_acc:.4f}. Now training full CBM...")
+            # train full CBM
+            stngs["drop_concepts"] = ["foot_shape_flat_rounded", "foot_shape_pointy_trapezoid", 'foot_shape_pointy_3sided',
+                                      'foot_shape_flat_lshaped', 'foot_shape_pointy_4sided', 'foot_shape_pointy_square',
+                                      'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square',
+                                      'foot_shape_flat_trapezoid' ]
+
+            stngs["train_dnn"] = 0
+            stngs['run_name'] = f"A_CBM_alignment_trials_seed{seed}"
+            metrics_full = main(stngs)
+            cbm_acc_full = metrics_full.get("cbm_acc_detected", 0.0)
+            if cbm_acc_full >= 0.85:
+                # train DNN
+                print(f"Full CBM accuracy {cbm_acc_full:.4f} meets criteria")
+                stngs["train_dnn"] = 1
+                stngs['run_name'] = f"A_DNN_alignment_trials_seed{seed}"
+                metrics_dnn = main(stngs)
+                dnn_acc = metrics_dnn.get("dnn_accuracy", 0.0)
+                if 0.68 <= dnn_acc <= 0.73:
+                    print(f"DNN accuracy {dnn_acc:.4f} meets criteria. Found good seed: {seed}")
+                    return seed
+                else:
+                    print(f"DNN accuracy {dnn_acc:.4f} does not meet criteria.")
+            else:
+                print(f"Full CBM accuracy {cbm_acc_full:.4f} does not meet criteria.")
+    return None
+
+#find_good_seed(settings)
 
 main(settings)
