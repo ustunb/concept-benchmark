@@ -85,8 +85,8 @@ def model_to_logistic(model: str, weights: dict, scalar = 1.0, intercept = None)
             weight = weights[feature]
         old_pattern = f"int(row['{feature}']=={value})"
         new_pattern = f"{weight}*int(row['{feature}']=={value})"
+        expr = expr.replace(old_pattern, new_pattern)
 
-    expr = expr.replace(old_pattern, new_pattern)
     intercept = intercept if intercept is not None else num.group(1)
     expr += ' - ' + str(intercept)
 

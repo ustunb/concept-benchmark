@@ -20,12 +20,15 @@ class ImageDS(Dataset):
         return enc, y
 
 
-def train_eval_image(paths_tr, y_tr, paths_te, y_te, model_id, epochs, batch_size, lr, device):
+def train_eval_image(paths_tr, y_tr, paths_te, y_te, model_id, epochs, batch_size, lr, device, seed):
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+
     proc = AutoImageProcessor.from_pretrained(model_id)
     model = AutoModelForImageClassification.from_pretrained(model_id, num_labels=2, ignore_mismatched_sizes=True)
     ds_tr = ImageDS(paths_tr, y_tr, proc)
     ds_te = ImageDS(paths_te, y_te, proc)
-    dl_tr = DataLoader(ds_tr, batch_size=batch_size, shuffle=True)
+    dl_tr = DataLoader(ds_tr, batch_size=batch_size, shuffle=True, generator=generator)
     dl_te = DataLoader(ds_te, batch_size=batch_size, shuffle=False)
     model.to(device)
     optim = torch.optim.AdamW(model.parameters(), lr=lr)

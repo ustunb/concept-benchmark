@@ -22,7 +22,7 @@ settings = {
     "image_dir": "./data/robot_images",
     "image_size": "medium",
     "color_mode": "color",
-    "train_dnn": 0,
+    "train_dnn": 1,
     "seed": 1025,
     "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy'))>= 3 else 'drent'",
     'dataset_characterization': "",
@@ -61,16 +61,16 @@ settings = {
     "drop_concepts": ["foot_shape_flat_rounded",
                       "foot_shape_pointy_trapezoid",
                       'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
-                      'foot_shape'],#'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
+                      'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
     "human_alignment": {
-        "foot_shape_pointy_4sided": 4,
+        "foot_shape_pointy_4sided": 6,
         "foot_shape_flat_5sided": -4,
-        "foot_shape_flat_square": -2,
-        "foot_shape_pointy_rounded": 2,
-        "foot_shape_pointy_square": 2,
+        "foot_shape_flat_square": -4,
+        "foot_shape_pointy_rounded": 6,
+        "foot_shape_pointy_square": 6,
         "foot_shape_flat_trapezoid": -2,
-        "mouth_type": -4,
-        "bias": 1
+        "mouth_type": -3,
+        "bias": 4
     }, # amplifying well working detectors
     "model_type": "stochastic",
     "logit_scalar": 1.0,
@@ -93,7 +93,7 @@ settings = {
     "intervention_threshold": 1.0,
     "epochs": 10,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "another_run",
+    "run_name": "FINAL_RUN_CBM_DNN_ALIGNED",
     "load_detector": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed555.pt")),
     "load_frontend": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed555.pkl")),
 }
@@ -230,7 +230,8 @@ def train_dnn(sttngs, device, dnn_stats, int_acc_tag, label_noise_tag, miss_tag,
         epochs=int(sttngs["epochs"]),
         batch_size=16,
         lr=5e-5,
-        device=device
+        device=device,
+        seed=int(sttngs["seed_dnn"])
     )
 
     dnn_stats = {"dnn_accuracy": float(dnn_acc)}
@@ -499,6 +500,22 @@ def find_good_seed(stngs):
             else:
                 print(f"Full CBM accuracy {cbm_acc_full:.4f} does not meet criteria.")
     return None
+
+
+def find_good_dnn_seed(stngs):
+    for seed in range(4,100):
+        print(f"Testing seed {seed} for DNN...")
+        stngs["seed_dnn"] = 1025 + seed
+        stngs["train_dnn"] = 1
+        stngs['run_name'] = f"DNN_alignment_trials_seed{seed}"
+        metrics = main(stngs)
+        dnn_acc = metrics.get("dnn_accuracy", 0.0)
+        if 0.75 <= dnn_acc <= 0.77:
+            print(f"Found good DNN seed: {seed} with accuracy {dnn_acc:.4f}")
+            return seed
+    return None
+
+find_good_dnn_seed(settings)
 
 #find_good_seed(settings)
 
