@@ -21,7 +21,7 @@ ENV["PYTHONPATH"] = str(ROOT) + (os.pathsep + ENV.get("PYTHONPATH", ""))
 settings = {
     "seed": 1337,
     "difficulty": "hard",
-    "budgets": [0, 1, 2, 5, 10],
+    "budgets": [0, 1, 2],
     "force": 0,
     "reuse_detector": 1,
     "run_tag": "new_try",
@@ -30,8 +30,8 @@ settings = {
     "text_model": "distilbert-base-uncased",
 
     "best_human_acc": 1.00,
-    "expert_human_accs": [0.7, 0.80, 0.9, 1.00],
-    "subjective_human_accs": [0.7, 0.8, 0.9, 1.00],
+    "expert_human_accs": [0.80],
+    "subjective_human_accs": [0.8],
     "subjective_noise_rates": [0.20],
 
     "skip_fit": 1,
@@ -58,7 +58,7 @@ settings = {
 
     "seed_test_offset": 1234,
     "image_meta_catalog": "auto",
-"templates_file": str(ROOT / "concept_benchmark" / "synthetic" / "helper" / "static" / "text_templates" / "templates_simple.jsonl"),
+    "templates_file": str(ROOT / "concept_benchmark" / "synthetic" / "helper" / "static" / "text_templates" / "templates_simple.jsonl"),
 }
 
 
@@ -77,9 +77,13 @@ def parse_cli():
     ap.add_argument("--subjective_human_acc", type=float)
     ap.add_argument("--subjective_noise_rate", type=float)
     ap.add_argument("--label_model_type", type=str)
+    ap.add_argument("--label-model-type", dest="label_model_type", type=str)
     ap.add_argument("--label_model_alpha", type=float)
+    ap.add_argument("--label-model-alpha", dest="label_model_alpha", type=float)
     ap.add_argument("--label_model_bias", type=float)
+    ap.add_argument("--label-model-bias", dest="label_model_bias", type=float)
     ap.add_argument("--label_model_expr", type=str)
+    ap.add_argument("--label-model-expr", dest="label_model_expr", type=str)
     ap.add_argument("--templates_file", type=str)
     ap.add_argument("--redact_concepts", type=str)
     ap.add_argument("--redact_splits", type=str)
@@ -370,7 +374,7 @@ def make_run_name():
 def run():
     modality = str(settings.get("modality", "text"))
     model_id = str(settings.get("text_model", "distilbert-base-uncased")) if modality == "text" else "vit"
-    ensure_baseline(model_id=model_id, modality=modality)
+    # ensure_baseline(model_id=model_id, modality=modality)
 
     bb = str(find_metrics_json(modality, model_id, "test") or "")
 
@@ -384,90 +388,90 @@ def run():
         reverse=True,
     )
     det_path = det_candidates[0] if det_candidates else None
-    # if det_path is None:
-    #     anchor_flags = ["--variants-per-row", "1", "--concept-mode", "hard", "--skip-fit", "0", "--force-rerun", str(force)]
-    #     run_spec(
-    #         prefix="anchor",
-    #         regime="anchor",
-    #         human_acc=float(settings.get("best_human_acc", 1.0)),
-    #         blackbox_metrics=bb,
-    #         tag_suffix="cbm_anchor",
-    #         concept_source="detected",
-    #         extra_flags=anchor_flags,
-    #         detector_model=None,
-    #     )
-    #     det_candidates = sorted(
-    #         (results_dir / "robot_text").rglob(f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"),
-    #         key=lambda p: p.stat().st_mtime,
-    #         reverse=True,
-    #     )
-    #     det_path = det_candidates[0] if det_candidates else None
-    #     if det_path is None:
-    #         raise FileNotFoundError("Detector not produced for detected-CBM runs")
-    #
-    # def _listify(v):
-    #     if v is None:
-    #         return []
-    #     if isinstance(v, (list, tuple)):
-    #         return list(v)
-    #     if isinstance(v, str):
-    #         return [float(x) for x in v.split(",") if x.strip() != ""]
-    #     return [float(v)]
-    #
-    # # detected-CBM: best + expert sweeps
-    # cbm_flags = ["--skip-fit", "1"]
-    # run_spec(
-    #     prefix="cbm",
-    #     regime="best",
-    #     human_acc=float(settings.get("best_human_acc", 1.0)),
-    #     blackbox_metrics=bb,
-    #     tag_suffix="cbm",
-    #     concept_source="detected",
-    #     extra_flags=cbm_flags,
-    #     detector_model=str(det_path),
-    # )
-    # for h in _listify(settings.get("expert_human_accs")):
-    #     run_spec(
-    #         prefix="cbm",
-    #         regime="expert",
-    #         human_acc=float(h),
-    #         blackbox_metrics=bb,
-    #         tag_suffix="cbm",
-    #         concept_source="detected",
-    #         extra_flags=cbm_flags,
-    #         detector_model=str(det_path),
-    #     )
-    #
-    # # machine (LFCBM): best only
-    # lf_flags = []
-    # lf_flags += ["--lf-alpha", str(settings.get("lf_alpha", 0.5))]
-    # lf_flags += ["--lf-threshold", str(settings.get("lf_threshold", 0.5))]
-    # lf_flags += ["--lf-mode", str(settings.get("lf_mode", "soft"))]
-    # if bool(settings.get("lf_ridge", False)):
-    #     lf_flags += ["--lf-ridge"]
-    # lf_flags += ["--lf-ridge-alpha", str(settings.get("lf_ridge_alpha", 1.0))]
-    # lf_flags += ["--lf-encoder", str(settings.get("lf_encoder", "sentence-transformers/all-MiniLM-L6-v2"))]
-    # _lf_dev = settings.get("lf_device")
-    # if _lf_dev is None:
-    #     try:
-    #         import torch
-    #         _lf_dev = "cuda" if torch.cuda.is_available() else "cpu"
-    #     except Exception:
-    #         _lf_dev = "cpu"
-    # lf_flags += ["--lf-device", str(_lf_dev)]
-    # lf_flags += ["--lf-batch-size", str(settings.get("lf_batch_size", 64))]
-    # lf_flags += ["--lf-group-threshold", str(settings.get("lf_group_threshold", 0.9))]
-    #
-    # run_spec(
-    #     prefix="cbm",
-    #     regime="best",
-    #     human_acc=float(settings.get("best_human_acc", 1.0)),
-    #     blackbox_metrics=bb,
-    #     tag_suffix="lfcbm",
-    #     concept_source="machine",
-    #     extra_flags=lf_flags,
-    #     detector_model=None,
-    # )
+    if det_path is None:
+        anchor_flags = ["--variants-per-row", "1", "--concept-mode", "hard", "--skip-fit", "0", "--force-rerun", str(force)]
+        run_spec(
+            prefix="anchor",
+            regime="anchor",
+            human_acc=float(settings.get("best_human_acc", 1.0)),
+            blackbox_metrics=bb,
+            tag_suffix="cbm_anchor",
+            concept_source="detected",
+            extra_flags=anchor_flags,
+            detector_model=None,
+        )
+        det_candidates = sorted(
+            (results_dir / "robot_text").rglob(f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        det_path = det_candidates[0] if det_candidates else None
+        if det_path is None:
+            raise FileNotFoundError("Detector not produced for detected-CBM runs")
+
+    def _listify(v):
+        if v is None:
+            return []
+        if isinstance(v, (list, tuple)):
+            return list(v)
+        if isinstance(v, str):
+            return [float(x) for x in v.split(",") if x.strip() != ""]
+        return [float(v)]
+
+    # detected-CBM: best + expert sweeps
+    cbm_flags = ["--skip-fit", "1"]
+    run_spec(
+        prefix="cbm",
+        regime="best",
+        human_acc=float(settings.get("best_human_acc", 1.0)),
+        blackbox_metrics=bb,
+        tag_suffix="cbm",
+        concept_source="detected",
+        extra_flags=cbm_flags,
+        detector_model=str(det_path),
+    )
+    for h in _listify(settings.get("expert_human_accs")):
+        run_spec(
+            prefix="cbm",
+            regime="expert",
+            human_acc=float(h),
+            blackbox_metrics=bb,
+            tag_suffix="cbm",
+            concept_source="detected",
+            extra_flags=cbm_flags,
+            detector_model=str(det_path),
+        )
+
+    # machine (LFCBM): best only
+    lf_flags = []
+    lf_flags += ["--lf-alpha", str(settings.get("lf_alpha", 0.5))]
+    lf_flags += ["--lf-threshold", str(settings.get("lf_threshold", 0.5))]
+    lf_flags += ["--lf-mode", str(settings.get("lf_mode", "soft"))]
+    if bool(settings.get("lf_ridge", False)):
+        lf_flags += ["--lf-ridge"]
+    lf_flags += ["--lf-ridge-alpha", str(settings.get("lf_ridge_alpha", 1.0))]
+    lf_flags += ["--lf-encoder", str(settings.get("lf_encoder", "sentence-transformers/all-MiniLM-L6-v2"))]
+    _lf_dev = settings.get("lf_device")
+    if _lf_dev is None:
+        try:
+            import torch
+            _lf_dev = "cuda" if torch.cuda.is_available() else "cpu"
+        except Exception:
+            _lf_dev = "cpu"
+    lf_flags += ["--lf-device", str(_lf_dev)]
+    lf_flags += ["--lf-batch-size", str(settings.get("lf_batch_size", 64))]
+    lf_flags += ["--lf-group-threshold", str(settings.get("lf_group_threshold", 0.9))]
+
+    run_spec(
+        prefix="cbm",
+        regime="best",
+        human_acc=float(settings.get("best_human_acc", 1.0)),
+        blackbox_metrics=bb,
+        tag_suffix="lfcbm",
+        concept_source="machine",
+        extra_flags=lf_flags,
+        detector_model=None,
+    )
 
 
 def recompute_metrics():

@@ -33,7 +33,7 @@ settings = {
     "seed_balance_test": 1903,
     "out_dir": str(results_dir / "robot_baseline"),
     "label_model_expr": "",
-    "label_model_type": "deterministic",
+    "label_model_type": "stochastic",
     "label_model_alpha": 10.0,
     "label_model_bias": -0.2,
     "corr_pair": "",
@@ -600,7 +600,7 @@ if modality == "text":
     else:
         catalog_df = pd.DataFrame([dict(zip(cols, vals)) for vals in product(*[concepts[c] for c in cols])], columns=cols)
 
-    default_expr = "'glorp' if (min(int(str(row['has_antennae']).lower()=='true'), int(row['body_shape']=='square')) >= 1) else 'drent'"
+    default_expr = "5*int(row['mouth_type']=='closed') + 10*int(str(row['foot_shape']).startswith('pointy_')) - 3"
     expr = str(settings.get("label_model_expr", "") or "").strip()
     if ("label" in catalog_df.columns) and not expr:
         catalog_df["label"] = catalog_df["label"].astype(str)
@@ -609,9 +609,9 @@ if modality == "text":
         catalog_df["label"] = compute_label(
             catalog_df,
             label_expr,
-            label_model_type=settings.get("label_model_type", "deterministic"),
-            alpha=float(settings.get("label_model_alpha", 10.0)),
-            bias=float(settings.get("label_model_bias", -0.2)),
+            label_model_type=settings.get("label_model_type", "stochastic"),
+            alpha=float(settings.get("label_model_alpha", 1.0)),
+            bias=float(settings.get("label_model_bias", 0)),
             seed=int(settings.get("seed", 0)),
         )
     _lbl = catalog_df["label"].astype(str)
