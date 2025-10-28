@@ -7,7 +7,7 @@ import numpy as np
 from colorir import StackPalette
 from colorir import simplified_dist as colordist
 from pero import Color
-from scipy.special import expit
+
 
 # Color Schemes
 def generate_color_schemes(shuffle=True, random_seed=123456, include_flipped=True):
@@ -85,8 +85,8 @@ def model_to_logistic(model: str, weights: dict, scalar = 1.0, intercept = None)
             weight = weights[feature]
         old_pattern = f"int(row['{feature}']=={value})"
         new_pattern = f"{weight}*int(row['{feature}']=={value})"
+        expr = expr.replace(old_pattern, new_pattern)
 
-    expr = expr.replace(old_pattern, new_pattern)
     intercept = intercept if intercept is not None else num.group(1)
     expr += ' - ' + str(intercept)
 

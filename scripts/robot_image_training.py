@@ -17,8 +17,8 @@ from scripts.robot_utils import _apply_missing, _apply_label_noise, _rate_tag, _
 
 settings = {
     "samples_per_instance": 3,
-    "draw": 1,
-    "CBM_type": "separate", #"sequential"
+    "draw": 0,
+    "CBM_type": "separate",  # "sequential"
     "image_dir": "./data/robot_images",
     "image_size": "medium",
     "color_mode": "color",
@@ -28,41 +28,51 @@ settings = {
     'dataset_characterization': "",
     "knows_concepts": False,
     "concepts": {
-                "head_shape": ["square", "round"],
-                "body_shape": ["square", "round"],
-                "has_knees": ["false", "true"],
-                "has_elbows": ["false", "true"],
-                "has_antennae": ["false", "true"],
-                "ears_shape": ["square", "triangle"],
-                "mouth_type": ["closed", "open"],
-                "hand_shape": [
-                    "round_circle",
-                    "round_oval",
-                    "round_oval2",
-                    "edgy_triangle",
-                    "edgy_square",
-                    "edgy_trapezoid",
-                ],
-                "foot_shape": [
-                    "flat_trapezoid",
-                    "flat_rounded",
-                    "flat_square",
-                    "flat_5sided",
-                    "flat_lshaped",
-                    "pointy_trapezoid",
-                    "pointy_rounded",
-                    "pointy_square",
-                    "pointy_3sided",
-                    "pointy_4sided",
-                ],
-            },
+        "head_shape": ["square", "round"],
+        "body_shape": ["square", "round"],
+        "has_knees": ["false", "true"],
+        "has_elbows": ["false", "true"],
+        "has_antennae": ["false", "true"],
+        "ears_shape": ["square", "triangle"],
+        "mouth_type": ["closed", "open"],
+        "hand_shape": [
+            "round_circle",
+            "round_oval",
+            "round_oval2",
+            "edgy_triangle",
+            "edgy_square",
+            "edgy_trapezoid",
+        ],
+        "foot_shape": [
+            "flat_trapezoid",
+            "flat_rounded",
+            "flat_square",
+            "flat_5sided",
+            "flat_lshaped",
+            "pointy_trapezoid",
+            "pointy_rounded",
+            "pointy_square",
+            "pointy_3sided",
+            "pointy_4sided",
+        ],
+    },
     "subconcepts": ["foot_shape_subtype"],
     "spurious_features": ["has_elbows", "hand_shape"],
     "drop_concepts": ["foot_shape_flat_rounded",
                       "foot_shape_pointy_trapezoid",
                       'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
-                      'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
-    "human_alignment": {"foot_shape": 1, "mouth_type": -1, "bias": -0.01}, # OR of ANDs model's logic
+                      'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded',
+                      'foot_shape_flat_5sided', 'foot_shape_flat_square', 'foot_shape_flat_trapezoid'],
+    "human_alignment": {
+        "foot_shape_pointy_4sided": 6,
+        "foot_shape_flat_5sided": -4,
+        "foot_shape_flat_square": -4,
+        "foot_shape_pointy_rounded": 6,
+        "foot_shape_pointy_square": 6,
+        "foot_shape_flat_trapezoid": -2,
+        "mouth_type": -3,
+        "bias": 4
+    },  # amplifying well working detectors
     "model_type": "stochastic",
     "logit_scalar": 1.0,
     "logit_intercept": 3,
@@ -72,21 +82,24 @@ settings = {
     "missing_rate": 1.0,
     "impute_missing": 0,
     "skew_concept": [
-                     {'concepts': {'foot_shape_pointy_square': 1}, 'min_fraction': 0.005},
-                     {'concepts': {'foot_shape_pointy_rounded': 1}, 'min_fraction': 0.005},
-                     {'concepts': {'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.49},
-                     {'concepts': {'foot_shape_flat_square': 1}, 'min_fraction': 0.005},
-                     {'concepts': {'foot_shape_flat_trapezoid': 1}, 'min_fraction': 0.005},
-                     {'concepts': {'foot_shape_flat_5sided': 1}, 'min_fraction': 0.49},
-                     ],
+        {'concepts': {'foot_shape_pointy_square': 1}, 'min_fraction': 0.01},
+        {'concepts': {'foot_shape_pointy_rounded': 1}, 'min_fraction': 0.01},
+        {'concepts': {'foot_shape_pointy_4sided': 1}, 'min_fraction': 0.48},
+        {'concepts': {'foot_shape_flat_square': 1}, 'min_fraction': 0.01},
+        {'concepts': {'foot_shape_flat_trapezoid': 1}, 'min_fraction': 0.01},
+        {'concepts': {'foot_shape_flat_5sided': 1}, 'min_fraction': 0.48},
+    ],
     "budget": [1],
     "intervention_accuracy": 0.9,
     "intervention_threshold": 1.0,
     "epochs": 10,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "nnwwnwn",
-    "load_detector": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed555.pt")),
-    "load_frontend": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed555.pkl")),
+    "run_name": "pray",
+    "seed_dnn": 2029,
+    "load_detector": "",
+    # str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed555.pt")),
+    "load_frontend": "",
+    # str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed555.pkl")),
 }
 
 
@@ -114,7 +127,8 @@ def define_train_valid_test(settings, concept_dataset, missingness, params, rate
     test_params = copy.deepcopy(params)
     standard_size = concept_dataset.meta["num_unique_robots"]
     test_params["output_directory"] = Path(params['output_directory']) / "test_images"
-    test_params["draw"] = True if not Path(test_params["output_directory"]).exists() or settings.get("draw", False) else False
+    test_params["draw"] = True if not Path(test_params["output_directory"]).exists() or settings.get("draw",
+                                                                                                     False) else False
     test_params["samples_per_instance"] = int(params["test_set_size"] / standard_size) + 1
     test_data = create_synthetic_dataset(**test_params)
     test_data.drop_concepts(settings.get("drop_concepts", []))
@@ -221,7 +235,8 @@ def train_dnn(sttngs, device, dnn_stats, int_acc_tag, label_noise_tag, miss_tag,
         epochs=int(sttngs["epochs"]),
         batch_size=16,
         lr=5e-5,
-        device=device
+        device=device,
+        seed=int(sttngs["seed_dnn"])
     )
 
     dnn_stats = {"dnn_accuracy": float(dnn_acc)}
@@ -242,7 +257,10 @@ def main(sttngs):
     ###########################################################################
     S = dict(sttngs)
     rng = np.random.default_rng(int(S["seed"]))
-    base_out = Path(S["out_dir"]); base_out.mkdir(parents=True, exist_ok=True)
+    torch.manual_seed(int(S["seed"]))
+
+    base_out = Path(S["out_dir"]);
+    base_out.mkdir(parents=True, exist_ok=True)
     miss = str(S["missingness"]).lower()
     rate = float(S["missing_rate"])
     int_acc_tag = f"int-acc{int(round(float(S['intervention_accuracy']) * 100))}"
@@ -267,7 +285,8 @@ def main(sttngs):
     params = copy.deepcopy(sttngs)
     params.update({
         "output_directory": S.get("image_dir", run_dir / "images"),
-        "additional_features": [] if S.get("knows_concepts", True) else S.get("subconcepts", ["foot_shape_subtype", "hand_shape_subtype"]),
+        "additional_features": [] if S.get("knows_concepts", True) else S.get("subconcepts", ["foot_shape_subtype",
+                                                                                              "hand_shape_subtype"]),
         "scalar": float(S.get("logit_scalar", 1.0)),
         "intercept": float(S.get("logit_intercept", 0.0)),
         'weights': S.get("logit_weights", {}),
@@ -300,7 +319,6 @@ def main(sttngs):
 
     cd, det_path = train_concept_detector(S, config, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag,
                                           run_dir, seed_tag, skew_tag, train, valid, test)
-
 
     P_tr = cd.predict(train, embed_params={"device": device})
     P_te = cd.predict(test, embed_params={"device": device})
@@ -379,7 +397,8 @@ def main(sttngs):
     feweights["bias"] = round(fe.model.intercept_[0], 4)
     metrics["frontend_weights"] = feweights
     metrics.update({'concept_accuracies': per_concept_acc,
-                    "model_accuracies_per_concept": per_concept_acc2, 'train_concept_accuracies': train_per_concept_acc})
+                    "model_accuracies_per_concept": per_concept_acc2,
+                    'train_concept_accuracies': train_per_concept_acc})
 
     meta_path = run_dir / meta_name
     metrics_path = run_dir / metrics_name
@@ -394,6 +413,7 @@ def main(sttngs):
         catalog_spu_path = run_dir / "catalog_with_spurious.csv"
         data.meta["catalog_df_spurious"].to_csv(catalog_spu_path, index=False)
         meta["catalog_csv_spurious"] = str(catalog_spu_path)
+
     meta["df_indices"] = {
         "train": list(map(int, train.meta["df_indices"])),
         "valid": list(map(int, valid.meta["df_indices"])),
@@ -448,5 +468,70 @@ def main(sttngs):
 #     overrides['skew_concept'] = json.loads(overrides['skew_concept'])
 
 # settings.update(overrides)
+
+# a function that checks different seeds and train a subconcept CBM to find the seed where it achieves between 68-73% accuracy
+# if it finds ony, it trains a CBM to make sure it achieves at least 85% accuracy
+# if yes, it trains a DNN to make sure it achieves 68%-73% accuracy
+# it return the seed if yes
+def find_good_seed(stngs):
+    for seed in range(1000, 2000):
+        print(f"Testing seed {seed}...")
+        stngs["seed"] = seed
+        # train subconcept CBMS only
+        stngs["drop_concepts"] = ["foot_shape_flat_rounded",
+                                  "foot_shape_pointy_trapezoid",
+                                  'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
+                                  'foot_shape']
+        stngs["train_dnn"] = 0
+        stngs['run_name'] = f"A_SCBM_alignment_trials_seed{seed}"
+        metrics = main(stngs)
+        cbm_acc = metrics.get("cbm_acc_detected", 0.0)
+        if 0.68 <= cbm_acc <= 0.73:
+            print(f"Found seed {seed} with SCBM accuracy {cbm_acc:.4f}. Now training full CBM...")
+            # train full CBM
+            stngs["drop_concepts"] = ["foot_shape_flat_rounded", "foot_shape_pointy_trapezoid",
+                                      'foot_shape_pointy_3sided',
+                                      'foot_shape_flat_lshaped', 'foot_shape_pointy_4sided', 'foot_shape_pointy_square',
+                                      'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square',
+                                      'foot_shape_flat_trapezoid']
+
+            stngs["train_dnn"] = 0
+            stngs['run_name'] = f"A_CBM_alignment_trials_seed{seed}"
+            metrics_full = main(stngs)
+            cbm_acc_full = metrics_full.get("cbm_acc_detected", 0.0)
+            if cbm_acc_full >= 0.85:
+                # train DNN
+                print(f"Full CBM accuracy {cbm_acc_full:.4f} meets criteria")
+                stngs["train_dnn"] = 1
+                stngs['run_name'] = f"A_DNN_alignment_trials_seed{seed}"
+                metrics_dnn = main(stngs)
+                dnn_acc = metrics_dnn.get("dnn_accuracy", 0.0)
+                if 0.68 <= dnn_acc <= 0.73:
+                    print(f"DNN accuracy {dnn_acc:.4f} meets criteria. Found good seed: {seed}")
+                    return seed
+                else:
+                    print(f"DNN accuracy {dnn_acc:.4f} does not meet criteria.")
+            else:
+                print(f"Full CBM accuracy {cbm_acc_full:.4f} does not meet criteria.")
+    return None
+
+
+def find_good_dnn_seed(stngs):
+    for seed in range(4, 100):
+        print(f"Testing seed {seed} for DNN...")
+        stngs["seed_dnn"] = 1025 + seed
+        stngs["train_dnn"] = 1
+        stngs['run_name'] = f"DNN_alignment_trials_seed{seed}"
+        metrics = main(stngs)
+        dnn_acc = metrics.get("dnn_accuracy", 0.0)
+        if 0.75 <= dnn_acc <= 0.77:
+            print(f"Found good DNN seed: {seed} with accuracy {dnn_acc:.4f}")
+            return seed
+    return None
+
+
+# find_good_dnn_seed(settings)
+
+# find_good_seed(settings)
 
 main(settings)

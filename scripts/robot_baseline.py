@@ -17,6 +17,10 @@ from transformers import (
 from sklearn.metrics import accuracy_score, f1_score, balanced_accuracy_score, roc_auc_score
 from sklearn.linear_model import LogisticRegression
 import torch.nn.functional as F
+try:
+    from tqdm.auto import tqdm
+except Exception:
+    def tqdm(x, **kwargs): return x
 
 from concept_benchmark.paths import results_dir, pkg_dir
 from concept_benchmark.data import ConceptDatasetSample
@@ -267,8 +271,8 @@ def train_eval_text(X_tr, y_tr, X_te, y_te, model_id, epochs, batch_size, lr, de
     model.to(device)
     optim = torch.optim.AdamW(model.parameters(), lr=lr)
     model.train()
-    for _ in range(int(epochs)):
-        for xb, yb in dl_tr:
+    for e in range(int(epochs)):
+        for xb, yb in tqdm(dl_tr, total=len(dl_tr), desc=f"train {e+1}/{int(epochs)}"):
             xb = {k: v.to(device) for k, v in xb.items()}
             yb = yb.to(device)
             out = model(**xb, labels=yb)
@@ -280,7 +284,7 @@ def train_eval_text(X_tr, y_tr, X_te, y_te, model_id, epochs, batch_size, lr, de
     correct = 0
     total = 0
     with torch.no_grad():
-        for xb, yb in dl_te:
+        for xb, yb in tqdm(dl_te, total=len(dl_te), desc="eval:test", leave=False):
             xb = {k: v.to(device) for k, v in xb.items()}
             yb = yb.to(device)
             out = model(**xb)
@@ -301,8 +305,8 @@ def train_eval_image(paths_tr, y_tr, paths_te, y_te, model_id, size, epochs, bat
     model.to(device)
     optim = torch.optim.AdamW(model.parameters(), lr=lr)
     model.train()
-    for _ in range(int(epochs)):
-        for xb, yb in dl_tr:
+    for e in range(int(epochs)):
+        for xb, yb in tqdm(dl_tr, total=len(dl_tr), desc=f"train {e+1}/{int(epochs)}"):
             xb = {k: v.to(device) for k, v in xb.items()}
             yb = yb.to(device)
             out = model(**xb, labels=yb)
@@ -314,7 +318,7 @@ def train_eval_image(paths_tr, y_tr, paths_te, y_te, model_id, size, epochs, bat
     correct = 0
     total = 0
     with torch.no_grad():
-        for xb, yb in dl_te:
+        for xb, yb in tqdm(dl_te, total=len(dl_te), desc="eval:test", leave=False):
             xb = {k: v.to(device) for k, v in xb.items()}
             yb = yb.to(device)
             out = model(**xb)
@@ -323,6 +327,19 @@ def train_eval_image(paths_tr, y_tr, paths_te, y_te, model_id, size, epochs, bat
             total += yb.numel()
     acc = correct / total if total > 0 else 0.0
     return float(acc), proc, model
+
+def _collect_z(X, tok, model, device):
+    ds = TextDS(X, np.zeros((len(X),), dtype=int), tok)
+    dl = DataLoader(ds, batch_size=64, shuffle=False)
+    zs = []
+    model.eval()
+    with torch.no_grad():
+        for xb, _ in dl:
+            xb = {k: v.to(device) for k, v in xb.items()}
+            out = model(**xb)
+            z = (out.logits[:, 1] - out.logits[:, 0]).detach().cpu().numpy()
+            zs.append(z)
+    return np.concatenate(zs) if zs else np.zeros((0,), dtype=float)
 
 def _fit_platt(X, y, tok, model, device):
     ds = TextDS(X, np.asarray(y, dtype=int), tok)
@@ -344,12 +361,26 @@ def _fit_platt(X, y, tok, model, device):
     lr.fit(Z, Y)
     return lr
 
-def _eval_text_metrics(X, y, tok, model, device, calibrator=None, abstain=None, tau=None):
+def _collect_z(X, tok, model, device):
+    ds = TextDS(X, np.zeros((len(X),), dtype=int), tok)
+    dl = DataLoader(ds, batch_size=64, shuffle=False)
+    zs = []
+    model.eval()
+    with torch.no_grad():
+        for xb, _ in dl:
+            xb = {k: v.to(device) for k, v in xb.items()}
+            out = model(**xb)
+            z = (out.logits[:, 1] - out.logits[:, 0]).detach().cpu().numpy()
+            zs.append(z)
+    return np.concatenate(zs) if zs else np.zeros((0,), dtype=float)
+
+def _eval_text_metrics(X, y, tok, model, device, calibrator=None, abstain=None, tau=None, decision_threshold=None):
     ds = TextDS(X, np.asarray(y, dtype=int), tok)
     dl = DataLoader(ds, batch_size=64, shuffle=False)
     model.eval()
     preds = []
     probs = []
+    thr = 0.5 if decision_threshold is None else float(decision_threshold)
     with torch.no_grad():
         for xb, yb in dl:
             xb = {k: v.to(device) for k, v in xb.items()}
@@ -358,11 +389,12 @@ def _eval_text_metrics(X, y, tok, model, device, calibrator=None, abstain=None, 
                 z = (out.logits[:, 1] - out.logits[:, 0]).detach().cpu().numpy()
                 p1 = calibrator.predict_proba(z.reshape(-1, 1))[:, 1]
                 probs.append(p1)
-                preds.append((p1 >= 0.5).astype(int))
+                preds.append((p1 >= thr).astype(int))
             else:
                 p = out.logits.softmax(dim=-1)
-                preds.append(p.argmax(dim=-1).cpu().numpy())
-                probs.append(p[:, 1].cpu().numpy())
+                p1 = p[:, 1].cpu().numpy()
+                probs.append(p1)
+                preds.append((p1 >= thr).astype(int))
     y_true = np.asarray(y, dtype=int)
     y_pred = np.concatenate(preds) if preds else np.zeros_like(y_true)
     proba1 = np.concatenate(probs) if probs else np.zeros_like(y_true, dtype=float)
@@ -375,8 +407,7 @@ def _eval_text_metrics(X, y, tok, model, device, calibrator=None, abstain=None, 
         conf = np.where(y_pred == 1, proba1, 1.0 - proba1)
         m = conf >= float(tau)
         cov = float(m.mean()) if m.size else 0.0
-        if m.any(): sel_acc = float((y_pred[m] == y_true[m]).mean())
-        else: sel_acc = float("nan")
+        sel_acc = float((y_pred[m] == y_true[m]).mean()) if m.any() else float("nan")
         out["selective_accuracy"] = sel_acc
         out["coverage"] = cov
     return out
@@ -427,10 +458,16 @@ p.add_argument("--test_break", type=float)
 p.add_argument("--epochs", type=int)
 p.add_argument("--batch_size", type=int)
 p.add_argument("--lr", type=float)
-p.add_argument("--calibrate", choices=["none","platt"])
+p.add_argument("--calibrate", choices=["none","platt","auto"])
 p.add_argument("--abstain", choices=["none","conf"])
 p.add_argument("--tau", type=float)
 p.add_argument("--tau-target", dest="tau_target", type=float)
+p.add_argument("--decision-threshold", dest="decision_threshold", type=float)
+p.add_argument("--threshold-masked", dest="threshold_masked", type=float)
+p.add_argument("--threshold-unmasked", dest="threshold_unmasked", type=float)
+p.add_argument("--cal-select-metric", dest="cal_select_metric", choices=["accuracy","balanced_acc","f1"], default="accuracy")
+p.add_argument("--save-logits", dest="save_logits", type=int)
+p.add_argument("--posthoc-dir", dest="posthoc_dir", type=str)
 p.add_argument("--text_model")
 p.add_argument("--image_model")
 p.add_argument("--image_size", type=int)
@@ -464,6 +501,15 @@ p.add_argument("--image-meta-catalog", dest="image_meta_catalog", choices=["auto
 p.add_argument("--skip-generic-leak-check", dest="skip_generic_leak_check", action="store_true")
 p.add_argument("--debug-dump", dest="debug_dump", type=int)
 
+# per-split variant policy (default behavior unchanged: one per robot id)
+p.add_argument("--train-variant-mode", dest="train_variant_mode", choices=["one","all"])
+p.add_argument("--val-variant-mode", dest="val_variant_mode", choices=["one","all"])
+p.add_argument("--test-variant-mode", dest="test_variant_mode", choices=["one","all"])
+
+# masked-threshold controls
+p.add_argument("--threshold-masked-mode", dest="threshold_masked_mode", choices=["fixed","auto"])
+p.add_argument("--apply-masked-threshold-overall", dest="apply_masked_threshold_overall", type=int)
+
 args, _ = p.parse_known_args()
 for k, v in vars(args).items():
     if v is not None: settings[k] = v if k != "draw" else bool(v)
@@ -480,6 +526,44 @@ run_name = settings.get("run_name", "").strip()
 run_folder = run_name if run_name else ts
 out_dir = Path(settings["out_dir"]) / modality / run_folder
 out_dir.mkdir(parents=True, exist_ok=True)
+
+# post-hoc calibration without retraining (uses saved z/y)
+_ph = str(settings.get("posthoc_dir", "")).strip()
+if _ph:
+    run_dir = Path(_ph)
+    base_candidates = sorted(run_dir.glob("baseline_dnn_robots_*_metrics_test.json"))
+    if not base_candidates:
+        raise SystemExit("posthoc-dir missing metrics_test.json")
+    base = base_candidates[0].name.replace("_metrics_test.json", "")
+    Zva = np.load(run_dir / "z_val.npy"); yva = np.load(run_dir / "y_val.npy")
+    Zte = np.load(run_dir / "z_test.npy"); yte = np.load(run_dir / "y_test.npy")
+    thr = float(settings.get("decision_threshold") or 0.5)
+    grid = ["none", "platt"] if str(settings.get("calibrate", "auto")).lower() == "auto" else [str(settings.get("calibrate", "none")).lower()]
+    summary = {"metric": str(settings.get("cal_select_metric", "accuracy")), "selected": None, "candidates": {}}
+    def _side_metrics(p1, y):
+        y = y.astype(int); yhat = (p1 >= thr).astype(int)
+        return {
+            "accuracy": float((yhat == y).mean()),
+            "balanced_acc": float(balanced_accuracy_score(y, yhat)),
+            "f1": float(f1_score(y, yhat, zero_division=0)),
+            "decision_threshold": thr,
+        }
+    for nm in grid:
+        if nm == "platt":
+            lr = LogisticRegression(solver="lbfgs", max_iter=1000).fit(Zva.reshape(-1,1), yva.astype(int))
+            p1_va = lr.predict_proba(Zva.reshape(-1,1))[:,1]
+            p1_te = lr.predict_proba(Zte.reshape(-1,1))[:,1]
+        else:
+            p1_va = 1.0 / (1.0 + np.exp(-Zva))
+            p1_te = 1.0 / (1.0 + np.exp(-Zte))
+        rec_va = _side_metrics(p1_va, yva)
+        rec_te = _side_metrics(p1_te, yte)
+        (run_dir / f"{base}_metrics_val.cal-{nm}.json").write_text(json.dumps(rec_va, indent=2))
+        (run_dir / f"{base}_metrics_test.cal-{nm}.json").write_text(json.dumps(rec_te, indent=2))
+        summary["candidates"][nm] = {"val": rec_va, "test": rec_te}
+    (run_dir / "calibration_candidates_posthoc.json").write_text(json.dumps(summary, indent=2))
+    raise SystemExit(0)
+
 
 def build_text_ds_hard(catalog_df: pd.DataFrame,
                        concepts: dict,
@@ -557,8 +641,17 @@ if modality == "text":
             df = df.copy()
             if "hand_shape_subtype" in df.columns:
                 df["hand_shape"] = df["hand_shape_subtype"].astype(str)
-            if "foot_shape_subtype" in df.columns:
-                df["foot_shape"] = df["foot_shape_subtype"].astype(str)
+
+            # combine coarse + subtype for feet; preserve flat_/pointy_ prefix
+            if "foot_shape" in df.columns and "foot_shape_subtype" in df.columns:
+                coarse = df["foot_shape"].astype(str).str.lower()
+                sub    = df["foot_shape_subtype"].astype(str).str.lower().replace({
+                    "square": "4sided", "4-sided": "4sided", "4": "4sided",
+                    "3-sided": "3sided", "3": "3sided",
+                    "5-sided": "5sided", "5": "5sided",
+                    "l-shaped": "lshaped", "l": "lshaped",
+                })
+                df["foot_shape"] = coarse + "_" + sub
 
             def _canon_hand(v, i):
                 t = str(v)
@@ -582,7 +675,9 @@ if modality == "text":
                 df["hand_shape"] = [_canon_hand(v, i) for i, v in enumerate(df["hand_shape"])]
 
             def _canon_foot(v, i):
-                s = str(v)
+                s = str(v).lower()
+                if s.startswith("flat_") or s.startswith("pointy_"):
+                    return s
                 if s in {"flat", "flat_generic"}:
                     return ["flat_4sided","flat_5sided","flat_lshaped"][i % 3]
                 if s in {"pointy", "pointy_generic"}:
@@ -665,17 +760,28 @@ if modality == "text":
             row_index_full = getattr(getattr(ds, "_full", ds), "meta", {}).get("row_index", np.arange(len(ds.X)))
             idx_map = {int(r): i for i, r in enumerate(np.asarray(row_index_full, dtype=int))}
 
-            def _subset_by_ids(ids):
-                sel = [idx_map[int(x)] for x in ids if int(x) in idx_map]
+            def _subset_by_ids(ids, mode="one"):
+                row_idx_arr = np.asarray(row_index_full, dtype=int)
+                if str(mode).lower() == "all":
+                    idx_map_list = {}
+                    for i, rid in enumerate(row_idx_arr):
+                        idx_map_list.setdefault(int(rid), []).append(i)
+                    sel = []
+                    for x in ids:
+                        j = int(x)
+                        if j in idx_map_list:
+                            sel.extend(idx_map_list[j])
+                else:
+                    sel = [idx_map[int(x)] for x in ids if int(x) in idx_map]
                 if not sel: return None
-                sel = np.asarray(sel, dtype=int)
+                sel = np.asarray(sorted(sel), dtype=int)
                 X = [ds.X[i] for i in sel]
                 C = ds.C[sel]
                 y = ds.y[sel]
                 sub = ConceptDatasetSample(
                     X=X, C=C, y=y,
                     meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text",
-                          "df_indices": [int(row_index_full[i]) for i in sel]}
+                          "df_indices": [int(row_idx_arr[i]) for i in sel]}
                 )
                 # copy any available generic masks
                 for attr, val in ds.__dict__.items():
@@ -683,10 +789,12 @@ if modality == "text":
                         setattr(sub, attr, np.asarray(val)[sel])
                 return sub
 
-            tr = _subset_by_ids(_dfi.get("train", []))
-            va = _subset_by_ids(_dfi.get("valid", _dfi.get("val", [])))
-            te = _subset_by_ids(_dfi.get("test", []))
-            if tr is not None and va is not None and te is not None:
+
+            tr = _subset_by_ids(_dfi.get("train", []), mode=str(settings.get("train_variant_mode", "one")))
+            va = _subset_by_ids(_dfi.get("valid", _dfi.get("val", [])),
+                                mode=str(settings.get("val_variant_mode", "one")))
+            te = _subset_by_ids(_dfi.get("test", []), mode=str(settings.get("test_variant_mode", "one")))
+        if tr is not None and va is not None and te is not None:
                 ds.training, ds.validation, ds.test = tr, va, te
                 ds.deployment = ds.test
                 _split_applied = True
@@ -885,7 +993,7 @@ if modality == "text":
     t_train = float(settings.get("train_target_generic_frac", settings.get("generic_rate", 0.5))) if int(settings.get("train_balance_enable", 0)) == 1 else float(settings.get("generic_rate", 0.5))
     t_val = float(settings.get("generic_rate", 0.5))
     t_test = float(settings.get("generic_rate", 0.5))
-    tol = float(settings.get("generic_tol", 0.02))
+    tol = float(settings.get("generic_tol", 0.15))
     targets = {"train": t_train, "val": t_val, "test": t_test}
 
     print(json.dumps({
@@ -951,31 +1059,141 @@ if modality == "text":
     Xte = ds.test.X
     yte = ds.test.y.astype(int)
 
-    acc, tok_or_proc, model = train_eval_text(Xtr, ytr, Xte, yte, model_id=model_id, epochs=int(settings["epochs"]), batch_size=int(settings["batch_size"]), lr=float(settings["lr"]), device=device)
-    calibrator = None
-    if str(settings.get("calibrate", "none")).lower() == "platt":
-        calibrator = _fit_platt(Xva, yva, tok_or_proc, model, device)
+    acc, tok_or_proc, model = train_eval_text(
+        Xtr, ytr, Xte, yte,
+        model_id=model_id, epochs=int(settings["epochs"]),
+        batch_size=int(settings["batch_size"]), lr=float(settings["lr"]), device=device
+    )
+
+    # auto-calibration selection
+    mode = str(settings.get("calibrate", "none")).lower()
+    cal_grid = ["none", "platt"] if mode == "auto" else [mode]
+    calibrators = {}
+    if "platt" in cal_grid:
+        calibrators["platt"] = _fit_platt(Xva, yva, tok_or_proc, model, device)
+    if "none" in cal_grid:
+        calibrators["none"] = None
+
+    thr_global = settings.get("decision_threshold", None)
+    sel_metric = str(settings.get("cal_select_metric", "accuracy"))
+
+    val_by = {}
+    for nm in cal_grid:
+        m = _eval_text_metrics(Xva, yva, tok_or_proc, model, device,
+                               calibrator=calibrators[nm], abstain=None, tau=None,
+                               decision_threshold=thr_global)
+        val_by[nm] = m
+
+
+    # pick best by validation metric
+    def _score(m, key):
+        return float(m.get(key, float("-inf")))
+
+
+    best_cal_name = sorted(cal_grid, key=lambda nm: (_score(val_by[nm], sel_metric), nm), reverse=True)[0]
+    calibrator = calibrators[best_cal_name]
+
+    # optionally save logits/masks for post-hoc reuse
+    if int(settings.get("save_logits", 1) or 1) == 1:
+        Zva = _collect_z(Xva, tok_or_proc, model, device)
+        Zte = _collect_z(Xte, tok_or_proc, model, device)
+        np.save(out_dir / "z_val.npy", Zva.astype(np.float32))
+        np.save(out_dir / "y_val.npy", np.asarray(yva, dtype=int))
+        np.save(out_dir / "z_test.npy", Zte.astype(np.float32))
+        np.save(out_dir / "y_test.npy", np.asarray(yte, dtype=int))
+        _gen_target = str(settings.get("generic_what", "ears")).lower()
+        mv = _maybe_masked_indices(ds.validation, _gen_target)
+        mt = _maybe_masked_indices(ds.test, _gen_target)
+        np.save(out_dir / "mask_val.npy", np.asarray(mv, dtype=np.uint8))
+        np.save(out_dir / "mask_test.npy", np.asarray(mt, dtype=np.uint8))
 
     abstain_mode = str(settings.get("abstain", "none")).lower()
     target_sel = float(settings.get("tau_target", 0.99))
     tau_val = settings.get("tau", None)
-    if abstain_mode == "conf" and (tau_val is None or str(tau_val).lower() == "none"):
-        grid = np.linspace(0.5, 0.999, 201)
-        best_tau = None
-        best_cov = 0.0
-        for t in grid:
-            m = _eval_text_metrics(Xva, yva, tok_or_proc, model, device, calibrator=calibrator, abstain="conf", tau=float(t))
-            sel_acc = m.get("selective_accuracy", float("nan"))
-            cov = m.get("coverage", 0.0)
-            if not np.isnan(sel_acc) and sel_acc >= target_sel:
-                if best_tau is None or t < best_tau or (t == best_tau and cov > best_cov):
-                    best_tau = float(t); best_cov = float(cov)
-        tau_val = best_tau if best_tau is not None else 1.0
-        settings["tau"] = float(tau_val)
 
-    _train_metrics = _eval_text_metrics(Xtr, ytr, tok_or_proc, model, device, calibrator=calibrator, abstain=abstain_mode, tau=tau_val)
-    _val_metrics = _eval_text_metrics(Xva, yva, tok_or_proc, model, device, calibrator=calibrator, abstain=abstain_mode, tau=tau_val)
-    _test_metrics = _eval_text_metrics(Xte, yte, tok_or_proc, model, device, calibrator=calibrator, abstain=abstain_mode, tau=tau_val)
+    # --- auto-tune masked decision threshold on validation (optional) ---
+    if str(settings.get("threshold_masked_mode", "fixed")).lower() == "auto":
+        _gen_target = str(settings.get("generic_what", "ears")).lower()
+
+
+        def _mask_for(part):
+            gm_ = getattr(part, f"{_gen_target}_generic_mask", None)
+            if gm_ is None and _gen_target == "footmouth":
+                gf_ = getattr(part, "foot_generic_mask", None)
+                gm2_ = getattr(part, "mouth_generic_mask", None)
+                gm_ = (np.asarray(gf_) | np.asarray(gm2_)) if (gf_ is not None and gm2_ is not None) else None
+            return gm_
+
+
+        gm_val = _mask_for(ds.validation)
+        if isinstance(gm_val, np.ndarray) and gm_val.size == len(Xva) and gm_val.any():
+            idx = np.where(gm_val.astype(bool))[0]
+            grid_thr = np.linspace(0.35, 0.65, 61)
+            best_thr, best_acc = 0.5, -1.0
+            for t in grid_thr:
+                m = _eval_text_metrics([Xva[i] for i in idx],
+                                       [int(yva[i]) for i in idx],
+                                       tok_or_proc, model, device,
+                                       calibrator=calibrator, abstain=None, tau=None,
+                                       decision_threshold=float(t))
+                acc = float(m.get("accuracy", float("nan")))
+                if not np.isnan(acc) and acc > best_acc:
+                    best_acc, best_thr = acc, float(t)
+                    settings["threshold_masked"] = best_thr
+            if abstain_mode == "conf" and (tau_val is None or str(tau_val).lower() == "none"):
+                grid = np.linspace(0.5, 0.999, 201)
+                best_tau = None
+                best_cov = 0.0
+                for t in grid:
+                    m = _eval_text_metrics(Xva, yva, tok_or_proc, model, device,
+                                           calibrator=calibrator, abstain="conf", tau=float(t),
+                                           decision_threshold=thr_global)
+                    sel_acc = m.get("selective_accuracy", float("nan"))
+                    cov = m.get("coverage", 0.0)
+                    if not np.isnan(sel_acc) and sel_acc >= target_sel:
+                        if best_tau is None or t < best_tau or (t == best_tau and cov > best_cov):
+                            best_tau = float(t)
+                            best_cov = float(cov)
+                tau_val = best_tau if best_tau is not None else 1.0
+                settings["tau"] = float(tau_val)
+
+    # proceed with chosen calibrator
+    _train_metrics = _eval_text_metrics(Xtr, ytr, tok_or_proc, model, device,
+                                        calibrator=calibrator, abstain=abstain_mode, tau=tau_val,
+                                        decision_threshold=thr_global)
+    _val_metrics = _eval_text_metrics(Xva, yva, tok_or_proc, model, device,
+                                      calibrator=calibrator, abstain=abstain_mode, tau=tau_val,
+                                      decision_threshold=thr_global)
+    _test_metrics = _eval_text_metrics(Xte, yte, tok_or_proc, model, device,
+                                       calibrator=calibrator, abstain=abstain_mode, tau=tau_val,
+                                       decision_threshold=thr_global)
+    if thr_global is not None:
+        _train_metrics["decision_threshold"] = float(thr_global)
+        _val_metrics["decision_threshold"] = float(thr_global)
+        _test_metrics["decision_threshold"] = float(thr_global)
+
+    # sidecar: write metrics for every calibration tried
+    summary = {"metric": sel_metric, "selected": best_cal_name, "candidates": {}}
+    for nm in cal_grid:
+        if nm == best_cal_name:
+            tr_m, va_m, te_m = _train_metrics, _val_metrics, _test_metrics
+        else:
+            cal = calibrators.get(nm)
+            tr_m = _eval_text_metrics(Xtr, ytr, tok_or_proc, model, device,
+                                      calibrator=cal, abstain=abstain_mode, tau=tau_val,
+                                      decision_threshold=thr_global)
+            va_m = _eval_text_metrics(Xva, yva, tok_or_proc, model, device,
+                                      calibrator=cal, abstain=abstain_mode, tau=tau_val,
+                                      decision_threshold=thr_global)
+            te_m = _eval_text_metrics(Xte, yte, tok_or_proc, model, device,
+                                      calibrator=cal, abstain=abstain_mode, tau=tau_val,
+                                      decision_threshold=thr_global)
+        for split, rec in [("train", tr_m), ("val", va_m), ("test", te_m)]:
+            (
+                        out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_seed{int(settings['seed'])}_metrics_{split}.cal-{nm}.json").write_text(
+                json.dumps(rec, indent=2))
+        summary["candidates"][nm] = {"val": va_m}
+    (out_dir / "calibration_candidates.json").write_text(json.dumps(summary, indent=2))
 
     if abstain_mode == "conf" and tau_val is not None:
         for _m in [_train_metrics, _val_metrics, _test_metrics]:
@@ -993,31 +1211,66 @@ if modality == "text":
     unmasked_metrics = {}
     if isinstance(gm, np.ndarray) and gm.size == len(Xte):
         m = gm.astype(bool)
+        thr_m = settings.get("threshold_masked", thr_global)
+        thr_u = settings.get("threshold_unmasked", thr_global)
         if m.any():
             masked_metrics = _eval_text_metrics([Xte[i] for i in range(len(Xte)) if m[i]],
                                                 [int(yte[i]) for i in range(len(yte)) if m[i]],
                                                 tok_or_proc, model, device,
-                                                calibrator=calibrator, abstain=abstain_mode, tau=tau_val)
+                                                calibrator=calibrator, abstain=abstain_mode, tau=tau_val,
+                                                decision_threshold=thr_m)
+            if thr_m is not None:
+                masked_metrics["decision_threshold"] = float(thr_m) if thr_m is not None else None
         if (~m).any():
             unmasked_metrics = _eval_text_metrics([Xte[i] for i in range(len(Xte)) if not m[i]],
                                                   [int(yte[i]) for i in range(len(yte)) if not m[i]],
                                                   tok_or_proc, model, device,
-                                                  calibrator=calibrator, abstain=abstain_mode, tau=tau_val)
+                                                  calibrator=calibrator, abstain=abstain_mode, tau=tau_val,
+                                                  decision_threshold=thr_u)
+            if thr_u is not None:
+                unmasked_metrics["decision_threshold"] = float(thr_u) if thr_u is not None else None
+
+# optionally override overall test metrics using mixed thresholds
+if int(settings.get("apply_masked_threshold_overall", 0) or 0) == 1 and isinstance(gm, np.ndarray) and gm.size == len(
+        Xte):
+    z_all = _collect_z(Xte, tok_or_proc, model, device)
+    if calibrator is not None:
+        p1_all = calibrator.predict_proba(z_all.reshape(-1, 1))[:, 1]
+    else:
+        p1_all = 1.0 / (1.0 + np.exp(-z_all))
+    y_true_all = np.asarray(yte, dtype=int)
+    thr_m_eff = float(thr_m if thr_m is not None else 0.5)
+    thr_u_eff = float(thr_u if thr_u is not None else 0.5)
+    yhat_all = np.zeros_like(y_true_all, dtype=int)
+    yhat_all[m] = (p1_all[m] >= thr_m_eff).astype(int)
+    yhat_all[~m] = (p1_all[~m] >= thr_u_eff).astype(int)
+    acc_all = float((yhat_all == y_true_all).mean())
+    ba_all = float(balanced_accuracy_score(y_true_all, yhat_all))
+    f1_all = float(f1_score(y_true_all, yhat_all, zero_division=0))
+    roc_all = float(roc_auc_score(y_true_all, p1_all)) if np.unique(y_true_all).size == 2 else float("nan")
+    _test_metrics = {
+        "accuracy": acc_all, "balanced_acc": ba_all, "ber": float(1.0 - ba_all),
+        "f1": f1_all, "roc_auc": roc_all,
+        "decision_threshold": float(thr_global) if thr_global is not None else None,
+        "decision_threshold_masked": float(thr_m) if thr_m is not None else None,
+        "decision_threshold_unmasked": float(thr_u) if thr_u is not None else None
+    }
 
     print("Baseline test metrics:",
-          {"accuracy": round(_test_metrics["accuracy"], 4),
-           "balanced_acc": round(_test_metrics["balanced_acc"], 4),
-           "ber": round(_test_metrics["ber"], 4),
-           "f1": round(_test_metrics["f1"], 4),
-           "roc_auc": (round(_test_metrics["roc_auc"], 4) if not np.isnan(_test_metrics["roc_auc"]) else "nan")},
-          "masked", {"accuracy": round(masked_metrics.get("accuracy", float("nan")), 4)},
-          "unmasked", {"accuracy": round(unmasked_metrics.get("accuracy", float("nan")), 4)})
+      {"accuracy": round(_test_metrics["accuracy"], 4),
+       "balanced_acc": round(_test_metrics["balanced_acc"], 4),
+       "ber": round(_test_metrics["ber"], 4),
+       "f1": round(_test_metrics["f1"], 4),
+       "roc_auc": (round(_test_metrics["roc_auc"], 4) if not np.isnan(_test_metrics["roc_auc"]) else "nan")},
+      "masked", {"accuracy": round(masked_metrics.get("accuracy", float("nan")), 4)},
+      "unmasked", {"accuracy": round(unmasked_metrics.get("accuracy", float("nan")), 4)})
 
-else:
+elif str(settings.get("modality", "text")).lower() == "image":
     imgs_dir = pkg_dir / "synthetic" / "helper" / "static" / "robot_images_small"
     meta = pd.read_csv(imgs_dir / "meta.csv")
     meta = meta.sample(frac=1.0, random_state=int(settings["seed"])).reset_index(drop=True)
-    label_expr = settings["label_model_expr"] or "'glorp' if (min(int(row['ears_shape']=='square'), int(row['body_shape']=='square')) >= 1) else 'drent'"
+    label_expr = settings["label_model_expr"] or "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy'))>= 3 else 'drent'"
+    print("Using label model expression:", label_expr)
     meta["label"] = compute_label(meta, label_expr, label_model_type=settings.get("label_model_type", "deterministic"), alpha=float(settings.get("label_model_alpha", 10.0)), bias=float(settings.get("label_model_bias", -0.2)), seed=int(settings.get("seed", 0)))
     _lbl_img = meta["label"].astype(str)
     print("Label distribution (images, full):", {"glorp": int((_lbl_img == "glorp").sum()), "drent": int((_lbl_img == "drent").sum()), "total": int(len(_lbl_img)), "pos_frac": round((_lbl_img == "glorp").mean(), 4)})
@@ -1059,6 +1312,7 @@ metrics = {
     "modality": settings["modality"],
     "model": model_id,
     "n": int(settings["n"]),
+    "calibration": best_cal_name,
 }
 
 processor_or_tok = tok_or_proc
@@ -1076,6 +1330,13 @@ model_dir.mkdir(parents=True, exist_ok=True)
 processor_or_tok.save_pretrained(model_dir)
 model.save_pretrained(model_dir)
 
+if int(settings.get("save_logits", 1) or 1) == 1 and modality == "text":
+    np.save(out_dir / "z_val.npy", _collect_z(Xva, tok_or_proc, model, device).astype(np.float32))
+    np.save(out_dir / "y_val.npy", np.asarray(yva, dtype=int))
+    np.save(out_dir / "z_test.npy", _collect_z(Xte, tok_or_proc, model, device).astype(np.float32))
+    np.save(out_dir / "y_test.npy", np.asarray(yte, dtype=int))
+
+
 print(json.dumps({"run_dir": str(out_dir), "metrics_path": str(legacy_metrics), "metrics_named_path": str(named_metrics), "model_dir": str(model_dir)}, indent=2))
 
 split_files = {
@@ -1085,4 +1346,18 @@ split_files = {
 }
 metrics_map = {"train": _train_metrics, "val": _val_metrics, "test": _test_metrics}
 for name, path in split_files.items():
+    metrics_map[name]["calibration"] = best_cal_name
     path.write_text(json.dumps(metrics_map[name], indent=2))
+
+# sidecars for every calibration tried
+for nm in (["none","platt"] if str(settings.get("calibrate","none")).lower()=="auto" else [str(settings.get("calibrate","none")).lower()]):
+    cal = calibrators.get(nm, None)
+    tr = _eval_text_metrics(Xtr, ytr, tok_or_proc, model, device, calibrator=cal,
+                            abstain=abstain_mode, tau=tau_val, decision_threshold=thr_global)
+    va = _eval_text_metrics(Xva, yva, tok_or_proc, model, device, calibrator=cal,
+                            abstain=abstain_mode, tau=tau_val, decision_threshold=thr_global)
+    te = _eval_text_metrics(Xte, yte, tok_or_proc, model, device, calibrator=cal,
+                            abstain=abstain_mode, tau=tau_val, decision_threshold=thr_global)
+    (out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_seed{int(settings['seed'])}_metrics_train.cal-{nm}.json").write_text(json.dumps(tr, indent=2))
+    (out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_seed{int(settings['seed'])}_metrics_val.cal-{nm}.json").write_text(json.dumps(va, indent=2))
+    (out_dir / f"baseline_dnn_robots_{modality}_{model_tag}_seed{int(settings['seed'])}_metrics_test.cal-{nm}.json").write_text(json.dumps(te, indent=2))

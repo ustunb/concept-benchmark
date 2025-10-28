@@ -258,7 +258,7 @@ def _nat_from_tokens(row: dict, seed: int) -> dict:
         _foot_key = "pointy_3sided"
     else:
         _foot_key = str(row["foot_shape"])
-    feet_nat = pick(feet_map.get(_foot_key, feet_map["flat_4sided"]), "FEET")
+    feet_nat = pick(feet_map.get(_foot_key, feet_map["pointy_3sided"] if str(_foot_key).startswith("pointy_") else feet_map["flat_4sided"]), "FEET")
 
     ant_nat = "has antennae" if str(row["has_antennae"]).lower() == "true" else "no antennae"
     knees_nat = "has knees" if str(row["has_knees"]).lower() == "true" else "no knees"
@@ -349,9 +349,11 @@ def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, v
     _targets = sorted(set(t.strip().lower() for t in re.split(r"[;,]", _raw_targets) if t.strip()))
     if not _targets:
         _targets = ["foot"]
+    if "footmouth" in _targets:
+        _targets = [t for t in _targets if t != "footmouth"] + ["foot", "mouth"]
     _mask = np.asarray(ears_generic, dtype=bool)
     ds.ears_generic_mask = _mask
-    for _t in _targets:
+    for _t in sorted(set(_targets)):
         setattr(ds, f"{_t}_generic_mask", _mask)
     if _subtypes is not None:
         setattr(ds, "subtypes", {k: np.asarray(v, dtype=object) for k, v in _subtypes.items()})
@@ -530,6 +532,7 @@ else:
     ap.add_argument("--generic-tol", type=float, default=0.02)
     ap.add_argument("--generic-enable", type=int, default=0)
     ap.add_argument("--shared-test", type=int, default=0)
+    ap.add_argument("--val-variant-mode", choices=["all","one"], default="one")
     ap.add_argument("--policy", choices=["uncertainty", "oracle", "kflip"], default="kflip")
     ap.add_argument("--generic-what", choices=["ears","foot","footmouth"], default="foot")
     ap.add_argument("--k", type=int, default=2, help="concepts per instance")
@@ -606,6 +609,7 @@ else:
         "dev_per_fold": int(getattr(known, "dev_per_fold", 1000)),
         "deployment_size": int(getattr(known, "deployment_size", 0)),
         "shared_test": int(getattr(known, "shared_test", 0)),
+        "val_variant_mode": str(getattr(known, "val_variant_mode", "one")),
         "image_meta": str(getattr(known, "image_meta", "")),
     })
     if merged["test_corr"] is not None and merged["test_corr"] >= 0:
@@ -642,7 +646,7 @@ params = {
         "mouth_type": ["closed", "open"],
         "hand_shape": ["round_circle", "wide_oval", "tall_oval", "edgy_square", "edgy_triangle", "edgy_trapezoid"],
     },
-    "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy'))>= 2 else 'drent'",
+    "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy'))>= 3 else 'drent'"
 }
 
 if args_obj.label_model_expr:
@@ -1161,8 +1165,22 @@ def _normalize_catalog_schema(df: pd.DataFrame, seed: int) -> pd.DataFrame:
     # prefer subtype columns if present
     if "hand_shape_subtype" in df.columns:
         df["hand_shape"] = df["hand_shape_subtype"].astype(str)
-    if "foot_shape_subtype" in df.columns:
-        df["foot_shape"] = df["foot_shape_subtype"].astype(str)
+    # Combine coarse + subtype for feet when both are present
+    if "foot_shape" in df.columns and "foot_shape_subtype" in df.columns:
+        coarse = df["foot_shape"].astype(str).str.lower()
+        sub    = df["foot_shape_subtype"].astype(str).str.lower()
+        sub = sub.replace({
+            "square": "4sided",
+            "4-sided": "4sided",
+            "4": "4sided",
+            "3-sided": "3sided",
+            "3": "3sided",
+            "5-sided": "5sided",
+            "5": "5sided",
+            "l-shaped": "lshaped",
+            "l": "lshaped"
+        })
+        df["foot_shape"] = coarse + "_" + sub
 
     # canonicalize hands to hands_map keys
     def _canon_hand(v, i):
@@ -1189,7 +1207,9 @@ def _normalize_catalog_schema(df: pd.DataFrame, seed: int) -> pd.DataFrame:
 
     # canonicalize feet to feet_map keys
     def _canon_foot(v, i):
-        s = str(v)
+        s = str(v).lower()
+        if s.startswith("flat_") or s.startswith("pointy_"):
+            return s
         if s in {"flat", "flat_generic"}:
             return ["flat_4sided", "flat_5sided", "flat_lshaped"][i % 3]
         if s in {"pointy", "pointy_generic"}:
@@ -1212,8 +1232,22 @@ def _normalize_catalog_schema(df: pd.DataFrame, seed: int) -> pd.DataFrame:
     # prefer subtype columns if present
     if "hand_shape_subtype" in df.columns:
         df["hand_shape"] = df["hand_shape_subtype"].astype(str)
-    if "foot_shape_subtype" in df.columns:
-        df["foot_shape"] = df["foot_shape_subtype"].astype(str)
+    # Combine coarse + subtype for feet when both are present
+    if "foot_shape" in df.columns and "foot_shape_subtype" in df.columns:
+        coarse = df["foot_shape"].astype(str).str.lower()
+        sub    = df["foot_shape_subtype"].astype(str).str.lower()
+        sub = sub.replace({
+            "square": "4sided",
+            "4-sided": "4sided",
+            "4": "4sided",
+            "3-sided": "3sided",
+            "3": "3sided",
+            "5-sided": "5sided",
+            "5": "5sided",
+            "l-shaped": "lshaped",
+            "l": "lshaped"
+        })
+        df["foot_shape"] = coarse + "_" + sub
     # map simple → subtype for hands
     _hands_simple = {
         "round": "round_circle",
@@ -1227,7 +1261,9 @@ def _normalize_catalog_schema(df: pd.DataFrame, seed: int) -> pd.DataFrame:
         df["hand_shape"] = df["hand_shape"].astype(str).map(lambda v: _hands_simple.get(v, v))
     # expand flat/pointy feet deterministically if needed
     def _fix_foot(v, i):
-        s = str(v)
+        s = str(v).lower()
+        if s.startswith("flat_") or s.startswith("pointy_"):
+            return s
         if s in {"flat", "flat_generic"}:
             return ["flat_4sided", "flat_5sided", "flat_lshaped"][i % 3]
         if s in {"pointy", "pointy_generic"}:
@@ -1254,12 +1290,6 @@ catalog_df["label"] = compute_label(
 )
 
 _lbl = catalog_df["label"].astype(str)
-print("Label distribution (catalog_df):", {
-    "glorp": int((_lbl == "glorp").sum()),
-    "drent": int((_lbl == "drent").sum()),
-    "total": int(len(_lbl)),
-    "pos_frac": round((_lbl == "glorp").mean(), 4),
-})
 
 concept_cols = list(params["concepts"].keys())
 ds = None
@@ -1290,10 +1320,14 @@ if args_obj.templates_file and str(args_obj.templates_file).lower().endswith(".j
     if not gen_jsonl.is_file():
         _cand = list(base_jsonl.parent.glob(f"*_{_sfx}{base_jsonl.suffix}"))
         gen_jsonl = _cand[0] if _cand else None
-    ds = _build_ds_from_corpus(catalog_df, params, base_jsonl, base_vpr, SEED, row_variants=row_variants, generic_path=(
-        gen_jsonl if (gen_jsonl and gen_jsonl.is_file() and int(getattr(args_obj, "generic_enable", 0)) == 1) else None),
-                               generic_rate=(float(getattr(args_obj, "generic_rate", 0.5)) if int(
-                                   getattr(args_obj, "generic_enable", 0)) == 1 else 0.0))
+    if int(getattr(args_obj, "generic_enable", 0)) == 1 and not (gen_jsonl and gen_jsonl.is_file()):
+        raise SystemExit(f"generic_enable=1 but missing generic corpus: {base_jsonl.stem}_{_sfx}{base_jsonl.suffix}")
+    ds = _build_ds_from_corpus(
+        catalog_df, params, base_jsonl, base_vpr, SEED,
+        row_variants=row_variants,
+        generic_path=(gen_jsonl if gen_jsonl and gen_jsonl.is_file() else None),
+        generic_rate=(float(getattr(args_obj, "generic_rate", 0.5)) if int(getattr(args_obj, "generic_enable", 0)) == 1 else 0.0)
+    )
     setattr(ds, "cvindices", None)
 
 elif args_obj.template_difficulty == "hard":
@@ -1377,12 +1411,6 @@ print("CLASSES:", ds.classes)
 print("N samples:", len(ds))
 
 _y_all = np.asarray(ds.y, dtype=int)
-print("Label distribution (dataset):", {
-    "glorp": int((_y_all == 1).sum()),
-    "drent": int((_y_all == 0).sum()),
-    "total": int(_y_all.size),
-    "pos_frac": round((_y_all == 1).mean() if _y_all.size else 0.0, 4),
-})
 
 seed_tag = f"seed{SEED}"
 if VARIANT == "imperfect" and IMPERFECT_STRATEGY == "missing_concepts":
@@ -1611,11 +1639,20 @@ if need_split:
         gm = getattr(ds, "ears_generic_mask", None)
         if gm is not None:
             setattr(sub, "ears_generic_mask", np.asarray(gm)[idx])
+            raw = str(getattr(args_obj, "generic_what", "foot"))
+            ts = [t.strip().lower() for t in re.split(r"[;,]", raw) if t.strip()]
+            if not ts:
+                ts = ["foot"]
+            if "footmouth" in ts:
+                ts = [t for t in ts if t != "footmouth"] + ["foot", "mouth"]
+            for t in sorted(set(ts)):
+                m = getattr(ds, f"{t}_generic_mask", None)
+                if m is not None:
+                    setattr(sub, f"{t}_generic_mask", np.asarray(m)[idx])
         _sub = getattr(ds, "subtypes", None)
         if _sub is not None:
             setattr(sub, "subtypes", {k: np.asarray(_sub[k])[idx] for k in _sub.keys()})
         return sub
-
 
     ds.training = _subset_mask(mtr)
     ds.validation = _subset_mask(mva)
@@ -1639,12 +1676,14 @@ if need_split:
             if not gen_jsonl_dep.is_file():
                 _cand_dep = list(base_jsonl_dep.parent.glob(f"*_{_sfx_dep}{base_jsonl_dep.suffix}"))
                 gen_jsonl_dep = _cand_dep[0] if _cand_dep else None
-            ds_testpool = _build_ds_from_corpus(catalog_df, params, base_jsonl_dep, vpr_t, SEED,
-                                                row_variants=None,
-                                                generic_path=(gen_jsonl_dep if (gen_jsonl_dep and gen_jsonl_dep.is_file() and int(
-                                                    getattr(args_obj, "generic_enable", 0)) == 1) else None),
-                                                generic_rate=(float(getattr(args_obj, "generic_rate", 0.5)) if int(
-                                                    getattr(args_obj, "generic_enable", 0)) == 1 else 0.0))
+            ds_testpool = _build_ds_from_corpus(
+                catalog_df, params, base_jsonl_dep, vpr_t, SEED,
+                row_variants=[1] * len(catalog_df),  # force equal per-row replication
+                generic_path=(gen_jsonl_dep if (gen_jsonl_dep and gen_jsonl_dep.is_file() and int(
+                    getattr(args_obj, "generic_enable", 0)) == 1) else None),
+                generic_rate=(float(getattr(args_obj, "generic_rate", 0.5)) if int(
+                    getattr(args_obj, "generic_enable", 0)) == 1 else 0.0),
+            )
             rng_dep = np.random.default_rng(
                 int(getattr(args_obj, "seed", 0)) + int(getattr(args_obj, "seed_test_offset", 1234)))
             pool = np.arange(len(ds_testpool.y), dtype=int)
@@ -1653,9 +1692,27 @@ if need_split:
             X = [ds_testpool.X[i] for i in idx_dep]
             C = ds_testpool.C[idx_dep]
             y = ds_testpool.y[idx_dep]
-            test_sub = ConceptDatasetSample(X=X, C=C, y=y,
-                                            meta={"concepts": ds_testpool.concepts, "classes": ds_testpool.classes,
-                                                  "data_type": "text"})
+            test_sub = ConceptDatasetSample(
+                X=X, C=C, y=y,
+                meta={"concepts": ds_testpool.concepts, "classes": ds_testpool.classes, "data_type": "text"}
+            )
+            ds.deployment = test_sub
+            ds.test = test_sub
+
+            # print(f"Final split sizes → train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
+            yt = np.asarray(ds.training.y, dtype=int)
+            yv = np.asarray(ds.validation.y, dtype=int)
+            yte = np.asarray(ds.test.y, dtype=int)
+            # print("Final label distribution (train):",
+            #       {"glorp": int((yt == 1).sum()), "drent": int((yt == 0).sum()), "total": int(yt.size),
+            #        "pos_frac": round((yt == 1).mean() if yt.size else 0.0, 4)})
+            # print("Final label distribution (val):",
+            #       {"glorp": int((yv == 1).sum()), "drent": int((yv == 0).sum()), "total": int(yv.size),
+            #        "pos_frac": round((yv == 1).mean() if yv.size else 0.0, 4)})
+            # print("Final label distribution (test):",
+            #       {"glorp": int((yte == 1).sum()), "drent": int((yte == 0).sum()), "total": int(yte.size),
+            #        "pos_frac": round((yte == 1).mean() if yte.size else 0.0, 4)})
+
             gm2 = getattr(ds_testpool, "ears_generic_mask", None)
             if gm2 is not None:
                 setattr(test_sub, "ears_generic_mask", np.asarray(gm2)[idx_dep])
@@ -1683,40 +1740,43 @@ if need_split:
                                                  "df_indices": idxs.tolist()})
                 gm = getattr(ds, "ears_generic_mask", None)
                 if gm is not None:
-                    setattr(sub, "ears_generic_mask", np.asarray(gm)[idxs])
+                    setattr(sub, "ears_generic_mask", np.asarray(gm)[sel])
+
+                raw = str(getattr(args_obj, "generic_what", "foot"))
+                ts = [t.strip().lower() for t in re.split(r"[;,]", raw) if t.strip()]
+                if not ts:
+                    ts = ["foot"]
+                if "footmouth" in ts:
+                    ts = [t for t in ts if t != "footmouth"] + ["foot", "mouth"]
+                for t in sorted(set(ts)):
+                    m = getattr(ds, f"{t}_generic_mask", None)
+                    if isinstance(m, np.ndarray):
+                        setattr(sub, f"{t}_generic_mask", np.asarray(m)[sel])
+
                 sub0 = getattr(ds, "subtypes", None)
                 if sub0 is not None:
-                    setattr(sub, "subtypes", {k: np.asarray(sub0[k])[idxs] for k in sub0.keys()})
+                    setattr(sub, "subtypes", {k: np.asarray(sub0[k])[sel] for k in sub0.keys()})
                 return sub
+
 
             ds.deployment = _subset_idx(dep_idx)
             ds.test = ds.deployment
     else:
         ds.test = _subset_mask(np.zeros(n_all, dtype=bool))
 
-    print(f"Split sizes → train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
-
+    print(f"Initial split (pre-meta) sizes → train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
     yt = np.asarray(ds.training.y, dtype=int)
     yv = np.asarray(ds.validation.y, dtype=int)
     yte = np.asarray(ds.test.y, dtype=int)
-    print("Label distribution (train):", {
-        "glorp": int((yt == 1).sum()),
-        "drent": int((yt == 0).sum()),
-        "total": int(yt.size),
-        "pos_frac": round((yt == 1).mean() if yt.size else 0.0, 4),
-    })
-    print("Label distribution (val):", {
-        "glorp": int((yv == 1).sum()),
-        "drent": int((yv == 0).sum()),
-        "total": int(yv.size),
-        "pos_frac": round((yv == 1).mean() if yv.size else 0.0, 4),
-    })
-    print("Label distribution (test):", {
-        "glorp": int((yte == 1).sum()),
-        "drent": int((yte == 0).sum()),
-        "total": int(yte.size),
-        "pos_frac": round((yte == 1).mean() if yte.size else 0.0, 4),
-    })
+    print("Initial split (pre-meta) label distribution (train):",
+          {"glorp": int((yt == 1).sum()), "drent": int((yt == 0).sum()), "total": int(yt.size),
+           "pos_frac": round((yt == 1).mean() if yt.size else 0.0, 4)})
+    print("Initial split (pre-meta) label distribution (val):",
+          {"glorp": int((yv == 1).sum()), "drent": int((yv == 0).sum()), "total": int(yv.size),
+           "pos_frac": round((yv == 1).mean() if yv.size else 0.0, 4)})
+    print("Initial split (pre-meta) label distribution (test):",
+          {"glorp": int((yte == 1).sum()), "drent": int((yte == 0).sum()), "total": int(yte.size),
+           "pos_frac": round((yte == 1).mean() if yte.size else 0.0, 4)})
 
 elif need_split:
     pass
@@ -1858,32 +1918,194 @@ if str(getattr(args_obj, "image_meta", "")).strip():
         row_index_full = getattr(getattr(ds, "_full", ds), "meta", {}).get("row_index", np.arange(len(ds)))
         idx_map = {int(r): i for i, r in enumerate(np.asarray(row_index_full, dtype=int))}
 
-        def _subset_by_ids(ids):
-            sel = [idx_map[int(x)] for x in ids if int(x) in idx_map]
-            if not sel: return None
-            sel = np.asarray(sel, dtype=int)
+        def _subset_by_ids(ids, mode="all"):
+            row_idx = np.asarray(row_index_full, dtype=int)
+            idx_map_list = {}
+            for i, rid in enumerate(row_idx):
+                idx_map_list.setdefault(int(rid), []).append(i)
+
+            sel = []
+            for x in ids:
+                j = int(x)
+                if j in idx_map_list:
+                    if mode == "one":
+                        sel.append(idx_map_list[j][0])
+                    else:
+                        sel.extend(idx_map_list[j])
+            if not sel:
+                return None
+            sel = np.asarray(sorted(sel), dtype=int)
+
             X = [ds.X[i] for i in sel]
             C = ds.C[sel]
             y = ds.y[sel]
             sub = ConceptDatasetSample(
                 X=X, C=C, y=y,
                 meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text",
-                      "df_indices": [int(row_index_full[i]) for i in sel]}
+                      "df_indices": [int(row_idx[i]) for i in sel]}
             )
-            gm = getattr(ds, "ears_generic_mask", None)
-            if gm is not None:
-                setattr(sub, "ears_generic_mask", np.asarray(gm)[sel])
+            for _t in ["ears", "foot", "mouth", "footmouth"]:
+                gm = getattr(ds, f"{_t}_generic_mask", None)
+                if gm is not None:
+                    setattr(sub, f"{_t}_generic_mask", np.asarray(gm)[sel])
             sub0 = getattr(ds, "subtypes", None)
             if sub0 is not None:
                 setattr(sub, "subtypes", {k: np.asarray(sub0[k])[sel] for k in sub0.keys()})
             return sub
 
-        tr = _subset_by_ids(_dfi.get("train", []))
-        va = _subset_by_ids(_dfi.get("valid", _dfi.get("val", [])))
-        te = _subset_by_ids(_dfi.get("test", []))
+        tr = _subset_by_ids(_dfi.get("train", []), mode="all")
+        va = _subset_by_ids(_dfi.get("valid", _dfi.get("val", [])), mode=str(getattr(args_obj, "val_variant_mode", "all")))
+        te = _subset_by_ids(_dfi.get("test", []), mode=("all" if int(getattr(args_obj, "shared_test", 0)) == 0 else "one"))
         if tr is not None: train_ds = tr
-        if va is not None:  val_ds  = va
+        if va is not None:  val_ds = va
         if te is not None:  test_ds = te
+
+    # log true pre-balance after image-meta remap
+    print(f"Pre-balance split sizes → train: {train_ds.n}, val: {val_ds.n}, test: {test_ds.n}")
+    yt = np.asarray(train_ds.y, dtype=int)
+    yv = np.asarray(val_ds.y, dtype=int)
+    yte = np.asarray(test_ds.y, dtype=int)
+    print("Pre-balance label distribution (train):",
+          {"glorp": int((yt == 1).sum()), "drent": int((yt == 0).sum()), "total": int(yt.size),
+           "pos_frac": round((yt == 1).mean() if yt.size else 0.0, 4)})
+    print("Pre-balance label distribution (val):",
+          {"glorp": int((yv == 1).sum()), "drent": int((yv == 0).sum()), "total": int(yv.size),
+           "pos_frac": round((yv == 1).mean() if yv.size else 0.0, 4)})
+    print("Pre-balance label distribution (test):",
+          {"glorp": int((yte == 1).sum()), "drent": int((yte == 0).sum()), "total": int(yte.size),
+           "pos_frac": round((yte == 1).mean() if yte.size else 0.0, 4)})
+
+    # -------- re-apply balancing after image_meta remap --------
+    if int(getattr(args_obj, "train_balance_enable", 0)) == 1 and hasattr(train_ds, "ears_generic_mask"):
+        ytr0 = np.asarray(train_ds.y, dtype=int)
+        gtr0 = np.asarray(train_ds.ears_generic_mask, dtype=bool)
+        idx0 = np.arange(ytr0.shape[0])
+        f_pos = float(getattr(args_obj, "train_target_pos_frac", 0.5))
+        f_gen = float(getattr(args_obj, "train_target_generic_frac", 0.5))
+        within = int(getattr(args_obj, "train_balance_within_label", 1)) == 1
+        rng = np.random.default_rng(int(SEED) + 907)
+        if within:
+            t = {(1, 1): f_pos * f_gen, (1, 0): f_pos * (1.0 - f_gen), (0, 1): (1.0 - f_pos) * f_gen,
+                 (0, 0): (1.0 - f_pos) * (1.0 - f_gen)}
+            avail = {k: idx0[(ytr0 == k[0]) & (gtr0 == (k[1] == 1))] for k in t}
+            caps = [avail[k].size / v for k, v in t.items() if v > 0]
+            N = int(np.floor(min(caps))) if caps else 0
+            take = []
+            for k, v in t.items():
+                n = int(np.floor(v * N)) if v > 0 else 0
+                n = min(n, avail[k].size)
+                if n > 0:
+                    take.append(rng.choice(avail[k], size=n, replace=False))
+            take = np.sort(np.concatenate(take)) if take else np.array([], dtype=int)
+        else:
+            pos_idx = idx0[ytr0 == 1];
+            neg_idx = idx0[ytr0 == 0]
+            N = min(pos_idx.size, neg_idx.size) * 2
+            n_pos = N // 2;
+            n_neg = N - n_pos
+            take = np.sort(np.concatenate([
+                rng.choice(pos_idx, size=n_pos, replace=False),
+                rng.choice(neg_idx, size=n_neg, replace=False),
+            ])) if N > 0 else np.array([], dtype=int)
+        if take.size > 0:
+            X = [train_ds.X[i] for i in take]
+            C = train_ds.C[take]
+            y = train_ds.y[take]
+            tr_ds = ConceptDatasetSample(X=X, C=C, y=y, meta=train_ds.meta)
+            if hasattr(train_ds, "ears_generic_mask"):
+                setattr(tr_ds, "ears_generic_mask", np.asarray(train_ds.ears_generic_mask)[take])
+            for _t in ["foot", "mouth", "ears", "footmouth"]:
+                m = getattr(train_ds, f"{_t}_generic_mask", None)
+                if m is not None:
+                    setattr(tr_ds, f"{_t}_generic_mask", np.asarray(m)[take])
+            if hasattr(train_ds, "subtypes"):
+                setattr(tr_ds, "subtypes", {k: np.asarray(train_ds.subtypes[k])[take] for k in train_ds.subtypes})
+            train_ds = tr_ds
+
+    if int(getattr(args_obj, "val_balance_enable", 0)) == 1 and hasattr(val_ds, "ears_generic_mask"):
+        yv0 = np.asarray(val_ds.y, dtype=int);
+        gv0 = np.asarray(val_ds.ears_generic_mask, dtype=bool)
+        idxv = np.arange(yv0.shape[0]);
+        f_gen_v = float(getattr(args_obj, "val_target_generic_frac", 0.5))
+        rngv = np.random.default_rng(int(SEED) + 908)
+        take_v = []
+        for lab in (0, 1):
+            lab_idx = idxv[yv0 == lab]
+            if lab_idx.size == 0: continue
+            lab_gen = lab_idx[gv0[lab_idx]];
+            lab_spec = lab_idx[~gv0[lab_idx]]
+            want_gen = int(round(f_gen_v * lab_idx.size));
+            want_spec = lab_idx.size - want_gen
+            sel_gen = rngv.choice(lab_gen, size=min(want_gen, lab_gen.size),
+                                  replace=False) if lab_gen.size else np.array([], dtype=int)
+            sel_spec = rngv.choice(lab_spec, size=min(want_spec, lab_spec.size),
+                                   replace=False) if lab_spec.size else np.array([], dtype=int)
+            short_gen = want_gen - sel_gen.size
+            if short_gen > 0 and (lab_spec.size - sel_spec.size) > 0:
+                add = rngv.choice(np.setdiff1d(lab_spec, sel_spec), size=min(short_gen, lab_spec.size - sel_spec.size),
+                                  replace=False)
+                sel_spec = np.concatenate([sel_spec, add])
+            short_spec = want_spec - sel_spec.size
+            if short_spec > 0 and (lab_gen.size - sel_gen.size) > 0:
+                add = rngv.choice(np.setdiff1d(lab_gen, sel_gen), size=min(short_spec, lab_gen.size - sel_gen.size),
+                                  replace=False)
+                sel_gen = np.concatenate([sel_gen, add])
+            take_v.append(np.concatenate([sel_gen, sel_spec]))
+        if take_v:
+            take_v = np.sort(np.concatenate(take_v))
+            X = [val_ds.X[i] for i in take_v];
+            C = val_ds.C[take_v];
+            y = val_ds.y[take_v]
+            va_ds = ConceptDatasetSample(X=X, C=C, y=y, meta=val_ds.meta)
+            if hasattr(val_ds, "ears_generic_mask"): setattr(va_ds, "ears_generic_mask",
+                                                             val_ds.ears_generic_mask[take_v])
+            if hasattr(val_ds, "subtypes"):          setattr(va_ds, "subtypes",
+                                                             {k: np.asarray(val_ds.subtypes[k])[take_v] for k in
+                                                              val_ds.subtypes})
+            val_ds = va_ds
+
+    if int(getattr(args_obj, "test_balance_enable", 0)) == 1 and hasattr(test_ds, "ears_generic_mask"):
+        yte0 = np.asarray(test_ds.y, dtype=int);
+        gte0 = np.asarray(test_ds.ears_generic_mask, dtype=bool)
+        idxt = np.arange(yte0.shape[0]);
+        f_gen_t = float(getattr(args_obj, "test_target_generic_frac", 0.5))
+        rngt = np.random.default_rng(int(SEED) + 909)
+        take_t = []
+        for lab in (0, 1):
+            lab_idx = idxt[yte0 == lab]
+            if lab_idx.size == 0: continue
+            lab_gen = lab_idx[gte0[lab_idx]];
+            lab_spec = lab_idx[~gte0[lab_idx]]
+            want_gen = int(round(f_gen_t * lab_idx.size));
+            want_spec = lab_idx.size - want_gen
+            sel_gen = rngt.choice(lab_gen, size=min(want_gen, lab_gen.size),
+                                  replace=False) if lab_gen.size else np.array([], dtype=int)
+            sel_spec = rngt.choice(lab_spec, size=min(want_spec, lab_spec.size),
+                                   replace=False) if lab_spec.size else np.array([], dtype=int)
+            short_gen = want_gen - sel_gen.size
+            if short_gen > 0 and (lab_spec.size - sel_spec.size) > 0:
+                add = rngt.choice(np.setdiff1d(lab_spec, sel_spec), size=min(short_gen, lab_spec.size - sel_spec.size),
+                                  replace=False)
+                sel_spec = np.concatenate([sel_spec, add])
+            short_spec = want_spec - sel_spec.size
+            if short_spec > 0 and (lab_gen.size - sel_gen.size) > 0:
+                add = rngt.choice(np.setdiff1d(lab_gen, sel_gen), size=min(short_spec, lab_gen.size - sel_gen.size),
+                                  replace=False)
+                sel_gen = np.concatenate([sel_gen, add])
+            take_t.append(np.concatenate([sel_gen, sel_spec]))
+        if take_t:
+            take_t = np.sort(np.concatenate(take_t))
+            X = [test_ds.X[i] for i in take_t];
+            C = test_ds.C[take_t];
+            y = test_ds.y[take_t]
+            te_ds = ConceptDatasetSample(X=X, C=C, y=y, meta=test_ds.meta)
+            if hasattr(test_ds, "ears_generic_mask"): setattr(te_ds, "ears_generic_mask",
+                                                              test_ds.ears_generic_mask[take_t])
+            if hasattr(test_ds, "subtypes"):          setattr(te_ds, "subtypes",
+                                                              {k: np.asarray(test_ds.subtypes[k])[take_t] for k in
+                                                               test_ds.subtypes})
+            test_ds = te_ds
+    # -------- end re-apply balancing --------
 
 pat_shape = re.compile(
     r"(?i)\b(square|boxy|box|angular|cornered|right-angled|rectilinear|90-degree|triangle|triangular|tri-corner|three-angled|three-point|pointy|pointed|tapered|wedge|spearhead|spear-tip)\b")
@@ -2145,8 +2367,18 @@ if inc_idx or exc_idx:
     keep = sorted(set(inc_idx) - set(exc_idx))
     if keep:
         train_ds = _select_concept_columns(train_ds, np.array(keep, dtype=int))
-        val_ds = _select_concept_columns(val_ds, np.array(keep, dtype=int))
-        test_ds = _select_concept_columns(test_ds, np.array(keep, dtype=int))
+        val_ds   = _select_concept_columns(val_ds,   np.array(keep, dtype=int))
+        test_ds  = _select_concept_columns(test_ds,  np.array(keep, dtype=int))
+
+# Report post-balance splits used
+_n = lambda d: int(getattr(d, "n", len(getattr(d, "y", []))))
+print(f"Post-balance split sizes → train: {_n(train_ds)}, val: {_n(val_ds)}, test: {_n(test_ds)}")
+yt  = np.asarray(train_ds.y, dtype=int)
+yv  = np.asarray(val_ds.y, dtype=int)
+yte = np.asarray(test_ds.y, dtype=int)
+print("Post-balance label distribution (train):", {"glorp": int((yt==1).sum()),  "drent": int((yt==0).sum()),  "total": int(yt.size),  "pos_frac": round((yt==1).mean() if yt.size else 0.0, 4)})
+print("Post-balance label distribution (val):",   {"glorp": int((yv==1).sum()),  "drent": int((yv==0).sum()),  "total": int(yv.size),  "pos_frac": round((yv==1).mean() if yv.size else 0.0, 4)})
+print("Post-balance label distribution (test):",  {"glorp": int((yte==1).sum()), "drent": int((yte==0).sum()), "total": int(yte.size), "pos_frac": round((yte==1).mean() if yte.size else 0.0, 4)})
 
 detector = TextConceptDetector(
     embed_dim=128,

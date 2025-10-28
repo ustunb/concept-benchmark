@@ -7,6 +7,7 @@ suppressPackageStartupMessages({
   library(stringr)
   library(tidyr)
   library(tools)
+  library(jsonlite)
 })
 
 logi <- function(fmt, ...) cat(sprintf(paste0("[info] ", fmt, "\n"), ...))
@@ -17,28 +18,41 @@ loge <- function(fmt, ...) cat(sprintf(paste0("[error] ", fmt, "\n"), ...))
 parse_args <- function() {
   args <- commandArgs(trailingOnly = TRUE)
   kv <- list()
-  for (a in args) {
+  i <- 1L
+  while (i <= length(args)) {
+    a <- args[i]
     if (grepl("^--", a)) {
-      sp <- strsplit(sub("^--", "", a), "=", fixed = TRUE)[[1]]
-      key <- sp[1]
-      val <- ifelse(length(sp) >= 2, paste(sp[-1], collapse="="), "1")
+      body <- sub("^--", "", a)
+      if (grepl("=", body, fixed = TRUE)) {
+        sp <- strsplit(body, "=", fixed = TRUE)[[1]]
+        key <- sp[1]
+        val <- paste(sp[-1], collapse = "=")
+      } else {
+        key <- body
+        if (i + 1L <= length(args) && !grepl("^--", args[i + 1L])) {
+          val <- args[i + 1L]
+          i <- i + 1L
+        } else {
+          val <- "1"
+        }
+      }
       kv[[key]] <- val
     }
+    i <- i + 1L
   }
   if (is.null(kv$repo_root)) kv$repo_root <- getwd()
   if (is.null(kv$results_root)) kv$results_root <- file.path(kv$repo_root, "results")
   if (is.null(kv$run_name) && is.null(kv$run_glob) && is.null(kv$run_prefix)) {
     stop("Provide one of: --run_name, --run_glob, or --run_prefix")
   }
-  # optional: --expert_acc=0.8 or 80 (filters to only that expert line)
   if (!is.null(kv$expert_acc)) {
     acc <- suppressWarnings(as.numeric(kv$expert_acc))
-    if (is.finite(acc)) {
-      if (acc > 1) acc <- acc / 100
-      kv$expert_acc <- acc
-    } else {
-      kv$expert_acc <- NULL
-    }
+    kv$expert_acc <- if (is.finite(acc)) { if (acc > 1) acc / 100 else acc } else NULL
+  }
+  if (!is.null(kv$dnn_acc)) {
+    s <- gsub("%", "", kv$dnn_acc)
+    v <- suppressWarnings(as.numeric(s))
+    kv$dnn_acc <- if (is.finite(v)) { if (v > 1) v / 100 else v } else NULL
   }
   if (is.null(kv$outdir)) kv$outdir <- file.path(kv$results_root, "robot_text")
   kv
@@ -50,7 +64,6 @@ find_run_dirs <- function(results_root, run_name=NULL, run_glob=NULL, run_prefix
   base <- file.path(results_root, "robot_text")
   if (!dir.exists(base)) return(character(0))
   dirs <- list.dirs(base, full.names = TRUE, recursive = FALSE)
-  # drop any *_plots dirs
   dirs <- dirs[!grepl("_plots$", basename(dirs))]
   pick <- character(0)
   if (!is.null(run_name)) {
@@ -89,7 +102,6 @@ parse_run_attrs <- function(run_name) {
 }
 
 read_viability <- function(run_dir) {
-  # read only from <run>, not from <run>_plots
   cand <- list.files(run_dir, pattern = "^viability_robots_text_complete_seed.*_(detected|machine)\\.csv$", full.names = TRUE)
   if (!length(cand)) return(NULL)
   df <- suppressWarnings(readr::read_csv(cand[1], show_col_types = FALSE))
@@ -98,6 +110,39 @@ read_viability <- function(run_dir) {
   df <- df %>% select(any_of(c("target_acc","budget","acc_cbm_pre","acc_cbm_intv","raw_gain_vs_k0","corrected_edits_total","attempted_edits_total")))
   df
 }
+
+# ---- DNN baseline helpers ----
+infer_seed_from_run <- function(run_name) {
+  m <- regexec("seed(\\d+)", run_name)
+  g <- regmatches(run_name, m)[[1]]
+  if (length(g) >= 2) suppressWarnings(as.numeric(g[2])) else NA_real_
+}
+
+read_baseline_acc <- function(results_root, seed) {
+  base <- file.path(results_root, "robot_baseline", "text")
+  if (!dir.exists(base) || !is.finite(seed)) return(NA_real_)
+  pat_platt <- paste0("seed", seed, ".*metrics_test\\.cal-platt\\.json$")
+  pat_plain <- paste0("seed", seed, ".*metrics_test\\.json$")
+  files <- list.files(base, pattern = pat_platt, full.names = TRUE, recursive = TRUE)
+  if (!length(files)) files <- list.files(base, pattern = pat_plain, full.names = TRUE, recursive = TRUE)
+  if (!length(files)) return(NA_real_)
+  js <- tryCatch(jsonlite::fromJSON(files[1]), error = function(e) NULL)
+  if (is.null(js) || is.null(js$accuracy)) return(NA_real_) else as.numeric(js$accuracy)
+}
+
+# ---------- plotting ----------
+
+.base_theme <- theme_bw() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.title = element_blank(),
+        legend.position = "inside",
+        legend.position.inside = c(0.2, 0.86),  # top-left, safely inside panel
+        legend.background = element_rect(fill = "white", color = NA),
+        legend.key = element_blank(),
+        legend.text = element_text(size = ggplot2::rel(1)),   # 1× base size
+        legend.title = element_text(size = ggplot2::rel(1)),  # match text size
+        plot.caption = element_text(size = ggplot2::rel(1)))
 
 plot_overlay <- function(A, subkey, cs_label, out_root) {
   if (!nrow(A)) return(invisible(NULL))
@@ -117,18 +162,18 @@ plot_overlay <- function(A, subkey, cs_label, out_root) {
     labs(x = "Intervention budget (k)",
          y = "Post-intervention accuracy",
          title = paste0("Accuracy vs budget — ", subkey)) +
-    theme_bw()
+    .base_theme
   out_png = file.path(out_root, paste0("acc_vs_budget_", subkey, ".png"))
   ggsave(out_png, plot = p, width = 8.0, height = 4.5, dpi = 200)
 }
 
-plot_overlay_combined <- function(A, subkey, out_root) {
+plot_overlay_combined <- function(A, subkey, out_root, baseline_acc = NA_real_) {
   if (!nrow(A)) return(invisible(NULL))
   A <- A %>% mutate(
     series = dplyr::case_when(
       startsWith(run, "lfcbm_") ~ "Automated Detection",
       regime == "best" ~ "Perfect Annotation",
-      regime == "expert" & is.finite(expert_acc) ~ paste0("Expert Annotations — ", round(100*expert_acc)),
+      regime == "expert" & is.finite(expert_acc) ~ paste0("Expert Annotations - ", round(100*expert_acc), "% Accuracy"),
       TRUE ~ "Other"
     )
   )
@@ -137,18 +182,23 @@ plot_overlay_combined <- function(A, subkey, out_root) {
 
   min_pct <- suppressWarnings(min(100*A$acc_cbm_intv, na.rm = TRUE))
   y0_pct <- if (is.finite(min_pct)) { s <- floor(min_pct/5)*5; if (s >= min_pct) s <- s - 5; max(0, s) } else 0
-  y0 <- y0_pct/100
+  max_pct <- suppressWarnings(max(100*A$acc_cbm_intv, na.rm = TRUE))
+  y1_pct <- if (is.finite(max_pct)) { min(100, ceiling(max_pct/5)*5 + 5) } else 100
+  y0 <- y0_pct/100; y1 <- y1_pct/100
   xmax <- suppressWarnings(max(A$budget, na.rm = TRUE)); if (!is.finite(xmax)) xmax <- 1
 
   p <- ggplot(A, aes(x = budget, y = acc_cbm_intv, color = series)) +
     geom_line() + geom_point(size = 2) +
     scale_x_continuous(breaks = sort(unique(A$budget)), limits = c(0, xmax), expand = c(0,0)) +
-    scale_y_continuous(limits = c(y0, 1), breaks = seq(y0, 1, by = 0.05)) +
+    scale_y_continuous(limits = c(y0, y1), breaks = seq(y0, y1, by = 0.05), expand = c(0,0)) +
     labs(x = "Intervention budget (k)", y = "Post-intervention accuracy") +
-    theme_bw() +
-    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-          plot.title = element_blank()) +
-    guides(color = guide_legend(title = NULL))
+    .base_theme +
+    guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL))
+  if (is.finite(baseline_acc)) {
+    p <- p +
+      geom_hline(aes(yintercept = baseline_acc, linetype = "Black-Box DNN")) +
+      scale_linetype_manual(values = c("Black-Box DNN" = "dashed"))
+  }
   out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_combined.png"))
   ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
 }
@@ -165,34 +215,34 @@ plot_overlay_per_expert <- function(A, subkey, out_root) {
       series = dplyr::case_when(
         startsWith(run, "lfcbm_") ~ "Automated Detection",
         regime == "best" ~ "Perfect Annotation",
-        regime == "expert" ~ paste0("Expert Annotations — ", round(100*ea)),
+        regime == "expert" ~ paste0("Expert Annotations - ", round(100*ea), "% Accuracy"),
         TRUE ~ "Other"
       )
     )
     B$series <- factor(B$series, levels = c("Automated Detection",
-                                            paste0("Expert Annotations — ", round(100*ea)),
-                                            "Perfect Annotation"))
+                                        paste0("Expert Annotations - ", round(100*ea), "% Accuracy"),
+                                        "Perfect Annotation"))
 
     min_pct <- suppressWarnings(min(100*B$acc_cbm_intv, na.rm = TRUE))
     y0_pct <- if (is.finite(min_pct)) { s <- floor(min_pct/5)*5; if (s >= min_pct) s <- s - 5; max(0, s) } else 0
-    y0 <- y0_pct/100
+    max_pct <- suppressWarnings(max(100*B$acc_cbm_intv, na.rm = TRUE))
+    y1_pct <- if (is.finite(max_pct)) { min(100, ceiling(max_pct/5)*5 + 5) } else 100
+    y0 <- y0_pct/100; y1 <- y1_pct/100
     xmax <- suppressWarnings(max(B$budget, na.rm = TRUE)); if (!is.finite(xmax)) xmax <- 1
 
     p <- ggplot(B, aes(x = budget, y = acc_cbm_intv, color = series)) +
       geom_line() + geom_point(size = 2) +
       scale_x_continuous(breaks = sort(unique(B$budget)), limits = c(0, xmax), expand = c(0,0)) +
-      scale_y_continuous(limits = c(y0, 1), breaks = seq(y0, 1, by = 0.05)) +
+      scale_y_continuous(limits = c(y0, y1), breaks = seq(y0, y1, by = 0.05)) +
       labs(x = "Intervention budget (k)", y = "Post-intervention accuracy") +
-      theme_bw() +
-      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-            plot.title = element_blank()) +
+      .base_theme +
       guides(color = guide_legend(title = NULL))
     out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_expert_", round(100*ea), ".png"))
     ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
   }
 }
 
-plot_overlay_combined_variants <- function(A, subkey, out_root) {
+plot_overlay_combined_variants <- function(A, subkey, out_root, baseline_acc = NA_real_) {
   bs <- sort(unique(A$budget))
   extras <- setdiff(bs, c(0,1))
   if (!length(extras)) return(invisible(NULL))
@@ -203,7 +253,7 @@ plot_overlay_combined_variants <- function(A, subkey, out_root) {
       series = dplyr::case_when(
         startsWith(run, "lfcbm_") ~ "Automated Detection",
         regime == "best" ~ "Perfect Annotation",
-        regime == "expert" & is.finite(expert_acc) ~ paste0("Expert Annotations — ", round(100*expert_acc)),
+        regime == "expert" & is.finite(expert_acc) ~ paste0("Expert Annotations - ", round(100*expert_acc), "% Accuracy"),
         TRUE ~ "Other"
       )
     )
@@ -212,18 +262,24 @@ plot_overlay_combined_variants <- function(A, subkey, out_root) {
 
     min_pct <- suppressWarnings(min(100*S$acc_cbm_intv, na.rm = TRUE))
     y0_pct <- if (is.finite(min_pct)) { s <- floor(min_pct/5)*5; if (s >= min_pct) s <- s - 5; max(0, s) } else 0
-    y0 <- y0_pct/100
+    max_pct <- suppressWarnings(max(100*S$acc_cbm_intv, na.rm = TRUE))
+    y1_pct <- if (is.finite(max_pct)) { min(100, ceiling(max_pct/5)*5 + 5) } else 100
+    y0 <- y0_pct/100; y1 <- y1_pct/100
+    if (is.finite(baseline_acc)) y1 <- max(y1, min(1, baseline_acc + 0.02))
     xmax <- suppressWarnings(max(S$budget, na.rm = TRUE)); if (!is.finite(xmax)) xmax <- 1
 
     p <- ggplot(S, aes(x = budget, y = acc_cbm_intv, color = series)) +
       geom_line() + geom_point(size = 2) +
       scale_x_continuous(breaks = sort(unique(S$budget)), limits = c(0, xmax), expand = c(0,0)) +
-      scale_y_continuous(limits = c(y0, 1), breaks = seq(y0, 1, by = 0.05)) +
+      scale_y_continuous(limits = c(y0, y1), breaks = seq(y0, y1, by = 0.05), expand = c(0,0)) +
       labs(x = "Intervention budget (k)", y = "Post-intervention accuracy") +
-      theme_bw() +
-      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-            plot.title = element_blank()) +
-      guides(color = guide_legend(title = NULL))
+      .base_theme +
+      guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL))
+    if (is.finite(baseline_acc)) {
+      p <- p +
+        geom_hline(aes(yintercept = baseline_acc, linetype = "Black-Box DNN")) +
+        scale_linetype_manual(values = c("Black-Box DNN" = "dashed"))
+    }
     out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_combined_budgets_0_1_", b, ".png"))
     ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
   }
@@ -241,7 +297,7 @@ plot_overlay_per_expert_variants <- function(A, subkey, out_root) {
       series = dplyr::case_when(
         startsWith(run, "lfcbm_") ~ "Automated Detection",
         regime == "best" ~ "Perfect Annotation",
-        regime == "expert" ~ paste0("Expert Annotations — ", round(100*ea)),
+        regime == "expert" ~ paste0("Expert Annotations - ", round(100*ea), "% Accuracy"),
         TRUE ~ "Other"
       )
     )
@@ -262,9 +318,7 @@ plot_overlay_per_expert_variants <- function(A, subkey, out_root) {
         scale_x_continuous(breaks = sort(unique(S$budget)), limits = c(0, xmax), expand = c(0,0)) +
         scale_y_continuous(limits = c(y0, 1), breaks = seq(y0, 1, by = 0.05)) +
         labs(x = "Intervention budget (k)", y = "Post-intervention accuracy") +
-        theme_bw() +
-        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-              plot.title = element_blank()) +
+        .base_theme +
         guides(color = guide_legend(title = NULL))
       out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_expert_", round(100*ea), "_budgets_0_1_", b, ".png"))
       ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
@@ -272,6 +326,171 @@ plot_overlay_per_expert_variants <- function(A, subkey, out_root) {
   }
 }
 
+plot_overlay_combined_no_machine <- function(A, subkey, out_root, baseline_acc = NA_real_) {
+  A <- A %>% dplyr::filter(!startsWith(run, "lfcbm_"))
+  if (!nrow(A)) return(invisible(NULL))
+  A <- A %>% mutate(
+    series = dplyr::case_when(
+      regime == "best" ~ "Perfect Annotation",
+      regime == "expert" & is.finite(expert_acc) ~ paste0("Expert Annotations - ", round(100*expert_acc), "% Accuracy"),
+      TRUE ~ "Other"
+    )
+  )
+  expert_levels <- sort(unique(A$series[grepl("^Expert Annotations", A$series)]))
+  A$series <- factor(A$series, levels = unique(c(expert_levels, "Perfect Annotation", "Other")))
+
+  min_pct <- suppressWarnings(min(100*A$acc_cbm_intv, na.rm = TRUE))
+  y0_pct <- if (is.finite(min_pct)) { s <- floor(min_pct/5)*5; if (s >= min_pct) s <- s - 5; max(0, s) } else 0
+  y0 <- y0_pct/100
+  y1 <- {
+    m <- suppressWarnings(max(A$acc_cbm_intv, na.rm = TRUE))
+    if (!is.finite(m)) 1 else min(1, (ceiling(m/0.05) * 0.05) + 0.05)
+  }
+  y1 <- round(y1, 4)
+  xmax <- suppressWarnings(max(A$budget, na.rm = TRUE)); if (!is.finite(xmax)) xmax <- 1
+
+  p <- ggplot(A, aes(x = budget, y = acc_cbm_intv, color = series)) +
+    geom_line() + geom_point(size = 2) +
+    scale_x_continuous(breaks = sort(unique(A$budget)), limits = c(0, xmax), expand = c(0,0)) +
+    scale_y_continuous(limits = c(y0, y1), breaks = seq(y0, y1, by = 0.05), expand = c(0,0)) +
+    labs(x = "Intervention budget (k)", y = "Post-intervention accuracy") +
+    .base_theme +
+    guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL))
+  if (is.finite(baseline_acc)) {
+    p <- p +
+      geom_hline(aes(yintercept = baseline_acc, linetype = "Black-Box DNN")) +
+      scale_linetype_manual(values = c("Black-Box DNN" = "dashed"))
+  }
+  out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_combined_no_machine.png"))
+  ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
+}
+
+plot_overlay_per_expert_no_machine <- function(A, subkey, out_root) {
+  A <- A %>% dplyr::filter(!startsWith(run, "lfcbm_"))
+  exps <- sort(unique(A$expert_acc[A$regime == "expert" & is.finite(A$expert_acc)]))
+  if (!length(exps)) return(invisible(NULL))
+  for (ea in exps) {
+    B <- A %>% filter(
+      (regime == "expert" & is.finite(expert_acc) & abs(expert_acc - ea) < 1e-9) |
+      (regime == "best")
+    ) %>% mutate(
+      series = dplyr::case_when(
+        regime == "best" ~ "Perfect Annotation",
+        regime == "expert" ~ paste0("Expert Annotations - ", round(100*ea), "% Accuracy"),
+        TRUE ~ "Other"
+      )
+    )
+    B$series <- factor(B$series, levels = c(paste0("Expert Annotations - ", round(100*ea), "% Accuracy"), "Perfect Annotation"))
+
+    min_pct <- suppressWarnings(min(100*B$acc_cbm_intv, na.rm = TRUE))
+    y0_pct <- if (is.finite(min_pct)) { s <- floor(min_pct/5)*5; if (s >= min_pct) s <- s - 5; max(0, s) } else 0
+    y0 <- y0_pct/100
+    y1 <- {
+      m <- suppressWarnings(max(B$acc_cbm_intv, na.rm = TRUE))
+      if (!is.finite(m)) 1 else min(1, (ceiling(m/0.05) * 0.05) + 0.05)
+    }
+    y1 <- round(y1, 4)
+    xmax <- suppressWarnings(max(B$budget, na.rm = TRUE)); if (!is.finite(xmax)) xmax <- 1
+
+    p <- ggplot(B, aes(x = budget, y = acc_cbm_intv, color = series)) +
+      geom_line() + geom_point(size = 2) +
+      scale_x_continuous(breaks = sort(unique(B$budget)), limits = c(0, xmax), expand = c(0,0)) +
+      scale_y_continuous(limits = c(y0, y1), breaks = seq(y0, y1, by = 0.05), expand = c(0,0)) +
+      labs(x = "Intervention budget (k)", y = "Post-intervention accuracy") +
+      .base_theme +
+      guides(color = guide_legend(title = NULL))
+    out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_expert_", round(100*ea), "_no_machine.png"))
+    ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
+  }
+}
+
+plot_overlay_combined_variants_no_machine <- function(A, subkey, out_root, baseline_acc = NA_real_) {
+  A <- A %>% dplyr::filter(!startsWith(run, "lfcbm_"))
+  bs <- sort(unique(A$budget))
+  extras <- setdiff(bs, c(0,1))
+  if (!length(extras)) return(invisible(NULL))
+  for (b in extras) {
+    S <- A %>% filter(budget %in% c(0,1,b))
+    if (!nrow(S)) next
+    S <- S %>% mutate(
+      series = dplyr::case_when(
+        regime == "best" ~ "Perfect Annotation",
+        regime == "expert" & is.finite(expert_acc) ~ paste0("Expert Annotations - ", round(100*expert_acc), "% Accuracy"),
+        TRUE ~ "Other"
+      )
+    )
+    expert_levels <- sort(unique(S$series[grepl("^Expert Annotations", S$series)]))
+    S$series <- factor(S$series, levels = unique(c(expert_levels, "Perfect Annotation", "Other")))
+
+    min_pct <- suppressWarnings(min(100*S$acc_cbm_intv, na.rm = TRUE))
+    y0_pct <- if (is.finite(min_pct)) { s <- floor(min_pct/5)*5; if (s >= min_pct) s <- s - 5; max(0, s) } else 0
+    y0 <- y0_pct/100
+    y1 <- {
+      m <- suppressWarnings(max(S$acc_cbm_intv, na.rm = TRUE))
+      if (!is.finite(m)) 1 else min(1, (ceiling(m/0.05) * 0.05) + 0.05)
+    }
+    if (is.finite(baseline_acc)) y1 <- max(y1, min(1, baseline_acc + 0.02))
+    y1 <- round(y1, 4)
+    xmax <- suppressWarnings(max(S$budget, na.rm = TRUE)); if (!is.finite(xmax)) xmax <- 1
+
+    p <- ggplot(S, aes(x = budget, y = acc_cbm_intv, color = series)) +
+      geom_line() + geom_point(size = 2) +
+      scale_x_continuous(breaks = sort(unique(S$budget)), limits = c(0, xmax), expand = c(0,0)) +
+      scale_y_continuous(limits = c(y0, y1), breaks = seq(y0, y1, by = 0.05), expand = c(0,0)) +
+      labs(x = "Intervention budget (k)", y = "Post-intervention accuracy") +
+      .base_theme +
+      guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL))
+    if (is.finite(baseline_acc)) {
+      p <- p +
+        geom_hline(aes(yintercept = baseline_acc, linetype = "Black-Box DNN")) +
+        scale_linetype_manual(values = c("Black-Box DNN" = "dashed"))
+    }
+    out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_combined_budgets_0_1_", b, "_no_machine.png"))
+    ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
+  }
+}
+
+plot_acc_vs_gain_no_machine <- function(A, subkey, out_root) {
+  B <- A %>% dplyr::filter(!startsWith(run, "lfcbm_"))
+  if (!nrow(B)) return(invisible(NULL))
+  if (!("acc_cbm_pre" %in% names(B) && "acc_cbm_intv" %in% names(B))) return(invisible(NULL))
+  B <- B %>% dplyr::mutate(
+    series = dplyr::case_when(
+      regime == "best" ~ "Perfect Annotation",
+      regime == "expert" & is.finite(expert_acc) ~ paste0("Expert Annotations - ", round(100*expert_acc), "% Accuracy"),
+      TRUE ~ "Other"
+    )
+  ) %>% dplyr::filter(budget == 1)
+  if (!nrow(B)) return(invisible(NULL))
+  if ("raw_gain_vs_k0" %in% names(B)) {
+    B$gain <- B$raw_gain_vs_k0
+  } else {
+    B$gain <- B$acc_cbm_intv - B$acc_cbm_pre
+  }
+
+  miny <- suppressWarnings(min(100*B$gain, na.rm = TRUE))
+  y0p <- if (is.finite(miny)) { s <- floor(miny/5)*5; if (s >= miny) s <- s - 5; max(0, s) } else 0
+  y0 <- y0p/100
+  y1 <- {
+    m <- suppressWarnings(max(B$gain, na.rm = TRUE))
+    if (!is.finite(m)) 1 else min(1, (ceiling(m/0.05) * 0.05) + 0.05)
+  }
+  y1 <- round(y1, 4)
+  minx <- suppressWarnings(min(100*B$acc_cbm_pre, na.rm = TRUE))
+  x0p <- if (is.finite(minx)) { s <- floor(minx/5)*5; if (s >= minx) s <- s - 5; max(0, s) } else 0
+  x0 <- x0p/100
+  xmax <- suppressWarnings(max(B$acc_cbm_pre, na.rm = TRUE)); if (!is.finite(xmax)) xmax <- 1
+
+  p <- ggplot(B, aes(x = acc_cbm_pre, y = gain, color = series)) +
+    geom_point(size = 2) +
+    scale_x_continuous(limits = c(x0, 1), expand = c(0,0)) +
+    scale_y_continuous(limits = c(y0, y1), breaks = seq(y0, y1, by = 0.05), expand = c(0,0)) +
+    labs(x = "Pre-intervention accuracy", y = "Accuracy gain at k=1") +
+    .base_theme +
+    guides(color = guide_legend(title = NULL))
+  out_png <- file.path(out_root, paste0("acc_vs_gain_no_machine_", subkey, ".png"))
+  ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
+}
 
 write_gain_table <- function(A, out_root) {
   G <- A %>% dplyr::filter(budget == 1)
@@ -382,7 +601,6 @@ main <- function() {
   readr::write_csv(data.frame(run_dir = runs), file.path(out_root, "RUNS_FOUND.csv"))
   logi("Found %d run(s).", length(runs))
 
-  # Aggregate all
   rows <- list()
   for (rd in runs) {
     rn <- basename(rd)
@@ -403,7 +621,6 @@ main <- function() {
   }
   A <- dplyr::bind_rows(rows)
 
-  # Optional: filter to one expert accuracy
   if (!is.null(args$expert_acc)) {
     A <- A %>% filter(regime == "expert" & is.finite(expert_acc) & abs(expert_acc - as.numeric(args$expert_acc)) < 1e-6)
     if (!nrow(A)) {
@@ -412,18 +629,25 @@ main <- function() {
     }
   }
 
-  # Map concept source labels
   A$cs_label <- ifelse(startsWith(A$run, "lfcbm_"), "Automated Detection", NA_character_)
 
-    # Only combined overlays per subkey + per-expert singletons + budget-variants
+  seed_guess <- infer_seed_from_run(basename(runs[[1]]))
+  baseline_acc <- read_baseline_acc(results_root, seed_guess)
+  if (!is.null(args$dnn_acc)) baseline_acc <- as.numeric(args$dnn_acc)
+  logi("Using baseline_acc=%.4f", baseline_acc)
+
   keys <- unique(A$subkey)
   for (k in keys) {
     Ak <- A %>% filter(subkey == k)
-    D <- Ak %>% select(run, budget, acc_cbm_intv, regime, expert_acc)
-    plot_overlay_combined(D, k, out_root)
+    D <- Ak %>% select(run, budget, acc_cbm_intv, regime, expert_acc, acc_cbm_pre)
+    plot_overlay_combined(D, k, out_root, baseline_acc)
     plot_overlay_per_expert(D, k, out_root)
-    plot_overlay_combined_variants(D, k, out_root)
+    plot_overlay_combined_variants(D, k, out_root, baseline_acc)
     plot_overlay_per_expert_variants(D, k, out_root)
+    plot_overlay_combined_no_machine(D, k, out_root, baseline_acc)
+    plot_overlay_per_expert_no_machine(D, k, out_root)
+    plot_overlay_combined_variants_no_machine(D, k, out_root, baseline_acc)
+    plot_acc_vs_gain_no_machine(Ak, k, out_root)
   }
 
   write_gain_table(A, out_root)
