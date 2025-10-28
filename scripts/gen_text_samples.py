@@ -481,7 +481,7 @@ else:
     ap.add_argument("--make-plots", type=int, default=settings["make_plots"])
     ap.add_argument("--concept-include", type=str, default=settings["concept_include"])
     ap.add_argument("--concept-exclude", type=str, default=settings["concept_exclude"])
-    ap.add_argument("--blackbox_metrics", type=str, default=settings["blackbox_metrics"])
+    ap.add_argument("--blackbox_metrics", type=str, default="")
     ap.add_argument("--subtype-mode", choices=["off","track","salience"], default=settings["subtype_mode"])
     ap.add_argument("--human-alone", type=float, default=0.75)
     ap.add_argument("--concept-source", type=str, choices=["gt", "detected", "machine", "human", "none"],
@@ -3323,8 +3323,16 @@ names_vec, U_full_src, H_test_src, T_truth_src, fe_src = _choose_source()
 allow_idxs = _allowed_indices(names_vec, args_obj.intervene_allow)
 
 bb_acc = None
+bb_path = None
 if args_obj.blackbox_metrics and Path(args_obj.blackbox_metrics).is_file():
-    _m = json.loads(Path(args_obj.blackbox_metrics).read_text())
+    bb_path = Path(args_obj.blackbox_metrics)
+else:
+    base = results_dir / "robot_baseline" / "text"
+    cand = sorted(base.glob(f"baseline_dnn_robots_text_*_seed{int(args_obj.seed)}_metrics_test.json"))
+    if cand:
+        bb_path = cand[-1]
+if bb_path is not None and bb_path.is_file():
+    _m = json.loads(bb_path.read_text())
     bb_acc = float(_m.get("accuracy", _m.get("acc_test", 0.0)))
 
 miss_meta_capture = None
@@ -3629,7 +3637,7 @@ for ta in acc_grid:
                     float(failed_interventions) / float(interventions)) if interventions > 0 else 0.0
 
             gain_vs_k0 = (acc_k - base_acc) if base_acc is not None else float("nan")
-            concept_checks_total = int(k * Hm.shape[0])
+            concept_checks_total = int(selected.size) * int(k)
             edit_effectiveness = (gain_vs_k0 / max(1, k)) if not np.isnan(gain_vs_k0) else float("nan")
             edit_effectiveness_per_intervention = (gain_vs_k0 / max(1, interventions)) if not np.isnan(
                 gain_vs_k0) else float("nan")
@@ -3647,6 +3655,11 @@ for ta in acc_grid:
                 "delta_vs_blackbox": (acc_k - bb_acc) if bb_acc is not None else float("nan"),
                 "concept_checks": concept_checks_total,
                 "confirmation_cost": concept_checks_total,
+                "presented_rate": (float(selected.size) / float(Hm.shape[0])),
+                "edit_rate": (float(interventions) / float(Hm.shape[0])),
+                "concept_checks_per_instance": ((float(selected.size) / float(Hm.shape[0])) * float(k)),
+                "Total Concept Checks": int(concept_checks_total),
+                "Total Interventions": int(interventions),
                 "edit_effectiveness": edit_effectiveness,
                 "edit_effectiveness_per_intervention": edit_effectiveness_per_intervention,
                 "interventions_pct": float(interventions) / float(Hm.shape[0]),

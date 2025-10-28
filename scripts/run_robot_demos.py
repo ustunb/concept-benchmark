@@ -160,6 +160,8 @@ def parse_cli():
     ap.add_argument("--train-variant-mode", choices=["all","one"])
     ap.add_argument("--val-variant-mode", choices=["all","one"])
     ap.add_argument("--test-variant-mode", choices=["all","one"])
+    ap.add_argument("--blackbox_metrics", type=str, default="")
+
 
     known, _ = ap.parse_known_args()
 
@@ -379,6 +381,10 @@ def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, 
 
     # start with base cmd (includes [PY, GEN] + core flags and kflip knobs)
     argv = common_gen_argv()
+    if not blackbox_metrics:
+        bb_guess = find_metrics_json(str(settings.get("modality", "text")),
+                                     str(settings.get("text_model", "distilbert-base-uncased")), "test")
+        blackbox_metrics = str(bb_guess) if bb_guess else ""
 
     # scenario-specific flags
     argv += [
