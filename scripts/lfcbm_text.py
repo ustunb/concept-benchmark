@@ -72,6 +72,17 @@ def _ridge(h, z, alpha):
     w = np.linalg.solve(m, ht @ z)
     return w.astype(np.float32, copy=False)
 
+def _ridge_w(h, z, alpha, w):
+    d = h.shape[1]
+    a = alpha
+    wv = w.reshape(-1, 1)
+    ht = h.T
+    m = ht @ (wv * h)
+    m[np.diag_indices(d)] += a
+    r = ht @ (wv * z)
+    wmat = np.linalg.solve(m, r)
+    return wmat.astype(np.float32, copy=False)
+
 def _proj_learn(H, Zt, epochs, lr, device):
     dev = torch.device("cuda" if str(device) == "cuda" and torch.cuda.is_available() else "cpu")
     Ht = torch.from_numpy(H).float().to(dev)
@@ -137,22 +148,65 @@ class _Encoder:
                 vs.append(v)
         return np.concatenate(vs, axis=0)
 
-def _rank_topk(Z, y, keep_k, supervised=True):
+def _dup_weights(texts):
+    n = len(texts)
+    d = {}
+    for t in texts:
+        d[t] = d.get(t, 0) + 1
+    w = np.array([1.0 / d[t] for t in texts], dtype=np.float32)
+    s = w.sum()
+    if s <= 0:
+        return np.ones(n, dtype=np.float32)
+    w = w * (n / s)
+    return w
+
+def _class_balanced_weights(y):
+    yv = np.asarray(y).reshape(-1)
+    n = len(yv)
+    n_pos = int((yv == 1).sum())
+    n_neg = n - n_pos
+    if n_pos == 0 or n_neg == 0:
+        return np.ones(n, dtype=np.float32)
+    w = np.empty(n, dtype=np.float32)
+    w[yv == 1] = 0.5 * n / n_pos
+    w[yv == 0] = 0.5 * n / n_neg
+    return w
+
+def _weighted_corr(y, z, w):
+    yv = np.asarray(y).astype(np.float32).reshape(-1)
+    zv = np.asarray(z).astype(np.float32).reshape(-1)
+    wv = np.asarray(w).astype(np.float32).reshape(-1)
+    sw = wv.sum()
+    my = (wv * yv).sum() / max(sw, 1e-8)
+    mz = (wv * zv).sum() / max(sw, 1e-8)
+    cyz = (wv * (yv - my) * (zv - mz)).sum() / max(sw, 1e-8)
+    vy = (wv * (yv - my) ** 2).sum() / max(sw, 1e-8)
+    vz = (wv * (zv - mz) ** 2).sum() / max(sw, 1e-8)
+    denom = np.sqrt(max(vy, 0.0) * max(vz, 0.0)) + 1e-12
+    r = cyz / denom
+    if not np.isfinite(r):
+        return 0.0
+    return float(abs(r))
+
+def _rank_topk(Z, y, keep_k, supervised=True, weights=None, metric="corr"):
     K = Z.shape[1]
     if keep_k <= 0 or keep_k >= K:
         return list(range(K))
     if supervised:
         if y is None:
             return list(range(K))
-        yv = np.asarray(y).reshape(-1).astype(np.float32)
-        corrs = []
+        w = None
+        if weights is not None:
+            w = np.asarray(weights).reshape(-1)
+        scores = []
         for j in range(K):
             zj = Z[:, j]
-            c = np.corrcoef(yv, zj)[0, 1] if np.std(zj) > 0 else 0.0
-            if not np.isfinite(c):
-                c = 0.0
-            corrs.append(abs(float(c)))
-        idx = np.argsort(-np.asarray(corrs))
+            if metric == "corr":
+                s = _weighted_corr(y, zj, w if w is not None else np.ones(len(zj), dtype=np.float32))
+            else:
+                s = _weighted_corr(y, zj, w if w is not None else np.ones(len(zj), dtype=np.float32))
+            scores.append(s)
+        idx = np.argsort(-np.asarray(scores))
         return idx[:keep_k].tolist()
     var = Z.var(axis=0)
     idx = np.argsort(-var)
@@ -194,7 +248,11 @@ class LabelFreeDetector:
             Z = _sigmoid(H @ self._W)
             self._proj_on = True
         elif bool(self.settings.get("lf_ridge", False)):
-            self._W = _ridge(H, Zt, float(self.settings.get("lf_ridge_alpha", 1.0)))
+            if int(self.settings.get("lf_ridge_dedup", 0)) == 1:
+                wd = _dup_weights(list(train_texts))
+                self._W = _ridge_w(H, Zt, float(self.settings.get("lf_ridge_alpha", 1.0)), wd)
+            else:
+                self._W = _ridge(H, Zt, float(self.settings.get("lf_ridge_alpha", 1.0)))
             Z = _sigmoid(H @ self._W)
             self._proj_on = False
         else:
@@ -202,7 +260,22 @@ class LabelFreeDetector:
             self._proj_on = False
             Z = Zt
         keep_k = int(self.settings.get("lf_keep_k", 0))
-        self._keep_idx = _rank_topk(Z, y, keep_k, supervised=bool(self.settings.get("lf_topk_supervised", True)))
+        if keep_k > 0:
+            w_sel = None
+            if bool(self.settings.get("lf_topk_supervised", True)) and y is not None:
+                w_sel = np.ones(len(train_texts), dtype=np.float32)
+                if int(self.settings.get("lf_topk_dedup", 0)) == 1:
+                    w_sel *= _dup_weights(list(train_texts))
+                if str(self.settings.get("lf_topk_weighting", "none")) == "class" and y is not None:
+                    w_sel *= _class_balanced_weights(y)
+            self._keep_idx = _rank_topk(
+                Z, y, keep_k,
+                supervised=bool(self.settings.get("lf_topk_supervised", True)),
+                weights=w_sel,
+                metric=str(self.settings.get("lf_topk_metric", "corr")),
+            )
+        else:
+            self._keep_idx = list(range(Z.shape[1]))
         self._fitted = True
 
     def predict(self, texts):
@@ -215,7 +288,7 @@ class LabelFreeDetector:
             Z = _cosine(H, self._E)
             Z = 0.5 * (Z + 1.0)
         Z = Z[:, self._keep_idx]
-        if str(self.settings.get("lf_mode", "soft")) == "hard":
+        if str(self.settings.get("lf_mode", "hard")) == "hard":
             thr = float(self.settings.get("lf_threshold", 0.5))
             Z = (Z >= thr).astype(np.float32, copy=False)
         else:
@@ -265,9 +338,13 @@ settings = {
     "lf_alpha": 1.0,
     "lf_threshold": 0.5,
     "lf_mode": "hard",
-    "lf_ridge": False,
-    "lf_topk_supervised": True,
+    "lf_ridge": True,
     "lf_ridge_alpha": 1.0,
+    "lf_ridge_dedup": 1,
+    "lf_topk_supervised": True,
+    "lf_topk_metric": "corr",
+    "lf_topk_weighting": "none",
+    "lf_topk_dedup": 0,
     "lf_encoder": "sentence-transformers/all-MiniLM-L6-v2",
     "lf_device": "cuda" if (lambda: hasattr(__import__("torch"), "cuda") and __import__("torch").cuda.is_available())() else "cpu",
     "lf_batch_size": 64,
@@ -285,11 +362,16 @@ _parser.add_argument("--lf-threshold", type=float, default=settings["lf_threshol
 _parser.add_argument("--lf-mode", type=str, choices=["hard", "soft"], default=settings["lf_mode"])
 _parser.add_argument("--lf-ridge", action="store_true", default=settings["lf_ridge"])
 _parser.add_argument("--lf-ridge-alpha", type=float, default=settings["lf_ridge_alpha"])
+_parser.add_argument("--lf-ridge-dedup", type=int, default=settings["lf_ridge_dedup"])
 _parser.add_argument("--lf-encoder", type=str, default=settings["lf_encoder"])
 _parser.add_argument("--lf-device", type=str, default=settings["lf_device"])
 _parser.add_argument("--lf-batch-size", type=int, default=settings["lf_batch_size"])
 _parser.add_argument("--lf-keep-k", type=int, default=settings["lf_keep_k"])
 _parser.add_argument("--lf-group-threshold", type=float, default=settings["lf_group_threshold"])
+_parser.add_argument("--lf-topk-supervised", type=int, default=1)
+_parser.add_argument("--lf-topk-metric", type=str, choices=["corr"], default=settings["lf_topk_metric"])
+_parser.add_argument("--lf-topk-weighting", type=str, choices=["none", "class"], default=settings["lf_topk_weighting"])
+_parser.add_argument("--lf-topk-dedup", type=int, default=settings["lf_topk_dedup"])
 _parser.add_argument("--proj-enable", action="store_true", default=settings["proj_enable"])
 _parser.add_argument("--proj-epochs", type=int, default=settings["proj_epochs"])
 _parser.add_argument("--proj-lr", type=float, default=settings["proj_lr"])

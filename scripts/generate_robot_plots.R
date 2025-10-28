@@ -13,6 +13,10 @@ suppressPackageStartupMessages({
 logi <- function(fmt, ...) cat(sprintf(paste0("[info] ", fmt, "\n"), ...))
 loge <- function(fmt, ...) cat(sprintf(paste0("[error] ", fmt, "\n"), ...))
 
+# ---------- theme knobs ----------
+AXIS_TITLE_X_SIZE <- NULL  # set e.g. 40 for large X label; NULL keeps default
+AXIS_TITLE_Y_SIZE <- NULL  # set e.g. 50 for large Y label; NULL keeps default
+
 # ---------- helpers ----------
 
 parse_args <- function() {
@@ -132,17 +136,29 @@ read_baseline_acc <- function(results_root, seed) {
 
 # ---------- plotting ----------
 
-.base_theme <- theme_bw() +
-  theme(panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        plot.title = element_blank(),
-        legend.position = "inside",
-        legend.position.inside = c(0.2, 0.86),  # top-left, safely inside panel
-        legend.background = element_rect(fill = "white", color = NA),
-        legend.key = element_blank(),
-        legend.text = element_text(size = ggplot2::rel(1)),   # 1× base size
-        legend.title = element_text(size = ggplot2::rel(1)),  # match text size
-        plot.caption = element_text(size = ggplot2::rel(1)))
+build_base_theme <- function() {
+  xt <- if (is.null(AXIS_TITLE_X_SIZE)) element_text(size = ggplot2::rel(1.5)) else element_text(size = AXIS_TITLE_X_SIZE)
+  yt <- if (is.null(AXIS_TITLE_Y_SIZE)) element_text(size = ggplot2::rel(1.5)) else element_text(size = AXIS_TITLE_Y_SIZE)
+  theme_bw() +
+    theme(
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      plot.title = element_blank(),
+      legend.position = "inside",
+      legend.position.inside = c(0.3, 0.73),
+      legend.background = element_rect(fill = "white", color = NA),
+      legend.key = element_blank(),
+      legend.text = element_text(size = ggplot2::rel(1.5)),
+      legend.title = element_text(size = ggplot2::rel(1)),
+      plot.caption = element_text(size = ggplot2::rel(1)),
+      axis.title.x = xt,
+      axis.title.y = yt,
+      axis.text.x  = element_text(size = 15),  # <— tick size
+      axis.text.y  = element_text(size = 15)   # <— tick size
+    )
+}
+
+.base_theme <- build_base_theme()
 
 plot_overlay <- function(A, subkey, cs_label, out_root) {
   if (!nrow(A)) return(invisible(NULL))
@@ -163,7 +179,7 @@ plot_overlay <- function(A, subkey, cs_label, out_root) {
          y = "Post-intervention accuracy",
          title = paste0("Accuracy vs budget — ", subkey)) +
     .base_theme
-  out_png = file.path(out_root, paste0("acc_vs_budget_", subkey, ".png"))
+  out_png = file.path(out_root, paste0("acc_vs_budget_", subkey, ".pdf"))
   ggsave(out_png, plot = p, width = 8.0, height = 4.5, dpi = 200)
 }
 
@@ -199,7 +215,7 @@ plot_overlay_combined <- function(A, subkey, out_root, baseline_acc = NA_real_) 
       geom_hline(aes(yintercept = baseline_acc, linetype = "Black-Box DNN")) +
       scale_linetype_manual(values = c("Black-Box DNN" = "dashed"))
   }
-  out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_combined.png"))
+  out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_combined.pdf"))
   ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
 }
 
@@ -237,7 +253,7 @@ plot_overlay_per_expert <- function(A, subkey, out_root) {
       labs(x = "Intervention budget (k)", y = "Post-intervention accuracy") +
       .base_theme +
       guides(color = guide_legend(title = NULL))
-    out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_expert_", round(100*ea), ".png"))
+    out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_expert_", round(100*ea), ".pdf"))
     ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
   }
 }
@@ -280,7 +296,7 @@ plot_overlay_combined_variants <- function(A, subkey, out_root, baseline_acc = N
         geom_hline(aes(yintercept = baseline_acc, linetype = "Black-Box DNN")) +
         scale_linetype_manual(values = c("Black-Box DNN" = "dashed"))
     }
-    out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_combined_budgets_0_1_", b, ".png"))
+    out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_combined_budgets_0_1_", b, ".pdf"))
     ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
   }
 }
@@ -320,7 +336,7 @@ plot_overlay_per_expert_variants <- function(A, subkey, out_root) {
         labs(x = "Intervention budget (k)", y = "Post-intervention accuracy") +
         .base_theme +
         guides(color = guide_legend(title = NULL))
-      out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_expert_", round(100*ea), "_budgets_0_1_", b, ".png"))
+      out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_expert_", round(100*ea), "_budgets_0_1_", b, ".pdf"))
       ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
     }
   }
@@ -361,7 +377,7 @@ plot_overlay_combined_no_machine <- function(A, subkey, out_root, baseline_acc =
       geom_hline(aes(yintercept = baseline_acc, linetype = "Black-Box DNN")) +
       scale_linetype_manual(values = c("Black-Box DNN" = "dashed"))
   }
-  out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_combined_no_machine.png"))
+  out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_combined_no_machine.pdf"))
   ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
 }
 
@@ -399,7 +415,7 @@ plot_overlay_per_expert_no_machine <- function(A, subkey, out_root) {
       labs(x = "Intervention budget (k)", y = "Post-intervention accuracy") +
       .base_theme +
       guides(color = guide_legend(title = NULL))
-    out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_expert_", round(100*ea), "_no_machine.png"))
+    out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_expert_", round(100*ea), "_no_machine.pdf"))
     ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
   }
 }
@@ -445,7 +461,7 @@ plot_overlay_combined_variants_no_machine <- function(A, subkey, out_root, basel
         geom_hline(aes(yintercept = baseline_acc, linetype = "Black-Box DNN")) +
         scale_linetype_manual(values = c("Black-Box DNN" = "dashed"))
     }
-    out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_combined_budgets_0_1_", b, "_no_machine.png"))
+    out_png <- file.path(out_root, paste0("acc_vs_budget_", subkey, "_combined_budgets_0_1_", b, "_no_machine.pdf"))
     ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
   }
 }
@@ -488,7 +504,7 @@ plot_acc_vs_gain_no_machine <- function(A, subkey, out_root) {
     labs(x = "Pre-intervention accuracy", y = "Accuracy gain at k=1") +
     .base_theme +
     guides(color = guide_legend(title = NULL))
-  out_png <- file.path(out_root, paste0("acc_vs_gain_no_machine_", subkey, ".png"))
+  out_png <- file.path(out_root, paste0("acc_vs_gain_no_machine_", subkey, ".pdf"))
   ggsave(out_png, plot = p, width = 9.0, height = 4.8, dpi = 200)
 }
 
