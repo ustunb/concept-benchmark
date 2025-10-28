@@ -2612,7 +2612,7 @@ print(f"Concept outputs (mode={CONCEPT_MODE}) shape:", proba_demo.shape)
 print("First row outputs:", proba_demo[0])
 
 y_train_true = train_ds.y.astype(int)
-if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm" and args_obj.concept_mode == "hard":
+if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm":
     y_train_proba = cbm.front_end_model.predict_proba(C_train_used)
 else:
     y_train_proba = cbm.predict_proba(train_ds)
@@ -2631,8 +2631,9 @@ print("Label model metrics (train):", {"accuracy": float(acc_train), "roc_auc": 
                                        "f1": float(f1_train), "balanced_acc": float(ba_train),
                                        "ber": float(1.0 - ba_train)})
 y_val = val_ds.y.astype(int)
-if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm" and args_obj.concept_mode == "hard":
-    y_val_proba = cbm.front_end_model.predict_proba(H_val_lf)
+if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm":
+    _val_feats = H_val_lf if args_obj.concept_mode == "hard" else C_val_used
+    y_val_proba = cbm.front_end_model.predict_proba(_val_feats)
 else:
     y_val_proba = cbm.predict_proba(val_ds)
 
@@ -2650,8 +2651,12 @@ print("Label model metrics (validation):", {"accuracy": float(acc), "roc_auc": f
                                             "f1": float(f1_val), "balanced_acc": float(ba_val), "ber": float(ber_val)})
 
 y_test = test_ds.y.astype(int)
-if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm" and args_obj.concept_mode == "hard":
-    y_test_proba = cbm.front_end_model.predict_proba(H_test_lf)
+if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm":
+    if args_obj.concept_mode == "hard":
+        _test_feats = H_test_lf
+    else:
+        _test_feats = det_lf.predict([str(x) for x in test_ds.X]).astype(np.float32)
+    y_test_proba = cbm.front_end_model.predict_proba(_test_feats)
 else:
     y_test_proba = cbm.predict_proba(test_ds)
 
