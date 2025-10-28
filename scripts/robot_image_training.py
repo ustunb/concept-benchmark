@@ -7,9 +7,17 @@ from torchvision import transforms
 from concept_benchmark.models import ConceptDetector, FrontEndModel, RobotConceptClassifier
 from concept_benchmark.paths import results_dir
 from concept_benchmark.synthetic.robot import create_synthetic_dataset
+from concept_benchmark.models import ConceptBasedModel
+from concept_benchmark.intervention import (
+    InterventionBatch,
+    InterventionConfig,
+    ConceptInterventionRunner,
+    ScoreIntervention,
+    OrderedCBMStrategy
+
+)
 from scripts.dataset_skewing import create_skewed_splits, filter_training_by_string
 from scripts.dnn_training import train_eval_image
-from scripts.robot_interventions import test_interventions
 from scripts.robot_alignment import test_alignment
 from scripts.robot_invariance_test import test_concept_detector_invariance
 from scripts.robot_utils import _apply_missing, _apply_label_noise, _rate_tag, _get_concept_accuracies, \
@@ -66,12 +74,13 @@ settings = {
                       'foot_shape'],#'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
     "human_alignment": {
         "foot_shape_pointy_4sided": 5,
+        "foot_shape_pointy_rounded": 3,
+        "foot_shape_pointy_square": 1,
         "foot_shape_flat_5sided": -5,
-        "foot_shape_pointy_rounded": 5,
         "foot_shape_flat_square": -1,
-        "foot_shape_pointy_square": 5,
+        "foot_shape_flat_trapezoid": 0,
         "mouth_type": -5,
-        "bias": 3
+        "bias": 4
     },
     "model_type": "stochastic",
     "logit_scalar": 1.0,
@@ -89,14 +98,14 @@ settings = {
                      {'concepts': {'foot_shape_flat_trapezoid': 1}, 'min_fraction': 0.005},
                      {'concepts': {'foot_shape_flat_5sided': 1}, 'min_fraction': 0.49},
                      ],
-    "budget": [1],
+    "budget": [3],
     "intervention_accuracy": 0.9,
-    "intervention_threshold": 1.0,
-    "epochs": 10,
+    "intervention_threshold": 0.2,
+    "epochs": 1,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "TEST_cbm_run_565_subconcepts",
-    "load_detector": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed555.pt")),
-    "load_frontend": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed555.pkl")),
+    "run_name": "cbm_run_1002_subconcepts",
+    "load_detector": str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed1002.pt")),
+    "load_frontend": str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed1002.pkl")),
 }
 
 
@@ -236,6 +245,60 @@ def train_dnn(sttngs, device, dnn_stats, int_acc_tag, label_noise_tag, miss_tag,
     return dnn_stats
 
 
+def test_interventions(prob_test, sttngs, acc_det, fe, test):
+    """Test interventions using the intervention framework."""
+    intervention_results = {}
+    budgets = sttngs.get('budget', [1])
+    human_acc = sttngs.get("intervention_accuracy", 0.9)
+
+    # Create a CBM wrapper for the intervention framework
+    cbm = ConceptBasedModel(concept_detector=None, front_end_model=fe)
+    runner = ConceptInterventionRunner(cbm)
+
+    for budget in budgets:
+        config = InterventionConfig(
+            max_concepts_per_instance=budget,
+            random_state=int(sttngs["seed"]),
+            score_threshold=sttngs.get("intervention_threshold", 1.0),
+            noise=1.0 - human_acc  # convert human accuracy to noise
+        )
+
+        strategy = ScoreIntervention()
+
+        # Run intervention
+        result = runner.run(
+            strategy=strategy,
+            config=config,
+            dataset=test,
+            concept_proba=prob_test,
+            labels=test.y.astype(int)
+        )
+
+        acc_intervened = float((result.y_pred_after == test.y.astype(int)).mean())
+
+        # Extract intervention statistics
+        n_intervened = np.sum(result.mask)
+        n_samples = prob_test.shape[0]
+
+        intervened_concepts = np.any(result.mask, axis=0)
+        concept_intervention_counts = {c: int(np.sum(result.mask[:, i])) for i, c in enumerate(test.concepts) if intervened_concepts[i]}
+
+        key = f"top_{budget}_human_acc_{int(human_acc * 100)}"
+        intervention_results[key] = {
+            "accuracy": acc_intervened,
+            "accuracy_gain": acc_intervened - acc_det,
+            "predictions_intervened_on": int(np.sum(np.any(result.mask, axis=1))),
+            "interventions_rate": float(np.sum(np.any(result.mask, axis=1)) / n_samples),
+            "avg_edits_per_intervention": float(n_intervened / max(1, np.sum(np.any(result.mask, axis=1)))),
+            "total_concept_checks": int(n_intervened),
+            "total_concept_edits_made": int(n_intervened),
+            "concept_interventions": concept_intervention_counts,
+            "human_accuracy": human_acc
+        }
+
+    return budgets, human_acc, intervention_results
+
+
 def main(sttngs):
     ###########################################################################
     ##############################    NAMING    ##############################
@@ -325,7 +388,7 @@ def main(sttngs):
     ###########################    INTERVENTIONS    ###########################
     ###########################################################################
     # apply interventions and measure their effect on the predictions
-    budgets, human_acc, intervention_results = test_interventions(P_te, S, acc_det, fe, rng, test)
+    budgets, human_acc, intervention_results = test_interventions(P_te, S, acc_det, fe, test)
 
     subtype_concepts = [c for c in test.concepts if c.startswith('foot_shape_')]
     missing_concepts = [c for c in S.get("drop_concepts", []) if c.startswith('foot_shape_')]
@@ -489,6 +552,6 @@ def find_good_seed(stngs):
             print(f"SCBM accuracy {cbm_acc:.4f} does not meet criteria.")
     return None
 
-find_good_seed(settings)
+#find_good_seed(settings)
 
-#main(settings)
+main(settings)
