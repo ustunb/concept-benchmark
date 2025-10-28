@@ -16,16 +16,18 @@ from scripts.robot_utils import _apply_missing, _apply_label_noise, _rate_tag, _
     _get_confusion_matrix, _get_accuracies_per_subconcept
 
 settings = {
-    "samples_per_instance": 3,
+    "samples_per_instance": 4,
     "draw": 0,
     "CBM_type": "separate", #"sequential"
     "image_dir": "./data/robot_images",
     "image_size": "medium",
     "color_mode": "color",
     "train_dnn": 0,
-    "seed": 565,
+    "seed": 1002,
     "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy'))>= 3 else 'drent'",
     'dataset_characterization': "",
+    "test_size": 10000,
+    "train_size": 3800,
     "knows_concepts": False,
     "concepts": {
                 "head_shape": ["square", "round"],
@@ -92,7 +94,7 @@ settings = {
     "intervention_threshold": 1.0,
     "epochs": 10,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "cbm_run_565_subconcepts",
+    "run_name": "TEST_cbm_run_565_subconcepts",
     "load_detector": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed555.pt")),
     "load_frontend": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed555.pkl")),
 }
@@ -104,6 +106,8 @@ def define_train_valid_test(settings, concept_dataset, missingness, params, rate
         train, valid, test = create_skewed_splits(
             concept_dataset,
             skew_specs=settings["skew_concept"],
+            test_size=settings.get("test_size", 10000),
+            train_skew_size=settings.get("train_size", None),
             rng=rng,
             drop_concepts=settings.get("drop_concepts", [])
         )
@@ -118,19 +122,6 @@ def define_train_valid_test(settings, concept_dataset, missingness, params, rate
         train = concept_dataset.training
         valid = concept_dataset.validation
 
-    # Setup the test set
-    test_params = copy.deepcopy(params)
-    standard_size = concept_dataset.meta["num_unique_robots"]
-    test_params["output_directory"] = Path(params['output_directory']) / "test_images"
-    test_params["draw"] = True if not Path(test_params["output_directory"]).exists() or settings.get("draw", False) else False
-    test_params["samples_per_instance"] = int(params["test_set_size"] / standard_size) + 1
-    test_data = create_synthetic_dataset(**test_params)
-    test_data.drop_concepts(settings.get("drop_concepts", []))
-    test_data.transform = tf
-    # take random sample of test set to match test_set_size
-    rng_test = np.random.default_rng(int(settings["seed"]) + 1234)
-    test_indices = rng_test.choice(len(test_data), size=int(params["test_set_size"]), replace=False)
-    test = test_data._full.filter(np.isin(np.arange(len(test_data)), test_indices))
 
     if settings.get("label_noise_rate", 0.0) > 0:
         train = _apply_label_noise(train, settings["label_noise_rate"], seed=int(settings["seed"]))
@@ -455,4 +446,49 @@ def main(sttngs):
 
 # settings.update(overrides)
 
-main(settings)
+def find_good_seed(stngs):
+    for seed in range(1001, 2000):
+        print(f"Testing seed {seed}...")
+        stngs["seed"] = seed
+        # train subconcept CBMS only
+        stngs["drop_concepts"] = ["foot_shape_flat_rounded",
+                      "foot_shape_pointy_trapezoid",
+                      'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
+                      'foot_shape']
+        stngs["train_dnn"] = 0
+        stngs['run_name'] = f"A_SCBM_alignment_trials_seed{seed}"
+        metrics = main(stngs)
+        cbm_acc = metrics.get("cbm_acc_detected", 0.0)
+        if 0.68 <= cbm_acc <= 0.735:
+            print(f"Found seed {seed} with SCBM accuracy {cbm_acc:.4f}. Now training full CBM...")
+            # train full CBM
+            stngs["drop_concepts"] = ["foot_shape_flat_rounded", "foot_shape_pointy_trapezoid", 'foot_shape_pointy_3sided',
+                                      'foot_shape_flat_lshaped', 'foot_shape_pointy_4sided', 'foot_shape_pointy_square',
+                                      'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square',
+                                      'foot_shape_flat_trapezoid' ]
+
+            stngs["train_dnn"] = 0
+            stngs['run_name'] = f"A_CBM_alignment_trials_seed{seed}"
+            metrics_full = main(stngs)
+            cbm_acc_full = metrics_full.get("cbm_acc_detected", 0.0)
+            if cbm_acc_full >= 0.85:
+                # train DNN
+                print(f"Full CBM accuracy {cbm_acc_full:.4f} meets criteria")
+                stngs["train_dnn"] = 1
+                stngs['run_name'] = f"A_DNN_alignment_trials_seed{seed}"
+                metrics_dnn = main(stngs)
+                dnn_acc = metrics_dnn.get("dnn_accuracy", 0.0)
+                if 0.68 <= dnn_acc <= 0.73:
+                    print(f"DNN accuracy {dnn_acc:.4f} meets criteria. Found good seed: {seed}")
+                    return seed
+                else:
+                    print(f"DNN accuracy {dnn_acc:.4f} does not meet criteria.")
+            else:
+                print(f"Full CBM accuracy {cbm_acc_full:.4f} does not meet criteria.")
+        else:
+            print(f"SCBM accuracy {cbm_acc:.4f} does not meet criteria.")
+    return None
+
+find_good_seed(settings)
+
+#main(settings)
