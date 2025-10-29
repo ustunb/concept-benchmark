@@ -389,23 +389,25 @@ def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, 
 
     # scenario-specific flags
     argv += [
-        "--variant", "perfect",
+        "--variant", str(settings.get("variant", "perfect")),
         "--variants-per-row", "1",
         "--variants-per-row-minority", str(settings.get("variants_per_row_minority", 3)),
         "--variants-per-row-majority", str(settings.get("variants_per_row_majority", 1)),
-        "--imperfect-strategy", "missing_concepts",
-        "--heldout-concepts", "[]",
-        "--mask-p", "0.0",
-        "--mask-mode", "mask",
-        "--mask-rate", "0.0",
-        "--concept-mode", "hard",
+        "--imperfect-strategy", str(settings.get("imperfect_strategy", "missing_concepts")),
+        "--heldout-concepts", str(settings.get("heldout_concepts", "[]")),
+        "--mask-p", str(settings.get("mask_p", 0.0)),
+        "--mask-mode", str(settings.get("mask_mode", "mask")),
+        "--mask-rate", str(settings.get("mask_rate", 0.0)),
+        "--concept-mode", str(settings.get("concept_mode", "hard")),
         *([] if not str(settings.get("templates_file", "")).strip()
           else ["--templates-file", str(settings["templates_file"]).strip()]),
-        "--redact-concepts", str(settings.get("redact_concepts", "")),        "--redact-splits", str(settings.get("redact_splits", "")),
+        "--redact-concepts", str(settings.get("redact_concepts", "")), "--redact-splits",
+        str(settings.get("redact_splits", "")),
         "--label-model-type", "stochastic",
         "--label-model-alpha", "1.0",
         "--label-model-bias", "0.0",
-        "--label-model-expr", "5*int(row['mouth_type']=='closed') + 10*int(str(row['foot_shape']).startswith('pointy_')) - 3",
+        "--label-model-expr",
+        "5*int(row['mouth_type']=='closed') + 10*int(str(row['foot_shape']).startswith('pointy_')) - 3",
         "--corr-pair", "",
         "--train-corr", "1.0",
         "--test-break", "1.0",
@@ -419,7 +421,8 @@ def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, 
         "--concept-label-noise-mode", ("subjective" if concept_source == "gt" else "none"),
         "--concept-label-noise-rate", str(
             settings.get("subjective_noise_rate",
-                         (settings.get("subjective_noise_rates", [0.20])[0] if settings.get("subjective_noise_rates") else 0.20))
+                         (settings.get("subjective_noise_rates", [0.20])[0] if settings.get(
+                             "subjective_noise_rates") else 0.20))
         ),
         "--blackbox-metrics", blackbox_metrics or "",
         *([] if str(settings.get("templates_file", "")).strip()

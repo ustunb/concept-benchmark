@@ -2420,9 +2420,20 @@ _noise_mode = merged.get("concept_label_noise_mode", "none")
 if (_noise_mode == "subjective") and (str(args_obj.concept_source) == "gt"):
     _rate = float(merged.get("concept_label_noise_rate", 0.20))
     _seed = int(merged.get("seed", 0)) + 199
-    train_ds.C = apply_subjective_noise(
-        train_ds.C.astype(int).copy(), rate=_rate, seed=_seed
-    ).astype(np.float32)
+    C0 = train_ds.C.astype(int).copy()
+    _obs = train_ds.meta.get("observed_mask", None)
+    if isinstance(_obs, np.ndarray):
+        rng = np.random.default_rng(_seed)
+        idx = np.where(_obs.astype(bool).reshape(-1))[0]
+        k = int(round(_rate * idx.size))
+        if k > 0:
+            sel = rng.choice(idx, size=k, replace=False)
+            flat = C0.reshape(-1)
+            flat[sel] = 1 - flat[sel]
+            C0 = flat.reshape(C0.shape)
+        train_ds.C = C0.astype(np.float32)
+    else:
+        train_ds.C = apply_subjective_noise(C0, rate=_rate, seed=_seed).astype(np.float32)
 
 SKIP = int(getattr(args_obj, "skip_fit", 0)) == 1
 loaded_cbm = None
@@ -2515,14 +2526,13 @@ else:
     else:
         C_train_used = C_train
 
+    _obs = (train_ds.meta.get("observed_mask", None) if isinstance(getattr(train_ds, "meta", {}), dict) else None)
+    if isinstance(_obs, np.ndarray) and (not train_on_detected):
+        C_train_used = C_train_used.astype(np.float32)
+        C_train_used[_obs == 0] = 0.5  # unknown
+
 noise_mode = merged.get("concept_label_noise_mode", "none")
-if noise_mode == "subjective" and (not train_on_detected) and (str(args_obj.concept_source) != "machine"):
-    C_train_used = apply_subjective_noise(
-        C_train_used.astype(int).copy(),
-        rate=float(merged.get("concept_label_noise_rate", 0.20)),
-        seed=int(merged.get("seed", 0)) + 200
-    )
-elif noise_mode == "machine":
+if noise_mode == "machine":
     confusion_json = merged.get("concept_label_noise_confusion", "")
     confusion = None
     if confusion_json:
@@ -3320,8 +3330,14 @@ def _choose_source():
         H_base = T_test.copy()
         T_truth = T_test
 
+        C_fe_train = train_ds.C.astype(np.float32)
+        _obs = getattr(train_ds, "meta", {}).get("observed_mask", None)
+        if isinstance(_obs, np.ndarray):
+            C_fe_train = C_fe_train.copy()
+            C_fe_train[_obs == 0] = 0.5
+
         fe_gt = FrontEndModel()
-        fe_gt.fit(train_ds.C.astype(int), train_ds.y.astype(int))
+        fe_gt.fit(C_fe_train, train_ds.y.astype(int))
 
         return names_vec, U_full, H_base, T_truth, fe_gt
 
