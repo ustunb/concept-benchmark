@@ -16,6 +16,7 @@ def main():
         default=["setup", "cbm", "dnn", "intervene"],
     )
     p.add_argument("--seed", type=int, default=DEFAULT_ROBOT_SETTINGS['seed'])
+    p.add_argument("--ignore-errors", action="store_true", help="continue on errors")
     args = p.parse_args()
 
     # setup pipeline tasks
@@ -56,7 +57,7 @@ def main():
         except KeyboardInterrupt:
             failed = True
             break
-        except:
+        except Exception:
             failed = True
             if not args.ignore_errors:
                 break

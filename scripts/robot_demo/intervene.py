@@ -13,11 +13,12 @@ from utils import (
 )
 
 from concept_benchmark.ext.fileutils import load, save
+from concept_benchmark.paths import results_dir
 
 from scripts.robot_image_training import test_interventions
 
 THRESH = [0.2, 0.4, 0.6, 0.8]
-COLS = [
+METRIC_COLS = [
     "accuracy",
     "predictions_intervened_on",
     "total_concept_checks",
@@ -43,6 +44,7 @@ c_preds = model.concept_detector.predict(data.test)
 acc = (model.predict(data.test) == data.test.y).mean().item()
 
 df_lst = []
+COLS = ['budget', 'threshold'] + METRIC_COLS
 for t in THRESH:
     INTERVENTION_SETTINGS.update({"intervention_threshold": t})
     b, a, r = test_interventions(
@@ -56,8 +58,6 @@ for t in THRESH:
         (
             pd.DataFrame(r)
             .T
-            .assign(setup=[f"robot_intervene_budget_{b}_thresh_{t}]"
-                           for b in INTERVENTION_SETTINGS['budget']])
             .assign(budget=INTERVENTION_SETTINGS['budget'])
             .assign(threshold=t)
             .reset_index(drop=True)
@@ -67,9 +67,9 @@ for t in THRESH:
 
 results_df = pd.concat(df_lst, axis=0).reset_index(drop=True)
 results_df.melt(
-    id_vars=["setup", "budget", "threshold"],
-    value_vars=COLS,
+    id_vars=["budget", "threshold"],
+    value_vars=METRIC_COLS,
     var_name="metric",
     value_name="value"
 )
-results_df.to_csv(results_df / get_results_file(**settings), index=False)
+results_df.to_csv(results_dir / get_results_file(**settings), index=False)

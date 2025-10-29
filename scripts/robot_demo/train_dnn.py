@@ -13,6 +13,7 @@ from utils import (
     determine_device,
     get_dataset_file,
     get_model_file,
+    compute_accuracy
 )
 
 from concept_benchmark.ext.fileutils import load, save
@@ -99,22 +100,9 @@ if best_state_dict is not None:
     model.load_state_dict(best_state_dict)
 
 # compute print accuracy stats
-def compute_accuracy(model, loader):
-    model.eval()
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for X, _, y in loader:
-            X, y = X.to(device), y.to(device)
-            outputs = model(X)
-            predicted = (outputs.squeeze() > 0.5).long()  # Thresholding at 0.5
-            total += y.size(0)
-            correct += (predicted == y).sum().item()
-    return correct / total if total > 0 else 0
-
-train_accuracy = compute_accuracy(model, train_loader)
-valid_accuracy = compute_accuracy(model, valid_loader)
-test_accuracy = compute_accuracy(model, test_loader)
+train_accuracy = compute_accuracy(model, train_loader, device=device)
+valid_accuracy = compute_accuracy(model, valid_loader, device=device)
+test_accuracy = compute_accuracy(model, test_loader, device=device)
 print(f"Training Accuracy: {train_accuracy * 100:.2f}%")
 print(f"Validation Accuracy: {valid_accuracy * 100:.2f}%")
 print(f"Test Accuracy: {test_accuracy * 100:.2f}%")

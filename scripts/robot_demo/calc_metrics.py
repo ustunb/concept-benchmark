@@ -1,14 +1,17 @@
 import pandas as pd
 
 from concept_benchmark.ext.fileutils import load
+from concept_benchmark.paths import results_dir
 from scripts.robot_demo.utils import (
     DEFAULT_ROBOT_SETTINGS,
+    INPUT_MAP,
     get_dataset_file,
     get_model_file,
     get_results_file,
-    determine_device
+    determine_device,
+    compute_accuracy,
+    RobotClassifierCNN
 )
-from scripts.robot_demo.train_dnn import compute_accuracy
 
 device = determine_device()
 settings = DEFAULT_ROBOT_SETTINGS.copy()
@@ -27,11 +30,19 @@ loader_config = {
 acc_rows = []
 
 # DNN accuracy
-dnn = load(get_model_file(model_class="dnn", **settings))
+dnn_weights = load(get_model_file(model_class="dnn", **settings))
+dnn = RobotClassifierCNN(input_size=INPUT_MAP[settings['size']]).to(device)
+dnn.load_state_dict(dnn_weights)
 test_loader = data.test.loader(shuffle=False, **loader_config)
-dnn_accuracy = compute_accuracy(dnn, test_loader)
+dnn_accuracy = compute_accuracy(dnn, test_loader, device)
 acc_rows.append(["dnn", "accuracy", dnn_accuracy])
 
+COLS = [
+    "accuracy",
+    "predictions_intervened_on",
+    "total_concept_checks",
+    "total_concept_edits_made",
+]
 
 interv_lst = []
 # CBM metrics
@@ -44,13 +55,19 @@ for subconcept in [True, False]:
     acc_rows.append([model_str + "_no_int", "accuracy", cbm_acc])
 
     # intervention metrics
-    metrics = pd.read_csv(get_results_file(model_class="cbm", **settings)).drop(columns=['setup'])
+    metrics = pd.read_csv(get_results_file(model_class="cbm", **settings))
+    metrics = metrics.melt(
+        id_vars=["budget", "threshold"],
+        value_vars=COLS,
+        var_name="metric",
+        value_name="value"
+    )
     metrics['model'] = model_str + "_with_int"
     metrics = metrics[metrics['metric'].isin(METRICS.values())]
     interv_lst.append(metrics)
     
-metrics_df = pd.DataFrame(acc_rows, columns=["model", "metric", "value"])
+acc_df = pd.DataFrame(acc_rows, columns=["model", "metric", "value"])
 interv_df = pd.concat(interv_lst, ignore_index=True).reset_index(drop=True)
 
-final_df = pd.concat([metrics_df, interv_df], ignore_index=True).reset_index(drop=True)
-final_df.to_csv('robot_demo_results.csv', index=False)
+final_df = pd.concat([acc_df, interv_df], ignore_index=True).reset_index(drop=True)
+final_df.to_csv(results_dir / 'robot_demo_results.csv', index=False)

@@ -223,3 +223,15 @@ class RobotClassifierCNN(nn.Module):
         # For binary classification, we apply a sigmoid function to the output
         return torch.sigmoid(x)
 
+def compute_accuracy(model, loader, device):
+    model.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for X, _, y in loader:
+            X, y = X.to(device), y.to(device)
+            outputs = model(X)
+            predicted = (outputs.squeeze() > 0.5).long()  # Thresholding at 0.5
+            total += y.size(0)
+            correct += (predicted == y).sum().item()
+    return correct / total if total > 0 else 0
