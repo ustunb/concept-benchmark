@@ -2416,6 +2416,18 @@ train_ds.meta = dict(getattr(train_ds, "meta", {}) or {})
 if label_mask is not None:
     train_ds.meta["observed_mask"] = label_mask
 
+_noise_mode = merged.get("concept_label_noise_mode", "none")
+if (_noise_mode == "subjective") and (not train_on_detected):
+    _rate = float(merged.get("concept_label_noise_rate", 0.20))
+    _seed = int(merged.get("seed", 0)) + 199
+    _C_noisy = apply_subjective_noise(train_ds.C.astype(int).copy(), rate=_rate, seed=_seed)
+    train_ds = ConceptDatasetSample(
+        X=train_ds.X, C=_C_noisy, y=train_ds.y,
+        meta={"concepts": train_ds.concepts,
+              "classes": train_ds.meta.get("classes", []),
+              "data_type": "text"}
+    )
+
 SKIP = int(getattr(args_obj, "skip_fit", 0)) == 1
 loaded_cbm = None
 det_path = None
