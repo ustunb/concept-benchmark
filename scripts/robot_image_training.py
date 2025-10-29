@@ -133,9 +133,9 @@ settings = {
     "intervention_threshold": 0.2,
     "epochs": 1,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "maxed",
-    "load_detector": "",#str(Path(results_dir / "robots" / "aaa_Test2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc100_seed1012.pt")),
-    "load_frontend": "",#str(Path(results_dir / "robots" / "aaa_Test2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc100_seed1012.pkl")),
+    "run_name": "cbm_run_1002_ideal",
+    # "load_detector": str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed1002.pt")),
+    # "load_frontend": str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed1002.pkl")),
 }
 
 
@@ -370,7 +370,7 @@ def train_concept_detector(settings, config, device, int_acc_tag, label_noise_ta
                                                       input_size=600 if settings["image_size"] == "large" else
                                                       32 if settings["image_size"] == "medium" else 8))
     det_name = f"detector_dnn_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
-    if settings["load_detector"]:
+    if settings.get("load_detector", False):
         mini_train = train.filter(np.array([True] + [False] * (len(train.C) - 1)))
         mini_valid = valid.filter(np.array([True] + [False] * (len(valid.C) - 1)))
 
@@ -395,31 +395,10 @@ def train_concept_detector(settings, config, device, int_acc_tag, label_noise_ta
 
 
 def train_frontend(H_te, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
-                   seed_tag, skew_tag, test, train, monotonicity_constraints={}, prediction_constraints=[]):
-    cvxpy = False
-    if monotonicity_constraints or prediction_constraints:
-        cvxpy = True
-        fe = FrontEndModelCVXPY(monotonicity_constraints=monotonicity_constraints,
-                                prediction_constraints=prediction_constraints,
-                                concept_names=test.concepts,
-                                concept_pos_value_map=test.meta['concept_pos_value'])
-        fe_name = f"frontend_aligned_logreg_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
-    else:
-        fe = FrontEndModel()
-        fe_name = f"frontend_logreg_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
-                   seed_tag, skew_tag, test, train, monotonicity_constraints={}, prediction_constraints=[]):
-    cvxpy = False
-    if monotonicity_constraints or prediction_constraints:
-        cvxpy = True
-        fe = FrontEndModelCVXPY(monotonicity_constraints=monotonicity_constraints,
-                                prediction_constraints=prediction_constraints,
-                                concept_names=test.concepts,
-                                concept_pos_value_map=test.meta['concept_pos_value'])
-        fe_name = f"frontend_aligned_logreg_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
-    else:
-        fe = FrontEndModel()
-        fe_name = f"frontend_logreg_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
-    if sttngs["load_frontend"]:
+                   seed_tag, skew_tag, test, train):
+    fe = FrontEndModel()
+    fe_name = f"frontend_logreg_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
+    if sttngs.get("load_frontend", False):
         with open(sttngs["load_frontend"], "rb") as f:
             fe = pickle.load(f)
         fe_path = Path(sttngs["load_frontend"])
@@ -915,4 +894,79 @@ def main(sttngs):
     return metrics
 
 
-main(settings)
+# import argparse
+# parser = argparse.ArgumentParser()
+# parser.add_argument('--fe-harness', dest='fe_harness', type=int, default=0)
+# parser.add_argument('--draw', dest='draw', type=int)
+# parser.add_argument('--image-size', dest='image_size', type=str)
+# parser.add_argument('--train-dnn', dest='train_dnn', type=int)
+# parser.add_argument('--model', dest='model', type=str)
+# parser.add_argument('--drop-concepts', dest='drop_concepts', type=str)          # JSON list
+# parser.add_argument('--model-type', dest='model_type', type=str)
+# parser.add_argument('--logit-scalar', dest='logit_scalar', type=float)
+# parser.add_argument('--logit-intercept', dest='logit_intercept', type=float)
+# parser.add_argument('--logit-weights', dest='logit_weights', type=str)          # JSON dict
+# parser.add_argument('--skew-concept', dest='skew_concept', type=str)            # JSON list[dict]
+# parser.add_argument('--run-name', dest='run_name', type=str)
+#
+# args, _ = parser.parse_known_args()
+#
+# overrides = {k: v for k, v in vars(args).items() if v is not None}
+#
+# # Parse JSON-like args
+# if 'drop_concepts' in overrides:
+#     overrides['drop_concepts'] = json.loads(overrides['drop_concepts'])
+# if 'logit_weights' in overrides:
+#     overrides['logit_weights'] = json.loads(overrides['logit_weights'])
+# if 'skew_concept' in overrides:
+#     overrides['skew_concept'] = json.loads(overrides['skew_concept'])
+
+# settings.update(overrides)
+
+def find_good_seed(stngs):
+    for seed in range(1001, 2000):
+        print(f"Testing seed {seed}...")
+        stngs["seed"] = seed
+        # train subconcept CBMS only
+        stngs["drop_concepts"] = ["foot_shape_flat_rounded",
+                      "foot_shape_pointy_trapezoid",
+                      'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
+                      'foot_shape']
+        stngs["train_dnn"] = 0
+        stngs['run_name'] = f"A_SCBM_alignment_trials_seed{seed}"
+        metrics = main(stngs)
+        cbm_acc = metrics.get("cbm_acc_detected", 0.0)
+        if 0.68 <= cbm_acc <= 0.735:
+            print(f"Found seed {seed} with SCBM accuracy {cbm_acc:.4f}. Now training full CBM...")
+            # train full CBM
+            stngs["drop_concepts"] = ["foot_shape_flat_rounded", "foot_shape_pointy_trapezoid", 'foot_shape_pointy_3sided',
+                                      'foot_shape_flat_lshaped', 'foot_shape_pointy_4sided', 'foot_shape_pointy_square',
+                                      'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square',
+                                      'foot_shape_flat_trapezoid' ]
+
+            stngs["train_dnn"] = 0
+            stngs['run_name'] = f"A_CBM_alignment_trials_seed{seed}"
+            metrics_full = main(stngs)
+            cbm_acc_full = metrics_full.get("cbm_acc_detected", 0.0)
+            if cbm_acc_full >= 0.85:
+                # train DNN
+                print(f"Full CBM accuracy {cbm_acc_full:.4f} meets criteria")
+                stngs["train_dnn"] = 1
+                stngs['run_name'] = f"A_DNN_alignment_trials_seed{seed}"
+                metrics_dnn = main(stngs)
+                dnn_acc = metrics_dnn.get("dnn_accuracy", 0.0)
+                if 0.68 <= dnn_acc <= 0.73:
+                    print(f"DNN accuracy {dnn_acc:.4f} meets criteria. Found good seed: {seed}")
+                    return seed
+                else:
+                    print(f"DNN accuracy {dnn_acc:.4f} does not meet criteria.")
+            else:
+                print(f"Full CBM accuracy {cbm_acc_full:.4f} does not meet criteria.")
+        else:
+            print(f"SCBM accuracy {cbm_acc:.4f} does not meet criteria.")
+    return None
+
+#find_good_seed(settings)
+
+if __name__ == "__main__":
+    main(settings)
