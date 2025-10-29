@@ -111,7 +111,7 @@ class TextConceptDetector(ConceptDetector):
         base_lr: float = 2e-5,
         num_warmup_steps: int = 0,
         group_unknown_threshold: float = 0.55,
-        seed: int | None = None,
+        seed: int | None = 0,
         **kwargs,
     ) -> None:
         super().__init__(embedding_model=None, concept_layers=None)
@@ -210,8 +210,6 @@ class TextConceptDetector(ConceptDetector):
         if hasattr(torch.backends, "cudnn"):
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
-        if hasattr(torch, "use_deterministic_algorithms"):
-            torch.use_deterministic_algorithms(True)
 
         Xtr = self._to_text_list(train_dataset)
         Ytr = np.asarray(train_dataset.C, dtype=np.float32)

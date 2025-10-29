@@ -2433,6 +2433,10 @@ if int(args_obj.reuse_detector):
             detector = obj_det["detector"]
         if hasattr(detector, "output_mode"):
             detector.output_mode = CONCEPT_MODE
+        if not hasattr(detector, "seed"):
+            detector.seed = int(SEED)
+        else:
+            detector.seed = int(SEED)
         if SKIP and isinstance(obj_det, dict) and "cbm" in obj_det:
             loaded_cbm = obj_det["cbm"]
     elif det_path:

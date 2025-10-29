@@ -137,24 +137,37 @@ read_baseline_acc <- function(results_root, seed) {
 # ---------- plotting ----------
 
 build_base_theme <- function() {
-  xt <- if (is.null(AXIS_TITLE_X_SIZE)) element_text(size = ggplot2::rel(1.5)) else element_text(size = AXIS_TITLE_X_SIZE)
-  yt <- if (is.null(AXIS_TITLE_Y_SIZE)) element_text(size = ggplot2::rel(1.5)) else element_text(size = AXIS_TITLE_Y_SIZE)
+  xt <- if (is.null(AXIS_TITLE_X_SIZE)) element_text(face = "bold", size = ggplot2::rel(1.5)) else element_text(face = "bold", size = AXIS_TITLE_X_SIZE)
+  yt <- if (is.null(AXIS_TITLE_Y_SIZE)) element_text(face = "bold", size = ggplot2::rel(1.5)) else element_text(face = "bold", size = AXIS_TITLE_Y_SIZE)
   theme_bw() +
     theme(
-      panel.grid.major = element_blank(),
-      panel.grid.minor = element_blank(),
+      # light grey gridlines
+      panel.grid.major = element_line(color = "grey85", size = 0.3),
+      panel.grid.minor = element_line(color = "grey92", size = 0.2),
+
+      # no surrounding box
+      panel.border = element_blank(),
+
+      # bold axis lines
+      axis.line.x = element_line(color = "black", size = 1.0),
+      axis.line.y = element_line(color = "black", size = 1.0),
+
       plot.title = element_blank(),
       legend.position = "inside",
-      legend.position.inside = c(0.3, 0.73),
+      legend.position.inside = c(0.3, 0.8),
       legend.background = element_rect(fill = "white", color = NA),
       legend.key = element_blank(),
       legend.text = element_text(size = ggplot2::rel(1.5)),
       legend.title = element_text(size = ggplot2::rel(1)),
       plot.caption = element_text(size = ggplot2::rel(1)),
+
+      # bold axis titles
       axis.title.x = xt,
       axis.title.y = yt,
-      axis.text.x  = element_text(size = 15),  # <— tick size
-      axis.text.y  = element_text(size = 15)   # <— tick size
+
+      # tick label size (keep or adjust)
+      axis.text.x  = element_text(size = 15),
+      axis.text.y  = element_text(size = 15)
     )
 }
 
