@@ -2508,7 +2508,13 @@ else:
         C_train_used = C_train
 
 noise_mode = merged.get("concept_label_noise_mode", "none")
-if noise_mode == "machine":
+if noise_mode == "subjective" and (not train_on_detected) and (str(args_obj.concept_source) != "machine"):
+    C_train_used = apply_subjective_noise(
+        C_train_used.astype(int).copy(),
+        rate=float(merged.get("concept_label_noise_rate", 0.20)),
+        seed=int(merged.get("seed", 0)) + 200
+    )
+elif noise_mode == "machine":
     confusion_json = merged.get("concept_label_noise_confusion", "")
     confusion = None
     if confusion_json:

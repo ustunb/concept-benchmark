@@ -416,8 +416,11 @@ def run_spec(prefix: str, regime: str, human_acc: float, blackbox_metrics: str, 
         "--human-acc", str(human_acc),
         "--human-acc-concepts", "",
         "--make-plots", str(make_plots),
-        "--concept-label-noise-mode", "none",
-        "--concept-label-noise-rate", "0.2",
+        "--concept-label-noise-mode", ("subjective" if concept_source == "gt" else "none"),
+        "--concept-label-noise-rate", str(
+            settings.get("subjective_noise_rate",
+                         (settings.get("subjective_noise_rates", [0.20])[0] if settings.get("subjective_noise_rates") else 0.20))
+        ),
         "--blackbox-metrics", blackbox_metrics or "",
         *([] if str(settings.get("templates_file", "")).strip()
           else ["--concepts-csv", settings.get("concepts_csv", "")]),
@@ -449,9 +452,9 @@ def make_run_name():
 def run():
     modality = str(settings.get("modality", "text"))
     model_id = str(settings.get("text_model", "distilbert-base-uncased")) if modality == "text" else "vit"
-    ensure_baseline(model_id=model_id, modality=modality)
+    # ensure_baseline(model_id=model_id, modality=modality)
 
-    # bb = str(find_metrics_json(modality, model_id, "test") or "")
+    bb = str(find_metrics_json(modality, model_id, "test") or "")
     #
     # seed = int(settings.get("seed", 0))
     # force = int(settings.get("force", 0))
@@ -516,6 +519,16 @@ def run():
     #         extra_flags=cbm_flags,
     #         detector_model=str(det_path),
     #     )
+    run_spec(
+        prefix="cbm",
+        regime="subjective20",
+        human_acc=float(settings.get("best_human_acc", 1.0)),
+        blackbox_metrics=bb,
+        tag_suffix="cbm",
+        concept_source="gt",
+        extra_flags=["--skip-fit", "0"],
+        detector_model=None,
+    )
     #
     # # machine (LFCBM): best only
     # lf_flags = []
