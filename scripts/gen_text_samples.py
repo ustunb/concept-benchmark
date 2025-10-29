@@ -2394,6 +2394,7 @@ detector = TextConceptDetector(
     pooling="attn",
     group_unknown_threshold=0.50,
     validate=True,
+    seed=int(SEED),
 )
 
 label_mask = None
@@ -2470,7 +2471,12 @@ if (args_obj.concept_source == "machine") and (str(args_obj.machine_method) == "
     _det_lf.fit([str(x) for x in train_ds.X], y=train_ds.y.astype(int))
     det_lf = _det_lf
 
-    det_lf = _det_lf
+    try:
+        (run_dir / "lfcbm_kselection").mkdir(parents=True, exist_ok=True)
+        det_lf.save(run_dir / "lfcbm_kselection")  # meta.json has keep_idx and names
+    except Exception:
+        pass
+
     if args_obj.concept_mode == "soft":
         C_train_used = det_lf.predict([str(x) for x in train_ds.X]).astype(np.float32)
         C_val_used = det_lf.predict([str(x) for x in val_ds.X]).astype(np.float32)
@@ -3179,29 +3185,35 @@ if args_obj.concept_source == "machine":
         H_te_m = det_lf.predict([str(x) for x in test_ds.X]).astype(int)
         det_lf.settings["lf_mode"] = old_mode_lf
 
-        names_m = list(det_lf.concept_names)
-        print(f"[lfcbm] concepts={len(names_m)} first5={names_m[:5]}")
+        # align names to LF keep_idx and log selected names
+        _kidx = getattr(det_lf, "_keep_idx", None)  # indices chosen inside LabelFreeDetector
+        if isinstance(_kidx, (list, np.ndarray)) and len(_kidx):
+            names_m = [det_lf.concept_names[int(i)] for i in _kidx]
+        else:
+            _w = (P_tr_m.shape[1] if P_tr_m is not None else H_tr_m.shape[1])
+            names_m = list(det_lf.concept_names)[:_w]
+        print(f"[lfcbm] selected_k={len(names_m)} names={names_m}")  # shows the actual 9
 
-        # Enforce exactly K concepts by LR importance (probabilities preferred; fall back to hard)
+        # only prune if current feature width > K; use balanced LR to rank
         _k_top = int(getattr(args_obj, "lf_keep_k", getattr(args_obj, "lf_topk_concepts", 9)))
-        if len(names_m) > _k_top:
+        _nfeat = (P_tr_m.shape[1] if P_tr_m is not None else H_tr_m.shape[1])
+        if _nfeat > _k_top:
             from sklearn.linear_model import LogisticRegression
-            # choose features for importance: probabilities if available
             _Ximp = P_tr_m if P_tr_m is not None else H_tr_m.astype(np.float32)
             _yimp = train_ds.y.astype(int)
-            _lr = LogisticRegression(penalty="l2", solver="liblinear", max_iter=1000, random_state=int(args_obj.seed))
+            _lr = LogisticRegression(penalty="l2", solver="liblinear", class_weight="balanced",
+                                     max_iter=1000, random_state=int(args_obj.seed))
             _lr.fit(_Ximp, _yimp)
             _w = np.abs(_lr.coef_[0])
             _keep = np.argsort(-_w)[:_k_top]
 
-            # slice all LF products and names
             P_tr_m = P_tr_m[:, _keep] if P_tr_m is not None else None
             P_val_m = P_val_m[:, _keep] if 'P_val_m' in locals() and P_val_m is not None else None
             P_te_m  = P_te_m[:,  _keep] if P_te_m  is not None else None
             H_tr_m  = H_tr_m[:,  _keep]
             H_val_m = H_val_m[:, _keep]
             H_te_m  = H_te_m[:,  _keep]
-            names_m = [names_m[i] for i in _keep]
+            names_m = [names_m[i] for i in _keep]  # now indexes into the already-aligned list
 
         train_ds_lf_hard = ConceptDatasetSample(
             X=[str(x) for x in train_ds.X],

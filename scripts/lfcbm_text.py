@@ -377,3 +377,5 @@ _parser.add_argument("--proj-epochs", type=int, default=settings["proj_epochs"])
 _parser.add_argument("--proj-lr", type=float, default=settings["proj_lr"])
 _args, _unknown = _parser.parse_known_args()
 settings.update(vars(_args))
+
+print(settings)
