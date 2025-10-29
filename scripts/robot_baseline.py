@@ -625,6 +625,10 @@ if modality == "text":
         _cat_spu  = _im.get("catalog_csv_spurious", "")
         _kind = str(settings.get("image_meta_catalog","auto")).lower()
 
+        print("Using image meta catalog kind:", _kind)
+        print("Base catalog path:", _cat_base)
+        print("Spurious catalog path:", _cat_spu)
+
         def _exists(p): return isinstance(p,str) and p and Path(p).is_file()
         if _kind == "base":
             _choice = _cat_base
