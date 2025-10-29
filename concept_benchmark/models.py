@@ -2,6 +2,7 @@ import itertools
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import copy
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 from sklearn.linear_model import LogisticRegression
@@ -16,6 +17,59 @@ from concept_benchmark.train import (
     _extract_logits,
     _prepare_inputs,
 )
+
+
+class RobotClassifierCNN(nn.Module):
+    def __init__(self, num_classes=1, input_size=224):
+        super(RobotClassifierCNN, self).__init__()
+
+        # --- Feature Extractor ---
+        # Input images are assumed to be 3-channel RGB
+        # Block 1
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
+        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)  # Halves the dimensions
+        # Block 2
+        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1)
+        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)  # Halves the dimensions again
+        # Block 3
+        self.conv3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1)
+        self.pool3 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.backbone = nn.Sequential(
+            self.conv1,
+            nn.ReLU(),
+            self.pool1,
+            self.conv2,
+            nn.ReLU(),
+            self.pool2,
+            self.conv3,
+            nn.ReLU(),
+            self.pool3,
+        )
+
+        with torch.no_grad():
+            dummy = torch.zeros(1, 3, input_size, input_size)
+            dummy_out = self.backbone(dummy)
+            feature_size = dummy_out.view(1, -1).size(1)
+
+        # self.fc1 = nn.Linear(64 * 28 * 28, 128)
+        self.fc1 = nn.Linear(feature_size, 128)
+        self.dropout = nn.Dropout(0.5)
+        self.fc2 = nn.Linear(128, num_classes)
+
+    def forward(self, x):
+        # Pass through the feature extractor
+        x = self.backbone(x)
+
+        # Flatten the feature maps for the classifier
+        x = torch.flatten(x, 1)
+
+        # Pass through the classifier
+        x = F.relu(self.fc1(x))
+        x = self.dropout(x)
+        x = self.fc2(x)
+
+        # For binary classification, we apply a sigmoid function to the output
+        return torch.sigmoid(x)
 
 
 class RobotConceptClassifier(nn.Module):

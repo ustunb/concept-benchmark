@@ -30,7 +30,7 @@ settings = {
     "image_dir": "./data/robot_images",
     "image_size": "medium",
     "color_mode": "color",
-    "train_dnn": 0,
+    "train_dnn": 1,
     "seed": 1002,
     "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy'))>= 3 else 'drent'",
     'dataset_characterization': "",
@@ -213,8 +213,8 @@ def train_frontend(H_te, h_train, prob_train, sttngs, int_acc_tag, label_noise_t
     return acc_det, acc_gt, concept_acc_mean, fe, fe_path, y_pred_det
 
 
-def train_dnn(sttngs, device, dnn_stats, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir, seed_tag,
-              skew_tag, test, train):
+def train_dnn(sttngs, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir, seed_tag,
+              skew_tag, test, train, tf):
     print("Training baseline DNN...")
 
     # Convert ConceptDatasetSample to path arrays
@@ -223,14 +223,15 @@ def train_dnn(sttngs, device, dnn_stats, int_acc_tag, label_noise_tag, miss_tag,
     paths_te = [test.base_dir / p for p in test.X]
     yte = test.y.astype(int)
 
-    dnn_acc, proc, dnn_model = train_eval_image(
+    dnn_acc, dnn_model = train_eval_image(
         paths_tr, ytr, paths_te, yte,
-        model_id=sttngs.get("image_model", "google/vit-base-patch16-224"),
         epochs=int(sttngs["epochs"]),
         batch_size=16,
         lr=5e-5,
         device=device,
-        seed=int(sttngs["seed"])
+        seed=int(sttngs["seed"]),
+        tf=tf,
+        input_size=600 if sttngs["image_size"] == "large" else 32 if sttngs["image_size"] == "medium" else 8
     )
 
     dnn_stats = {"dnn_accuracy": float(dnn_acc)}
@@ -240,7 +241,6 @@ def train_dnn(sttngs, device, dnn_stats, int_acc_tag, label_noise_tag, miss_tag,
     dnn_path = run_dir / dnn_name
     torch.save({
         "model_state_dict": dnn_model.state_dict(),
-        "processor": proc,
     }, dnn_path)
     return dnn_stats
 
@@ -380,8 +380,8 @@ def main(sttngs):
                                                                                 skew_tag, test, train)
     dnn_stats = {}
     if S.get("train_dnn", False):
-        dnn_stats = train_dnn(S, device, {}, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
-                              seed_tag, skew_tag, test, train)
+        dnn_stats = train_dnn(S, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
+                              seed_tag, skew_tag, test, train, tf)
     ###########################################################################
 
     ###########################################################################
