@@ -522,12 +522,33 @@ def run():
     run_spec(
         prefix="cbm",
         regime="subjective20",
-        human_acc=float(settings.get("best_human_acc", 1.0)),
+        human_acc=1.0,  # perfect interventions
         blackbox_metrics=bb,
         tag_suffix="cbm",
         concept_source="gt",
         extra_flags=["--skip-fit", "0"],
         detector_model=None,
+    )
+
+    seed = int(settings.get("seed", 0))
+    subjective_det_candidates = sorted(
+        (results_dir / "robot_text").rglob(f"cbm_fe_gt_robots_text_complete_seed{seed}.pkl"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    sub_det_path = subjective_det_candidates[0] if subjective_det_candidates else None
+    if sub_det_path is None:
+        raise FileNotFoundError("Detector not produced by the first run")
+
+    run_spec(
+        prefix="cbm",
+        regime="subjective20",
+        human_acc=0.8,
+        blackbox_metrics=bb,
+        tag_suffix="cbm",
+        concept_source="gt",
+        extra_flags=["--skip-fit", "0"],
+        detector_model=str(sub_det_path),
     )
     #
     # # machine (LFCBM): best only

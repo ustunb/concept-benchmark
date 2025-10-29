@@ -2417,16 +2417,12 @@ if label_mask is not None:
     train_ds.meta["observed_mask"] = label_mask
 
 _noise_mode = merged.get("concept_label_noise_mode", "none")
-if (_noise_mode == "subjective") and (not train_on_detected):
+if (_noise_mode == "subjective") and (str(args_obj.concept_source) == "gt"):
     _rate = float(merged.get("concept_label_noise_rate", 0.20))
     _seed = int(merged.get("seed", 0)) + 199
-    _C_noisy = apply_subjective_noise(train_ds.C.astype(int).copy(), rate=_rate, seed=_seed)
-    train_ds = ConceptDatasetSample(
-        X=train_ds.X, C=_C_noisy, y=train_ds.y,
-        meta={"concepts": train_ds.concepts,
-              "classes": train_ds.meta.get("classes", []),
-              "data_type": "text"}
-    )
+    train_ds.C = apply_subjective_noise(
+        train_ds.C.astype(int).copy(), rate=_rate, seed=_seed
+    ).astype(np.float32)
 
 SKIP = int(getattr(args_obj, "skip_fit", 0)) == 1
 loaded_cbm = None
@@ -3326,24 +3322,6 @@ def _choose_source():
 
         fe_gt = FrontEndModel()
         fe_gt.fit(train_ds.C.astype(int), train_ds.y.astype(int))
-
-        noise_mode = merged.get("concept_label_noise_mode", "none")
-        if noise_mode == "subjective":
-            rate = float(merged.get("concept_label_noise_rate", 0.20))
-            H_base = apply_subjective_noise(H_base.astype(int).copy(),
-                                            rate=rate,
-                                            seed=int(merged.get("seed", 0)) + 100)
-        elif noise_mode == "machine":
-            confusion_json = merged.get("concept_label_noise_confusion", "")
-            confusion = None
-            if confusion_json:
-                try:
-                    confusion = json.loads(confusion_json)
-                except Exception:
-                    confusion = None
-            H_base = apply_machine_noise(H_base.astype(int).copy(),
-                                         confusion=confusion,
-                                         seed=int(merged.get("seed", 0)) + 200)
 
         return names_vec, U_full, H_base, T_truth, fe_gt
 
