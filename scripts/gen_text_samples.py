@@ -3302,12 +3302,7 @@ def _choose_source():
         H_base = H_test
 
         noise_mode = merged.get("concept_label_noise_mode", "none")
-        if noise_mode == "subjective":
-            rate = float(merged.get("concept_label_noise_rate", 0.20))
-            H_base = apply_subjective_noise(H_base.astype(int).copy(),
-                                            rate=rate,
-                                            seed=int(merged.get("seed", 0)) + 555)
-        elif noise_mode == "machine":
+        if noise_mode == "machine":
             confusion_json = merged.get("concept_label_noise_confusion", "")
             confusion = None
             if confusion_json:
@@ -3332,10 +3327,10 @@ def _choose_source():
         _obs = getattr(train_ds, "meta", {}).get("observed_mask", None)
         if isinstance(_obs, np.ndarray):
             C_fe_train = C_fe_train.copy()
-            C_fe_train[_obs == 0] = 0.5
+            C_fe_train[_obs == 0] = 0.5  # unknown
 
         fe_gt = FrontEndModel()
-        fe_gt.fit(train_ds.C.astype(int), train_ds.y.astype(int))
+        fe_gt.fit(C_fe_train, train_ds.y.astype(int))
 
         noise_mode = merged.get("concept_label_noise_mode", "none")
         if noise_mode == "machine":
@@ -3351,6 +3346,7 @@ def _choose_source():
                                          seed=int(merged.get("seed", 0)) + 200)
 
         return names_vec, U_full, H_base, T_truth, fe_gt
+
 
 names_vec, U_full_src, H_test_src, T_truth_src, fe_src = _choose_source()
 allow_idxs = _allowed_indices(names_vec, args_obj.intervene_allow)

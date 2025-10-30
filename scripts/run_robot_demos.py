@@ -528,7 +528,7 @@ def run():
         human_acc=1.0,  # perfect interventions
         blackbox_metrics=bb,
         tag_suffix="cbm",
-        concept_source="gt",
+        concept_source="detected",
         extra_flags=["--skip-fit", "0"],
         detector_model=None,
     )
@@ -549,7 +549,7 @@ def run():
         human_acc=0.8,
         blackbox_metrics=bb,
         tag_suffix="cbm",
-        concept_source="gt",
+        concept_source="detected",
         extra_flags=["--skip-fit", "0"],
         detector_model=str(sub_det_path),
     )
