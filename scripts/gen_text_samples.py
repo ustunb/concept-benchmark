@@ -2421,19 +2421,17 @@ if (_noise_mode == "subjective") and (str(args_obj.concept_source) == "gt"):
     _rate = float(merged.get("concept_label_noise_rate", 0.20))
     _seed = int(merged.get("seed", 0)) + 199
     C0 = train_ds.C.astype(int).copy()
-    _obs = train_ds.meta.get("observed_mask", None)
-    if isinstance(_obs, np.ndarray):
+    N = C0.size
+    k = int(round(_rate * N))
+    if k > 0:
         rng = np.random.default_rng(_seed)
-        idx = np.where(_obs.astype(bool).reshape(-1))[0]
-        k = int(round(_rate * idx.size))
-        if k > 0:
-            sel = rng.choice(idx, size=k, replace=False)
-            flat = C0.reshape(-1)
-            flat[sel] = 1 - flat[sel]
-            C0 = flat.reshape(C0.shape)
-        train_ds.C = C0.astype(np.float32)
-    else:
-        train_ds.C = apply_subjective_noise(C0, rate=_rate, seed=_seed).astype(np.float32)
+        idx = rng.choice(N, size=k, replace=False)
+        flat = C0.reshape(-1)
+        flat[idx] = 1 - flat[idx]
+        C0 = flat.reshape(C0.shape)
+
+    train_ds.meta["subjective_flips"] = {"total": int(k), "rate": float(k) / float(N) if N > 0 else 0.0}
+    train_ds.C = C0.astype(np.float32)
 
 SKIP = int(getattr(args_obj, "skip_fit", 0)) == 1
 loaded_cbm = None
@@ -3337,21 +3335,23 @@ def _choose_source():
             C_fe_train[_obs == 0] = 0.5
 
         fe_gt = FrontEndModel()
-        fe_gt.fit(C_fe_train, train_ds.y.astype(int))
+        fe_gt.fit(train_ds.C.astype(int), train_ds.y.astype(int))
+
+        noise_mode = merged.get("concept_label_noise_mode", "none")
+        if noise_mode == "machine":
+            confusion_json = merged.get("concept_label_noise_confusion", "")
+            confusion = None
+            if confusion_json:
+                try:
+                    confusion = json.loads(confusion_json)
+                except Exception:
+                    confusion = None
+            H_base = apply_machine_noise(H_base.astype(int).copy(),
+                                         confusion=confusion,
+                                         seed=int(merged.get("seed", 0)) + 200)
 
         return names_vec, U_full, H_base, T_truth, fe_gt
 
-    names_vec = names_m
-    if names_vec is None:
-        raise ValueError(f"Unsupported or missing concept_source={args_obj.concept_source}. Pass --concept-source in {'gt','detected','machine'}.")
-    U_full = P_te_m * (1.0 - P_te_m)
-    H_base = H_te_m
-    if int(args_obj.machine_upper_bound) and truth_map is not None:
-        T_truth = T_test[:, truth_map]
-    else:
-        T_truth = H_te_m.copy()
-    fe = fe_machine
-    return names_vec, U_full, H_base, T_truth, fe
 names_vec, U_full_src, H_test_src, T_truth_src, fe_src = _choose_source()
 allow_idxs = _allowed_indices(names_vec, args_obj.intervene_allow)
 
