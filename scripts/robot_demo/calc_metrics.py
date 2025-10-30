@@ -35,7 +35,8 @@ dnn = RobotClassifierCNN(input_size=INPUT_MAP[settings['size']]).to(device)
 dnn.load_state_dict(dnn_weights)
 test_loader = data.test.loader(shuffle=False, **loader_config)
 dnn_accuracy = compute_accuracy(dnn, test_loader, device)
-acc_rows.append(["dnn", "accuracy", dnn_accuracy])
+acc_rows.append(["ideal", "dnn", "accuracy", dnn_accuracy])
+acc_rows.append(["subconcept", "dnn", "accuracy", dnn_accuracy])
 
 COLS = [
     "accuracy",
@@ -51,22 +52,22 @@ for subconcept in [True, False]:
     # raw accuracy
     cbm = load(get_model_file(model_class="cbm", **settings))
     cbm_acc = (cbm.predict(data.test) == data.test.y).mean().item()
-    model_str = "subconcept_cbm" if subconcept else "cbm"
-    acc_rows.append([model_str + "_no_int", "accuracy", cbm_acc])
+    data_name = "subconcept" if subconcept else "ideal"
+    acc_rows.append([data_name, "cbm_no_int", "accuracy", cbm_acc])
 
     # intervention metrics
     metrics = pd.read_csv(get_results_file(model_class="cbm", **settings))
     metrics = metrics.melt(
-        id_vars=["budget", "threshold"],
+        id_vars=["data_name", "budget", "threshold"],
         value_vars=COLS,
         var_name="metric",
         value_name="value"
     )
-    metrics['model'] = model_str + "_with_int"
+    metrics['model'] = "cbm_with_int_" + metrics['budget'].astype(str)
     metrics = metrics[metrics['metric'].isin(METRICS.values())]
     interv_lst.append(metrics)
     
-acc_df = pd.DataFrame(acc_rows, columns=["model", "metric", "value"])
+acc_df = pd.DataFrame(acc_rows, columns=["data_name", "model", "metric", "value"])
 interv_df = pd.concat(interv_lst, ignore_index=True).reset_index(drop=True)
 
 final_df = pd.concat([acc_df, interv_df], ignore_index=True).reset_index(drop=True)

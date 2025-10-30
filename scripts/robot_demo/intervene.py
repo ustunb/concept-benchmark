@@ -12,7 +12,7 @@ from utils import (
     get_results_file
 )
 
-from concept_benchmark.ext.fileutils import load, save
+from concept_benchmark.ext.fileutils import load
 from concept_benchmark.paths import results_dir
 
 from scripts.robot_image_training import test_interventions
@@ -72,4 +72,5 @@ results_df.melt(
     var_name="metric",
     value_name="value"
 )
+results_df['data_name'] = "subconcept" if settings['subconcept'] else "ideal"
 results_df.to_csv(results_dir / get_results_file(**settings), index=False)
