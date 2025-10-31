@@ -75,7 +75,7 @@ settings = {
             #"foot_shape_pointy_square": -1,
         },
         "monotonicity": [
-            (["foot_shape_flat_square", "mouth_type"], ">=", 0.8),
+            (["foot_shape_flat_square", "mouth_type"], ">=", 0.95),
         ]
 
     },
@@ -328,8 +328,15 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
         n_samples = prob_test.shape[0]
 
         intervened_concepts = np.any(result.mask, axis=0)
-        concept_intervention_counts = {c: int(np.sum(result.mask[:, i])) for i, c in enumerate(test.concepts) if intervened_concepts[i]}
-        prediction_num_concepts_intervened_on = {int(i): int(np.sum(result.mask[i])) for i in range(n_samples)}
+
+        C_pred_binary = (result.C_pred >= 0.5).astype(int)
+        C_final_binary = (result.C_intervened >= 0.5).astype(int)
+        actual_edits_mask = (C_pred_binary != C_final_binary)
+        prediction_num_concepts_intervened_on = {int(i): int(np.sum(actual_edits_mask[i])) for i in range(n_samples)}
+        concept_intervention_counts = {
+            c: f"{int(np.sum(result.mask[:, i]))} ({int(np.sum(actual_edits_mask[:, i]))})"
+            for i, c in enumerate(test.concepts) if intervened_concepts[i]
+        }
 
         key = f"top_{budget}_human_acc_{int(human_acc * 100)}"
         intervention_results[key] = {
