@@ -1,11 +1,12 @@
-# scripts/robot_regimes.py
+# scripts/robot_concept_regimes.py
 from __future__ import annotations
 
 import os
 import json
 import random
+import hashlib
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 import torch
@@ -25,8 +26,7 @@ from scripts.robot_utils import (
     _get_accuracies_per_subconcept,
 )
 
-
-# -------------------- seeds --------------------
+# seeds
 def set_seed(seed: int) -> None:
     seed = int(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
@@ -44,8 +44,7 @@ def set_seed(seed: int) -> None:
     except Exception:
         pass
 
-
-# -------------------- small helpers --------------------
+# helpers
 def _device() -> str:
     try:
         if torch.cuda.is_available():
@@ -56,30 +55,24 @@ def _device() -> str:
         pass
     return "cpu"
 
-
 def _len(dset) -> int:
     try:
         return int(dset.n)
     except Exception:
         return int(len(dset))
 
-
 def _build_groups(concept_names: List[str], spec: Dict) -> Dict[str, List[int]]:
     groups: Dict[str, List[int]] = {}
     used = set()
-
     for base in list(spec.keys()):
         idxs = [i for i, c in enumerate(concept_names) if c == base or c.startswith(f"{base}_")]
         if idxs:
             groups[base] = idxs
             used.update(idxs)
-
     for i, c in enumerate(concept_names):
         if i not in used:
             groups[c] = [i]
-
     return groups
-
 
 def _flip_onehot_row(row: np.ndarray, idxs: List[int], rng: np.random.Generator) -> None:
     vals = row[idxs]
@@ -97,7 +90,6 @@ def _flip_onehot_row(row: np.ndarray, idxs: List[int], rng: np.random.Generator)
     row[idxs] = 0.0
     row[idxs[new_j]] = 1.0
 
-
 def _apply_concept_noise(
     C_in: np.ndarray, concept_names: List[str], spec: Dict, rate: float, rng: np.random.Generator
 ) -> np.ndarray:
@@ -108,7 +100,6 @@ def _apply_concept_noise(
             if rng.random() < float(rate):
                 _flip_onehot_row(C[r], idxs, rng)
     return C
-
 
 def _clone_with_C(dset, C_new: np.ndarray):
     return dset.__class__(
@@ -123,7 +114,6 @@ def _clone_with_C(dset, C_new: np.ndarray):
         base_dir=getattr(dset, "base_dir", None),
     )
 
-
 def _extract_fe_weights(fe: FrontEndModel, concept_names: List[str]) -> Dict[str, float]:
     out: Dict[str, float] = {}
     try:
@@ -135,20 +125,111 @@ def _extract_fe_weights(fe: FrontEndModel, concept_names: List[str]) -> Dict[str
         out["bias"] = float(round(bias, 6))
         return out
     except Exception:
-        # fallback: no weights available
         for name in concept_names:
             out[name] = None
         out["bias"] = None
         return out
 
-
 def _build_slug(S: Dict, miss_tag: str, filter_tag: str, label_noise_tag: str, skew_tag: str, int_acc_tag: str) -> str:
     impute_tag = f"impute{int(S.get('impute_missing', 0))}"
-    slug = f"robots_image_{S['model_type']}_{miss_tag}{filter_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{impute_tag}"
-    return slug
+    return f"robots_image_{S['model_type']}_{miss_tag}{filter_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{impute_tag}"
 
+def _merge_save_npz(path: Path, new_arrays: Dict[str, np.ndarray]) -> None:
+    merged = {}
+    if path.exists():
+        old = np.load(path)
+        for k in old.files:
+            merged[k] = old[k]
+    merged.update(new_arrays)
+    np.savez_compressed(path, **merged)
 
-# -------------------- dataset build to mirror main --------------------
+def _training_critical_subset(S: Dict) -> Dict:
+    # exclude intervention-only knobs; include data, split, and model training knobs
+    keep = {
+        "concepts", "subconcepts", "additional_features", "spurious_features", "drop_concepts",
+        "model", "model_type", "image_size", "color_mode",
+        "logit_scalar", "logit_intercept", "logit_weights",
+        "knows_concepts", "impute_missing", "CBM_type",
+        "missingness", "missing_rate", "label_noise_rate",
+        "skew_concept", "dataset_characterization",
+        "train_size", "test_size", "samples_per_instance", "seed",
+    }
+    return {k: S[k] for k in sorted(keep) if k in S}
+
+def _anchor_key(S: Dict, *, concept_noise_rate: float = 0.0) -> str:
+    crit = _training_critical_subset(S)
+    crit["concept_noise_rate"] = float(concept_noise_rate)
+    payload = json.dumps(crit, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+def _anchor_paths(base_out: Path, run_name: str, key: str) -> Dict[str, Path]:
+    anchor_dir = base_out / "anchors" / f"{run_name}__{key}"
+    return {
+        "dir": anchor_dir,
+        "meta": anchor_dir / "anchor_meta.json",
+        "detector": anchor_dir / "detector.pt",
+        "frontend": anchor_dir / "frontend.pkl",
+        "probs": anchor_dir / "probs.npz",
+    }
+
+def _resolve_anchor(S: Dict, base_out: Path, run_name: str, *, concept_noise_rate: float = 0.0) -> Tuple[Dict, Dict[str, Path]]:
+    key = _anchor_key(S, concept_noise_rate=concept_noise_rate)
+    paths = _anchor_paths(base_out, run_name, key)
+    paths["dir"].mkdir(parents=True, exist_ok=True)
+    # Prefer existing anchor artifacts if present
+    if paths["detector"].exists():
+        S["load_detector"] = str(paths["detector"])
+    if paths["frontend"].exists():
+        S["load_frontend"] = str(paths["frontend"])
+    S["anchor_dir"] = str(paths["dir"])
+    return S, paths
+
+def _load_artifacts_and_cache(
+    S: Dict, run_dir: Path, slug: str, seed_tag: str, force: bool
+) -> Tuple[Dict, Optional[np.lib.npyio.NpzFile], Path, Path, Path]:
+    meta_path = run_dir / f"meta_cbm_detected_{slug}_{seed_tag}.json"
+    metrics_path = run_dir / f"metrics_cbm_detected_{slug}_{seed_tag}.json"
+    prob_npz_path = run_dir / f"probs_{slug}_{seed_tag}.npz"
+    prob_cache = None
+    if not force:
+        if not meta_path.exists():
+            cands = list(run_dir.glob(f"**/meta_cbm_detected_{slug}_{seed_tag}.json"))
+            if cands:
+                meta_path = cands[0]
+        if meta_path.exists():
+            with open(meta_path, "r") as f:
+                _meta_prev = json.load(f)
+            arts = _meta_prev.get("artifacts", {})
+            if "load_detector" not in S and arts.get("detector") and os.path.exists(arts["detector"]):
+                S["load_detector"] = arts["detector"]
+            if "load_frontend" not in S and arts.get("frontend") and os.path.exists(arts["frontend"]):
+                S["load_frontend"] = arts["frontend"]
+        if not prob_npz_path.exists():
+            nc = list(run_dir.glob(f"**/probs_{slug}_{seed_tag}.npz"))
+            if nc:
+                prob_npz_path = nc[0]
+        if prob_npz_path.exists():
+            prob_cache = np.load(prob_npz_path)
+    return S, prob_cache, prob_npz_path, meta_path, metrics_path
+
+def _write_catalogs(out_dir: Path, data_meta: Dict) -> Tuple[str, Dict]:
+    catalog_csv_path = out_dir / "catalog.csv"
+    data_meta["catalog_df"].to_csv(catalog_csv_path, index=False)
+    meta_extra = {}
+    if "catalog_df_spurious" in data_meta:
+        catalog_spu_path = out_dir / "catalog_with_spurious.csv"
+        data_meta["catalog_df_spurious"].to_csv(catalog_spu_path, index=False)
+        meta_extra["catalog_csv_spurious"] = str(catalog_spu_path)
+    return str(catalog_csv_path), meta_extra
+
+def _emit_confusion(out_dir: Path, fe: FrontEndModel, H_te: np.ndarray, P_te: np.ndarray, test, drop_list: List[str]) -> Dict:
+    subtype = [c for c in test.concepts if c.startswith("foot_shape_")]
+    missing = [c for c in drop_list if c.startswith("foot_shape_")]
+    all_preds, confusion_df = _get_confusion_matrix(subtype, missing, fe, H_te, P_te, test)
+    (out_dir / "confusion.csv").write_text(confusion_df.to_csv(index=False))
+    return _get_accuracies_per_subconcept(all_preds, missing, subtype)
+
+# dataset build to mirror main
 def _define_train_valid_test(
     settings: Dict,
     concept_dataset,
@@ -175,20 +256,20 @@ def _define_train_valid_test(
         concept_dataset.split("K05N01", fold_num_validation=4, fold_num_test=5)
         train = concept_dataset.training
         valid = concept_dataset.validation
-        test = concept_dataset.test
 
-    standard_size = 108 * int(settings["samples_per_instance"])
+    standard_size = concept_dataset.meta["num_unique_robots"]
     test_params = dict(params)
+    test_params["output_directory"] = Path(params["output_directory"]) / "test_images"
+    test_params["draw"] = not Path(test_params["output_directory"]).exists()
     test_params["samples_per_instance"] = int(params["test_set_size"] / standard_size) + 1
     test_data = create_synthetic_dataset(**test_params)
     test_data.drop_concepts(settings.get("drop_concepts", []))
     test_data.transform = tf
-    test_data.generate_cvindices(seed=int(settings["seed"]))
     rng_test = np.random.default_rng(int(settings["seed"]) + 1234)
     test_indices = rng_test.choice(len(test_data), size=int(params["test_set_size"]), replace=False)
     test = test_data._full.filter(np.isin(np.arange(len(test_data)), test_indices))
 
-    if settings.get("label_noise_rate", 0.0) and float(settings["label_noise_rate"]) > 0.0:
+    if float(settings.get("label_noise_rate", 0.0)) > 0.0:
         sd = int(settings["seed"])
         train = _apply_label_noise(train, settings["label_noise_rate"], seed=sd)
         valid = _apply_label_noise(valid, settings["label_noise_rate"], seed=sd)
@@ -207,11 +288,9 @@ def _define_train_valid_test(
             target_transform=train.target_transform,
             base_dir=getattr(train, "base_dir", None),
         )
-
     return test, train, valid
 
-
-# -------------------- model training wrappers --------------------
+# model training wrappers
 def _train_concept_detector(
     settings: Dict,
     config: Dict,
@@ -230,9 +309,12 @@ def _train_concept_detector(
     n_c = train.n_concepts
     img_size = str(settings.get("image_size", "small"))
     input_size = 600 if img_size == "large" else 32 if img_size == "medium" else 8
-
     cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=n_c, input_size=input_size))
-    det_name = f"detector_dnn_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
+
+    # Save to anchor if provided, else to run_dir with full name
+    save_dir = Path(settings.get("anchor_dir", run_dir))
+    save_dir.mkdir(parents=True, exist_ok=True)
+    det_name = "detector.pt" if settings.get("anchor_dir") else f"detector_dnn_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
 
     if settings.get("load_detector"):
         mini_train = train.filter(np.array([True] + [False] * (len(train.C) - 1)))
@@ -243,15 +325,12 @@ def _train_concept_detector(
         det_path = Path(settings["load_detector"])
     else:
         cd.fit(train, valid, embed_params={"shuffle": False, **config}, fit_params={"epochs": 50, "lr": 1e-3, "patience": 10, **config})
-        det_path = run_dir / det_name
+        det_path = save_dir / det_name
         torch.save(cd.state_dict(), det_path)
 
-    subtype_concepts = [c for c in test.concepts if c.startswith("foot_shape_")]
-    for concept in subtype_concepts:
+    for concept in [c for c in test.concepts if c.startswith("foot_shape_")]:
         _ = test_concept_detector_invariance(cd, concept, train.concepts, test, device, num_tests=10)
-
     return cd, det_path
-
 
 def _train_frontend(
     H_te: np.ndarray,
@@ -269,11 +348,13 @@ def _train_frontend(
     train,
 ):
     fe = FrontEndModel()
-    fe_name = f"frontend_logreg_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
+    # Save to anchor if provided, else to run_dir with full name
+    save_dir = Path(sttngs.get("anchor_dir", run_dir))
+    save_dir.mkdir(parents=True, exist_ok=True)
+    fe_name = "frontend.pkl" if sttngs.get("anchor_dir") else f"frontend_logreg_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
 
     if sttngs.get("load_frontend"):
         import pickle
-
         with open(sttngs["load_frontend"], "rb") as f:
             fe = pickle.load(f)
         fe_path = Path(sttngs["load_frontend"])
@@ -290,10 +371,8 @@ def _train_frontend(
                 fe.fit(h_train[keep], train.y[keep].astype(int))
             else:
                 fe.fit(Ctr, train.y.astype(int))
-
         import pickle
-
-        fe_path = run_dir / fe_name
+        fe_path = save_dir / fe_name
         with open(fe_path, "wb") as f:
             pickle.dump(fe, f)
 
@@ -302,17 +381,217 @@ def _train_frontend(
     acc_det = float((y_pred_det.argmax(1) == test.y.astype(int)).mean())
     acc_gt = float((y_pred_gt.argmax(1) == test.y.astype(int)).mean())
     concept_acc_mean = float((H_te == test.C).mean())
-
     return acc_det, acc_gt, concept_acc_mean, fe, fe_path, y_pred_det
 
+# regime runners
+def _run_fixed_regime(
+    regime: str,
+    S: Dict,
+    config: Dict,
+    device: str,
+    int_acc_tag: str,
+    label_noise_tag: str,
+    miss_tag: str,
+    model_type_tag: str,
+    run_dir: Path,
+    seed_tag: str,
+    skew_tag: str,
+    slug: str,
+    train,
+    valid,
+    test,
+    data,
+    prob_npz_path: Path,
+    prob_cache: Optional[np.lib.npyio.NpzFile],
+    force: bool,
+    rng,
+    params: Dict,
+):
+    cd, det_path = _train_concept_detector(
+        S, config, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir, seed_tag, skew_tag, train, valid, test
+    )
 
-# -------------------- public entrypoint --------------------
+    if (not force) and prob_cache is not None and {"P_tr", "P_te"}.issubset(set(prob_cache.files)):
+        P_tr = prob_cache["P_tr"]
+        P_te = prob_cache["P_te"]
+    else:
+        P_tr = cd.predict(train, embed_params={"device": device})
+        P_te = cd.predict(test, embed_params={"device": device})
+        _merge_save_npz(
+            prob_npz_path,
+            {
+                "P_tr": P_tr,
+                "P_te": P_te,
+                "C_tr": train.C.astype(np.float32),
+                "C_te": test.C.astype(np.float32),
+                "y_tr": train.y.astype(int),
+                "y_te": test.y.astype(int),
+                "concepts": np.array(list(test.concepts)),
+            },
+        )
+
+    H_tr = (P_tr > 0.5).astype(np.float32)
+    H_te = (P_te > 0.5).astype(np.float32)
+    per_concept_acc, train_per_concept_acc = _get_concept_accuracies(H_te, H_tr, test, train)
+    acc_det, acc_gt, concept_acc_mean, fe, fe_path, _ = _train_frontend(
+        H_te, H_tr, P_tr, S, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir, seed_tag, skew_tag, test, train
+    )
+
+    ia_val = 1.0 if regime == "perfect" else float(S.get("human_annotation_accuracy", 0.8))
+    _, _, intervention_results = test_interventions(P_te, {**S, "intervention_accuracy": ia_val}, acc_det, fe, rng, test)
+
+    per_sub_acc = _emit_confusion(run_dir, fe, H_te, P_te, test, S.get("drop_concepts", []))
+    catalog_csv_path, meta_extra = _write_catalogs(run_dir, data.meta)
+
+    meta = {
+        "settings": S,
+        "run_dir": str(run_dir),
+        "artifacts": {"detector": str(det_path), "frontend": str(fe_path)},
+        "splits": {"n_train": _len(train), "n_valid": _len(valid), "n_test": _len(test)},
+        "concepts": list(data.concepts),
+        "intervention_budgets": S.get("budget", []),
+        "intervention_acc": ia_val,
+        "logit_weights": params.get("weights", {}),
+        "naming_slug": slug,
+        "catalog_csv": catalog_csv_path,
+        "df_indices": {
+            "train": list(map(int, train.meta.get("df_indices", []))),
+            "valid": list(map(int, valid.meta.get("df_indices", []))),
+            "test": list(map(int, test.meta.get("df_indices", []))),
+        },
+        "robot_ids": {
+            "train": list(map(int, train.meta.get("robot_ids", []))),
+            "valid": list(map(int, valid.meta.get("robot_ids", []))),
+            "test": list(map(int, test.meta.get("robot_ids", []))),
+        },
+    }
+    meta.update(meta_extra)
+
+    feweights = _extract_fe_weights(fe, list(test.concepts))
+    metrics = {
+        "cbm_acc_detected": float(acc_det),
+        "cbm_acc_oracle": float(acc_gt),
+        "concept_det_acc_mean": float(concept_acc_mean),
+        "interventions": intervention_results,
+        "frontend_weights": feweights,
+        "concept_accuracies": per_concept_acc,
+        "model_accuracies_per_concept": per_sub_acc,
+        "train_concept_accuracies": train_per_concept_acc,
+        "prob_test_npz": str(prob_npz_path),
+        "concept_names": list(test.concepts),
+    }
+    return meta, metrics, {"acc_det": acc_det, "acc_gt": acc_gt, "interventions": intervention_results}
+
+def _run_subjective_rate(
+    rate_subj: float,
+    S: Dict,
+    config: Dict,
+    device: str,
+    int_acc_tag: str,
+    label_noise_tag: str,
+    miss_tag: str,
+    model_type_tag: str,
+    rate_dir: Path,
+    seed_tag: str,
+    skew_tag: str,
+    slug: str,
+    train,
+    valid,
+    test,
+    data,
+    prob_npz_path: Path,
+    prob_cache: Optional[np.lib.npyio.NpzFile],
+    force: bool,
+    rng,
+    params: Dict,
+):
+    Ctr_noisy = _apply_concept_noise(train.C, train.concepts, S.get("concepts", {}), float(rate_subj), rng)
+    Cva_noisy = _apply_concept_noise(valid.C, valid.concepts, S.get("concepts", {}), float(rate_subj), rng)
+    tr_noisy = _clone_with_C(train, Ctr_noisy)
+    va_noisy = _clone_with_C(valid, Cva_noisy)
+
+    cd, det_path = _train_concept_detector(
+        S, config, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, rate_dir, seed_tag, skew_tag, tr_noisy, va_noisy, test
+    )
+    P_tr = cd.predict(tr_noisy, embed_params={"device": device})
+    if (not force) and prob_cache is not None and "P_te" in set(prob_cache.files):
+        P_te = prob_cache["P_te"]
+    else:
+        P_te = cd.predict(test, embed_params={"device": device})
+        _merge_save_npz(
+            prob_npz_path,
+            {
+                "P_te": P_te,
+                "C_te": test.C.astype(np.float32),
+                "y_te": test.y.astype(int),
+                "concepts": np.array(list(test.concepts)),
+            },
+        )
+
+    H_tr = (P_tr > 0.5).astype(np.float32)
+    H_te = (P_te > 0.5).astype(np.float32)
+
+    per_concept_acc, train_per_concept_acc = _get_concept_accuracies(H_te, H_tr, test, tr_noisy)
+    acc_det, acc_gt, concept_acc_mean, fe, fe_path, _ = _train_frontend(
+        H_te, H_tr, P_tr, S, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, rate_dir, seed_tag, skew_tag, test, tr_noisy
+    )
+    _, _, intervention_results = test_interventions(P_te, S, acc_det, fe, rng, test)
+
+    per_sub_acc = _emit_confusion(rate_dir, fe, H_te, P_te, test, S.get("drop_concepts", []))
+    catalog_csv_path, meta_extra = _write_catalogs(rate_dir, data.meta)
+
+    meta = {
+        "settings": {**S, "regime_subjective_rate": float(rate_subj)},
+        "run_dir": str(rate_dir),
+        "artifacts": {"detector": str(det_path), "frontend": str(fe_path)},
+        "splits": {"n_train": _len(tr_noisy), "n_valid": _len(va_noisy), "n_test": _len(test)},
+        "concepts": list(data.concepts),
+        "intervention_budgets": S.get("budget", []),
+        "intervention_acc": float(S.get("intervention_accuracy", 0.9)),
+        "logit_weights": params.get("weights", {}),
+        "naming_slug": slug,
+        "catalog_csv": catalog_csv_path,
+        "df_indices": {
+            "train": list(map(int, tr_noisy.meta.get("df_indices", []))),
+            "valid": list(map(int, va_noisy.meta.get("df_indices", []))),
+            "test": list(map(int, test.meta.get("df_indices", []))),
+        },
+        "robot_ids": {
+            "train": list(map(int, tr_noisy.meta.get("robot_ids", []))),
+            "valid": list(map(int, va_noisy.meta.get("robot_ids", []))),
+            "test": list(map(int, test.meta.get("robot_ids", []))),
+        },
+    }
+    meta.update(meta_extra)
+
+    feweights = _extract_fe_weights(fe, list(test.concepts))
+    metrics = {
+        "cbm_acc_detected": float(acc_det),
+        "cbm_acc_oracle": float(acc_gt),
+        "concept_det_acc_mean": float(concept_acc_mean),
+        "interventions": intervention_results,
+        "frontend_weights": feweights,
+        "concept_accuracies": per_concept_acc,
+        "model_accuracies_per_concept": per_sub_acc,
+        "train_concept_accuracies": train_per_concept_acc,
+        "prob_test_npz": str(prob_npz_path),
+        "concept_names": list(test.concepts),
+    }
+    return meta, metrics, {"acc_det": acc_det, "acc_gt": acc_gt, "interventions": intervention_results}
+
+# entrypoint
 def run_regimes(settings: Dict) -> Dict:
     set_seed(settings["seed"])
 
     S = dict(settings)
+    force = bool(S.get("force", False))
+    if force:
+        S.pop("load_detector", None)
+        S.pop("load_frontend", None)
+
     rng = np.random.default_rng(int(S["seed"]))
-    base_out = Path(S["out_dir"])
+    base_root = Path(S["out_dir"])
+    base_out = base_root / "robots"
     base_out.mkdir(parents=True, exist_ok=True)
 
     miss = str(S["missingness"]).lower()
@@ -323,14 +602,14 @@ def run_regimes(settings: Dict) -> Dict:
     skew_tag = "_skew" if S.get("skew_concept", []) else ""
     filter_tag = "_filter" if S.get("dataset_characterization", "") else ""
     label_noise_tag = "_label-noise_" if float(S.get("label_noise_rate", 0.0)) else "_"
-    model_type_tag = f"_{S['model_type']}_{miss_tag}{filter_tag}_{S.get('image_size','')}"
+    model_type_tag = f"{S['model_type']}_"  # filenames
 
     params = {
         "samples_per_instance": S["samples_per_instance"],
         "draw": S["draw"],
-        "output_directory": S["image_dir"],
+        "output_directory": S.get("image_dir", base_root / "images"),
         "concepts": S["concepts"],
-        "subconcepts": S.get("subconcepts", ["foot_shape_subtype", "hand_shape_subtype"]),
+        "additional_features": [] if S.get("knows_concepts", True) else S.get("subconcepts", ["foot_shape_subtype", "hand_shape_subtype"]),
         "spurious_features": S.get("spurious_features", []),
         "drop_concepts": S.get("drop_concepts", []),
         "color_mode": S["color_mode"],
@@ -340,11 +619,14 @@ def run_regimes(settings: Dict) -> Dict:
         "scalar": float(S.get("logit_scalar", 1.0)),
         "intercept": float(S.get("logit_intercept", 0.0)),
         "weights": S.get("logit_weights", {}),
-        "test_set_size": 10000,
+        "test_set_size": int(S.get("test_size", 10000)),
         "train_concept_detector": True,
         "verbose": True,
         "rng_seed": S["seed"],
     }
+
+    if Path(params["output_directory"]).exists() and not bool(S.get("draw", False)):
+        params["draw"] = False
 
     data = create_synthetic_dataset(**params)
     tf = transforms.Compose([transforms.ToTensor()])
@@ -362,266 +644,167 @@ def run_regimes(settings: Dict) -> Dict:
 
     regimes = [str(r).lower() for r in S.get("regimes", [])]
     subjective_grid = S.get("subjective_grid", [0.2])
-    expert_acc = float(S.get("human_annotation_accuracy", 0.8))
 
-    # Rollup and per-regime writes
     results: Dict = {}
-    results_path = base_out / "robots" / f"{S['run_name']}__regime_results.json"
-    (base_out / "robots").mkdir(parents=True, exist_ok=True)
+    results_file = base_out / f"{S['run_name']}__regime_results.json"
 
     for regime in regimes:
-        run_dir = base_out / "robots" / f"{S['run_name']}__regime-{regime}"
+        run_dir = base_out / f"{S['run_name']}__regime-{regime}"
         run_dir.mkdir(parents=True, exist_ok=True)
 
         slug = _build_slug(S, miss_tag, filter_tag, label_noise_tag, skew_tag, int_acc_tag)
         seed_tag = f"seed{int(S['seed'])}"
 
-        if regime == "perfect":
-            cd, det_path = _train_concept_detector(
-                S, config, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir, seed_tag, skew_tag, train, valid, test
+        if regime in {"perfect", "expert"}:
+            # Anchor = noise-free training; reuse across different intervention settings
+            S_anchor, _ = _resolve_anchor(dict(S), base_out, S["run_name"], concept_noise_rate=0.0)
+            # Prefer anchor artifacts over per-regime meta
+            S_anchor, prob_cache, prob_npz_path, meta_path, metrics_path = _load_artifacts_and_cache(
+                S_anchor, run_dir, slug, seed_tag, force
             )
-            P_tr = cd.predict(train, embed_params={"device": device})
-            P_te = cd.predict(test, embed_params={"device": device})
-            H_tr = (P_tr > 0.5).astype(np.float32)
-            H_te = (P_te > 0.5).astype(np.float32)
-
-            per_concept_acc, train_per_concept_acc = _get_concept_accuracies(H_te, H_tr, test, train)
-            acc_det, acc_gt, concept_acc_mean, fe, fe_path, _ = _train_frontend(
-                H_te, H_tr, P_tr, S, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir, seed_tag, skew_tag, test, train
+            meta, metrics, res = _run_fixed_regime(
+                regime, S_anchor, config, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag,
+                run_dir, seed_tag, skew_tag, slug, train, valid, test, data, prob_npz_path, prob_cache, force, rng,
+                params
             )
-            _, _, intervention_results = test_interventions(
-                P_te, {**S, "intervention_accuracy": 1.0}, acc_det, fe, rng, test
-            )
-
-            subtype_concepts = [c for c in test.concepts if c.startswith("foot_shape_")]
-            missing_concepts = [c for c in S.get("drop_concepts", []) if c.startswith("foot_shape_")]
-            all_preds, confusion_df = _get_confusion_matrix(subtype_concepts, missing_concepts, fe, H_te, P_te, test)
-            per_sub_acc = _get_accuracies_per_subconcept(all_preds, missing_concepts, subtype_concepts)
-
-            confusion_path = run_dir / "confusion.csv"
-            confusion_df.to_csv(confusion_path, index=False)
-            catalog_csv_path = run_dir / "catalog.csv"
-            data.meta["catalog_df"].to_csv(catalog_csv_path, index=False)
-
-            meta_extra = {}
-            if "catalog_df_spurious" in data.meta:
-                catalog_spu_path = run_dir / "catalog_with_spurious.csv"
-                data.meta["catalog_df_spurious"].to_csv(catalog_spu_path, index=False)
-                meta_extra["catalog_csv_spurious"] = str(catalog_spu_path)
-
-            meta = {
-                "settings": S,
-                "run_dir": str(run_dir),
-                "artifacts": {"detector": str(det_path), "frontend": str(fe_path)},
-                "splits": {"n_train": _len(train), "n_valid": _len(valid), "n_test": _len(test)},
-                "concepts": list(data.concepts),
-                "intervention_budgets": S.get("budget", []),
-                "intervention_acc": 1.0,
-                "logit_weights": params.get("weights", {}),
-                "naming_slug": slug,
-                "catalog_csv": str(catalog_csv_path),
-                "df_indices": {
-                    "train": list(map(int, train.meta.get("df_indices", []))),
-                    "valid": list(map(int, valid.meta.get("df_indices", []))),
-                    "test": list(map(int, test.meta.get("df_indices", []))),
-                },
-                "robot_ids": {
-                    "train": list(map(int, train.meta.get("robot_ids", []))),
-                    "valid": list(map(int, valid.meta.get("robot_ids", []))),
-                    "test": list(map(int, test.meta.get("robot_ids", []))),
-                },
-            }
-            meta.update(meta_extra)
-            feweights = _extract_fe_weights(fe, list(test.concepts))
-            metrics = {
-                "cbm_acc_detected": float(acc_det),
-                "cbm_acc_oracle": float(acc_gt),
-                "concept_det_acc_mean": float(concept_acc_mean),
-                "interventions": intervention_results,
-                "frontend_weights": feweights,
-                "concept_accuracies": per_concept_acc,
-                "model_accuracies_per_concept": per_sub_acc,
-                "train_concept_accuracies": train_per_concept_acc,
-            }
-
-            meta_path = run_dir / f"meta_cbm_detected_{slug}_{seed_tag}.json"
-            metrics_path = run_dir / f"metrics_cbm_detected_{slug}_{seed_tag}.json"
             with open(meta_path, "w") as f:
                 json.dump(meta, f, indent=2)
             with open(metrics_path, "w") as f:
                 json.dump(metrics, f, indent=2)
+            results[regime] = res
 
-            results[(regime)] = {"acc_det": acc_det, "acc_gt": acc_gt, "interventions": intervention_results}
-
-        elif regime == "expert":
-            cd, det_path = _train_concept_detector(
-                S, config, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir, seed_tag, skew_tag, train, valid, test
-            )
-            P_tr = cd.predict(train, embed_params={"device": device})
-            P_te = cd.predict(test, embed_params={"device": device})
-            H_tr = (P_tr > 0.5).astype(np.float32)
-            H_te = (P_te > 0.5).astype(np.float32)
-
-            per_concept_acc, train_per_concept_acc = _get_concept_accuracies(H_te, H_tr, test, train)
-            acc_det, acc_gt, concept_acc_mean, fe, fe_path, _ = _train_frontend(
-                H_te, H_tr, P_tr, S, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir, seed_tag, skew_tag, test, train
-            )
-            _, _, intervention_results = test_interventions(
-                P_te, {**S, "intervention_accuracy": float(S.get("human_annotation_accuracy", 0.8))}, acc_det, fe, rng, test
-            )
-
-            subtype_concepts = [c for c in test.concepts if c.startswith("foot_shape_")]
-            missing_concepts = [c for c in S.get("drop_concepts", []) if c.startswith("foot_shape_")]
-            all_preds, confusion_df = _get_confusion_matrix(subtype_concepts, missing_concepts, fe, H_te, P_te, test)
-            per_sub_acc = _get_accuracies_per_subconcept(all_preds, missing_concepts, subtype_concepts)
-
-            confusion_path = run_dir / "confusion.csv"
-            confusion_df.to_csv(confusion_path, index=False)
-            catalog_csv_path = run_dir / "catalog.csv"
-            data.meta["catalog_df"].to_csv(catalog_csv_path, index=False)
-
-            meta_extra = {}
-            if "catalog_df_spurious" in data.meta:
-                catalog_spu_path = run_dir / "catalog_with_spurious.csv"
-                data.meta["catalog_df_spurious"].to_csv(catalog_spu_path, index=False)
-                meta_extra["catalog_csv_spurious"] = str(catalog_spu_path)
-
-            meta = {
-                "settings": S,
-                "run_dir": str(run_dir),
-                "artifacts": {"detector": str(det_path), "frontend": str(fe_path)},
-                "splits": {"n_train": _len(train), "n_valid": _len(valid), "n_test": _len(test)},
-                "concepts": list(data.concepts),
-                "intervention_budgets": S.get("budget", []),
-                "intervention_acc": float(S.get("human_annotation_accuracy", 0.8)),
-                "logit_weights": params.get("weights", {}),
-                "naming_slug": slug,
-                "catalog_csv": str(catalog_csv_path),
-                "df_indices": {
-                    "train": list(map(int, train.meta.get("df_indices", []))),
-                    "valid": list(map(int, valid.meta.get("df_indices", []))),
-                    "test": list(map(int, test.meta.get("df_indices", []))),
-                },
-                "robot_ids": {
-                    "train": list(map(int, train.meta.get("robot_ids", []))),
-                    "valid": list(map(int, valid.meta.get("robot_ids", []))),
-                    "test": list(map(int, test.meta.get("robot_ids", []))),
-                },
-            }
-            meta.update(meta_extra)
-            feweights = _extract_fe_weights(fe, list(test.concepts))
-            metrics = {
-                "cbm_acc_detected": float(acc_det),
-                "cbm_acc_oracle": float(acc_gt),
-                "concept_det_acc_mean": float(concept_acc_mean),
-                "interventions": intervention_results,
-                "frontend_weights": feweights,
-                "concept_accuracies": per_concept_acc,
-                "model_accuracies_per_concept": per_sub_acc,
-                "train_concept_accuracies": train_per_concept_acc,
-            }
-
-            meta_path = run_dir / f"meta_cbm_detected_{slug}_{seed_tag}.json"
-            metrics_path = run_dir / f"metrics_cbm_detected_{slug}_{seed_tag}.json"
-            with open(meta_path, "w") as f:
-                json.dump(meta, f, indent=2)
-            with open(metrics_path, "w") as f:
-                json.dump(metrics, f, indent=2)
-
-            results[(regime)] = {"acc_det": acc_det, "acc_gt": acc_gt, "interventions": intervention_results}
 
         elif regime == "subjective":
             for rate_subj in subjective_grid:
-                rate_dir = run_dir / f"rate{int(rate_subj * 100):02d}"
+                rate_dir = run_dir / f"rate{int(float(rate_subj) * 100):02d}"
                 rate_dir.mkdir(parents=True, exist_ok=True)
 
-                Ctr_noisy = _apply_concept_noise(train.C, train.concepts, S.get("concepts", {}), float(rate_subj), rng)
-                Cva_noisy = _apply_concept_noise(valid.C, valid.concepts, S.get("concepts", {}), float(rate_subj), rng)
-                tr_noisy = _clone_with_C(train, Ctr_noisy)
-                va_noisy = _clone_with_C(valid, Cva_noisy)
-
-                cd, det_path = _train_concept_detector(
-                    S, config, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, rate_dir, seed_tag, skew_tag, tr_noisy, va_noisy, test
+                # Anchor keyed by concept noise rate; independent of intervention accuracy
+                S_rate = dict(S)
+                S_rate, _anchor_paths_dict = _resolve_anchor(S_rate, base_out, S_rate["run_name"],
+                                                             concept_noise_rate=float(rate_subj))
+                S_rate, prob_cache, prob_npz_path, meta_path_unused, metrics_path_unused = _load_artifacts_and_cache(
+                    S_rate, rate_dir, slug, seed_tag, force
                 )
-                P_tr = cd.predict(tr_noisy, embed_params={"device": device})
-                P_te = cd.predict(test, embed_params={"device": device})
-                H_tr = (P_tr > 0.5).astype(np.float32)
-                H_te = (P_te > 0.5).astype(np.float32)
+                meta, metrics, res = _run_subjective_rate(
+                    float(rate_subj), S_rate, config, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag,
+                    rate_dir, seed_tag, skew_tag, slug, train, valid, test, data, prob_npz_path, prob_cache, force, rng,
+                    params
 
-                per_concept_acc, train_per_concept_acc = _get_concept_accuracies(H_te, H_tr, test, tr_noisy)
-                acc_det, acc_gt, concept_acc_mean, fe, fe_path, _ = _train_frontend(
-                    H_te, H_tr, P_tr, S, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, rate_dir, seed_tag, skew_tag, test, tr_noisy
                 )
-                _, _, intervention_results = test_interventions(P_te, S, acc_det, fe, rng, test)
-
-                subtype_concepts = [c for c in test.concepts if c.startswith("foot_shape_")]
-                missing_concepts = [c for c in S.get("drop_concepts", []) if c.startswith("foot_shape_")]
-                all_preds, confusion_df = _get_confusion_matrix(subtype_concepts, missing_concepts, fe, H_te, P_te, test)
-                per_sub_acc = _get_accuracies_per_subconcept(all_preds, missing_concepts, subtype_concepts)
-
-                confusion_path = rate_dir / "confusion.csv"
-                confusion_df.to_csv(confusion_path, index=False)
-                catalog_csv_path = rate_dir / "catalog.csv"
-                data.meta["catalog_df"].to_csv(catalog_csv_path, index=False)
-
-                meta_extra = {}
-                if "catalog_df_spurious" in data.meta:
-                    catalog_spu_path = rate_dir / "catalog_with_spurious.csv"
-                    data.meta["catalog_df_spurious"].to_csv(catalog_spu_path, index=False)
-                    meta_extra["catalog_csv_spurious"] = str(catalog_spu_path)
-
-                meta = {
-                    "settings": {**S, "regime_subjective_rate": float(rate_subj)},
-                    "run_dir": str(rate_dir),
-                    "artifacts": {"detector": str(det_path), "frontend": str(fe_path)},
-                    "splits": {"n_train": _len(tr_noisy), "n_valid": _len(va_noisy), "n_test": _len(test)},
-                    "concepts": list(data.concepts),
-                    "intervention_budgets": S.get("budget", []),
-                    "intervention_acc": float(S.get("intervention_accuracy", 0.9)),
-                    "logit_weights": params.get("weights", {}),
-                    "naming_slug": slug,
-                    "catalog_csv": str(catalog_csv_path),
-                    "df_indices": {
-                        "train": list(map(int, tr_noisy.meta.get("df_indices", []))),
-                        "valid": list(map(int, va_noisy.meta.get("df_indices", []))),
-                        "test": list(map(int, test.meta.get("df_indices", []))),
-                    },
-                    "robot_ids": {
-                        "train": list(map(int, tr_noisy.meta.get("robot_ids", []))),
-                        "valid": list(map(int, va_noisy.meta.get("robot_ids", []))),
-                        "test": list(map(int, test.meta.get("robot_ids", []))),
-                    },
-                }
-                meta.update(meta_extra)
-                feweights = _extract_fe_weights(fe, list(test.concepts))
-                metrics = {
-                    "cbm_acc_detected": float(acc_det),
-                    "cbm_acc_oracle": float(acc_gt),
-                    "concept_det_acc_mean": float(concept_acc_mean),
-                    "interventions": intervention_results,
-                    "frontend_weights": feweights,
-                    "concept_accuracies": per_concept_acc,
-                    "model_accuracies_per_concept": per_sub_acc,
-                    "train_concept_accuracies": train_per_concept_acc,
-                }
-
-                meta_path = rate_dir / f"meta_cbm_detected_{slug}_{seed_tag}.json"
-                metrics_path = rate_dir / f"metrics_cbm_detected_{slug}_{seed_tag}.json"
-                with open(meta_path, "w") as f:
+                with open(rate_dir / f"meta_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
                     json.dump(meta, f, indent=2)
-                with open(metrics_path, "w") as f:
+
+                with open(rate_dir / f"metrics_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
                     json.dump(metrics, f, indent=2)
 
-                results[(regime, float(rate_subj))] = {
-                    "acc_det": acc_det,
-                    "acc_gt": acc_gt,
-                    "interventions": intervention_results,
-                }
+                results[(regime, float(rate_subj))] = res
 
         elif regime == "machine":
-            results[(regime)] = {"note": "label-free CBM not implemented"}
+            results[regime] = {"note": "label-free CBM not implemented"}
 
-    with open(results_path, "w") as f:
-        json.dump(results, f, indent=2, sort_keys=True)
+    def _jsonify(o):
+        import numpy as np
+        from pathlib import Path
+        if isinstance(o, dict):
+            out = {}
+            for k, v in o.items():
+                k = "/".join(map(str, k)) if isinstance(k, tuple) else str(k)
+                out[k] = _jsonify(v)
+            return out
+        if isinstance(o, (list, tuple)):
+            return [_jsonify(x) for x in o]
+        if isinstance(o, (np.integer, np.floating, np.bool_)):
+            return o.item()
+        if hasattr(o, "tolist"):
+            try:
+                return o.tolist()
+            except Exception:
+                pass
+        if isinstance(o, Path):
+            return str(o)
+        return o
 
+    with open(results_file, "w") as f:
+        json.dump(_jsonify(results), f, indent=2, sort_keys=True)
     return results
+
+
+# optional example settings block kept for parity with training (no __main__ guard)
+from concept_benchmark.paths import results_dir
+
+settings = {
+    "samples_per_instance": 4,
+    "draw": 0,
+    "CBM_type": "separate",
+    "image_dir": "./data/robot_images",
+    "image_size": "medium",
+    "color_mode": "color",
+    "seed": 1002,
+    "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy'))>= 3 else 'drent'",
+    "dataset_characterization": "",
+    "test_size": 10000,
+    "train_size": 3800,
+    "knows_concepts": False,
+    "concepts": {
+        "head_shape": ["square", "round"],
+        "body_shape": ["square", "round"],
+        "has_knees": ["false", "true"],
+        "has_elbows": ["false", "true"],
+        "has_antennae": ["false", "true"],
+        "ears_shape": ["square", "triangle"],
+        "mouth_type": ["closed", "open"],
+        "hand_shape": [
+            "round_circle","round_oval","round_oval2",
+            "edgy_triangle","edgy_square","edgy_trapezoid",
+        ],
+        "foot_shape": [
+            "flat_trapezoid","flat_rounded","flat_square","flat_5sided","flat_lshaped",
+            "pointy_trapezoid","pointy_rounded","pointy_square","pointy_3sided","pointy_4sided",
+        ],
+    },
+    "subconcepts": ["foot_shape_subtype"],
+    "spurious_features": ["has_elbows", "hand_shape"],
+    "drop_concepts": [
+        "foot_shape_flat_rounded","foot_shape_pointy_trapezoid",
+        "foot_shape_pointy_3sided","foot_shape_flat_lshaped","foot_shape"
+    ],
+    "human_alignment": {
+        "foot_shape_pointy_4sided": 5,
+        "foot_shape_flat_5sided": -5,
+        "foot_shape_pointy_rounded": 5,
+        "foot_shape_flat_square": -1,
+        "foot_shape_pointy_square": 5,
+        "mouth_type": -5,
+        "bias": 3,
+    },
+    "model_type": "stochastic",
+    "logit_scalar": 1.0,
+    "logit_intercept": 3,
+    "logit_weights": {"mouth_type": 5, "foot_shape": 10},
+    "label_noise_rate": 0,
+    "missingness": "complete",
+    "missing_rate": 1.0,
+    "impute_missing": 0,
+    "skew_concept": [
+        {"concepts": {"foot_shape_pointy_square": 1}, "min_fraction": 0.005},
+        {"concepts": {"foot_shape_pointy_rounded": 1}, "min_fraction": 0.005},
+        {"concepts": {"foot_shape_pointy_4sided": 1}, "min_fraction": 0.49},
+        {"concepts": {"foot_shape_flat_square": 1}, "min_fraction": 0.005},
+        {"concepts": {"foot_shape_flat_trapezoid": 1}, "min_fraction": 0.005},
+        {"concepts": {"foot_shape_flat_5sided": 1}, "min_fraction": 0.49},
+    ],
+    "budget": [1],
+    "intervention_accuracy": 0.9,
+    "human_annotation_accuracy": 0.9,
+    "intervention_threshold": 0.3,
+    "out_dir": str(results_dir),
+    "run_name": "TEST_cbm_run_565_subconcepts",
+    "load_detector": "",
+    "load_frontend": "",
+    "force": 1,
+    # "subjective_grid": [0.2],
+    "regimes": ["perfect","expert","subjective"],
+}
+
+run_regimes(settings)
