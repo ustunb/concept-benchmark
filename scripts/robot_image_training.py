@@ -4,17 +4,14 @@ import numpy as np
 import torch
 import copy
 from torchvision import transforms
-from concept_benchmark.models import ConceptDetector, FrontEndModel, RobotConceptClassifier
+from concept_benchmark.models import ConceptDetector, FrontEndModel, RobotConceptClassifier, FrontEndModelCVXPY
 from concept_benchmark.paths import results_dir
 from concept_benchmark.synthetic.robot import create_synthetic_dataset
 from concept_benchmark.models import ConceptBasedModel
 from concept_benchmark.intervention import (
-    InterventionBatch,
     InterventionConfig,
     ConceptInterventionRunner,
     ScoreIntervention,
-    OrderedCBMStrategy
-
 )
 from scripts.dataset_skewing import create_skewed_splits, filter_training_by_string
 from scripts.dnn_training import train_eval_image
@@ -30,7 +27,7 @@ settings = {
     "image_dir": "./data/robot_images",
     "image_size": "medium",
     "color_mode": "color",
-    "train_dnn": 1,
+    "train_dnn": 0,
     "seed": 1002,
     "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy'))>= 3 else 'drent'",
     'dataset_characterization': "",
@@ -73,14 +70,14 @@ settings = {
                       'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
                       'foot_shape'],#'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
     "human_alignment": {
-        "foot_shape_pointy_4sided": 5,
-        "foot_shape_pointy_rounded": 3,
-        "foot_shape_pointy_square": 1,
-        "foot_shape_flat_5sided": -5,
-        "foot_shape_flat_square": -1,
-        "foot_shape_flat_trapezoid": 0,
-        "mouth_type": -5,
-        "bias": 4
+        "signs": {
+            #"foot_shape_flat_trapezoid": 1,
+            #"foot_shape_pointy_square": -1,
+        },
+        "monotonicity": [
+            (["foot_shape_flat_square", "mouth_type"], ">=", 0.8),
+        ]
+
     },
     "model_type": "stochastic",
     "logit_scalar": 1.0,
@@ -103,9 +100,9 @@ settings = {
     "intervention_threshold": 0.2,
     "epochs": 1,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "cbm_run_1002_subconcepts",
-    "load_detector": str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed1002.pt")),
-    "load_frontend": str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed1002.pkl")),
+    "run_name": "cbm_run_1002_subconcepts_newalignment",
+    "load_detector": str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts_newalignment" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed1002.pt")),
+    "load_frontend": ""#,str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed1002.pkl")),
 }
 
 
@@ -130,6 +127,7 @@ def define_train_valid_test(settings, concept_dataset, missingness, params, rate
         concept_dataset.split("K05N01", fold_num_validation=4, fold_num_test=5)
         train = concept_dataset.training
         valid = concept_dataset.validation
+        test = concept_dataset.test
 
 
     if settings.get("label_noise_rate", 0.0) > 0:
@@ -176,9 +174,17 @@ def train_concept_detector(settings, config, device, int_acc_tag, label_noise_ta
 
 
 def train_frontend(H_te, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
-                   seed_tag, skew_tag, test, train):
-    fe = FrontEndModel()
-    fe_name = f"frontend_logreg_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
+                   seed_tag, skew_tag, test, train, monotonicity_constraints={}, prediction_constraints=[]):
+    cvxpy = False
+    if monotonicity_constraints or prediction_constraints:
+        cvxpy = True
+        fe = FrontEndModelCVXPY(monotonicity_constraints=monotonicity_constraints,
+                                prediction_constraints=prediction_constraints,
+                                concept_names=test.concepts)
+        fe_name = f"frontend_aligned_logreg_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
+    else:
+        fe = FrontEndModel()
+        fe_name = f"frontend_logreg_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
     if sttngs["load_frontend"]:
         with open(sttngs["load_frontend"], "rb") as f:
             fe = pickle.load(f)
@@ -206,11 +212,52 @@ def train_frontend(H_te, h_train, prob_train, sttngs, int_acc_tag, label_noise_t
     acc_gt = float((y_pred_gt.argmax(1) == test.y.astype(int)).mean())
     concept_acc_mean = float((H_te == test.C).mean())
 
-    print("\n=== Learned Frontend Weights ===")
-    for i, concept in enumerate(test.concepts):
-        print(f"  {concept}: {fe.model.coef_[0, i]:.4f}")
-    print(f"  bias: {fe.model.intercept_[0]:.4f}")
+    if not cvxpy:
+        print("\n=== Learned Frontend Weights ===")
+        for i, concept in enumerate(test.concepts):
+            print(f"  {concept}: {fe.model.coef_[0, i]:.4f}")
+        print(f"  bias: {fe.model.intercept_[0]:.4f}")
     return acc_det, acc_gt, concept_acc_mean, fe, fe_path, y_pred_det
+
+
+def test_alignment(fe, h_test, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
+                   seed_tag, skew_tag, test, train, monotonicity_constraints, prediction_constraints):
+    test_concepts = h_test
+    test_labels = test.y.astype(int)
+    original_frontend = fe
+    print(f"Aligning the model with the following constraints: {monotonicity_constraints} {prediction_constraints}")
+    _, _, _, aligned_frontend, _, _ = train_frontend(h_test, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag,
+                                                     miss_tag, model_type_tag, run_dir, seed_tag, skew_tag, test, train,
+                                                     monotonicity_constraints, prediction_constraints)
+
+    original_probs = original_frontend.predict_proba(test_concepts)
+    aligned_probs = aligned_frontend.predict_proba(test_concepts)
+    original_preds = original_probs.argmax(1)
+    aligned_preds = aligned_probs.argmax(1)
+
+    original_acc = (original_preds == test_labels).mean()
+    aligned_acc = (aligned_preds == test_labels).mean()
+
+    print("\n=== Aligned Frontend Weights ===")
+    for i, concept in enumerate(test.concepts):
+        print(f"  {concept}: {aligned_frontend.model.coef_[0, i]:.4f}")
+    print(f"  bias: {aligned_frontend.model.intercept_[0]:.4f}")
+
+    feweights = {}
+    for i, concept in enumerate(test.concepts):
+        feweights[concept] = round(aligned_frontend.model.coef_[0, i], 4)
+    feweights["bias"] = round(aligned_frontend.model.intercept_[0], 4)
+
+    aligned_preds = aligned_frontend.predict(h_test)
+
+    alignment_stats = {
+        'original_accuracy': float(original_acc),
+        'aligned_accuracy': float(aligned_acc),
+        'accuracy_change': float(aligned_acc - original_acc),
+        'predictions_changed': int(np.sum(original_preds != aligned_preds)),
+        'frontend_weights': feweights
+    }
+    return alignment_stats
 
 
 def train_dnn(sttngs, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir, seed_tag,
@@ -282,6 +329,7 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
 
         intervened_concepts = np.any(result.mask, axis=0)
         concept_intervention_counts = {c: int(np.sum(result.mask[:, i])) for i, c in enumerate(test.concepts) if intervened_concepts[i]}
+        prediction_num_concepts_intervened_on = {int(i): int(np.sum(result.mask[i])) for i in range(n_samples)}
 
         key = f"top_{budget}_human_acc_{int(human_acc * 100)}"
         intervention_results[key] = {
@@ -289,9 +337,9 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
             "accuracy_gain": acc_intervened - acc_det,
             "predictions_intervened_on": int(np.sum(np.any(result.mask, axis=1))),
             "interventions_rate": float(np.sum(np.any(result.mask, axis=1)) / n_samples),
-            "avg_edits_per_intervention": float(n_intervened / max(1, np.sum(np.any(result.mask, axis=1)))),
+            "avg_edits_per_intervention": float(sum(prediction_num_concepts_intervened_on.values())) / n_samples,
             "total_concept_checks": int(n_intervened),
-            "total_concept_edits_made": int(n_intervened),
+            "total_concept_edits_made": sum(prediction_num_concepts_intervened_on.values()),
             "concept_interventions": concept_intervention_counts,
             "human_accuracy": human_acc
         }
@@ -402,7 +450,10 @@ def main(sttngs):
     # align the model with new weights
     alignment_stats = {}
     if S.get("human_alignment", {}) != {}:
-        alignment_stats = test_alignment(H_te, S.get("human_alignment", {}), fe, test)
+        sign_alignment = S["human_alignment"].get("signs", {})
+        monotonicity_alignment = S["human_alignment"].get("monotonicity", [])
+        alignment_stats = test_alignment(fe, H_te, H_tr, P_tr, S, int_acc_tag, label_noise_tag, miss_tag, model_type_tag,
+                                         run_dir, seed_tag, skew_tag, test, train, sign_alignment, monotonicity_alignment)
     ###########################################################################
 
     ###########################################################################
