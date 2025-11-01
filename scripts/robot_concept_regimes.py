@@ -714,11 +714,12 @@ def run_regimes(settings: Dict) -> Dict:
             #   - concept keys align with dataset concepts (or are aligned by LFConceptSet)
 
             concepts_file = S.get("concepts_file", "")
-            if not concepts_file:
-                raise ValueError("machine/machine_annotation regime requires 'concepts_file' in settings.")
-
-            # Align concept set to dataset order
-            concept_set = LFConceptSet.from_file(concepts_file, dataset_keys=list(data.concepts))
+            # Accept either a concept file or the in-memory concept list used elsewhere.
+            if concepts_file:
+                concept_set = LFConceptSet.from_file(concepts_file, dataset_keys=list(test.concepts))
+            else:
+                ds_keys = list(test.concepts)
+                concept_set = LFConceptSet(keys=ds_keys, texts=[LFConceptSet._normalize_key(k) for k in ds_keys])
 
             # Config: respect user overrides under S["lfcbm"], default to paper settings
             lf_cfg = S.get("lfcbm", {})
@@ -941,7 +942,8 @@ settings = {
     "force": 1,
     # "subjective_grid": [0.2],
     "regimes": ["perfect","expert","subjective","machine"],
-    "concepts_file": pkg_dir /"synthetic/helper/static/concepts_robot_subconcepts.csv",  # CSV/JSON/JSONL/TXT supported
+    # "concepts_file": pkg_dir /"synthetic/helper/static/concepts_robot_subconcepts.csv",  # CSV/JSON/JSONL/TXT supported
+    "concepts_file": None,
     "lfcbm": {
       "clip_model": "ViT-B-32",
       "clip_pretrained": "laion2b_s34b_b79k",
