@@ -25,12 +25,12 @@ from scripts.robot_utils import _apply_missing, _apply_label_noise, _rate_tag, _
 
 settings = {
     "samples_per_instance": 4,
-    "draw": 1,
+    "draw": 0,
     "CBM_type": "separate", #"sequential"
     "image_dir": "./data/robot_images",
     "image_size": "medium",
     "color_mode": "color",
-    "train_dnn": 0,
+    "train_dnn": 1,
     "seed": 1002,
     "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy'))>= 3 else 'drent'",
     'dataset_characterization': "",
@@ -152,22 +152,14 @@ def train_concept_detector(settings, config, device, int_acc_tag, label_noise_ta
                                                       32 if settings["image_size"] == "medium" else 8))
     det_name = f"detector_dnn_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
     if settings["load_detector"]:
-        det_candidate = Path(settings["load_detector"])
-        if det_candidate.is_file():
-            mini_train = train.filter(np.array([True] + [False] * (len(train.C) - 1)))
-            mini_valid = valid.filter(np.array([True] + [False] * (len(valid.C) - 1)))
+        mini_train = train.filter(np.array([True] + [False] * (len(train.C) - 1)))
+        mini_valid = valid.filter(np.array([True] + [False] * (len(valid.C) - 1)))
 
-            cd.fit(mini_train, mini_valid, freeze=True, embed_params={"device": device},
-                   fit_params={"epochs": 1, "device": "cpu"})
-            state = torch.load(det_candidate, weights_only=False, map_location="cpu")
-            cd.load_state_dict(state)
-            det_path = det_candidate
-        else:
-            print(f"{det_candidate} not found, regenerating")
-            cd.fit(train, valid, embed_params={'shuffle': False, **config},
-                   fit_params={"epochs": 50, 'lr': 1e-3, "patience": 10, **config})
-            det_path = run_dir / det_name
-            torch.save(cd.state_dict(), det_path)
+        cd.fit(mini_train, mini_valid, freeze=True, embed_params={"device": device},
+               fit_params={"epochs": 1, "device": "cpu"})
+        state = torch.load(settings["load_detector"], weights_only=False, map_location="cpu")
+        cd.load_state_dict(state)
+        det_path = Path(settings["load_detector"])
     else:
         cd.fit(train, valid, embed_params={'shuffle': False, **config},
                fit_params={"epochs": 50, 'lr': 1e-3, "patience": 10, **config})
@@ -188,28 +180,9 @@ def train_frontend(H_te, h_train, prob_train, sttngs, int_acc_tag, label_noise_t
     fe = FrontEndModel()
     fe_name = f"frontend_logreg_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
     if sttngs["load_frontend"]:
-        fe_candidate = Path(sttngs["load_frontend"])
-        if fe_candidate.is_file():
-            with open(fe_candidate, "rb") as f:
-                fe = pickle.load(f)
-            fe_path = fe_candidate
-        else:
-            print(f"{fe_candidate} not found, regenerating")
-            Ctr = train.C.astype(np.float32)
-            if int(sttngs["impute_missing"]) and np.any(Ctr < 0):
-                Cin = Ctr.copy()
-                m = Cin < 0
-                Cin[m] = prob_train[m]
-                fe.fit(Cin, train.y.astype(int))
-            else:
-                if sttngs.get("CBM_type", "separate") == "sequential":
-                    keep = np.all(Ctr >= 0, axis=1)
-                    fe.fit(h_train[keep], train.y[keep].astype(int))
-                else:
-                    fe.fit(Ctr, train.y.astype(int))
-            fe_path = run_dir / fe_name
-            with open(fe_path, "wb") as f:
-                pickle.dump(fe, f)
+        with open(sttngs["load_frontend"], "rb") as f:
+            fe = pickle.load(f)
+        fe_path = Path(sttngs["load_frontend"])
     else:
         Ctr = train.C.astype(np.float32)
         if int(sttngs["impute_missing"]) and np.any(Ctr < 0):
@@ -481,12 +454,6 @@ def main(sttngs):
     catalog_csv_path = run_dir / "catalog.csv"
     data.meta["catalog_df"].to_csv(catalog_csv_path, index=False)
     meta["catalog_csv"] = str(catalog_csv_path)
-
-    if "catalog_df_spurious" in data.meta:
-        catalog_spu_path = run_dir / "catalog_with_spurious.csv"
-        data.meta["catalog_df_spurious"].to_csv(catalog_spu_path, index=False)
-        meta["catalog_csv_spurious"] = str(catalog_spu_path)
-
     meta["df_indices"] = {
         "train": list(map(int, train.meta["df_indices"])),
         "valid": list(map(int, valid.meta["df_indices"])),

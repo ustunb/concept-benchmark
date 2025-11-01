@@ -481,24 +481,31 @@ class ScoreIntervention(InterventionStrategy):
 
         best_subset_arrays: List[Optional[np.ndarray]] = [None] * n_samples
 
-        for idx in range(n_samples):
-            base_vector = concepts_before[idx]
-            base_prob = p_before[idx]
-            best_score = -math.inf
-            best_subset_array: Optional[np.ndarray] = None
+        from tqdm import tqdm
+        with tqdm(total=batch.n_samples, desc="Computing intervention scores") as pbar:
 
-            for combo_indices in combination_arrays:
-                flipped = base_vector.copy()
-                flipped[combo_indices] = 1 - flipped[combo_indices]
-                p_after = model.front_end_model.predict_proba(flipped[None, :])[0]
-                score = float(np.max(np.abs(p_after - base_prob)))
-                if score > best_score:
-                    best_score = score
-                    best_subset_array = combo_indices
+            for idx in range(n_samples):
+                base_vector = concepts_before[idx]
+                base_prob = p_before[idx]
+                best_score = -math.inf
+                best_subset_array: Optional[np.ndarray] = None
 
-            if best_subset_array is not None:
-                scores[idx] = max(best_score, 0.0)
-                best_subset_arrays[idx] = best_subset_array
+                for combo_indices in combination_arrays:
+                    flipped = base_vector.copy()
+                    flipped[combo_indices] = 1 - flipped[combo_indices]
+                    p_after = model.front_end_model.predict_proba(flipped[None, :])[0]
+                    score = float(np.max(np.abs(p_after - base_prob)))
+                    if score > best_score:
+                        best_score = score
+                        best_subset_array = combo_indices
+
+                if best_subset_array is not None:
+                    scores[idx] = max(best_score, 0.0)
+                    best_subset_arrays[idx] = best_subset_array
+
+                pbar.update(1)
+                if idx % 100 == 0:  # Update postfix every 100 samples
+                    pbar.set_postfix({'avg_score': f"{scores[:idx + 1].mean():.3f}"})
 
         selected_indices: List[int] = []
         for idx, subset_array in enumerate(best_subset_arrays):
