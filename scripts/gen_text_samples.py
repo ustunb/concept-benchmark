@@ -3702,7 +3702,7 @@ for ta in acc_grid:
                 "sel_acc_post": float(sel_post.get("selective_accuracy", float("nan"))),
                 "sel_cov_post": float(sel_post.get("coverage", float("nan"))),
                 "coverage_automated": float(sel_pre.get("coverage", float("nan"))),
-                "coverage_after_confirmation": acc_k,
+                "coverage_after_confirmation": float(sel_post.get("coverage", float("nan"))),
                 "concept_source": args_obj.concept_source,
                 "test_miss": args_obj.test_miss,
                 "test_miss_rate": float(args_obj.test_miss_rate),
