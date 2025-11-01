@@ -7,6 +7,7 @@ import random
 import hashlib
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
+from concept_benchmark.paths import data_dir, results_dir, pkg_dir
 
 import numpy as np
 import torch
@@ -14,6 +15,7 @@ from torchvision import transforms
 
 from concept_benchmark.synthetic.robot import create_synthetic_dataset
 from concept_benchmark.models import ConceptDetector, FrontEndModel, RobotConceptClassifier
+from concept_benchmark.lfcbm import LabelFreeCBM, LFTrainingConfig, LFConceptSet
 from scripts.dataset_skewing import create_skewed_splits, filter_training_by_string
 from scripts.robot_interventions import test_interventions
 from scripts.robot_invariance_test import test_concept_detector_invariance
@@ -700,8 +702,142 @@ def run_regimes(settings: Dict) -> Dict:
 
                 results[(regime, float(rate_subj))] = res
 
-        elif regime == "machine":
-            results[regime] = {"note": "label-free CBM not implemented"}
+
+        elif regime in {"machine", "machine_annotation"}:
+
+            # ---- Label-free CBM regime (machine annotation) ----
+
+            # Requirements:
+
+            #   - settings["concepts_file"] points to a CSV/JSON/JSONL/TXT concept list
+
+            #   - concept keys align with dataset concepts (or are aligned by LFConceptSet)
+
+            concepts_file = S.get("concepts_file", "")
+            if not concepts_file:
+                raise ValueError("machine/machine_annotation regime requires 'concepts_file' in settings.")
+
+            # Align concept set to dataset order
+            concept_set = LFConceptSet.from_file(concepts_file, dataset_keys=list(data.concepts))
+
+            # Config: respect user overrides under S["lfcbm"], default to paper settings
+            lf_cfg = S.get("lfcbm", {})
+            cfg = LFTrainingConfig(
+                clip_model=str(lf_cfg.get("clip_model", "ViT-B-32")),
+                clip_pretrained=str(lf_cfg.get("clip_pretrained", "laion2b_s34b_b79k")),
+                device=device,
+                lr=float(lf_cfg.get("lr", 1e-2)),
+                weight_decay=float(lf_cfg.get("weight_decay", 1e-4)),
+                max_epochs=int(lf_cfg.get("max_epochs", 200)),
+                patience=int(lf_cfg.get("patience", 10)),
+                seed=int(S["seed"]),
+                l1_ratio=float(lf_cfg.get("l1_ratio", 0.99)),
+                C_grid=tuple(map(float, lf_cfg.get("C_grid", (0.05, 0.1, 0.2, 0.5, 1.0, 2.0)))),
+                target_nonzero_per_class=tuple(map(int, lf_cfg.get("target_nonzero_per_class", (25, 35)))),
+                cache_dir=run_dir / "lfcbm_cache",
+                batch_size=int(lf_cfg.get("batch_size", 256)),
+            )
+            lf = LabelFreeCBM(cfg)
+
+            # Fit label-free CBM on current split
+            stats = lf.fit(
+                train_X=list(map(str, train.X)),
+                train_y=train.y.astype(int),
+                valid_X=list(map(str, valid.X)),
+                valid_y=valid.y.astype(int),
+                concept_set=concept_set,
+                cache_dir=cfg.cache_dir,
+            )
+            # Compute concept probabilities on train/test
+            P_tr = lf.concept_proba(list(map(str, train.X)))  # (Ntr, Mk)
+            P_te = lf.concept_proba(list(map(str, test.X)))  # (Nte, Mk)
+            H_tr = (P_tr > 0.5).astype(np.float32)
+            H_te = (P_te > 0.5).astype(np.float32)
+
+            # Save probabilities to match the rest of the pipeline convention
+            prob_npz_path = run_dir / f"probs_{slug}_{seed_tag}.npz"
+            _merge_save_npz(prob_npz_path, {"P_tr": P_tr, "P_te": P_te})
+
+            # Build a lightweight front-end adapter that expects probabilities P and internally uses logit(P).
+            class _FEOnProbs(FrontEndModel):
+                def __init__(self, clf):
+                    super().__init__()
+                    self.model = clf
+                def predict_proba(self, P: np.ndarray) -> np.ndarray:
+                    P = np.clip(P, 1e-6, 1 - 1e-6)
+                    Z = np.log(P / (1.0 - P))  # inverse of sigmoid on z-scored fc(x)
+                    return self.model.predict_proba(Z)
+            fe = _FEOnProbs(lf.classifier)
+
+            # Accuracies
+            y_pred_det = fe.predict_proba(P_te)
+            acc_det = float((y_pred_det.argmax(1) == test.y.astype(int)).mean())
+
+            # Oracle (use ground-truth concepts; clamp to avoid inf logit)
+            C_oracle = np.clip(test.C.astype(np.float32), 1e-6, 1 - 1e-6)
+            y_pred_gt = fe.predict_proba(C_oracle)
+            acc_gt = float((y_pred_gt.argmax(1) == test.y.astype(int)).mean())
+
+            # Per-concept accuracies vs. ground truth
+            per_concept_acc, train_per_concept_acc = _get_concept_accuracies(H_te, H_tr, test, train)
+
+            # Interventions use probabilities
+            ia_val = float(S.get("human_annotation_accuracy", 0.8))
+            _, _, intervention_results = test_interventions(P_te, {**S, "intervention_accuracy": ia_val}, acc_det, fe,
+                                                            rng, test)
+            # Confusion and catalogs
+            per_sub_acc = _emit_confusion(run_dir, fe, H_te, P_te, test, S.get("drop_concepts", []))
+            catalog_csv_path, meta_extra = _write_catalogs(run_dir, data.meta)
+
+            # Persist LF-CBM artefacts
+            lf_paths = lf.save(run_dir / "lfcbm_artifacts")
+            meta = {
+                "settings": S,
+                "run_dir": str(run_dir),
+                "artifacts": {**lf_paths, "probs_npz": str(prob_npz_path)},
+                "splits": {"n_train": _len(train), "n_valid": _len(valid), "n_test": _len(test)},
+                "concepts": list(test.concepts),
+                "intervention_budgets": S.get("budget", []),
+                "intervention_acc": ia_val,
+                "naming_slug": slug,
+                "catalog_csv": catalog_csv_path,
+                "df_indices": {
+                    "train": list(map(int, train.meta.get("df_indices", []))),
+                    "valid": list(map(int, valid.meta.get("df_indices", []))),
+                    "test": list(map(int, test.meta.get("df_indices", []))),
+                },
+
+                "robot_ids": {
+                    "train": list(map(int, train.meta.get("robot_ids", []))),
+                    "valid": list(map(int, valid.meta.get("robot_ids", []))),
+                    "test": list(map(int, test.meta.get("robot_ids", []))),
+                },
+            }
+            meta.update(meta_extra)
+            metrics = {
+                "cbm_acc_detected": float(acc_det),
+                "cbm_acc_oracle": float(acc_gt),
+                "concept_det_acc_mean": float((H_te == test.C).mean()),
+                "interventions": intervention_results,
+                "concept_accuracies": per_concept_acc,
+                "model_accuracies_per_concept": per_sub_acc,
+                "train_concept_accuracies": train_per_concept_acc,
+                "prob_test_npz": str(prob_npz_path),
+                "concept_names": list(test.concepts),
+                "lfcbm_train_stats": stats,
+            }
+
+            with open(run_dir / f"meta_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
+                json.dump(meta, f, indent=2)
+
+            with open(run_dir / f"metrics_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
+                json.dump(metrics, f, indent=2)
+
+            results[regime] = {
+                "acc_detected": acc_det,
+                "acc_ground_truth": acc_gt,
+                "concept_acc_mean": float((H_te == test.C).mean()),
+            }
 
     def _jsonify(o):
         import numpy as np
@@ -804,7 +940,17 @@ settings = {
     "load_frontend": "",
     "force": 1,
     # "subjective_grid": [0.2],
-    "regimes": ["perfect","expert","subjective"],
+    "regimes": ["perfect","expert","subjective","machine"],
+    "concepts_file": pkg_dir /"synthetic/helper/static/concepts_robot_subconcepts.csv",  # CSV/JSON/JSONL/TXT supported
+    "lfcbm": {
+      "clip_model": "ViT-B-32",
+      "clip_pretrained": "laion2b_s34b_b79k",
+      "l1_ratio": 0.99,
+      "C_grid": [0.05, 0.1, 0.2, 0.5, 1.0, 2.0],
+      "target_nonzero_per_class": [25, 35],
+      "max_epochs": 200,
+      "patience": 10
+    }
 }
 
 run_regimes(settings)
