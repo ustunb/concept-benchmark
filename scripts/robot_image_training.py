@@ -7,9 +7,17 @@ from torchvision import transforms
 from concept_benchmark.models import ConceptDetector, FrontEndModel, RobotConceptClassifier
 from concept_benchmark.paths import results_dir
 from concept_benchmark.synthetic.robot import create_synthetic_dataset
+from concept_benchmark.models import ConceptBasedModel
+from concept_benchmark.intervention import (
+    InterventionBatch,
+    InterventionConfig,
+    ConceptInterventionRunner,
+    ScoreIntervention,
+    OrderedCBMStrategy
+
+)
 from scripts.dataset_skewing import create_skewed_splits, filter_training_by_string
 from scripts.dnn_training import train_eval_image
-from scripts.robot_interventions import test_interventions
 from scripts.robot_alignment import test_alignment
 from scripts.robot_invariance_test import test_concept_detector_invariance
 from scripts.robot_utils import _apply_missing, _apply_label_noise, _rate_tag, _get_concept_accuracies, \
@@ -66,12 +74,13 @@ settings = {
                       'foot_shape'],#'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
     "human_alignment": {
         "foot_shape_pointy_4sided": 5,
+        "foot_shape_pointy_rounded": 3,
+        "foot_shape_pointy_square": 1,
         "foot_shape_flat_5sided": -5,
-        "foot_shape_pointy_rounded": 5,
         "foot_shape_flat_square": -1,
-        "foot_shape_pointy_square": 5,
+        "foot_shape_flat_trapezoid": 0,
         "mouth_type": -5,
-        "bias": 3
+        "bias": 4
     },
     "model_type": "stochastic",
     "logit_scalar": 1.0,
@@ -89,14 +98,14 @@ settings = {
                      {'concepts': {'foot_shape_flat_trapezoid': 1}, 'min_fraction': 0.005},
                      {'concepts': {'foot_shape_flat_5sided': 1}, 'min_fraction': 0.49},
                      ],
-    "budget": [1],
+    "budget": [3],
     "intervention_accuracy": 0.9,
-    "intervention_threshold": 1.0,
-    "epochs": 10,
+    "intervention_threshold": 0.2,
+    "epochs": 1,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "TEST_cbm_run_565_subconcepts",
-    "load_detector": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed555.pt")),
-    "load_frontend": "",#str(Path(results_dir / "robots" / "labeling_and_p3f4_medium_imbalanced3_rerun2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed555.pkl")),
+    "run_name": "cbm_run_1002_subconcepts",
+    "load_detector": str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed1002.pt")),
+    "load_frontend": str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed1002.pkl")),
 }
 
 
@@ -122,20 +131,6 @@ def define_train_valid_test(settings, concept_dataset, missingness, params, rate
         train = concept_dataset.training
         valid = concept_dataset.validation
 
-    # Setup the test set
-    test_params = copy.deepcopy(params)
-    standard_size = concept_dataset.meta["num_unique_robots"]
-    test_params["output_directory"] = Path(params['output_directory']) / "test_images"
-    test_params["draw"] = True if not Path(test_params["output_directory"]).exists() or settings.get("draw",
-                                                                                                     False) else False
-    test_params["samples_per_instance"] = int(params["test_set_size"] / standard_size) + 1
-    test_data = create_synthetic_dataset(**test_params)
-    test_data.drop_concepts(settings.get("drop_concepts", []))
-    test_data.transform = tf
-    # take random sample of test set to match test_set_size
-    rng_test = np.random.default_rng(int(settings["seed"]) + 1234)
-    test_indices = rng_test.choice(len(test_data), size=int(params["test_set_size"]), replace=False)
-    test = test_data._full.filter(np.isin(np.arange(len(test_data)), test_indices))
 
     if settings.get("label_noise_rate", 0.0) > 0:
         train = _apply_label_noise(train, settings["label_noise_rate"], seed=int(settings["seed"]))
@@ -157,14 +152,22 @@ def train_concept_detector(settings, config, device, int_acc_tag, label_noise_ta
                                                       32 if settings["image_size"] == "medium" else 8))
     det_name = f"detector_dnn_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
     if settings["load_detector"]:
-        mini_train = train.filter(np.array([True] + [False] * (len(train.C) - 1)))
-        mini_valid = valid.filter(np.array([True] + [False] * (len(valid.C) - 1)))
+        det_candidate = Path(settings["load_detector"])
+        if det_candidate.is_file():
+            mini_train = train.filter(np.array([True] + [False] * (len(train.C) - 1)))
+            mini_valid = valid.filter(np.array([True] + [False] * (len(valid.C) - 1)))
 
-        cd.fit(mini_train, mini_valid, freeze=True, embed_params={"device": device},
-               fit_params={"epochs": 1, "device": "cpu"})
-        state = torch.load(settings["load_detector"], weights_only=False, map_location="cpu")
-        cd.load_state_dict(state)
-        det_path = Path(settings["load_detector"])
+            cd.fit(mini_train, mini_valid, freeze=True, embed_params={"device": device},
+                   fit_params={"epochs": 1, "device": "cpu"})
+            state = torch.load(det_candidate, weights_only=False, map_location="cpu")
+            cd.load_state_dict(state)
+            det_path = det_candidate
+        else:
+            print(f"{det_candidate} not found, regenerating")
+            cd.fit(train, valid, embed_params={'shuffle': False, **config},
+                   fit_params={"epochs": 50, 'lr': 1e-3, "patience": 10, **config})
+            det_path = run_dir / det_name
+            torch.save(cd.state_dict(), det_path)
     else:
         cd.fit(train, valid, embed_params={'shuffle': False, **config},
                fit_params={"epochs": 50, 'lr': 1e-3, "patience": 10, **config})
@@ -185,9 +188,28 @@ def train_frontend(H_te, h_train, prob_train, sttngs, int_acc_tag, label_noise_t
     fe = FrontEndModel()
     fe_name = f"frontend_logreg_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
     if sttngs["load_frontend"]:
-        with open(sttngs["load_frontend"], "rb") as f:
-            fe = pickle.load(f)
-        fe_path = Path(sttngs["load_frontend"])
+        fe_candidate = Path(sttngs["load_frontend"])
+        if fe_candidate.is_file():
+            with open(fe_candidate, "rb") as f:
+                fe = pickle.load(f)
+            fe_path = fe_candidate
+        else:
+            print(f"{fe_candidate} not found, regenerating")
+            Ctr = train.C.astype(np.float32)
+            if int(sttngs["impute_missing"]) and np.any(Ctr < 0):
+                Cin = Ctr.copy()
+                m = Cin < 0
+                Cin[m] = prob_train[m]
+                fe.fit(Cin, train.y.astype(int))
+            else:
+                if sttngs.get("CBM_type", "separate") == "sequential":
+                    keep = np.all(Ctr >= 0, axis=1)
+                    fe.fit(h_train[keep], train.y[keep].astype(int))
+                else:
+                    fe.fit(Ctr, train.y.astype(int))
+            fe_path = run_dir / fe_name
+            with open(fe_path, "wb") as f:
+                pickle.dump(fe, f)
     else:
         Ctr = train.C.astype(np.float32)
         if int(sttngs["impute_missing"]) and np.any(Ctr < 0):
@@ -218,8 +240,8 @@ def train_frontend(H_te, h_train, prob_train, sttngs, int_acc_tag, label_noise_t
     return acc_det, acc_gt, concept_acc_mean, fe, fe_path, y_pred_det
 
 
-def train_dnn(sttngs, device, dnn_stats, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir, seed_tag,
-              skew_tag, test, train):
+def train_dnn(sttngs, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir, seed_tag,
+              skew_tag, test, train, tf):
     print("Training baseline DNN...")
 
     # Convert ConceptDatasetSample to path arrays
@@ -228,14 +250,15 @@ def train_dnn(sttngs, device, dnn_stats, int_acc_tag, label_noise_tag, miss_tag,
     paths_te = [test.base_dir / p for p in test.X]
     yte = test.y.astype(int)
 
-    dnn_acc, proc, dnn_model = train_eval_image(
+    dnn_acc, dnn_model = train_eval_image(
         paths_tr, ytr, paths_te, yte,
-        model_id=sttngs.get("image_model", "google/vit-base-patch16-224"),
         epochs=int(sttngs["epochs"]),
         batch_size=16,
         lr=5e-5,
         device=device,
-        seed=int(sttngs["seed"])
+        seed=int(sttngs["seed"]),
+        tf=tf,
+        input_size=600 if sttngs["image_size"] == "large" else 32 if sttngs["image_size"] == "medium" else 8
     )
 
     dnn_stats = {"dnn_accuracy": float(dnn_acc)}
@@ -245,9 +268,62 @@ def train_dnn(sttngs, device, dnn_stats, int_acc_tag, label_noise_tag, miss_tag,
     dnn_path = run_dir / dnn_name
     torch.save({
         "model_state_dict": dnn_model.state_dict(),
-        "processor": proc,
     }, dnn_path)
     return dnn_stats
+
+
+def test_interventions(prob_test, sttngs, acc_det, fe, test):
+    """Test interventions using the intervention framework."""
+    intervention_results = {}
+    budgets = sttngs.get('budget', [1])
+    human_acc = sttngs.get("intervention_accuracy", 0.9)
+
+    # Create a CBM wrapper for the intervention framework
+    cbm = ConceptBasedModel(concept_detector=None, front_end_model=fe)
+    runner = ConceptInterventionRunner(cbm)
+
+    for budget in budgets:
+        config = InterventionConfig(
+            max_concepts_per_instance=budget,
+            random_state=int(sttngs["seed"]),
+            score_threshold=sttngs.get("intervention_threshold", 1.0),
+            noise=1.0 - human_acc  # convert human accuracy to noise
+        )
+
+        strategy = ScoreIntervention()
+
+        # Run intervention
+        result = runner.run(
+            strategy=strategy,
+            config=config,
+            dataset=test,
+            concept_proba=prob_test,
+            labels=test.y.astype(int)
+        )
+
+        acc_intervened = float((result.y_pred_after == test.y.astype(int)).mean())
+
+        # Extract intervention statistics
+        n_intervened = np.sum(result.mask)
+        n_samples = prob_test.shape[0]
+
+        intervened_concepts = np.any(result.mask, axis=0)
+        concept_intervention_counts = {c: int(np.sum(result.mask[:, i])) for i, c in enumerate(test.concepts) if intervened_concepts[i]}
+
+        key = f"top_{budget}_human_acc_{int(human_acc * 100)}"
+        intervention_results[key] = {
+            "accuracy": acc_intervened,
+            "accuracy_gain": acc_intervened - acc_det,
+            "predictions_intervened_on": int(np.sum(np.any(result.mask, axis=1))),
+            "interventions_rate": float(np.sum(np.any(result.mask, axis=1)) / n_samples),
+            "avg_edits_per_intervention": float(n_intervened / max(1, np.sum(np.any(result.mask, axis=1)))),
+            "total_concept_checks": int(n_intervened),
+            "total_concept_edits_made": int(n_intervened),
+            "concept_interventions": concept_intervention_counts,
+            "human_accuracy": human_acc
+        }
+
+    return budgets, human_acc, intervention_results
 
 
 def main(sttngs):
@@ -258,8 +334,7 @@ def main(sttngs):
     rng = np.random.default_rng(int(S["seed"]))
     torch.manual_seed(int(S["seed"]))
 
-    base_out = Path(S["out_dir"]);
-    base_out.mkdir(parents=True, exist_ok=True)
+    base_out = Path(S["out_dir"]); base_out.mkdir(parents=True, exist_ok=True)
     miss = str(S["missingness"]).lower()
     rate = float(S["missing_rate"])
     int_acc_tag = f"int-acc{int(round(float(S['intervention_accuracy']) * 100))}"
@@ -332,15 +407,15 @@ def main(sttngs):
                                                                                 skew_tag, test, train)
     dnn_stats = {}
     if S.get("train_dnn", False):
-        dnn_stats = train_dnn(S, device, {}, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
-                              seed_tag, skew_tag, test, train)
+        dnn_stats = train_dnn(S, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
+                              seed_tag, skew_tag, test, train, tf)
     ###########################################################################
 
     ###########################################################################
     ###########################    INTERVENTIONS    ###########################
     ###########################################################################
     # apply interventions and measure their effect on the predictions
-    budgets, human_acc, intervention_results = test_interventions(P_te, S, acc_det, fe, rng, test)
+    budgets, human_acc, intervention_results = test_interventions(P_te, S, acc_det, fe, test)
 
     subtype_concepts = [c for c in test.concepts if c.startswith('foot_shape_')]
     missing_concepts = [c for c in S.get("drop_concepts", []) if c.startswith('foot_shape_')]
@@ -510,6 +585,6 @@ def find_good_seed(stngs):
             print(f"SCBM accuracy {cbm_acc:.4f} does not meet criteria.")
     return None
 
-# find_good_seed(settings)
+#find_good_seed(settings)
 
 main(settings)
