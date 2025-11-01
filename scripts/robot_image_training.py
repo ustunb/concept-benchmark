@@ -71,11 +71,12 @@ settings = {
                       'foot_shape'],#'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
     "human_alignment": {
         "signs": {
-            #"foot_shape_flat_trapezoid": 1,
-            #"foot_shape_pointy_square": -1,
+            "foot_shape_flat_trapezoid": 1,
+            "foot_shape_flat_square": 1,
         },
         "monotonicity": [
-            (["foot_shape_flat_square", "mouth_type"], ">=", 0.95),
+            (["foot_shape_pointy_square", "mouth_type"], "<=", 0.05),
+            (["foot_shape_pointy_rounded", "mouth_type"], "<=", 0.05)
         ]
 
     },
@@ -95,7 +96,7 @@ settings = {
                      {'concepts': {'foot_shape_flat_trapezoid': 1}, 'min_fraction': 0.005},
                      {'concepts': {'foot_shape_flat_5sided': 1}, 'min_fraction': 0.49},
                      ],
-    "budget": [3],
+    "budget": [12],
     "intervention_accuracy": 0.9,
     "intervention_threshold": 0.2,
     "epochs": 1,
