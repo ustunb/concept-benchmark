@@ -354,8 +354,8 @@ def create_robot_image_dataset(
         print(catalog_df.head(10).to_string(index=False))
 
     # X: Image paths (stored as strings)
-    image_dir = output_directory
-    X = np.array([row["png_filename"] for _, row in catalog_df.iterrows()])
+    image_dir = Path(output_directory)
+    X = np.array([str(image_dir / row["png_filename"]) for _, row in catalog_df.iterrows()])
 
     copy_features = copy.deepcopy(ALL_ROBOT_FEATURES)
     copy_features.update(new_concepts)

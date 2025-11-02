@@ -290,6 +290,19 @@ def _define_train_valid_test(
             target_transform=train.target_transform,
             base_dir=getattr(train, "base_dir", None),
         )
+    # Normalize dataset paths in-place and force numpy arrays for boolean indexing
+    def _norm_inplace(ds):
+        if hasattr(ds, "X"):
+            Xn = []
+            for x in ds.X:
+                p = Path(str(x))
+                if "robot_images" in p.parts:
+                    i = p.parts.index("robot_images")
+                    p = Path(*p.parts[i+1:])
+                Xn.append(p.as_posix())
+            ds.X = np.array(Xn, dtype=object)
+        return ds
+    _norm_inplace(train); _norm_inplace(valid); _norm_inplace(test)
     return test, train, valid
 
 # model training wrappers
@@ -593,7 +606,7 @@ def run_regimes(settings: Dict) -> Dict:
 
     rng = np.random.default_rng(int(S["seed"]))
     base_root = Path(S["out_dir"])
-    base_out = base_root / "robots"
+    base_out = base_root
     base_out.mkdir(parents=True, exist_ok=True)
 
     miss = str(S["missingness"]).lower()
@@ -757,7 +770,18 @@ def run_regimes(settings: Dict) -> Dict:
 
             # Save probabilities to match the rest of the pipeline convention
             prob_npz_path = run_dir / f"probs_{slug}_{seed_tag}.npz"
-            _merge_save_npz(prob_npz_path, {"P_tr": P_tr, "P_te": P_te})
+            _merge_save_npz(
+                prob_npz_path,
+                {
+                    "P_tr": P_tr,
+                    "P_te": P_te,
+                    "C_tr": train.C.astype(np.float32),
+                    "C_te": test.C.astype(np.float32),
+                    "y_tr": train.y.astype(int),
+                    "y_te": test.y.astype(int),
+                    "concepts": np.array(list(test.concepts)),
+                },
+            )
 
             # Build a lightweight front-end adapter that expects probabilities P and internally uses logit(P).
             class _FEOnProbs(FrontEndModel):
@@ -769,6 +793,11 @@ def run_regimes(settings: Dict) -> Dict:
                     Z = np.log(P / (1.0 - P))  # inverse of sigmoid on z-scored fc(x)
                     return self.model.predict_proba(Z)
             fe = _FEOnProbs(lf.classifier)
+            import pickle
+            fe_name = f"frontend_{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
+            fe_path = run_dir / fe_name
+            with open(fe_path, "wb") as f:
+                pickle.dump(fe, f)
 
             # Accuracies
             y_pred_det = fe.predict_proba(P_te)
@@ -795,7 +824,7 @@ def run_regimes(settings: Dict) -> Dict:
             meta = {
                 "settings": S,
                 "run_dir": str(run_dir),
-                "artifacts": {**lf_paths, "probs_npz": str(prob_npz_path)},
+                "artifacts": {**lf_paths, "detector": "", "frontend": str(fe_path), "probs_npz": str(prob_npz_path)},
                 "splits": {"n_train": _len(train), "n_valid": _len(valid), "n_test": _len(test)},
                 "concepts": list(test.concepts),
                 "intervention_budgets": S.get("budget", []),
@@ -872,9 +901,9 @@ from concept_benchmark.paths import results_dir
 
 settings = {
     "samples_per_instance": 4,
-    "draw": 0,
+    "draw": 1,
     "CBM_type": "separate",
-    "image_dir": "./data/robot_images",
+    "image_dir": str(results_dir.parent / "data" / "robot_images"),
     "image_size": "medium",
     "color_mode": "color",
     "seed": 1002,
@@ -942,7 +971,8 @@ settings = {
     "load_frontend": "",
     "force": 1,
     "subjective_grid": [0.2],
-    "regimes": ["perfect","expert","subjective","machine"],
+    # "regimes": ["perfect","expert","subjective","machine"],
+    "regimes": ["perfect","expert","subjective"],
     # "concepts_file": pkg_dir /"synthetic/helper/static/concepts_robot_subconcepts.csv",  # CSV/JSON/JSONL/TXT supported
     "concepts_file": None,
     "lfcbm": {
