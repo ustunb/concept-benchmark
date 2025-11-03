@@ -1165,8 +1165,17 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
 
         img_path, c, y = self.X[idx], self.C[idx], self.y[idx]
 
-        if self.base_dir is not None:
-            img_path = self.base_dir / img_path
+        p = img_path if isinstance(img_path, Path) else Path(img_path)
+        bd = self.base_dir if isinstance(self.base_dir, Path) else (Path(self.base_dir) if self.base_dir is not None else None)
+        if bd is not None and not p.is_absolute():
+            parts = p.parts
+            # Strip "data/<base>" or "<base>" prefixes from relative paths
+            if len(parts) >= 2 and parts[0] == bd.parent.name and parts[1] == bd.name:
+                p = Path(*parts[2:])
+            elif parts and parts[0] == bd.name:
+                p = Path(*parts[1:])
+            p = bd / p
+        img_path = p
         try:
             image = Image.open(img_path).convert("RGB")
             if self.preprocess is not None:
