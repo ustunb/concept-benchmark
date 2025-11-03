@@ -424,9 +424,7 @@ def main(sttngs):
     ###########################################################################
     device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
     print(f"Using device: {device}")
-    #throw error if cuda is not available
-    if device != "cuda":
-        raise RuntimeError("CUDA device is not available. Please run on a machine with a CUDA-capable GPU.")
+
     config = {
         'device': device,
         'batch_size': 32,
