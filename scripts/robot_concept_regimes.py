@@ -6,6 +6,20 @@ import json
 import random
 import hashlib
 from pathlib import Path
+
+# join base/item; if not found, try parent-of-base (handles ".../test_images" + "test_images/..")
+def _resolve_items(items, base_dir):
+    base = Path(base_dir)
+    out = []
+    for s in items:
+        p = Path(str(s))
+        q = p if p.is_absolute() else base / p
+        if not q.exists():
+            alt = base.parent / p if not p.is_absolute() else q
+            if alt.exists():
+                q = alt
+        out.append(str(q.resolve()))
+    return out
 from typing import Dict, List, Tuple, Optional
 from concept_benchmark.paths import data_dir, results_dir, pkg_dir
 
@@ -27,6 +41,16 @@ from scripts.robot_utils import (
     _get_confusion_matrix,
     _get_accuracies_per_subconcept,
 )
+
+class FEOnProbs(FrontEndModel):
+    def __init__(self, clf):
+        super().__init__()
+        self.model = clf
+    def predict_proba(self, P: np.ndarray) -> np.ndarray:
+        P = np.clip(P, 1e-6, 1 - 1e-6)
+        Z = np.log(P / (1.0 - P))
+        return self.model.predict_proba(Z)
+
 
 # seeds
 def set_seed(seed: int) -> None:
@@ -755,16 +779,23 @@ def run_regimes(settings: Dict) -> Dict:
 
             # Fit label-free CBM on current split
             stats = lf.fit(
-                train_X=list(map(str, train.X)),
+                train_X=_resolve_items(train.X, getattr(train, "base_dir", Path("."))),
                 train_y=train.y.astype(int),
-                valid_X=list(map(str, valid.X)),
+                valid_X=_resolve_items(valid.X, getattr(valid, "base_dir", Path("."))),
                 valid_y=valid.y.astype(int),
                 concept_set=concept_set,
                 cache_dir=cfg.cache_dir,
             )
+
+            resolved_te = _resolve_items(test.X, getattr(test, "base_dir", Path(".")))
+            missing = [p for p in resolved_te if not Path(p).exists()]
+            print("missing test files:", len(missing), missing[:3])
+
             # Compute concept probabilities on train/test
-            P_tr = lf.concept_proba(list(map(str, train.X)))  # (Ntr, Mk)
-            P_te = lf.concept_proba(list(map(str, test.X)))  # (Nte, Mk)
+            P_tr = lf.concept_proba(
+                [str((getattr(train, "base_dir", Path(".")) / Path(p)).resolve()) for p in train.X])  # (Ntr, Mk)
+            P_te = lf.concept_proba(
+                [str((getattr(test, "base_dir", Path(".")) / Path(p)).resolve()) for p in test.X])  # (Nte, Mk)
             H_tr = (P_tr > 0.5).astype(np.float32)
             H_te = (P_te > 0.5).astype(np.float32)
 
@@ -784,15 +815,7 @@ def run_regimes(settings: Dict) -> Dict:
             )
 
             # Build a lightweight front-end adapter that expects probabilities P and internally uses logit(P).
-            class _FEOnProbs(FrontEndModel):
-                def __init__(self, clf):
-                    super().__init__()
-                    self.model = clf
-                def predict_proba(self, P: np.ndarray) -> np.ndarray:
-                    P = np.clip(P, 1e-6, 1 - 1e-6)
-                    Z = np.log(P / (1.0 - P))  # inverse of sigmoid on z-scored fc(x)
-                    return self.model.predict_proba(Z)
-            fe = _FEOnProbs(lf.classifier)
+            fe = FEOnProbs(lf.classifier)
             import pickle
             fe_name = f"frontend_{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
             fe_path = run_dir / fe_name
@@ -870,8 +893,6 @@ def run_regimes(settings: Dict) -> Dict:
             }
 
     def _jsonify(o):
-        import numpy as np
-        from pathlib import Path
         if isinstance(o, dict):
             out = {}
             for k, v in o.items():
@@ -901,7 +922,7 @@ from concept_benchmark.paths import results_dir
 
 settings = {
     "samples_per_instance": 4,
-    "draw": 1,
+    "draw": 0,
     "CBM_type": "separate",
     "image_dir": str(results_dir.parent / "data" / "robot_images"),
     "image_size": "medium",
@@ -972,7 +993,7 @@ settings = {
     "force": 1,
     "subjective_grid": [0.2],
     # "regimes": ["perfect","expert","subjective","machine"],
-    "regimes": ["perfect","expert","subjective"],
+    "regimes": ["machine"],
     # "concepts_file": pkg_dir /"synthetic/helper/static/concepts_robot_subconcepts.csv",  # CSV/JSON/JSONL/TXT supported
     "concepts_file": None,
     "lfcbm": {

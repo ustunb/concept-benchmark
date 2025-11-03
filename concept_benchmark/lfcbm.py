@@ -190,12 +190,37 @@ class _CLIPEncoder:
             def __init__(self, items, preprocess):
                 self.items = list(items)
                 self.preprocess = preprocess
+                self._base_dir = None
+                for it in self.items:
+                    p = Path(str(it))
+                    if p.is_absolute() or (p.parent and p.parent != Path('.')):
+                        self._base_dir = p.parent
+                        break
 
             def __len__(self):
                 return len(self.items)
 
             def __getitem__(self, idx):
-                im = Image.open(self.items[idx]).convert("RGB")
+                p = Path(str(self.items[idx]))
+                if not p.is_absolute() and not p.exists() and self._base_dir is not None:
+                    p = self._base_dir / p
+                try:
+                    im = Image.open(p).convert("RGB")
+                except FileNotFoundError:
+                    # drop an accidentally duplicated tail directory, e.g., ".../d/d/file" -> ".../d/file"
+                    im = None
+                    parts = p.parts
+                    if len(parts) >= 3 and parts[-3] == parts[-2]:
+                        p2 = Path(*parts[:-2]) / parts[-1]
+                        if p2.exists():
+                            im = Image.open(p2).convert("RGB")
+                    # try parent-of-base + last two segments, handles inputs like "test_images/file"
+                    if im is None and self._base_dir is not None and len(parts) >= 2:
+                        cand = self._base_dir.parent / Path(*parts[-2:])
+                        if cand.exists():
+                            im = Image.open(cand).convert("RGB")
+                    if im is None:
+                        raise
                 return self.preprocess(im)
 
         ds = _ImgDS(paths, self.preprocess)
@@ -297,8 +322,9 @@ class LabelFreeCBM:
         cache_dir: Optional[Path] = None,
     ) -> Dict[str, Any]:
         self.concept_set = concept_set
-        cache = Path(cache_dir or self.cfg.cache_dir or ".")
+        cache = Path(cache_dir or self.cfg.cache_dir or ".").resolve()
         cache.mkdir(parents=True, exist_ok=True)
+        print(f"[lfcbm] cache dir: {cache}")
 
         # 1) Encode images and concepts (CLIP) and cache them
         def _cache(path: Path, arr: np.ndarray) -> None:
