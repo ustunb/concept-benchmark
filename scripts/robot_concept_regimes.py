@@ -992,8 +992,8 @@ settings = {
     "load_frontend": "",
     "force": 1,
     "subjective_grid": [0.2],
-    # "regimes": ["perfect","expert","subjective","machine"],
-    "regimes": ["machine"],
+    "regimes": ["perfect","expert","subjective"],
+    # "regimes": ["machine"],
     # "concepts_file": pkg_dir /"synthetic/helper/static/concepts_robot_subconcepts.csv",  # CSV/JSON/JSONL/TXT supported
     "concepts_file": None,
     "lfcbm": {
