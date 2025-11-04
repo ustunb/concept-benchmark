@@ -282,18 +282,7 @@ def _define_train_valid_test(
         concept_dataset.split("K05N01", fold_num_validation=4, fold_num_test=5)
         train = concept_dataset.training
         valid = concept_dataset.validation
-
-    standard_size = concept_dataset.meta["num_unique_robots"]
-    test_params = dict(params)
-    test_params["output_directory"] = Path(params["output_directory"]) / "test_images"
-    test_params["draw"] = not Path(test_params["output_directory"]).exists()
-    test_params["samples_per_instance"] = int(params["test_set_size"] / standard_size) + 1
-    test_data = create_synthetic_dataset(**test_params)
-    test_data.drop_concepts(settings.get("drop_concepts", []))
-    test_data.transform = tf
-    rng_test = np.random.default_rng(int(settings["seed"]) + 1234)
-    test_indices = rng_test.choice(len(test_data), size=int(params["test_set_size"]), replace=False)
-    test = test_data._full.filter(np.isin(np.arange(len(test_data)), test_indices))
+        test = concept_dataset.test
 
     if float(settings.get("label_noise_rate", 0.0)) > 0.0:
         sd = int(settings["seed"])
