@@ -2,7 +2,10 @@
 Robot feature taxonomy and drawing utilities for synthetic robot images.
 """
 
-import cairo
+try:
+    import cairo
+except:
+    pass
 import numpy as np
 import pero
 from PIL import Image as PILImage
