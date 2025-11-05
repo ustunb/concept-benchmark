@@ -138,6 +138,13 @@ def define_train_valid_test(settings, concept_dataset, missingness, params, rate
         train = train.__class__(parent=train.parent, X=train.X, C=Ctr, y=train.y, meta=train.meta,
                                 transform=train.transform, concept_transform=train.concept_transform,
                                 target_transform=train.target_transform, base_dir=train.base_dir)
+
+
+    #print distribution of concepts in the test set:
+    for c in test.concepts:
+        unique, counts = np.unique(test.C[:, test.concepts.index(c)], return_counts=True)
+        dist = dict(zip(unique, counts))
+        print(f"Concept '{c}' distribution in test set: {dist}")
     return test, train, valid
 
 
