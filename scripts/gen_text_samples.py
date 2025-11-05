@@ -237,8 +237,28 @@ def _nat_from_tokens(row: dict, seed: int) -> dict:
     body_nat = pick(body_map[str(row["body_shape"])], "BODY")
     ears_nat = pick(ears_map[str(row["ears_shape"])], "EARS")
     mouth_nat = pick(mouth_map[str(row["mouth_type"])], "MOUTH")
-    hands_nat = pick(hands_map[str(row["hand_shape"])], "HANDS")
-    feet_nat = pick(feet_map[str(row["foot_shape"])], "FEET")
+    _hand_raw = str(row["hand_shape"]).lower()
+    _hand_alias = {
+        "round": "round_circle",
+        "circle": "round_circle",
+        "oval": "wide_oval",
+        "wide": "wide_oval",
+        "tall": "tall_oval",
+        "square": "edgy_square",
+        "triangle": "edgy_triangle",
+        "trapezoid": "edgy_trapezoid",
+    }
+    _hand_key = _hand_alias.get(_hand_raw, str(row["hand_shape"]))
+    hands_nat = pick(hands_map.get(_hand_key, hands_map["round_circle"]), "HANDS")
+
+    _foot_raw = str(row["foot_shape"]).lower()
+    if _foot_raw in {"flat", "flat_generic"}:
+        _foot_key = "flat_4sided"
+    elif _foot_raw in {"pointy", "pointy_generic"}:
+        _foot_key = "pointy_3sided"
+    else:
+        _foot_key = str(row["foot_shape"])
+    feet_nat = pick(feet_map.get(_foot_key, feet_map["pointy_3sided"] if str(_foot_key).startswith("pointy_") else feet_map["flat_4sided"]), "FEET")
 
     ant_nat = "has antennae" if str(row["has_antennae"]).lower() == "true" else "no antennae"
     knees_nat = "has knees" if str(row["has_knees"]).lower() == "true" else "no knees"
@@ -301,8 +321,11 @@ def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, v
         row = {k: sr[k] for k in params["concepts"].keys()}
         repeats = int(row_variants[i]) if row_variants is not None else int(variants_per_row)
         for v in range(repeats):
-            _gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
-            key = f"{seed}:{i}:{v}:{_gen_target}_generic"
+            _raw_targets = str(getattr(args_obj, "generic_what", "foot"))
+            _targets = sorted(set(t.strip().lower() for t in re.split(r"[;,]", _raw_targets) if t.strip()))
+            if not _targets:
+                _targets = ["foot"]
+            key = f"{seed}:{i}:{v}:{','.join(_targets)}_generic"
             h = int(hashlib.sha256(key.encode()).hexdigest(), 16)
             use_gen = (len(corpus_gen) > 0) and ((h % 1000000) < int(max(0.0, min(1.0, float(generic_rate))) * 1000000))
             corpus = corpus_gen if use_gen else corpus_spec
@@ -322,10 +345,16 @@ def _build_ds_from_corpus(catalog_df: pd.DataFrame, params, corpus_path: Path, v
         X=X, C=C, y=y, meta={"concepts": tuple(names), "classes": (0, 1), "data_type": "text"}
     )
     setattr(ds, "_full", type("Full", (), {"meta": {"row_index": np.asarray(row_index, dtype=int)}}))
-    _gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
+    _raw_targets = str(getattr(args_obj, "generic_what", "foot"))
+    _targets = sorted(set(t.strip().lower() for t in re.split(r"[;,]", _raw_targets) if t.strip()))
+    if not _targets:
+        _targets = ["foot"]
+    if "footmouth" in _targets:
+        _targets = [t for t in _targets if t != "footmouth"] + ["foot", "mouth"]
     _mask = np.asarray(ears_generic, dtype=bool)
     ds.ears_generic_mask = _mask
-    setattr(ds, f"{_gen_target}_generic_mask", _mask)
+    for _t in sorted(set(_targets)):
+        setattr(ds, f"{_t}_generic_mask", _mask)
     if _subtypes is not None:
         setattr(ds, "subtypes", {k: np.asarray(v, dtype=object) for k, v in _subtypes.items()})
     return ds
@@ -434,6 +463,8 @@ else:
     ap.add_argument("--concept-mode", choices=["hard", "soft"], default=settings["concept_mode"])
     ap.add_argument("--train-on-detected", action="store_true", default=settings["train_on_detected"])
     ap.add_argument("--templates-file", type=str, default=settings["templates_file"])
+    ap.add_argument("--image-meta", type=str, default="")
+    ap.add_argument("--image-meta-catalog", choices=["auto","base","spurious"], default="auto")
     ap.add_argument("--label-model-expr", type=str, default=settings["label_model_expr"])
     ap.add_argument("--corr-pair", type=str, default=settings["corr_pair"])
     ap.add_argument("--train-corr", type=float, default=settings["train_corr"])
@@ -450,7 +481,7 @@ else:
     ap.add_argument("--make-plots", type=int, default=settings["make_plots"])
     ap.add_argument("--concept-include", type=str, default=settings["concept_include"])
     ap.add_argument("--concept-exclude", type=str, default=settings["concept_exclude"])
-    ap.add_argument("--blackbox_metrics", type=str, default=settings["blackbox_metrics"])
+    ap.add_argument("--blackbox_metrics", type=str, default="")
     ap.add_argument("--subtype-mode", choices=["off","track","salience"], default=settings["subtype_mode"])
     ap.add_argument("--human-alone", type=float, default=0.75)
     ap.add_argument("--concept-source", type=str, choices=["gt", "detected", "machine", "human", "none"],
@@ -501,8 +532,9 @@ else:
     ap.add_argument("--generic-tol", type=float, default=0.02)
     ap.add_argument("--generic-enable", type=int, default=0)
     ap.add_argument("--shared-test", type=int, default=0)
+    ap.add_argument("--val-variant-mode", choices=["all","one"], default="one")
     ap.add_argument("--policy", choices=["uncertainty", "oracle", "kflip"], default="kflip")
-    ap.add_argument("--generic-what", choices=["ears","foot"], default="foot")
+    ap.add_argument("--generic-what", choices=["ears","foot","footmouth"], default="foot")
     ap.add_argument("--k", type=int, default=2, help="concepts per instance")
     ap.add_argument("--flip-threshold", type=float, default=0.30)
     ap.add_argument("--flip-batch-size", type=int, default=8192)
@@ -577,6 +609,8 @@ else:
         "dev_per_fold": int(getattr(known, "dev_per_fold", 1000)),
         "deployment_size": int(getattr(known, "deployment_size", 0)),
         "shared_test": int(getattr(known, "shared_test", 0)),
+        "val_variant_mode": str(getattr(known, "val_variant_mode", "one")),
+        "image_meta": str(getattr(known, "image_meta", "")),
     })
     if merged["test_corr"] is not None and merged["test_corr"] >= 0:
         merged["test_break"] = max(0.0, min(1.0, 1.0 - float(merged["test_corr"])))
@@ -612,7 +646,7 @@ params = {
         "mouth_type": ["closed", "open"],
         "hand_shape": ["round_circle", "wide_oval", "tall_oval", "edgy_square", "edgy_triangle", "edgy_trapezoid"],
     },
-    "model": "'glorp' if (min(int(row[\"ears_shape\"]==\"square\"), int(row[\"body_shape\"]==\"square\")) >= 1) else 'drent'",
+    "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy'))>= 3 else 'drent'"
 }
 
 if args_obj.label_model_expr:
@@ -781,7 +815,26 @@ def _subset_sample(sample: ConceptDatasetSample, keep_idx: np.ndarray, concepts,
     X = [str(x) for x in np.array(sample.X, dtype=object)[keep_idx]]
     C = sample.C[keep_idx]
     y = sample.y[keep_idx]
-    return ConceptDatasetSample(X=X, C=C, y=y, meta={"concepts": concepts, "classes": classes, "data_type": "text"})
+    meta_src = dict(getattr(sample, "meta", {}) or {})
+    meta_sub = {"concepts": concepts, "classes": classes, "data_type": "text"}
+    dfi = meta_src.get("df_indices", None)
+    if isinstance(dfi, (list, np.ndarray)):
+        arr = np.asarray(dfi)
+        meta_sub["df_indices"] = arr[keep_idx].astype(int).tolist()
+    sub = ConceptDatasetSample(X=X, C=C, y=y, meta=meta_sub)
+    gm = getattr(sample, "ears_generic_mask", None)
+    if gm is not None:
+        setattr(sub, "ears_generic_mask", np.asarray(gm)[keep_idx])
+        _raw_targets = str(getattr(args_obj, "generic_what", "foot"))
+        _targets = sorted(set(t.strip().lower() for t in re.split(r"[;,]", _raw_targets) if t.strip()))
+        if not _targets:
+            _targets = ["foot"]
+        for _t in _targets:
+            setattr(sub, f"{_t}_generic_mask", np.asarray(gm)[keep_idx])
+    subtypes = getattr(sample, "subtypes", None)
+    if subtypes is not None:
+        setattr(sub, "subtypes", {k: np.asarray(subtypes[k])[keep_idx] for k in subtypes.keys()})
+    return sub
 
 
 def _apply_missing_concepts(train_sample: ConceptDatasetSample, concepts: list[str], heldout: list[str], mask_p: float,
@@ -1083,8 +1136,150 @@ def _machine_truth_map(H_train_hard, C_train_true):
 
 
 cols = list(params["concepts"].keys())
-catalog_df = pd.DataFrame([dict(zip(cols, vals)) for vals in product(*[params["concepts"][c] for c in cols])],
-                          columns=cols)
+if str(getattr(args_obj, "image_meta", "")).strip():
+    _im = json.loads(Path(str(args_obj.image_meta)).read_text())
+    _cat_base = _im.get("catalog_csv", "")
+    _cat_spu  = _im.get("catalog_csv_spurious", "")
+    _kind = str(getattr(args_obj, "image_meta_catalog", "auto")).lower()
+
+    def _existing(p):
+        return (isinstance(p, str) and p and Path(p).is_file())
+
+    if _kind == "base":
+        _choice = _cat_base
+    elif _kind == "spurious":
+        _choice = _cat_spu
+    else:  # auto
+        _choice = _cat_spu if _existing(_cat_spu) else _cat_base
+
+    if _existing(_choice):
+        catalog_df = pd.read_csv(_choice)
+    else:
+        raise SystemExit(f"--image-meta provided but selected catalog missing or unreadable: {_choice}")
+else:
+    catalog_df = pd.DataFrame([dict(zip(cols, vals)) for vals in product(*[params["concepts"][c] for c in cols])],
+                              columns=cols)
+
+def _normalize_catalog_schema(df: pd.DataFrame, seed: int) -> pd.DataFrame:
+    df = df.copy()
+    # prefer subtype columns if present
+    if "hand_shape_subtype" in df.columns:
+        df["hand_shape"] = df["hand_shape_subtype"].astype(str)
+    # Combine coarse + subtype for feet when both are present
+    if "foot_shape" in df.columns and "foot_shape_subtype" in df.columns:
+        coarse = df["foot_shape"].astype(str).str.lower()
+        sub    = df["foot_shape_subtype"].astype(str).str.lower()
+        sub = sub.replace({
+            "square": "4sided",
+            "4-sided": "4sided",
+            "4": "4sided",
+            "3-sided": "3sided",
+            "3": "3sided",
+            "5-sided": "5sided",
+            "5": "5sided",
+            "l-shaped": "lshaped",
+            "l": "lshaped"
+        })
+        df["foot_shape"] = coarse + "_" + sub
+
+    # canonicalize hands to hands_map keys
+    def _canon_hand(v, i):
+        t = str(v)
+        m = {
+            "round": "round_circle",
+            "circle": "round_circle",
+            "oval": "wide_oval",
+            "wide": "wide_oval",
+            "tall": "tall_oval",
+            "wide_oval": "wide_oval",
+            "tall_oval": "tall_oval",
+            "square": "edgy_square",
+            "triangle": "edgy_triangle",
+            "trapezoid": "edgy_trapezoid",
+            "edgy_square": "edgy_square",
+            "edgy_triangle": "edgy_triangle",
+            "edgy_trapezoid": "edgy_trapezoid",
+        }
+        return m.get(t, t)
+
+    if "hand_shape" in df.columns:
+        df["hand_shape"] = [ _canon_hand(v, i) for i, v in enumerate(df["hand_shape"]) ]
+
+    # canonicalize feet to feet_map keys
+    def _canon_foot(v, i):
+        s = str(v).lower()
+        if s.startswith("flat_") or s.startswith("pointy_"):
+            return s
+        if s in {"flat", "flat_generic"}:
+            return ["flat_4sided", "flat_5sided", "flat_lshaped"][i % 3]
+        if s in {"pointy", "pointy_generic"}:
+            return ["pointy_3sided", "pointy_4sided", "pointy_6sided"][i % 3]
+        return s
+
+    if "foot_shape" in df.columns:
+        df["foot_shape"] = [ _canon_foot(v, i + int(seed)) for i, v in enumerate(df["foot_shape"]) ]
+
+    # booleans as "true"/"false"
+    for b in ["has_antennae", "has_knees", "has_elbows"]:
+        if b in df.columns:
+            df[b] = df[b].astype(str).str.lower()
+    return df
+
+catalog_df = _normalize_catalog_schema(catalog_df, seed=SEED)
+
+def _normalize_catalog_schema(df: pd.DataFrame, seed: int) -> pd.DataFrame:
+    df = df.copy()
+    # prefer subtype columns if present
+    if "hand_shape_subtype" in df.columns:
+        df["hand_shape"] = df["hand_shape_subtype"].astype(str)
+    # Combine coarse + subtype for feet when both are present
+    if "foot_shape" in df.columns and "foot_shape_subtype" in df.columns:
+        coarse = df["foot_shape"].astype(str).str.lower()
+        sub    = df["foot_shape_subtype"].astype(str).str.lower()
+        sub = sub.replace({
+            "square": "4sided",
+            "4-sided": "4sided",
+            "4": "4sided",
+            "3-sided": "3sided",
+            "3": "3sided",
+            "5-sided": "5sided",
+            "5": "5sided",
+            "l-shaped": "lshaped",
+            "l": "lshaped"
+        })
+        df["foot_shape"] = coarse + "_" + sub
+    # map simple → subtype for hands
+    _hands_simple = {
+        "round": "round_circle",
+        "wide": "wide_oval",
+        "tall": "tall_oval",
+        "square": "edgy_square",
+        "triangle": "edgy_triangle",
+        "trapezoid": "edgy_trapezoid",
+    }
+    if "hand_shape" in df.columns:
+        df["hand_shape"] = df["hand_shape"].astype(str).map(lambda v: _hands_simple.get(v, v))
+    # expand flat/pointy feet deterministically if needed
+    def _fix_foot(v, i):
+        s = str(v).lower()
+        if s.startswith("flat_") or s.startswith("pointy_"):
+            return s
+        if s in {"flat", "flat_generic"}:
+            return ["flat_4sided", "flat_5sided", "flat_lshaped"][i % 3]
+        if s in {"pointy", "pointy_generic"}:
+            return ["pointy_3sided", "pointy_4sided", "pointy_6sided"][i % 3]
+        return s
+    if "foot_shape" in df.columns:
+        idx = np.arange(len(df), dtype=int)
+        df["foot_shape"] = [ _fix_foot(v, i + int(seed)) for i, v in enumerate(df["foot_shape"].astype(str)) ]
+    # ensure booleans are strings "true"/"false"
+    for b in ["has_antennae", "has_knees", "has_elbows"]:
+        if b in df.columns:
+            df[b] = df[b].astype(str).str.lower()
+    return df
+
+catalog_df = _normalize_catalog_schema(catalog_df, seed=SEED)
+
 catalog_df["label"] = compute_label(
     catalog_df,
     params["model"],
@@ -1095,12 +1290,6 @@ catalog_df["label"] = compute_label(
 )
 
 _lbl = catalog_df["label"].astype(str)
-print("Label distribution (catalog_df):", {
-    "glorp": int((_lbl == "glorp").sum()),
-    "drent": int((_lbl == "drent").sum()),
-    "total": int(len(_lbl)),
-    "pos_frac": round((_lbl == "glorp").mean(), 4),
-})
 
 concept_cols = list(params["concepts"].keys())
 ds = None
@@ -1119,11 +1308,26 @@ if args_obj.templates_file and str(args_obj.templates_file).lower().endswith(".j
     row_variants = [vpr_min if lab == minority_label else vpr_maj for lab in _lbl]
     base_jsonl = Path(args_obj.templates_file)
     _gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
-    gen_jsonl = base_jsonl.with_name(f"HardCorpus_{'Foot' if _gen_target=='foot' else 'Ears'}Generic.jsonl")
-    ds = _build_ds_from_corpus(catalog_df, params, base_jsonl, base_vpr, SEED, row_variants=row_variants, generic_path=(
-        gen_jsonl if (gen_jsonl.is_file() and int(getattr(args_obj, "generic_enable", 0)) == 1) else None),
-                               generic_rate=(float(getattr(args_obj, "generic_rate", 0.5)) if int(
-                                   getattr(args_obj, "generic_enable", 0)) == 1 else 0.0))
+    _raw_targets = str(getattr(args_obj, "generic_what", "foot"))
+    _targets = [t.strip().lower() for t in re.split(r"[;,]", _raw_targets) if t.strip()]
+    if not _targets:
+        _targets = ["foot"]
+    if _targets == ["footmouth"] or "footmouth" in _targets:
+        _targets = ["foot", "mouth"]
+    _map = {"foot": "Foot", "mouth": "Mouth", "ears": "Ears", "ear": "Ears", "feet": "Foot", "footmouth": "FootMouth"}
+    _sfx = "".join(_map.get(t, t.title()) for t in _targets) + "Generic"
+    gen_jsonl = base_jsonl.with_name(f"{base_jsonl.stem}_{_sfx}{base_jsonl.suffix}")
+    if not gen_jsonl.is_file():
+        _cand = list(base_jsonl.parent.glob(f"*_{_sfx}{base_jsonl.suffix}"))
+        gen_jsonl = _cand[0] if _cand else None
+    if int(getattr(args_obj, "generic_enable", 0)) == 1 and not (gen_jsonl and gen_jsonl.is_file()):
+        raise SystemExit(f"generic_enable=1 but missing generic corpus: {base_jsonl.stem}_{_sfx}{base_jsonl.suffix}")
+    ds = _build_ds_from_corpus(
+        catalog_df, params, base_jsonl, base_vpr, SEED,
+        row_variants=row_variants,
+        generic_path=(gen_jsonl if gen_jsonl and gen_jsonl.is_file() else None),
+        generic_rate=(float(getattr(args_obj, "generic_rate", 0.5)) if int(getattr(args_obj, "generic_enable", 0)) == 1 else 0.0)
+    )
     setattr(ds, "cvindices", None)
 
 elif args_obj.template_difficulty == "hard":
@@ -1140,8 +1344,14 @@ elif args_obj.template_difficulty == "hard":
                                                                                                                           args_obj.minority_mult))))
         vpr_maj = int(args_obj.variants_per_row_majority) if int(args_obj.variants_per_row_majority) > 0 else base_vpr
         row_variants = [vpr_min if lab == minority_label else vpr_maj for lab in _lbl]
-        _gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
-        gen_jsonl = default_jsonl.with_name(f"HardCorpus_{'Foot' if _gen_target=='foot' else 'Ears'}Generic.jsonl")
+        _raw = str(getattr(args_obj, "generic_what", "foot")).lower()
+        if _raw in ("ears", "ear"):
+            _gn = "HardCorpus_EarsGeneric.jsonl"
+        elif _raw == "footmouth":
+            _gn = "HardCorpus_FootMouthGeneric.jsonl"
+        else:
+            _gn = "HardCorpus_FootGeneric.jsonl"
+        gen_jsonl = default_jsonl.with_name(_gn)
 
         # fail fast if genericization requested but the generic corpus isn't present
         if int(getattr(args_obj, "generic_enable", 0)) == 1 and not gen_jsonl.is_file():
@@ -1201,12 +1411,6 @@ print("CLASSES:", ds.classes)
 print("N samples:", len(ds))
 
 _y_all = np.asarray(ds.y, dtype=int)
-print("Label distribution (dataset):", {
-    "glorp": int((_y_all == 1).sum()),
-    "drent": int((_y_all == 0).sum()),
-    "total": int(_y_all.size),
-    "pos_frac": round((_y_all == 1).mean() if _y_all.size else 0.0, 4),
-})
 
 seed_tag = f"seed{SEED}"
 if VARIANT == "imperfect" and IMPERFECT_STRATEGY == "missing_concepts":
@@ -1317,10 +1521,18 @@ def _manual_by_robot_split(ds_obj, row_index_arr, n_folds=5, seed=0):
         X = [ds_obj.X[i] for i in idx]
         C = ds_obj.C[idx]
         y = ds_obj.y[idx]
-        sub = ConceptDatasetSample(X=X, C=C, y=y, meta={"concepts": ds_obj.concepts, "classes": ds_obj.classes, "data_type": "text"})
+        meta_sub = {"concepts": ds_obj.concepts, "classes": ds_obj.classes, "data_type": "text",
+                    "df_indices": np.asarray(row_index_arr, dtype=int)[idx].tolist()}
+        sub = ConceptDatasetSample(X=X, C=C, y=y, meta=meta_sub)
         gm = getattr(ds_obj, "ears_generic_mask", None)
         if gm is not None:
             setattr(sub, "ears_generic_mask", np.asarray(gm)[idx])
+            _raw_targets = str(getattr(args_obj, "generic_what", "foot"))
+            _targets = sorted(set(t.strip().lower() for t in re.split(r"[;,]", _raw_targets) if t.strip()))
+            if not _targets:
+                _targets = ["foot"]
+            for _t in _targets:
+                setattr(sub, f"{_t}_generic_mask", np.asarray(gm)[idx])
         sub0 = getattr(ds_obj, "subtypes", None)
         if sub0 is not None:
             setattr(sub, "subtypes", {k: np.asarray(sub0[k])[idx] for k in sub0.keys()})
@@ -1421,16 +1633,26 @@ if need_split:
         X = [ds.X[i] for i in idx]
         C = ds.C[idx]
         y = ds.y[idx]
-        sub = ConceptDatasetSample(X=X, C=C, y=y,
-                                   meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text"})
+        meta_sub = {"concepts": ds.concepts, "classes": ds.classes, "data_type": "text",
+                    "df_indices": np.asarray(row_index, dtype=int)[idx].tolist()}
+        sub = ConceptDatasetSample(X=X, C=C, y=y, meta=meta_sub)
         gm = getattr(ds, "ears_generic_mask", None)
         if gm is not None:
             setattr(sub, "ears_generic_mask", np.asarray(gm)[idx])
+            raw = str(getattr(args_obj, "generic_what", "foot"))
+            ts = [t.strip().lower() for t in re.split(r"[;,]", raw) if t.strip()]
+            if not ts:
+                ts = ["foot"]
+            if "footmouth" in ts:
+                ts = [t for t in ts if t != "footmouth"] + ["foot", "mouth"]
+            for t in sorted(set(ts)):
+                m = getattr(ds, f"{t}_generic_mask", None)
+                if m is not None:
+                    setattr(sub, f"{t}_generic_mask", np.asarray(m)[idx])
         _sub = getattr(ds, "subtypes", None)
         if _sub is not None:
             setattr(sub, "subtypes", {k: np.asarray(_sub[k])[idx] for k in _sub.keys()})
         return sub
-
 
     ds.training = _subset_mask(mtr)
     ds.validation = _subset_mask(mva)
@@ -1444,14 +1666,24 @@ if need_split:
             _tf = str(getattr(args_obj, "templates_file", "") or "").strip()
             base_jsonl_dep = Path(_tf) if _tf else default_jsonl_dep
             _gen_target_dep = str(getattr(args_obj, "generic_what", "foot")).lower()
-            gen_jsonl_dep = base_jsonl_dep.with_name(
-                f"HardCorpus_{'Foot' if _gen_target_dep == 'foot' else 'Ears'}Generic.jsonl")
-            ds_testpool = _build_ds_from_corpus(catalog_df, params, base_jsonl_dep, vpr_t, SEED,
-                                                row_variants=None,
-                                                generic_path=(gen_jsonl_dep if (gen_jsonl_dep.is_file() and int(
-                                                    getattr(args_obj, "generic_enable", 0)) == 1) else None),
-                                                generic_rate=(float(getattr(args_obj, "generic_rate", 0.5)) if int(
-                                                    getattr(args_obj, "generic_enable", 0)) == 1 else 0.0))
+            _raw_targets_dep = str(getattr(args_obj, "generic_what", "foot"))
+            _targets_dep = sorted(set(t.strip().lower() for t in re.split(r"[;,]", _raw_targets_dep) if t.strip()))
+            if not _targets_dep:
+                _targets_dep = ["foot"]
+            _map = {"foot": "Foot", "mouth": "Mouth", "ears": "Ears", "ear": "Ears", "feet": "Foot"}
+            _sfx_dep = "".join(_map.get(t, t.title()) for t in _targets_dep) + "Generic"
+            gen_jsonl_dep = base_jsonl_dep.with_name(f"{base_jsonl_dep.stem}_{_sfx_dep}{base_jsonl_dep.suffix}")
+            if not gen_jsonl_dep.is_file():
+                _cand_dep = list(base_jsonl_dep.parent.glob(f"*_{_sfx_dep}{base_jsonl_dep.suffix}"))
+                gen_jsonl_dep = _cand_dep[0] if _cand_dep else None
+            ds_testpool = _build_ds_from_corpus(
+                catalog_df, params, base_jsonl_dep, vpr_t, SEED,
+                row_variants=[1] * len(catalog_df),  # force equal per-row replication
+                generic_path=(gen_jsonl_dep if (gen_jsonl_dep and gen_jsonl_dep.is_file() and int(
+                    getattr(args_obj, "generic_enable", 0)) == 1) else None),
+                generic_rate=(float(getattr(args_obj, "generic_rate", 0.5)) if int(
+                    getattr(args_obj, "generic_enable", 0)) == 1 else 0.0),
+            )
             rng_dep = np.random.default_rng(
                 int(getattr(args_obj, "seed", 0)) + int(getattr(args_obj, "seed_test_offset", 1234)))
             pool = np.arange(len(ds_testpool.y), dtype=int)
@@ -1460,9 +1692,27 @@ if need_split:
             X = [ds_testpool.X[i] for i in idx_dep]
             C = ds_testpool.C[idx_dep]
             y = ds_testpool.y[idx_dep]
-            test_sub = ConceptDatasetSample(X=X, C=C, y=y,
-                                            meta={"concepts": ds_testpool.concepts, "classes": ds_testpool.classes,
-                                                  "data_type": "text"})
+            test_sub = ConceptDatasetSample(
+                X=X, C=C, y=y,
+                meta={"concepts": ds_testpool.concepts, "classes": ds_testpool.classes, "data_type": "text"}
+            )
+            ds.deployment = test_sub
+            ds.test = test_sub
+
+            # print(f"Final split sizes → train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
+            yt = np.asarray(ds.training.y, dtype=int)
+            yv = np.asarray(ds.validation.y, dtype=int)
+            yte = np.asarray(ds.test.y, dtype=int)
+            # print("Final label distribution (train):",
+            #       {"glorp": int((yt == 1).sum()), "drent": int((yt == 0).sum()), "total": int(yt.size),
+            #        "pos_frac": round((yt == 1).mean() if yt.size else 0.0, 4)})
+            # print("Final label distribution (val):",
+            #       {"glorp": int((yv == 1).sum()), "drent": int((yv == 0).sum()), "total": int(yv.size),
+            #        "pos_frac": round((yv == 1).mean() if yv.size else 0.0, 4)})
+            # print("Final label distribution (test):",
+            #       {"glorp": int((yte == 1).sum()), "drent": int((yte == 0).sum()), "total": int(yte.size),
+            #        "pos_frac": round((yte == 1).mean() if yte.size else 0.0, 4)})
+
             gm2 = getattr(ds_testpool, "ears_generic_mask", None)
             if gm2 is not None:
                 setattr(test_sub, "ears_generic_mask", np.asarray(gm2)[idx_dep])
@@ -1490,40 +1740,43 @@ if need_split:
                                                  "df_indices": idxs.tolist()})
                 gm = getattr(ds, "ears_generic_mask", None)
                 if gm is not None:
-                    setattr(sub, "ears_generic_mask", np.asarray(gm)[idxs])
+                    setattr(sub, "ears_generic_mask", np.asarray(gm)[sel])
+
+                raw = str(getattr(args_obj, "generic_what", "foot"))
+                ts = [t.strip().lower() for t in re.split(r"[;,]", raw) if t.strip()]
+                if not ts:
+                    ts = ["foot"]
+                if "footmouth" in ts:
+                    ts = [t for t in ts if t != "footmouth"] + ["foot", "mouth"]
+                for t in sorted(set(ts)):
+                    m = getattr(ds, f"{t}_generic_mask", None)
+                    if isinstance(m, np.ndarray):
+                        setattr(sub, f"{t}_generic_mask", np.asarray(m)[sel])
+
                 sub0 = getattr(ds, "subtypes", None)
                 if sub0 is not None:
-                    setattr(sub, "subtypes", {k: np.asarray(sub0[k])[idxs] for k in sub0.keys()})
+                    setattr(sub, "subtypes", {k: np.asarray(sub0[k])[sel] for k in sub0.keys()})
                 return sub
+
 
             ds.deployment = _subset_idx(dep_idx)
             ds.test = ds.deployment
     else:
         ds.test = _subset_mask(np.zeros(n_all, dtype=bool))
 
-    print(f"Split sizes → train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
-
+    print(f"Initial split (pre-meta) sizes → train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
     yt = np.asarray(ds.training.y, dtype=int)
     yv = np.asarray(ds.validation.y, dtype=int)
     yte = np.asarray(ds.test.y, dtype=int)
-    print("Label distribution (train):", {
-        "glorp": int((yt == 1).sum()),
-        "drent": int((yt == 0).sum()),
-        "total": int(yt.size),
-        "pos_frac": round((yt == 1).mean() if yt.size else 0.0, 4),
-    })
-    print("Label distribution (val):", {
-        "glorp": int((yv == 1).sum()),
-        "drent": int((yv == 0).sum()),
-        "total": int(yv.size),
-        "pos_frac": round((yv == 1).mean() if yv.size else 0.0, 4),
-    })
-    print("Label distribution (test):", {
-        "glorp": int((yte == 1).sum()),
-        "drent": int((yte == 0).sum()),
-        "total": int(yte.size),
-        "pos_frac": round((yte == 1).mean() if yte.size else 0.0, 4),
-    })
+    print("Initial split (pre-meta) label distribution (train):",
+          {"glorp": int((yt == 1).sum()), "drent": int((yt == 0).sum()), "total": int(yt.size),
+           "pos_frac": round((yt == 1).mean() if yt.size else 0.0, 4)})
+    print("Initial split (pre-meta) label distribution (val):",
+          {"glorp": int((yv == 1).sum()), "drent": int((yv == 0).sum()), "total": int(yv.size),
+           "pos_frac": round((yv == 1).mean() if yv.size else 0.0, 4)})
+    print("Initial split (pre-meta) label distribution (test):",
+          {"glorp": int((yte == 1).sum()), "drent": int((yte == 0).sum()), "total": int(yte.size),
+           "pos_frac": round((yte == 1).mean() if yte.size else 0.0, 4)})
 
 elif need_split:
     pass
@@ -1658,29 +1911,244 @@ if int(getattr(args_obj, "test_balance_enable", 0)) == 1 and hasattr(ds.test, "e
 train_ds = ds.training
 val_ds = ds.validation
 test_ds = ds.test
+if str(getattr(args_obj, "image_meta", "")).strip():
+    _im = json.loads(Path(str(args_obj.image_meta)).read_text())
+    _dfi = _im.get("df_indices", {})
+    if _dfi:
+        row_index_full = getattr(getattr(ds, "_full", ds), "meta", {}).get("row_index", np.arange(len(ds)))
+        idx_map = {int(r): i for i, r in enumerate(np.asarray(row_index_full, dtype=int))}
+
+        def _subset_by_ids(ids, mode="all"):
+            row_idx = np.asarray(row_index_full, dtype=int)
+            idx_map_list = {}
+            for i, rid in enumerate(row_idx):
+                idx_map_list.setdefault(int(rid), []).append(i)
+
+            sel = []
+            for x in ids:
+                j = int(x)
+                if j in idx_map_list:
+                    if mode == "one":
+                        sel.append(idx_map_list[j][0])
+                    else:
+                        sel.extend(idx_map_list[j])
+            if not sel:
+                return None
+            sel = np.asarray(sorted(sel), dtype=int)
+
+            X = [ds.X[i] for i in sel]
+            C = ds.C[sel]
+            y = ds.y[sel]
+            sub = ConceptDatasetSample(
+                X=X, C=C, y=y,
+                meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text",
+                      "df_indices": [int(row_idx[i]) for i in sel]}
+            )
+            for _t in ["ears", "foot", "mouth", "footmouth"]:
+                gm = getattr(ds, f"{_t}_generic_mask", None)
+                if gm is not None:
+                    setattr(sub, f"{_t}_generic_mask", np.asarray(gm)[sel])
+            sub0 = getattr(ds, "subtypes", None)
+            if sub0 is not None:
+                setattr(sub, "subtypes", {k: np.asarray(sub0[k])[sel] for k in sub0.keys()})
+            return sub
+
+        tr = _subset_by_ids(_dfi.get("train", []), mode="all")
+        va = _subset_by_ids(_dfi.get("valid", _dfi.get("val", [])), mode=str(getattr(args_obj, "val_variant_mode", "all")))
+        te = _subset_by_ids(_dfi.get("test", []), mode=("all" if int(getattr(args_obj, "shared_test", 0)) == 0 else "one"))
+        if tr is not None: train_ds = tr
+        if va is not None:  val_ds = va
+        if te is not None:  test_ds = te
+
+    # log true pre-balance after image-meta remap
+    print(f"Pre-balance split sizes → train: {train_ds.n}, val: {val_ds.n}, test: {test_ds.n}")
+    yt = np.asarray(train_ds.y, dtype=int)
+    yv = np.asarray(val_ds.y, dtype=int)
+    yte = np.asarray(test_ds.y, dtype=int)
+    print("Pre-balance label distribution (train):",
+          {"glorp": int((yt == 1).sum()), "drent": int((yt == 0).sum()), "total": int(yt.size),
+           "pos_frac": round((yt == 1).mean() if yt.size else 0.0, 4)})
+    print("Pre-balance label distribution (val):",
+          {"glorp": int((yv == 1).sum()), "drent": int((yv == 0).sum()), "total": int(yv.size),
+           "pos_frac": round((yv == 1).mean() if yv.size else 0.0, 4)})
+    print("Pre-balance label distribution (test):",
+          {"glorp": int((yte == 1).sum()), "drent": int((yte == 0).sum()), "total": int(yte.size),
+           "pos_frac": round((yte == 1).mean() if yte.size else 0.0, 4)})
+
+    # -------- re-apply balancing after image_meta remap --------
+    if int(getattr(args_obj, "train_balance_enable", 0)) == 1 and hasattr(train_ds, "ears_generic_mask"):
+        ytr0 = np.asarray(train_ds.y, dtype=int)
+        gtr0 = np.asarray(train_ds.ears_generic_mask, dtype=bool)
+        idx0 = np.arange(ytr0.shape[0])
+        f_pos = float(getattr(args_obj, "train_target_pos_frac", 0.5))
+        f_gen = float(getattr(args_obj, "train_target_generic_frac", 0.5))
+        within = int(getattr(args_obj, "train_balance_within_label", 1)) == 1
+        rng = np.random.default_rng(int(SEED) + 907)
+        if within:
+            t = {(1, 1): f_pos * f_gen, (1, 0): f_pos * (1.0 - f_gen), (0, 1): (1.0 - f_pos) * f_gen,
+                 (0, 0): (1.0 - f_pos) * (1.0 - f_gen)}
+            avail = {k: idx0[(ytr0 == k[0]) & (gtr0 == (k[1] == 1))] for k in t}
+            caps = [avail[k].size / v for k, v in t.items() if v > 0]
+            N = int(np.floor(min(caps))) if caps else 0
+            take = []
+            for k, v in t.items():
+                n = int(np.floor(v * N)) if v > 0 else 0
+                n = min(n, avail[k].size)
+                if n > 0:
+                    take.append(rng.choice(avail[k], size=n, replace=False))
+            take = np.sort(np.concatenate(take)) if take else np.array([], dtype=int)
+        else:
+            pos_idx = idx0[ytr0 == 1];
+            neg_idx = idx0[ytr0 == 0]
+            N = min(pos_idx.size, neg_idx.size) * 2
+            n_pos = N // 2;
+            n_neg = N - n_pos
+            take = np.sort(np.concatenate([
+                rng.choice(pos_idx, size=n_pos, replace=False),
+                rng.choice(neg_idx, size=n_neg, replace=False),
+            ])) if N > 0 else np.array([], dtype=int)
+        if take.size > 0:
+            X = [train_ds.X[i] for i in take]
+            C = train_ds.C[take]
+            y = train_ds.y[take]
+            tr_ds = ConceptDatasetSample(X=X, C=C, y=y, meta=train_ds.meta)
+            if hasattr(train_ds, "ears_generic_mask"):
+                setattr(tr_ds, "ears_generic_mask", np.asarray(train_ds.ears_generic_mask)[take])
+            for _t in ["foot", "mouth", "ears", "footmouth"]:
+                m = getattr(train_ds, f"{_t}_generic_mask", None)
+                if m is not None:
+                    setattr(tr_ds, f"{_t}_generic_mask", np.asarray(m)[take])
+            if hasattr(train_ds, "subtypes"):
+                setattr(tr_ds, "subtypes", {k: np.asarray(train_ds.subtypes[k])[take] for k in train_ds.subtypes})
+            train_ds = tr_ds
+
+    if int(getattr(args_obj, "val_balance_enable", 0)) == 1 and hasattr(val_ds, "ears_generic_mask"):
+        yv0 = np.asarray(val_ds.y, dtype=int);
+        gv0 = np.asarray(val_ds.ears_generic_mask, dtype=bool)
+        idxv = np.arange(yv0.shape[0]);
+        f_gen_v = float(getattr(args_obj, "val_target_generic_frac", 0.5))
+        rngv = np.random.default_rng(int(SEED) + 908)
+        take_v = []
+        for lab in (0, 1):
+            lab_idx = idxv[yv0 == lab]
+            if lab_idx.size == 0: continue
+            lab_gen = lab_idx[gv0[lab_idx]];
+            lab_spec = lab_idx[~gv0[lab_idx]]
+            want_gen = int(round(f_gen_v * lab_idx.size));
+            want_spec = lab_idx.size - want_gen
+            sel_gen = rngv.choice(lab_gen, size=min(want_gen, lab_gen.size),
+                                  replace=False) if lab_gen.size else np.array([], dtype=int)
+            sel_spec = rngv.choice(lab_spec, size=min(want_spec, lab_spec.size),
+                                   replace=False) if lab_spec.size else np.array([], dtype=int)
+            short_gen = want_gen - sel_gen.size
+            if short_gen > 0 and (lab_spec.size - sel_spec.size) > 0:
+                add = rngv.choice(np.setdiff1d(lab_spec, sel_spec), size=min(short_gen, lab_spec.size - sel_spec.size),
+                                  replace=False)
+                sel_spec = np.concatenate([sel_spec, add])
+            short_spec = want_spec - sel_spec.size
+            if short_spec > 0 and (lab_gen.size - sel_gen.size) > 0:
+                add = rngv.choice(np.setdiff1d(lab_gen, sel_gen), size=min(short_spec, lab_gen.size - sel_gen.size),
+                                  replace=False)
+                sel_gen = np.concatenate([sel_gen, add])
+            take_v.append(np.concatenate([sel_gen, sel_spec]))
+        if take_v:
+            take_v = np.sort(np.concatenate(take_v))
+            X = [val_ds.X[i] for i in take_v];
+            C = val_ds.C[take_v];
+            y = val_ds.y[take_v]
+            va_ds = ConceptDatasetSample(X=X, C=C, y=y, meta=val_ds.meta)
+            if hasattr(val_ds, "ears_generic_mask"): setattr(va_ds, "ears_generic_mask",
+                                                             val_ds.ears_generic_mask[take_v])
+            if hasattr(val_ds, "subtypes"):          setattr(va_ds, "subtypes",
+                                                             {k: np.asarray(val_ds.subtypes[k])[take_v] for k in
+                                                              val_ds.subtypes})
+            val_ds = va_ds
+
+    if int(getattr(args_obj, "test_balance_enable", 0)) == 1 and hasattr(test_ds, "ears_generic_mask"):
+        yte0 = np.asarray(test_ds.y, dtype=int);
+        gte0 = np.asarray(test_ds.ears_generic_mask, dtype=bool)
+        idxt = np.arange(yte0.shape[0]);
+        f_gen_t = float(getattr(args_obj, "test_target_generic_frac", 0.5))
+        rngt = np.random.default_rng(int(SEED) + 909)
+        take_t = []
+        for lab in (0, 1):
+            lab_idx = idxt[yte0 == lab]
+            if lab_idx.size == 0: continue
+            lab_gen = lab_idx[gte0[lab_idx]];
+            lab_spec = lab_idx[~gte0[lab_idx]]
+            want_gen = int(round(f_gen_t * lab_idx.size));
+            want_spec = lab_idx.size - want_gen
+            sel_gen = rngt.choice(lab_gen, size=min(want_gen, lab_gen.size),
+                                  replace=False) if lab_gen.size else np.array([], dtype=int)
+            sel_spec = rngt.choice(lab_spec, size=min(want_spec, lab_spec.size),
+                                   replace=False) if lab_spec.size else np.array([], dtype=int)
+            short_gen = want_gen - sel_gen.size
+            if short_gen > 0 and (lab_spec.size - sel_spec.size) > 0:
+                add = rngt.choice(np.setdiff1d(lab_spec, sel_spec), size=min(short_gen, lab_spec.size - sel_spec.size),
+                                  replace=False)
+                sel_spec = np.concatenate([sel_spec, add])
+            short_spec = want_spec - sel_spec.size
+            if short_spec > 0 and (lab_gen.size - sel_gen.size) > 0:
+                add = rngt.choice(np.setdiff1d(lab_gen, sel_gen), size=min(short_spec, lab_gen.size - sel_gen.size),
+                                  replace=False)
+                sel_gen = np.concatenate([sel_gen, add])
+            take_t.append(np.concatenate([sel_gen, sel_spec]))
+        if take_t:
+            take_t = np.sort(np.concatenate(take_t))
+            X = [test_ds.X[i] for i in take_t];
+            C = test_ds.C[take_t];
+            y = test_ds.y[take_t]
+            te_ds = ConceptDatasetSample(X=X, C=C, y=y, meta=test_ds.meta)
+            if hasattr(test_ds, "ears_generic_mask"): setattr(te_ds, "ears_generic_mask",
+                                                              test_ds.ears_generic_mask[take_t])
+            if hasattr(test_ds, "subtypes"):          setattr(te_ds, "subtypes",
+                                                              {k: np.asarray(test_ds.subtypes[k])[take_t] for k in
+                                                               test_ds.subtypes})
+            test_ds = te_ds
+    # -------- end re-apply balancing --------
 
 pat_shape = re.compile(
     r"(?i)\b(square|boxy|box|angular|cornered|right-angled|rectilinear|90-degree|triangle|triangular|tri-corner|three-angled|three-point|pointy|pointed|tapered|wedge|spearhead|spear-tip)\b")
+pat_mouth = re.compile(r"(?i)\bmouth\b.*\b(open|closed)\b|\b(open|closed)\b.*\bmouth\b")
 
+def _targets_list():
+    raw = str(getattr(args_obj, "generic_what", "foot"))
+    ts = [t.strip().lower() for t in re.split(r"[;,]", raw) if t.strip()]
+    if not ts: ts = ["foot"]
+    if "footmouth" in ts:  # alias support
+        ts = [t for t in ts if t != "footmouth"] + ["foot", "mouth"]
+    return sorted(set(ts))
 
 def _leak_sentence_scoped(t):
-    _gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
+    ts = _targets_list()
     sents = re.split(r"[.!?;:]\s+", str(t).lower())
     for s in sents:
-        if ((_gen_target in s) and pat_shape.search(s)):
+        if ("foot" in ts and re.search(r"\b(?:foot|feet)\b", s) and pat_shape.search(s)):
+            return True
+        if ("ears" in ts and re.search(r"\bears?\b", s) and pat_shape.search(s)):
+            return True
+        if ("mouth" in ts and pat_mouth.search(s)):
             return True
     return False
 
 def _rates(part):
-    gm = getattr(part, "ears_generic_mask", None)
-    if gm is None:
-        return {"overall": "na", "y1": "na", "y0": "na"}, {"generic_near_ears_shape": "na"}
+    ts = _targets_list()
+    masks = []
+    for t in ts:
+        m = getattr(part, f"{t}_generic_mask", None)
+        if isinstance(m, np.ndarray):
+            masks.append(m.astype(bool))
+    if not masks:
+        return {"overall": "na", "y1": "na", "y0": "na"}, {"generic_near_generic": "na"}
+    gm = masks[0].copy()
+    for m in masks[1:]:
+        gm |= m
     yv = np.asarray(part.y, dtype=int)
     overall = float(gm.mean()) if gm.size else float("nan")
     y1 = float(gm[yv == 1].mean()) if (yv == 1).any() else float("nan")
     y0 = float(gm[yv == 0].mean()) if (yv == 0).any() else float("nan")
     leak = int(sum(_leak_sentence_scoped(t) for t, g in zip(part.X, gm) if g))
-    return {"overall": overall, "y1": y1, "y0": y0}, {"generic_near_ears_shape": leak}
+    return {"overall": overall, "y1": y1, "y0": y0}, {"generic_near_generic": leak}
 
 
 dist = {};
@@ -1695,13 +2163,16 @@ t_train = float(getattr(args_obj, "train_target_generic_frac", getattr(args_obj,
 t_val = float(getattr(args_obj, "generic_rate", 0.5))
 t_test = float(getattr(args_obj, "generic_rate", 0.5))
 tol = float(getattr(args_obj, "generic_tol", 0.02))
-_gen_target = str(getattr(args_obj, "generic_what", "foot")).lower()
+_raw_targets = str(getattr(args_obj, "generic_what", "foot"))
+_targets = sorted(set(t.strip().lower() for t in re.split(r"[;,]", _raw_targets) if t.strip()))
+if not _targets:
+    _targets = ["foot"]
 if int(getattr(args_obj, "generic_enable", 0)) == 1:
-    print(json.dumps({
-        f"{_gen_target}_leak_counts_generic": leak,
-        f"{_gen_target}_generic_rates": dist,
-        "targets": {"train": t_train, "val": t_val, "test": t_test, "tol": tol}
-    }, indent=2))
+    _out = {"targets": {"train": t_train, "val": t_val, "test": t_test, "tol": tol}}
+    for _t in _targets:
+        _out[f"{_t}_leak_counts_generic"] = leak
+        _out[f"{_t}_generic_rates"] = dist
+    print(json.dumps(_out, indent=2))
 
     if any(v.get("generic_near_ears_shape", 0) not in ("na", 0) for v in leak.values()):
         raise SystemExit(3)
@@ -1896,8 +2367,18 @@ if inc_idx or exc_idx:
     keep = sorted(set(inc_idx) - set(exc_idx))
     if keep:
         train_ds = _select_concept_columns(train_ds, np.array(keep, dtype=int))
-        val_ds = _select_concept_columns(val_ds, np.array(keep, dtype=int))
-        test_ds = _select_concept_columns(test_ds, np.array(keep, dtype=int))
+        val_ds   = _select_concept_columns(val_ds,   np.array(keep, dtype=int))
+        test_ds  = _select_concept_columns(test_ds,  np.array(keep, dtype=int))
+
+# Report post-balance splits used
+_n = lambda d: int(getattr(d, "n", len(getattr(d, "y", []))))
+print(f"Post-balance split sizes → train: {_n(train_ds)}, val: {_n(val_ds)}, test: {_n(test_ds)}")
+yt  = np.asarray(train_ds.y, dtype=int)
+yv  = np.asarray(val_ds.y, dtype=int)
+yte = np.asarray(test_ds.y, dtype=int)
+print("Post-balance label distribution (train):", {"glorp": int((yt==1).sum()),  "drent": int((yt==0).sum()),  "total": int(yt.size),  "pos_frac": round((yt==1).mean() if yt.size else 0.0, 4)})
+print("Post-balance label distribution (val):",   {"glorp": int((yv==1).sum()),  "drent": int((yv==0).sum()),  "total": int(yv.size),  "pos_frac": round((yv==1).mean() if yv.size else 0.0, 4)})
+print("Post-balance label distribution (test):",  {"glorp": int((yte==1).sum()), "drent": int((yte==0).sum()), "total": int(yte.size), "pos_frac": round((yte==1).mean() if yte.size else 0.0, 4)})
 
 detector = TextConceptDetector(
     embed_dim=128,
@@ -1913,6 +2394,7 @@ detector = TextConceptDetector(
     pooling="attn",
     group_unknown_threshold=0.50,
     validate=True,
+    seed=int(SEED),
 )
 
 label_mask = None
@@ -1934,6 +2416,23 @@ train_ds.meta = dict(getattr(train_ds, "meta", {}) or {})
 if label_mask is not None:
     train_ds.meta["observed_mask"] = label_mask
 
+_noise_mode = merged.get("concept_label_noise_mode", "none")
+if (_noise_mode == "subjective") and (str(args_obj.concept_source) == "gt"):
+    _rate = float(merged.get("concept_label_noise_rate", 0.20))
+    _seed = int(merged.get("seed", 0)) + 199
+    C0 = train_ds.C.astype(int).copy()
+    N = C0.size
+    k = int(round(_rate * N))
+    if k > 0:
+        rng = np.random.default_rng(_seed)
+        idx = rng.choice(N, size=k, replace=False)
+        flat = C0.reshape(-1)
+        flat[idx] = 1 - flat[idx]
+        C0 = flat.reshape(C0.shape)
+
+    train_ds.meta["subjective_flips"] = {"total": int(k), "rate": float(k) / float(N) if N > 0 else 0.0}
+    train_ds.C = C0.astype(np.float32)
+
 SKIP = int(getattr(args_obj, "skip_fit", 0)) == 1
 loaded_cbm = None
 det_path = None
@@ -1951,6 +2450,10 @@ if int(args_obj.reuse_detector):
             detector = obj_det["detector"]
         if hasattr(detector, "output_mode"):
             detector.output_mode = CONCEPT_MODE
+        if not hasattr(detector, "seed"):
+            detector.seed = int(SEED)
+        else:
+            detector.seed = int(SEED)
         if SKIP and isinstance(obj_det, dict) and "cbm" in obj_det:
             loaded_cbm = obj_det["cbm"]
     elif det_path:
@@ -1989,7 +2492,12 @@ if (args_obj.concept_source == "machine") and (str(args_obj.machine_method) == "
     _det_lf.fit([str(x) for x in train_ds.X], y=train_ds.y.astype(int))
     det_lf = _det_lf
 
-    det_lf = _det_lf
+    try:
+        (run_dir / "lfcbm_kselection").mkdir(parents=True, exist_ok=True)
+        det_lf.save(run_dir / "lfcbm_kselection")  # meta.json has keep_idx and names
+    except Exception:
+        pass
+
     if args_obj.concept_mode == "soft":
         C_train_used = det_lf.predict([str(x) for x in train_ds.X]).astype(np.float32)
         C_val_used = det_lf.predict([str(x) for x in val_ds.X]).astype(np.float32)
@@ -2015,6 +2523,11 @@ else:
                 detector.output_mode = old_mode
     else:
         C_train_used = C_train
+
+    _obs = (train_ds.meta.get("observed_mask", None) if isinstance(getattr(train_ds, "meta", {}), dict) else None)
+    if isinstance(_obs, np.ndarray) and (not train_on_detected):
+        C_train_used = C_train_used.astype(np.float32)
+        C_train_used[_obs == 0] = 0.5  # unknown
 
 noise_mode = merged.get("concept_label_noise_mode", "none")
 if noise_mode == "machine":
@@ -2131,7 +2644,7 @@ print(f"Concept outputs (mode={CONCEPT_MODE}) shape:", proba_demo.shape)
 print("First row outputs:", proba_demo[0])
 
 y_train_true = train_ds.y.astype(int)
-if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm" and args_obj.concept_mode == "hard":
+if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm":
     y_train_proba = cbm.front_end_model.predict_proba(C_train_used)
 else:
     y_train_proba = cbm.predict_proba(train_ds)
@@ -2150,8 +2663,9 @@ print("Label model metrics (train):", {"accuracy": float(acc_train), "roc_auc": 
                                        "f1": float(f1_train), "balanced_acc": float(ba_train),
                                        "ber": float(1.0 - ba_train)})
 y_val = val_ds.y.astype(int)
-if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm" and args_obj.concept_mode == "hard":
-    y_val_proba = cbm.front_end_model.predict_proba(H_val_lf)
+if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm":
+    _val_feats = H_val_lf if args_obj.concept_mode == "hard" else C_val_used
+    y_val_proba = cbm.front_end_model.predict_proba(_val_feats)
 else:
     y_val_proba = cbm.predict_proba(val_ds)
 
@@ -2169,8 +2683,12 @@ print("Label model metrics (validation):", {"accuracy": float(acc), "roc_auc": f
                                             "f1": float(f1_val), "balanced_acc": float(ba_val), "ber": float(ber_val)})
 
 y_test = test_ds.y.astype(int)
-if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm" and args_obj.concept_mode == "hard":
-    y_test_proba = cbm.front_end_model.predict_proba(H_test_lf)
+if args_obj.concept_source == "machine" and str(args_obj.machine_method) == "lfcbm":
+    if args_obj.concept_mode == "hard":
+        _test_feats = H_test_lf
+    else:
+        _test_feats = det_lf.predict([str(x) for x in test_ds.X]).astype(np.float32)
+    y_test_proba = cbm.front_end_model.predict_proba(_test_feats)
 else:
     y_test_proba = cbm.predict_proba(test_ds)
 
@@ -2693,29 +3211,35 @@ if args_obj.concept_source == "machine":
         H_te_m = det_lf.predict([str(x) for x in test_ds.X]).astype(int)
         det_lf.settings["lf_mode"] = old_mode_lf
 
-        names_m = list(det_lf.concept_names)
-        print(f"[lfcbm] concepts={len(names_m)} first5={names_m[:5]}")
+        # align names to LF keep_idx and log selected names
+        _kidx = getattr(det_lf, "_keep_idx", None)  # indices chosen inside LabelFreeDetector
+        if isinstance(_kidx, (list, np.ndarray)) and len(_kidx):
+            names_m = [det_lf.concept_names[int(i)] for i in _kidx]
+        else:
+            _w = (P_tr_m.shape[1] if P_tr_m is not None else H_tr_m.shape[1])
+            names_m = list(det_lf.concept_names)[:_w]
+        print(f"[lfcbm] selected_k={len(names_m)} names={names_m}")  # shows the actual 9
 
-        # Enforce exactly K concepts by LR importance (probabilities preferred; fall back to hard)
+        # only prune if current feature width > K; use balanced LR to rank
         _k_top = int(getattr(args_obj, "lf_keep_k", getattr(args_obj, "lf_topk_concepts", 9)))
-        if len(names_m) > _k_top:
+        _nfeat = (P_tr_m.shape[1] if P_tr_m is not None else H_tr_m.shape[1])
+        if _nfeat > _k_top:
             from sklearn.linear_model import LogisticRegression
-            # choose features for importance: probabilities if available
             _Ximp = P_tr_m if P_tr_m is not None else H_tr_m.astype(np.float32)
             _yimp = train_ds.y.astype(int)
-            _lr = LogisticRegression(penalty="l2", solver="liblinear", max_iter=1000, random_state=int(args_obj.seed))
+            _lr = LogisticRegression(penalty="l2", solver="liblinear", class_weight="balanced",
+                                     max_iter=1000, random_state=int(args_obj.seed))
             _lr.fit(_Ximp, _yimp)
             _w = np.abs(_lr.coef_[0])
             _keep = np.argsort(-_w)[:_k_top]
 
-            # slice all LF products and names
             P_tr_m = P_tr_m[:, _keep] if P_tr_m is not None else None
             P_val_m = P_val_m[:, _keep] if 'P_val_m' in locals() and P_val_m is not None else None
             P_te_m  = P_te_m[:,  _keep] if P_te_m  is not None else None
             H_tr_m  = H_tr_m[:,  _keep]
             H_val_m = H_val_m[:, _keep]
             H_te_m  = H_te_m[:,  _keep]
-            names_m = [names_m[i] for i in _keep]
+            names_m = [names_m[i] for i in _keep]  # now indexes into the already-aligned list
 
         train_ds_lf_hard = ConceptDatasetSample(
             X=[str(x) for x in train_ds.X],
@@ -2778,12 +3302,7 @@ def _choose_source():
         H_base = H_test
 
         noise_mode = merged.get("concept_label_noise_mode", "none")
-        if noise_mode == "subjective":
-            rate = float(merged.get("concept_label_noise_rate", 0.20))
-            H_base = apply_subjective_noise(H_base.astype(int).copy(),
-                                            rate=rate,
-                                            seed=int(merged.get("seed", 0)) + 555)
-        elif noise_mode == "machine":
+        if noise_mode == "machine":
             confusion_json = merged.get("concept_label_noise_confusion", "")
             confusion = None
             if confusion_json:
@@ -2804,16 +3323,17 @@ def _choose_source():
         H_base = T_test.copy()
         T_truth = T_test
 
+        C_fe_train = train_ds.C.astype(np.float32)
+        _obs = getattr(train_ds, "meta", {}).get("observed_mask", None)
+        if isinstance(_obs, np.ndarray):
+            C_fe_train = C_fe_train.copy()
+            C_fe_train[_obs == 0] = 0.5  # unknown
+
         fe_gt = FrontEndModel()
-        fe_gt.fit(train_ds.C.astype(int), train_ds.y.astype(int))
+        fe_gt.fit(C_fe_train, train_ds.y.astype(int))
 
         noise_mode = merged.get("concept_label_noise_mode", "none")
-        if noise_mode == "subjective":
-            rate = float(merged.get("concept_label_noise_rate", 0.20))
-            H_base = apply_subjective_noise(H_base.astype(int).copy(),
-                                            rate=rate,
-                                            seed=int(merged.get("seed", 0)) + 100)
-        elif noise_mode == "machine":
+        if noise_mode == "machine":
             confusion_json = merged.get("concept_label_noise_confusion", "")
             confusion = None
             if confusion_json:
@@ -2827,23 +3347,21 @@ def _choose_source():
 
         return names_vec, U_full, H_base, T_truth, fe_gt
 
-    names_vec = names_m
-    if names_vec is None:
-        raise ValueError(f"Unsupported or missing concept_source={args_obj.concept_source}. Pass --concept-source in {'gt','detected','machine'}.")
-    U_full = P_te_m * (1.0 - P_te_m)
-    H_base = H_te_m
-    if int(args_obj.machine_upper_bound) and truth_map is not None:
-        T_truth = T_test[:, truth_map]
-    else:
-        T_truth = H_te_m.copy()
-    fe = fe_machine
-    return names_vec, U_full, H_base, T_truth, fe
+
 names_vec, U_full_src, H_test_src, T_truth_src, fe_src = _choose_source()
 allow_idxs = _allowed_indices(names_vec, args_obj.intervene_allow)
 
 bb_acc = None
+bb_path = None
 if args_obj.blackbox_metrics and Path(args_obj.blackbox_metrics).is_file():
-    _m = json.loads(Path(args_obj.blackbox_metrics).read_text())
+    bb_path = Path(args_obj.blackbox_metrics)
+else:
+    base = results_dir / "robot_baseline" / "text"
+    cand = sorted(base.glob(f"baseline_dnn_robots_text_*_seed{int(args_obj.seed)}_metrics_test.json"))
+    if cand:
+        bb_path = cand[-1]
+if bb_path is not None and bb_path.is_file():
+    _m = json.loads(bb_path.read_text())
     bb_acc = float(_m.get("accuracy", _m.get("acc_test", 0.0)))
 
 miss_meta_capture = None
@@ -3148,7 +3666,7 @@ for ta in acc_grid:
                     float(failed_interventions) / float(interventions)) if interventions > 0 else 0.0
 
             gain_vs_k0 = (acc_k - base_acc) if base_acc is not None else float("nan")
-            concept_checks_total = int(k * Hm.shape[0])
+            concept_checks_total = int(selected.size) * int(k)
             edit_effectiveness = (gain_vs_k0 / max(1, k)) if not np.isnan(gain_vs_k0) else float("nan")
             edit_effectiveness_per_intervention = (gain_vs_k0 / max(1, interventions)) if not np.isnan(
                 gain_vs_k0) else float("nan")
@@ -3166,6 +3684,11 @@ for ta in acc_grid:
                 "delta_vs_blackbox": (acc_k - bb_acc) if bb_acc is not None else float("nan"),
                 "concept_checks": concept_checks_total,
                 "confirmation_cost": concept_checks_total,
+                "presented_rate": (float(selected.size) / float(Hm.shape[0])),
+                "edit_rate": (float(interventions) / float(Hm.shape[0])),
+                "concept_checks_per_instance": ((float(selected.size) / float(Hm.shape[0])) * float(k)),
+                "Total Concept Checks": int(concept_checks_total),
+                "Total Interventions": int(interventions),
                 "edit_effectiveness": edit_effectiveness,
                 "edit_effectiveness_per_intervention": edit_effectiveness_per_intervention,
                 "interventions_pct": float(interventions) / float(Hm.shape[0]),
@@ -3179,7 +3702,7 @@ for ta in acc_grid:
                 "sel_acc_post": float(sel_post.get("selective_accuracy", float("nan"))),
                 "sel_cov_post": float(sel_post.get("coverage", float("nan"))),
                 "coverage_automated": float(sel_pre.get("coverage", float("nan"))),
-                "coverage_after_confirmation": acc_k,
+                "coverage_after_confirmation": float(sel_post.get("coverage", float("nan"))),
                 "concept_source": args_obj.concept_source,
                 "test_miss": args_obj.test_miss,
                 "test_miss_rate": float(args_obj.test_miss_rate),

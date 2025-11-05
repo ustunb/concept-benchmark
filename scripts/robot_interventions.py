@@ -234,16 +234,18 @@ def test_interventions(prob_test, sttngs, acc_det, fe, rng, test):
             acc_intervened = float((y_pred_intervened.argmax(1) == test.y.astype(int)).mean())
 
             # Store results
-            key = f"budget_{budget}_{policy}_human_acc_{int(human_acc * 100)}"
+            policy_label = f"top-{budget}" if policy == "top-k" else policy
+            key = f"budget_{budget}_{policy_label}_human_acc_{int(human_acc * 100)}"
             intervention_results[key] = {
                 "accuracy": acc_intervened,
                 "accuracy_gain": acc_intervened - acc_det,
                 "predictions_intervened_on": intervention_stats["samples_intervened_on"],
                 "interventions_rate": intervention_stats["intervention_rate"],
+                "intervention_rate": intervention_stats["intervention_rate"],
                 "avg_edits_per_intervention": intervention_stats["avg_edits_per_intervention"],
                 "total_concept_checks": intervention_stats["total_concept_checks"],
                 "total_concept_edits_made": intervention_stats["total_concept_edits_made"],
-                "policy": policy,
+                "policy": policy_label,
                 "budget": budget,
                 "human_accuracy": human_acc
             }
