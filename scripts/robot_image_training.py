@@ -70,15 +70,12 @@ settings = {
                       'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
                       'foot_shape'],#'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
     "human_alignment": {
-        "signs": {
-            "foot_shape_flat_trapezoid": 1,
-            "foot_shape_flat_square": 1,
-        },
-        "monotonicity": [
-            (["foot_shape_pointy_square", "mouth_type"], "<=", 0.05),
-            (["foot_shape_pointy_rounded", "mouth_type"], "<=", 0.05)
-        ]
-
+        # "signs": {
+        #     "foot_shape_pointy_square": -1
+        # },
+        # "features": [
+        #     (["foot_shape_pointy_square", "mouth_type"], "<=", 0.05)
+        # ]
     },
     "model_type": "stochastic",
     "logit_scalar": 1.0,
@@ -97,7 +94,7 @@ settings = {
                      {'concepts': {'foot_shape_flat_5sided': 1}, 'min_fraction': 0.49},
                      ],
     "budget": [12],
-    "intervention_accuracy": 0.9,
+    "intervention_accuracy": 0.5,
     "intervention_threshold": 0.2,
     "epochs": 1,
     "out_dir": str(results_dir / "robots"),
@@ -221,13 +218,13 @@ def train_frontend(H_te, h_train, prob_train, sttngs, int_acc_tag, label_noise_t
     return acc_det, acc_gt, concept_acc_mean, fe, fe_path, y_pred_det
 
 
-def test_alignment(fe, h_test, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
+def test_alignment(fe, h_test, h_train, prob_train, prob_test, sttngs, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
                    seed_tag, skew_tag, test, train, monotonicity_constraints, prediction_constraints):
     test_concepts = h_test
     test_labels = test.y.astype(int)
     original_frontend = fe
     print(f"Aligning the model with the following constraints: {monotonicity_constraints} {prediction_constraints}")
-    _, _, _, aligned_frontend, _, _ = train_frontend(h_test, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag,
+    acc_det, _, _, aligned_frontend, _, _ = train_frontend(h_test, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag,
                                                      miss_tag, model_type_tag, run_dir, seed_tag, skew_tag, test, train,
                                                      monotonicity_constraints, prediction_constraints)
 
@@ -251,12 +248,23 @@ def test_alignment(fe, h_test, h_train, prob_train, sttngs, int_acc_tag, label_n
 
     aligned_preds = aligned_frontend.predict(h_test)
 
+    # compute model accuracies per concept
+    subtype_concepts = [c for c in test.concepts if c.startswith('foot_shape_')]
+    missing_concepts = [c for c in sttngs.get("drop_concepts", []) if c.startswith('foot_shape_')]
+    all_preds, confusion_df = _get_confusion_matrix(subtype_concepts, missing_concepts, aligned_frontend, h_test, prob_test, test)
+    per_concept_acc = _get_accuracies_per_subconcept(all_preds, missing_concepts, subtype_concepts)
+
+    # testing interventions
+    _, _, intervention_results = test_interventions(prob_test, sttngs, acc_det, aligned_frontend, test)
+
     alignment_stats = {
         'original_accuracy': float(original_acc),
         'aligned_accuracy': float(aligned_acc),
         'accuracy_change': float(aligned_acc - original_acc),
         'predictions_changed': int(np.sum(original_preds != aligned_preds)),
-        'frontend_weights': feweights
+        'frontend_weights': feweights,
+        'model_accuracies_per_concept': per_concept_acc,
+        'interventions': intervention_results
     }
     return alignment_stats
 
@@ -457,11 +465,11 @@ def main(sttngs):
 
     # align the model with new weights
     alignment_stats = {}
-    if S.get("human_alignment", {}) != {}:
+    if S.get("human_alignment", {}) != None:
         sign_alignment = S["human_alignment"].get("signs", {})
-        monotonicity_alignment = S["human_alignment"].get("monotonicity", [])
-        alignment_stats = test_alignment(fe, H_te, H_tr, P_tr, S, int_acc_tag, label_noise_tag, miss_tag, model_type_tag,
-                                         run_dir, seed_tag, skew_tag, test, train, sign_alignment, monotonicity_alignment)
+        prediction_alignment = S["human_alignment"].get("features", [])
+        alignment_stats = test_alignment(fe, H_te, H_tr, P_tr, P_te, S, int_acc_tag, label_noise_tag, miss_tag, model_type_tag,
+                                         run_dir, seed_tag, skew_tag, test, train, sign_alignment, prediction_alignment)
     ###########################################################################
 
     ###########################################################################
