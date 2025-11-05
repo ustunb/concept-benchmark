@@ -11,8 +11,8 @@ from concept_benchmark.models import ConceptBasedModel
 from concept_benchmark.intervention import (
     InterventionConfig,
     ConceptInterventionRunner,
-    ScoreIntervention,
 )
+from concept_benchmark.kflip import KFlipInterventionStrategy as ScoreIntervention
 from scripts.dataset_skewing import create_skewed_splits, filter_training_by_string
 from scripts.dnn_training import train_eval_image
 from scripts.robot_alignment import test_alignment
@@ -94,7 +94,7 @@ settings = {
                      {'concepts': {'foot_shape_flat_5sided': 1}, 'min_fraction': 0.49},
                      ],
     "budget": [12],
-    "intervention_accuracy": 0.5,
+    "intervention_accuracy": 1.0,
     "intervention_threshold": 0.2,
     "epochs": 1,
     "out_dir": str(results_dir / "robots"),
@@ -311,8 +311,10 @@ def train_dnn(sttngs, device, int_acc_tag, label_noise_tag, miss_tag, model_type
 def test_interventions(prob_test, sttngs, acc_det, fe, test):
     """Test interventions using the intervention framework."""
     intervention_results = {}
+    rng = np.random.default_rng(int(sttngs["seed"]))
     budgets = sttngs.get('budget', [1])
     human_acc = sttngs.get("intervention_accuracy", 0.9)
+    err_prob = 1.0 - human_acc
 
     # Create a CBM wrapper for the intervention framework
     cbm = ConceptBasedModel(concept_detector=None, front_end_model=fe)
@@ -323,7 +325,7 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
             max_concepts_per_instance=budget,
             random_state=int(sttngs["seed"]),
             score_threshold=sttngs.get("intervention_threshold", 1.0),
-            noise=1.0 - human_acc  # convert human accuracy to noise
+            noise = 1.0 - human_acc,
         )
 
         strategy = ScoreIntervention()
@@ -337,7 +339,15 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
             labels=test.y.astype(int)
         )
 
-        acc_intervened = float((result.y_pred_after == test.y.astype(int)).mean())
+        mask = result.mask
+        C_gt = test.C.astype(np.float32)
+        C_after = result.C_intervened.copy()  # GT at masked entries
+
+        mistake_draw = rng.random(C_after.shape) < err_prob
+        mistakes = mask & mistake_draw
+        C_after[mistakes] = 1.0 - C_gt[mistakes]
+        result.C_intervened = C_after
+
 
         # Extract intervention statistics
         n_intervened = np.sum(result.mask)
@@ -348,6 +358,11 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
         C_pred_binary = (result.C_pred >= 0.5).astype(int)
         C_final_binary = (result.C_intervened >= 0.5).astype(int)
         actual_edits_mask = (C_pred_binary != C_final_binary)
+        result.y_prob_after = fe.predict_proba(C_final_binary)
+        result.y_pred_after = np.argmax(result.y_prob_after, axis=1)
+
+        acc_intervened = float((result.y_pred_after == test.y.astype(int)).mean())
+
         prediction_num_concepts_intervened_on = {int(i): int(np.sum(actual_edits_mask[i])) for i in range(n_samples)}
         concept_intervention_counts = {
             c: f"{int(np.sum(result.mask[:, i]))} ({int(np.sum(actual_edits_mask[:, i]))})"
