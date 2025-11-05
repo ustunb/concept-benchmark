@@ -1,40 +1,40 @@
-{"id":"m001","when":{"any":true},"text":"Angular head ({HEAD_NAT}) on a {BODY_NAT} torso; ears look {EARS_NAT}. Arms show {ELBOWS_NAT}. Hands are {HANDS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m002","when":{"any":true},"text":"Layout: {BODY_NAT} body with a {HEAD_NAT} crown. Mouth is {MOUTH_NAT}. Ears are {EARS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m003","when":{"any":true},"text":"Profile shows {HEAD_NAT} lines above a {BODY_NAT} shell. {KNEES_NAT}; {ELBOWS_NAT}. Hands are {HANDS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m004","when":{"any":true},"text":"Front view: {EARS_NAT} ears, {MOUTH_NAT} mouth. The frame is {BODY_NAT}. Hands {HANDS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m005","when":{"any":true},"text":"Silhouette keeps a {HEAD_NAT} helm over a {BODY_NAT} chassis. Antennae: {ANT_NAT}. Feet are {FEET_NAT}."}
-{"id":"m006","when":{"any":true},"text":"Arms articulate ({ELBOWS_NAT}); legs show ({KNEES_NAT}). Grippers read {HANDS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m007","when":{"any":true},"text":"Casing appears {BODY_NAT}; crown looks {HEAD_NAT}. Ears appear {EARS_NAT}. Mouth is {MOUTH_NAT}. Feet are {FEET_NAT}."}
-{"id":"m008","when":{"any":true},"text":"Faceplate: {MOUTH_NAT}. Sides: {EARS_NAT}. Manipulators: {HANDS_NAT}. Chassis {BODY_NAT}. Feet are {FEET_NAT}."}
-{"id":"m009","when":{"any":true},"text":"Form reads {BODY_NAT} with a {HEAD_NAT} top. {ANT_NAT}. Hands are {HANDS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m010","when":{"any":true},"text":"Assembly shows {HANDS_NAT} hands and {MOUTH_NAT} mouth under a {HEAD_NAT} helm. Feet are {FEET_NAT}."}
-{"id":"m011","when":{"any":true},"text":"Frame geometry is {BODY_NAT}. Ears: {EARS_NAT}. Joints: {KNEES_NAT}, {ELBOWS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m012","when":{"any":true},"text":"Overall build: {BODY_NAT} body, {HEAD_NAT} head, {HANDS_NAT} hands, {EARS_NAT} ears, {MOUTH_NAT} mouth. Feet are {FEET_NAT}."}
-{"id":"m013","when":{"any":true},"text":"Torso is {BODY_NAT}. Head is {HEAD_NAT}. Antennae: {ANT_NAT}. Hands {HANDS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m014","when":{"any":true},"text":"Front plate shows {MOUTH_NAT}; ear panels {EARS_NAT}. Upper {HEAD_NAT}, core {BODY_NAT}. Feet are {FEET_NAT}."}
-{"id":"m015","when":{"any":true},"text":"Manipulator style {HANDS_NAT}. Mouth {MOUTH_NAT}. Ears {EARS_NAT}. The frame {BODY_NAT}. Feet are {FEET_NAT}."}
-{"id":"m016","when":{"any":true},"text":"Upper: {HEAD_NAT} helm with {EARS_NAT}. Middle: {BODY_NAT}. Lower joints: {KNEES_NAT}. Feet are {FEET_NAT}."}
-{"id":"m017","when":{"any":true},"text":"Grip modules {HANDS_NAT}. Mouth remains {MOUTH_NAT}. Elbows: {ELBOWS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m018","when":{"any":true},"text":"Shell reads {BODY_NAT}; crown reads {HEAD_NAT}. {ANT_NAT}. Hands {HANDS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m019","when":{"any":true},"text":"Pose highlights {KNEES_NAT} and {ELBOWS_NAT}. Ears appear {EARS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m020","when":{"any":true},"text":"Body geometry {BODY_NAT}; head geometry {HEAD_NAT}. Hands {HANDS_NAT}. Mouth {MOUTH_NAT}. Feet are {FEET_NAT}."}
-{"id":"m021","when":{"any":true},"text":"Side view: {HEAD_NAT} crown and {BODY_NAT} torso. {ANT_NAT}. Hands {HANDS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m022","when":{"any":true},"text":"Hands read {HANDS_NAT}; ears read {EARS_NAT}. The mouth is {MOUTH_NAT}. Chassis {BODY_NAT}. Feet are {FEET_NAT}."}
-{"id":"m023","when":{"any":true},"text":"Casing shows {BODY_NAT}; helm shows {HEAD_NAT}. {KNEES_NAT}. {ELBOWS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m024","when":{"any":true},"text":"Upper assembly {HEAD_NAT}; lower assembly {BODY_NAT}. Elbows {ELBOWS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m025","when":{"any":true},"text":"Faceplate {MOUTH_NAT}; sideplates {EARS_NAT}. Manipulators {HANDS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m026","when":{"any":true},"text":"Outline stays {BODY_NAT}; crown stays {HEAD_NAT}. {ANT_NAT}. Hands {HANDS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m027","when":{"any":true},"text":"Arms hinge ({ELBOWS_NAT}); legs hinge ({KNEES_NAT}). Hands {HANDS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m028","when":{"any":true},"text":"Crown reads {HEAD_NAT}; core reads {BODY_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}. Feet are {FEET_NAT}."}
-{"id":"m029","when":{"any":true},"text":"Antennae state: {ANT_NAT}. Mouth state: {MOUTH_NAT}. Hands: {HANDS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m030","when":{"any":true},"text":"Geometry shows a {HEAD_NAT} top and {BODY_NAT} core. Ears {EARS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m031","when":{"any":true},"text":"Core is {BODY_NAT}; crown is {HEAD_NAT}. Joints: {KNEES_NAT}/{ELBOWS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m032","when":{"any":true},"text":"Manipulator style {HANDS_NAT}; ear style {EARS_NAT}; mouth {MOUTH_NAT}. Feet are {FEET_NAT}."}
-{"id":"m033","when":{"any":true},"text":"Body remains {BODY_NAT}; head remains {HEAD_NAT}. {ANT_NAT}. Hands {HANDS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m034","when":{"any":true},"text":"Joints indicate {KNEES_NAT} and {ELBOWS_NAT}. Hands {HANDS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m035","when":{"any":true},"text":"Ears appear {EARS_NAT}; mouth is {MOUTH_NAT}. Head {HEAD_NAT}. Feet are {FEET_NAT}."}
-{"id":"m036","when":{"any":true},"text":"Shell {BODY_NAT}. Helm {HEAD_NAT}. {ANT_NAT}. Hands {HANDS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m037","when":{"any":true},"text":"Upper geometry {HEAD_NAT}; core geometry {BODY_NAT}. {KNEES_NAT}. Hands {HANDS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m038","when":{"any":true},"text":"Mouth reads {MOUTH_NAT}. Ears read {EARS_NAT}. Elbows {ELBOWS_NAT}. Feet are {FEET_NAT}."}
-{"id":"m039","when":{"any":true},"text":"Hands present as {HANDS_NAT}. Body is {BODY_NAT}. Head is {HEAD_NAT}. {ANT_NAT}. Feet are {FEET_NAT}."}
-{"id":"m040","when":{"any":true},"text":"Summary: {BODY_NAT} body, {HEAD_NAT} head, {HANDS_NAT} hands, {EARS_NAT} ears, {MOUTH_NAT} mouth. Feet are {FEET_NAT}."}
+{"id": "m001", "when": {"any": true}, "text": "Angular head ({HEAD_NAT}) on a {BODY_NAT} torso; ears look {EARS_NAT}. Arms show {ELBOWS_NAT}. Hands are {HANDS_NAT}. Feet are {FEET_NAT}. {ANT_NAT}. {KNEES_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m002", "when": {"any": true}, "text": "Layout: {BODY_NAT} body with a {HEAD_NAT} crown. Mouth is {MOUTH_NAT}. Ears are {EARS_NAT}. Feet are {FEET_NAT}. {ANT_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}. Hands {HANDS_NAT}."}
+{"id": "m003", "when": {"any": true}, "text": "Profile shows {HEAD_NAT} lines above a {BODY_NAT} shell. {KNEES_NAT}; {ELBOWS_NAT}. Hands are {HANDS_NAT}. Feet are {FEET_NAT}. {ANT_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m004", "when": {"any": true}, "text": "Front view: {EARS_NAT} ears, {MOUTH_NAT} mouth. The frame is {BODY_NAT}. Hands {HANDS_NAT}. Feet are {FEET_NAT}. Head is {HEAD_NAT}. {ANT_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}."}
+{"id": "m005", "when": {"any": true}, "text": "Silhouette keeps a {HEAD_NAT} helm over a {BODY_NAT} chassis. Antennae: {ANT_NAT}. Feet are {FEET_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}. Hands {HANDS_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m006", "when": {"any": true}, "text": "Arms articulate ({ELBOWS_NAT}); legs show ({KNEES_NAT}). Grippers read {HANDS_NAT}. Feet are {FEET_NAT}. Head is {HEAD_NAT}. Chassis {BODY_NAT}. {ANT_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m007", "when": {"any": true}, "text": "Casing appears {BODY_NAT}; crown looks {HEAD_NAT}. Ears appear {EARS_NAT}. Mouth is {MOUTH_NAT}. Feet are {FEET_NAT}. {ANT_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}. Hands {HANDS_NAT}."}
+{"id": "m008", "when": {"any": true}, "text": "Faceplate: {MOUTH_NAT}. Sides: {EARS_NAT}. Manipulators: {HANDS_NAT}. Chassis {BODY_NAT}. Feet are {FEET_NAT}. Head is {HEAD_NAT}. {ANT_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}."}
+{"id": "m009", "when": {"any": true}, "text": "Form reads {BODY_NAT} with a {HEAD_NAT} top. {ANT_NAT}. Hands are {HANDS_NAT}. Feet are {FEET_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m010", "when": {"any": true}, "text": "Assembly shows {HANDS_NAT} hands and {MOUTH_NAT} mouth under a {HEAD_NAT} helm. Feet are {FEET_NAT}. Chassis {BODY_NAT}. {ANT_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}. Ears {EARS_NAT}."}
+{"id": "m011", "when": {"any": true}, "text": "Frame geometry is {BODY_NAT}. Ears: {EARS_NAT}. Joints: {KNEES_NAT}, {ELBOWS_NAT}. Feet are {FEET_NAT}. Head is {HEAD_NAT}. {ANT_NAT}. Hands {HANDS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m012", "when": {"any": true}, "text": "Overall build: {BODY_NAT} body, {HEAD_NAT} head, {HANDS_NAT} hands, {EARS_NAT} ears, {MOUTH_NAT} mouth. Feet are {FEET_NAT}. {ANT_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}."}
+{"id": "m013", "when": {"any": true}, "text": "Torso is {BODY_NAT}. Head is {HEAD_NAT}. Antennae: {ANT_NAT}. Hands {HANDS_NAT}. Feet are {FEET_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m014", "when": {"any": true}, "text": "Front plate shows {MOUTH_NAT}; ear panels {EARS_NAT}. Upper {HEAD_NAT}, core {BODY_NAT}. Feet are {FEET_NAT}. {ANT_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}. Hands {HANDS_NAT}."}
+{"id": "m015", "when": {"any": true}, "text": "Manipulator style {HANDS_NAT}. Mouth {MOUTH_NAT}. Ears {EARS_NAT}. The frame {BODY_NAT}. Feet are {FEET_NAT}. Head is {HEAD_NAT}. {ANT_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}."}
+{"id": "m016", "when": {"any": true}, "text": "Upper: {HEAD_NAT} helm with {EARS_NAT}. Middle: {BODY_NAT}. Lower joints: {KNEES_NAT}. Feet are {FEET_NAT}. {ANT_NAT}. Elbows {ELBOWS_NAT}. Hands {HANDS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m017", "when": {"any": true}, "text": "Grip modules {HANDS_NAT}. Mouth remains {MOUTH_NAT}. Elbows: {ELBOWS_NAT}. Feet are {FEET_NAT}. Head is {HEAD_NAT}. Chassis {BODY_NAT}. {ANT_NAT}. {KNEES_NAT}. Ears {EARS_NAT}."}
+{"id": "m018", "when": {"any": true}, "text": "Shell reads {BODY_NAT}; crown reads {HEAD_NAT}. {ANT_NAT}. Hands {HANDS_NAT}. Feet are {FEET_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m019", "when": {"any": true}, "text": "Pose highlights {KNEES_NAT} and {ELBOWS_NAT}. Ears appear {EARS_NAT}. Feet are {FEET_NAT}. Head is {HEAD_NAT}. Chassis {BODY_NAT}. {ANT_NAT}. Hands {HANDS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m020", "when": {"any": true}, "text": "Body geometry {BODY_NAT}; head geometry {HEAD_NAT}. Hands {HANDS_NAT}. Mouth {MOUTH_NAT}. Feet are {FEET_NAT}. {ANT_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}. Ears {EARS_NAT}."}
+{"id": "m021", "when": {"any": true}, "text": "Side view: {HEAD_NAT} crown and {BODY_NAT} torso. {ANT_NAT}. Hands {HANDS_NAT}. Feet are {FEET_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m022", "when": {"any": true}, "text": "Hands read {HANDS_NAT}; ears read {EARS_NAT}. The mouth is {MOUTH_NAT}. Chassis {BODY_NAT}. Feet are {FEET_NAT}. Head is {HEAD_NAT}. {ANT_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}."}
+{"id": "m023", "when": {"any": true}, "text": "Casing shows {BODY_NAT}; helm shows {HEAD_NAT}. {KNEES_NAT}. {ELBOWS_NAT}. Feet are {FEET_NAT}. {ANT_NAT}. Hands {HANDS_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m024", "when": {"any": true}, "text": "Upper assembly {HEAD_NAT}; lower assembly {BODY_NAT}. Elbows {ELBOWS_NAT}. Feet are {FEET_NAT}. {ANT_NAT}. {KNEES_NAT}. Hands {HANDS_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m025", "when": {"any": true}, "text": "Faceplate {MOUTH_NAT}; sideplates {EARS_NAT}. Manipulators {HANDS_NAT}. Feet are {FEET_NAT}. Head is {HEAD_NAT}. Chassis {BODY_NAT}. {ANT_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}."}
+{"id": "m026", "when": {"any": true}, "text": "Outline stays {BODY_NAT}; crown stays {HEAD_NAT}. {ANT_NAT}. Hands {HANDS_NAT}. Feet are {FEET_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m027", "when": {"any": true}, "text": "Arms hinge ({ELBOWS_NAT}); legs hinge ({KNEES_NAT}). Hands {HANDS_NAT}. Feet are {FEET_NAT}. Head is {HEAD_NAT}. Chassis {BODY_NAT}. {ANT_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m028", "when": {"any": true}, "text": "Crown reads {HEAD_NAT}; core reads {BODY_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}. Feet are {FEET_NAT}. {ANT_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}. Hands {HANDS_NAT}."}
+{"id": "m029", "when": {"any": true}, "text": "Antennae state: {ANT_NAT}. Mouth state: {MOUTH_NAT}. Hands: {HANDS_NAT}. Feet are {FEET_NAT}. Head is {HEAD_NAT}. Chassis {BODY_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}. Ears {EARS_NAT}."}
+{"id": "m030", "when": {"any": true}, "text": "Geometry shows a {HEAD_NAT} top and {BODY_NAT} core. Ears {EARS_NAT}. Feet are {FEET_NAT}. {ANT_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}. Hands {HANDS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m031", "when": {"any": true}, "text": "Core is {BODY_NAT}; crown is {HEAD_NAT}. Joints: {KNEES_NAT}/{ELBOWS_NAT}. Feet are {FEET_NAT}. {ANT_NAT}. Hands {HANDS_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m032", "when": {"any": true}, "text": "Manipulator style {HANDS_NAT}; ear style {EARS_NAT}; mouth {MOUTH_NAT}. Feet are {FEET_NAT}. Head is {HEAD_NAT}. Chassis {BODY_NAT}. {ANT_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}."}
+{"id": "m033", "when": {"any": true}, "text": "Body remains {BODY_NAT}; head remains {HEAD_NAT}. {ANT_NAT}. Hands {HANDS_NAT}. Feet are {FEET_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m034", "when": {"any": true}, "text": "Joints indicate {KNEES_NAT} and {ELBOWS_NAT}. Hands {HANDS_NAT}. Feet are {FEET_NAT}. Head is {HEAD_NAT}. Chassis {BODY_NAT}. {ANT_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m035", "when": {"any": true}, "text": "Ears appear {EARS_NAT}; mouth is {MOUTH_NAT}. Head {HEAD_NAT}. Feet are {FEET_NAT}. Chassis {BODY_NAT}. {ANT_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}. Hands {HANDS_NAT}."}
+{"id": "m036", "when": {"any": true}, "text": "Shell {BODY_NAT}. Helm {HEAD_NAT}. {ANT_NAT}. Hands {HANDS_NAT}. Feet are {FEET_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m037", "when": {"any": true}, "text": "Upper geometry {HEAD_NAT}; core geometry {BODY_NAT}. {KNEES_NAT}. Hands {HANDS_NAT}. Feet are {FEET_NAT}. {ANT_NAT}. Elbows {ELBOWS_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m038", "when": {"any": true}, "text": "Mouth reads {MOUTH_NAT}. Ears read {EARS_NAT}. Elbows {ELBOWS_NAT}. Feet are {FEET_NAT}. Head is {HEAD_NAT}. Chassis {BODY_NAT}. {ANT_NAT}. {KNEES_NAT}. Hands {HANDS_NAT}."}
+{"id": "m039", "when": {"any": true}, "text": "Hands present as {HANDS_NAT}. Body is {BODY_NAT}. Head is {HEAD_NAT}. {ANT_NAT}. Feet are {FEET_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}. Ears {EARS_NAT}. Mouth {MOUTH_NAT}."}
+{"id": "m040", "when": {"any": true}, "text": "Summary: {BODY_NAT} body, {HEAD_NAT} head, {HANDS_NAT} hands, {EARS_NAT} ears, {MOUTH_NAT} mouth. Feet are {FEET_NAT}. {ANT_NAT}. {KNEES_NAT}. Elbows {ELBOWS_NAT}."}

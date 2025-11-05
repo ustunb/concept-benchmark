@@ -111,6 +111,7 @@ class TextConceptDetector(ConceptDetector):
         base_lr: float = 2e-5,
         num_warmup_steps: int = 0,
         group_unknown_threshold: float = 0.55,
+        seed: int | None = 0,
         **kwargs,
     ) -> None:
         super().__init__(embedding_model=None, concept_layers=None)
@@ -150,6 +151,7 @@ class TextConceptDetector(ConceptDetector):
         self.pooling = pooling
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         self.group_unknown_threshold = float(group_unknown_threshold)
+        self.seed = 0 if seed is None else int(seed)
 
     def _to_text_list(self, dataset: ConceptDatasetSample) -> List[str]:
         X = getattr(dataset, "X", None)
@@ -199,6 +201,16 @@ class TextConceptDetector(ConceptDetector):
         n_jobs: Optional[int] = None,
         **kwargs,
     ) -> None:
+        import random as _py_random
+        _py_random.seed(self.seed)
+        np.random.seed(self.seed)
+        torch.manual_seed(self.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.seed)
+        if hasattr(torch.backends, "cudnn"):
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+
         Xtr = self._to_text_list(train_dataset)
         Ytr = np.asarray(train_dataset.C, dtype=np.float32)
         self._n_concepts = int(Ytr.shape[1])
@@ -218,13 +230,27 @@ class TextConceptDetector(ConceptDetector):
             Mtr = np.ones_like(Ytr, dtype=np.float32)
 
         tr_ds = _TxtDs(Xtr, Ytr, Mtr)
+
+        _gen = torch.Generator()
+        _gen.manual_seed(self.seed)
+
+        def _seed_worker(worker_id: int):
+            wseed = (self.seed + worker_id) & 0xFFFFFFFF
+            import random as _py_random
+            _py_random.seed(wseed)
+            np.random.seed(wseed)
+            torch.manual_seed(wseed)
+
+        _num_workers = 0
         tr_dl = DataLoader(
             tr_ds,
             batch_size=self.batch_size,
             shuffle=True,
             collate_fn=lambda b: _collate_hf(b, self.tokenizer, self.max_len),
             pin_memory=(self.device in {"cuda", "mps"}),
-            num_workers=0,
+            num_workers=_num_workers,
+            worker_init_fn=_seed_worker if _num_workers > 0 else None,
+            generator=_gen,
         )
 
         if valid_dataset is not None:
@@ -235,13 +261,16 @@ class TextConceptDetector(ConceptDetector):
             if Mva is None:
                 Mva = np.ones_like(Yva, dtype=np.float32)
             va_ds = _TxtDs(Xva, Yva, Mva)
+            _num_workers = 0
             va_dl = DataLoader(
                 va_ds,
                 batch_size=self.batch_size,
                 shuffle=False,
                 collate_fn=lambda b: _collate_hf(b, self.tokenizer, self.max_len),
                 pin_memory=(self.device in {"cuda", "mps"}),
-                num_workers=0,
+                num_workers=_num_workers,
+                worker_init_fn=_seed_worker if _num_workers > 0 else None,
+                generator=_gen,
             )
         else:
             va_dl = None
@@ -385,13 +414,27 @@ class TextConceptDetector(ConceptDetector):
         texts = self._to_text_list(dataset)
         labels_dummy = np.zeros((len(texts), self._n_concepts), dtype=np.float32)
         ds = _TxtDs(texts, labels_dummy)
+
+        _gen = torch.Generator()
+        _gen.manual_seed(self.seed)
+
+        def _seed_worker(worker_id: int):
+            wseed = (self.seed + worker_id) & 0xFFFFFFFF
+            import random as _py_random
+            _py_random.seed(wseed)
+            np.random.seed(wseed)
+            torch.manual_seed(wseed)
+
+        _num_workers = 0
         dl = DataLoader(
             ds,
             batch_size=self.batch_size,
             shuffle=False,
             collate_fn=lambda b: _collate_hf(b, self.tokenizer, self.max_len),
             pin_memory=(self.device in {"cuda", "mps"}),
-            num_workers=0,
+            num_workers=_num_workers,
+            worker_init_fn=_seed_worker if _num_workers > 0 else None,
+            generator=_gen,
         )
         outs: List[np.ndarray] = []
         for enc, _, _ in dl:
