@@ -724,13 +724,14 @@ class FrontEndModelCVXPY(object):
         self.concept_names = kwargs.get("concept_names", None)
         self.monotonicity_constraints = {}
         self.prediction_constraints = []
+        self.concept_pos_value_map = kwargs.get("concept_pos_value_map", None)
 
     # post init methods to add constraints
         for feature, sign in kwargs.get("monotonicity_constraints", {}).items():
             self.add_monotonicity_constraint(feature, sign)
-        for features, sign_txt, min_prob in kwargs.get("prediction_constraints", []):
+        for features, values, sign_txt, min_prob in kwargs.get("prediction_constraints", []):
             sign = sign_txt == ">="
-            self.add_prediction_constraint(features, sign, min_prob)
+            self.add_prediction_constraint(features, values, sign, min_prob)
 
     def _get_feature_idx(self, feature: Union[str, int]) -> int:
         """Convert feature name to index"""
@@ -748,11 +749,13 @@ class FrontEndModelCVXPY(object):
         feature_idx = self._get_feature_idx(feature)
         self.monotonicity_constraints[feature_idx] = sign
 
-    def add_prediction_constraint(self, features: List[Union[str, int]], sign: int = 1 , min_prob: float = 0.5):
+    def add_prediction_constraint(self, features: List[Union[str, int]], values: List[str], sign: int = 1 , min_prob: float = 0.5):
         """Add prediction constraint: when features active, prob >= or <= min_prob"""
         print("Adding prediction constraint on features:", features, "sign:", sign, "min_prob:", min_prob)
         feature_indices = [self._get_feature_idx(f) for f in features]
-        self.prediction_constraints.append((feature_indices, sign, min_prob))
+        feature_vals = [1 if val == self.concept_pos_value_map[feat] else 0 for feat, val in zip(features, values)]
+        print("Feature indices:", feature_indices, "Feature values:", feature_vals)
+        self.prediction_constraints.append((feature_indices, feature_vals, sign, min_prob))
 
     def fit(self, C: np.ndarray, y: np.ndarray, fit_params: Optional[dict] = None) -> None:
         """
@@ -796,11 +799,11 @@ class FrontEndModelCVXPY(object):
                 constraints.append(w[feature_idx] <= 0)
 
         # prediction constraints
-        for feature_indices, sign, min_prob in self.prediction_constraints:
+        for feature_ind, feature_val, sign, min_prob in self.prediction_constraints:
             # Convert prob to logit: logit = log(p/(1-p))
             logit_threshold = np.log(min_prob / (1 - min_prob))
             constraint_vec = np.zeros(n_features)
-            constraint_vec[feature_indices] = 1
+            constraint_vec[feature_ind] = feature_val
             constraints.append(constraint_vec @ w + b >= logit_threshold) if sign == 1 else constraints.append(constraint_vec @ w + b <= logit_threshold)
 
         problem = cp.Problem(objective, constraints)

@@ -70,12 +70,13 @@ settings = {
                       'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
                       'foot_shape'],#'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
     "human_alignment": {
-        # "signs": {
-        #     "foot_shape_pointy_square": -1
-        # },
-        # "features": [
-        #     (["foot_shape_pointy_square", "mouth_type"], "<=", 0.05)
-        # ]
+        "signs": {
+            #"foot_shape_flat_trapezoid": 1
+        },
+        "features": [
+            (["foot_shape_flat_trapezoid", "mouth_type"], ["True", "open"], "<=", 0.05),
+            (["foot_shape_flat_square", "mouth_type"], ["True", "open"], "<=", 0.05)
+        ]
     },
     "model_type": "stochastic",
     "logit_scalar": 1.0,
@@ -93,8 +94,8 @@ settings = {
                      {'concepts': {'foot_shape_flat_trapezoid': 1}, 'min_fraction': 0.005},
                      {'concepts': {'foot_shape_flat_5sided': 1}, 'min_fraction': 0.49},
                      ],
-    "budget": [12],
-    "intervention_accuracy": 1.0,
+    "budget": [3],
+    "intervention_accuracy": 0.9,
     "intervention_threshold": 0.2,
     "epochs": 1,
     "out_dir": str(results_dir / "robots"),
@@ -185,7 +186,8 @@ def train_frontend(H_te, h_train, prob_train, sttngs, int_acc_tag, label_noise_t
         cvxpy = True
         fe = FrontEndModelCVXPY(monotonicity_constraints=monotonicity_constraints,
                                 prediction_constraints=prediction_constraints,
-                                concept_names=test.concepts)
+                                concept_names=test.concepts,
+                                concept_pos_value_map=test.meta['concept_pos_value'])
         fe_name = f"frontend_aligned_logreg_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
     else:
         fe = FrontEndModel()
