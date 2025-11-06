@@ -70,12 +70,16 @@ settings = {
                       'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
                       'foot_shape'],#'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
     "human_alignment": {
-        "signs": {
-            #"foot_shape_flat_trapezoid": 1
-        },
+        # "signs": {
+        #     "mouth_type": 1
+        # },
         "features": [
-            (["foot_shape_flat_trapezoid", "mouth_type"], ["True", "open"], "<=", 0.05),
-            (["foot_shape_flat_square", "mouth_type"], ["True", "open"], "<=", 0.05)
+            (["foot_shape_flat_square"], ["True"], ">=", 0.95),
+            (["foot_shape_flat_trapezoid"], ["True"], ">=", 0.95),
+            #(["foot_shape_pointy_4sided"], ["True"], ">=", 0.95),
+            #(["foot_shape_flat_square", "mouth_type"], ["True", "closed"], ">=", 0.95),
+            #(["foot_shape_pointy_rounded", "mouth_type"], ["True", "open"], "<=", 0.05),
+            #(["foot_shape_pointy_square", "mouth_type"], ["True", "open"], "<=", 0.05)
         ]
     },
     "model_type": "stochastic",
@@ -99,7 +103,7 @@ settings = {
     "intervention_threshold": 0.2,
     "epochs": 1,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "cbm_run_1002_subconcepts_newalignment",
+    "run_name": "cbm_run_1002_subconcepts_incorrectPreds_2C2",
     "load_detector": str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts_newalignment" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed1002.pt")),
     "load_frontend": ""#,str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed1002.pkl")),
 }
@@ -569,80 +573,5 @@ def main(sttngs):
     }, indent=2))
 
     return metrics
-
-
-# import argparse
-# parser = argparse.ArgumentParser()
-# parser.add_argument('--fe-harness', dest='fe_harness', type=int, default=0)
-# parser.add_argument('--draw', dest='draw', type=int)
-# parser.add_argument('--image-size', dest='image_size', type=str)
-# parser.add_argument('--train-dnn', dest='train_dnn', type=int)
-# parser.add_argument('--model', dest='model', type=str)
-# parser.add_argument('--drop-concepts', dest='drop_concepts', type=str)          # JSON list
-# parser.add_argument('--model-type', dest='model_type', type=str)
-# parser.add_argument('--logit-scalar', dest='logit_scalar', type=float)
-# parser.add_argument('--logit-intercept', dest='logit_intercept', type=float)
-# parser.add_argument('--logit-weights', dest='logit_weights', type=str)          # JSON dict
-# parser.add_argument('--skew-concept', dest='skew_concept', type=str)            # JSON list[dict]
-# parser.add_argument('--run-name', dest='run_name', type=str)
-#
-# args, _ = parser.parse_known_args()
-#
-# overrides = {k: v for k, v in vars(args).items() if v is not None}
-#
-# # Parse JSON-like args
-# if 'drop_concepts' in overrides:
-#     overrides['drop_concepts'] = json.loads(overrides['drop_concepts'])
-# if 'logit_weights' in overrides:
-#     overrides['logit_weights'] = json.loads(overrides['logit_weights'])
-# if 'skew_concept' in overrides:
-#     overrides['skew_concept'] = json.loads(overrides['skew_concept'])
-
-# settings.update(overrides)
-
-def find_good_seed(stngs):
-    for seed in range(1001, 2000):
-        print(f"Testing seed {seed}...")
-        stngs["seed"] = seed
-        # train subconcept CBMS only
-        stngs["drop_concepts"] = ["foot_shape_flat_rounded",
-                      "foot_shape_pointy_trapezoid",
-                      'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
-                      'foot_shape']
-        stngs["train_dnn"] = 0
-        stngs['run_name'] = f"A_SCBM_alignment_trials_seed{seed}"
-        metrics = main(stngs)
-        cbm_acc = metrics.get("cbm_acc_detected", 0.0)
-        if 0.68 <= cbm_acc <= 0.735:
-            print(f"Found seed {seed} with SCBM accuracy {cbm_acc:.4f}. Now training full CBM...")
-            # train full CBM
-            stngs["drop_concepts"] = ["foot_shape_flat_rounded", "foot_shape_pointy_trapezoid", 'foot_shape_pointy_3sided',
-                                      'foot_shape_flat_lshaped', 'foot_shape_pointy_4sided', 'foot_shape_pointy_square',
-                                      'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square',
-                                      'foot_shape_flat_trapezoid' ]
-
-            stngs["train_dnn"] = 0
-            stngs['run_name'] = f"A_CBM_alignment_trials_seed{seed}"
-            metrics_full = main(stngs)
-            cbm_acc_full = metrics_full.get("cbm_acc_detected", 0.0)
-            if cbm_acc_full >= 0.85:
-                # train DNN
-                print(f"Full CBM accuracy {cbm_acc_full:.4f} meets criteria")
-                stngs["train_dnn"] = 1
-                stngs['run_name'] = f"A_DNN_alignment_trials_seed{seed}"
-                metrics_dnn = main(stngs)
-                dnn_acc = metrics_dnn.get("dnn_accuracy", 0.0)
-                if 0.68 <= dnn_acc <= 0.73:
-                    print(f"DNN accuracy {dnn_acc:.4f} meets criteria. Found good seed: {seed}")
-                    return seed
-                else:
-                    print(f"DNN accuracy {dnn_acc:.4f} does not meet criteria.")
-            else:
-                print(f"Full CBM accuracy {cbm_acc_full:.4f} does not meet criteria.")
-        else:
-            print(f"SCBM accuracy {cbm_acc:.4f} does not meet criteria.")
-    return None
-
-#find_good_seed(settings)
 
 main(settings)

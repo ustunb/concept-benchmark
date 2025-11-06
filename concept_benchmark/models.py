@@ -791,6 +791,15 @@ class FrontEndModelCVXPY(object):
 
         constraints = []
 
+        # slack variables to make sure when some features hae some values ALL concept combinations with this values are
+        # >= min_prob or <= min_prob
+        u_pos = cp.Variable(n_features)
+        v_neg = cp.Variable(n_features)
+        constraints += [
+            u_pos >= 0, u_pos >= w,  # u_pos >= max(0, w)
+            v_neg >= 0, v_neg >= -w,  # v_neg >= -min(0, w)
+        ]
+
         # monotonicity constraints
         for feature_idx, sign in self.monotonicity_constraints.items():
             if sign == 1:
@@ -802,10 +811,22 @@ class FrontEndModelCVXPY(object):
         for feature_ind, feature_val, sign, min_prob in self.prediction_constraints:
             # Convert prob to logit: logit = log(p/(1-p))
             logit_threshold = np.log(min_prob / (1 - min_prob))
+            fixed_mask = np.zeros(n_features, dtype=bool)
+            fixed_mask[np.array(feature_ind, dtype=int)] = True
+            free_mask = ~fixed_mask
+
             constraint_vec = np.zeros(n_features)
             constraint_vec[feature_ind] = feature_val
-            constraints.append(constraint_vec @ w + b >= logit_threshold) if sign == 1 else constraints.append(constraint_vec @ w + b <= logit_threshold)
+            fixed_constraint = constraint_vec @ w
 
+            if sign == 1:  # ">=" lower bound: for all others, P >= min_prob
+                # worst case lowers the logit by turning ON all negative weights:
+                #   fixed_contrib + b + sum_{free} min(0, w_j) >= t
+                constraints.append(fixed_constraint + b - cp.sum(v_neg[free_mask]) >= logit_threshold)
+            else:  # "<=" upper bound: for all others, P <= min_prob
+                # worst case increases the logit by turning ON all positive weights:
+                #   fixed_contrib + b + sum_{free} max(0, w_j) <= t
+                constraints.append(fixed_constraint + b + cp.sum(u_pos[free_mask]) <= logit_threshold)
         problem = cp.Problem(objective, constraints)
         problem.solve()
 
