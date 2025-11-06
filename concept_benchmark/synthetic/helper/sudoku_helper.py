@@ -603,3 +603,151 @@ def cell_digit_concept_vector(board: np.ndarray,
         for d in digits:
             vals.append(1 if v == d else 0)
     return np.asarray(vals, dtype=np.int32)
+
+
+# ----------------------------------------------------------
+# SCIP-based generator (more varied)
+# ----------------------------------------------------------
+def solve_sudoku_with_random_objective(board: np.ndarray, seed: int | None = None) -> np.ndarray:
+    """
+    Like solve_sudoku_with_scip, but add a random objective so SCIP picks
+    a random feasible solution instead of the first one it finds.
+    """
+    if Model is None:
+        raise ImportError("pyscipopt is required. Install with `pip install pyscipopt`.")
+    N, n = _assert_board_size(board)
+    digits = range(1, N + 1)
+    rng = random.Random(seed)
+
+    m = Model("sudoku-rand")
+    m.hideOutput()
+
+    # variables
+    x = {(r, c, d): m.addVar(vtype="B", name=f"x_{r}_{c}_{d}")
+         for r in range(N) for c in range(N) for d in digits}
+
+    # constraints
+    for r in range(N):
+        for c in range(N):
+            m.addCons(sum(x[r, c, d] for d in digits) == 1)
+
+    for r in range(N):
+        for d in digits:
+            m.addCons(sum(x[r, c, d] for c in range(N)) == 1)
+
+    for c in range(N):
+        for d in digits:
+            m.addCons(sum(x[r, c, d] for r in range(N)) == 1)
+
+    for br in range(n):
+        for bc in range(n):
+            for d in digits:
+                m.addCons(
+                    sum(
+                        x[r, c, d]
+                        for r in range(br * n, br * n + n)
+                        for c in range(bc * n, bc * n + n)
+                    ) == 1
+                )
+
+    # fix given cells
+    for r in range(N):
+        for c in range(N):
+            v = int(board[r, c])
+            if v > 0:
+                m.addCons(x[r, c, v] == 1)
+
+    # random objective
+    expr = 0
+    for r in range(N):
+        for c in range(N):
+            for d in digits:
+                w = rng.random()
+                expr += w * x[r, c, d]
+    m.setObjective(expr)  # maximize
+    m.optimize()
+
+    sol = m.getBestSol()
+    out = np.zeros((N, N), dtype=int)
+    for r in range(N):
+        for c in range(N):
+            for d in digits:
+                if m.getSolVal(sol, x[r, c, d]) > 0.5:
+                    out[r, c] = d
+                    break
+    return out
+
+
+def generate_valid_board_scip(n: int = 3, seed: int | None = None) -> np.ndarray:
+    """
+    Generate a valid Sudoku board by:
+    1) pre-filling 1 random legal cell per block,
+    2) solving with a random objective,
+    3) applying a final random digit relabel.
+    This produces boards that look less like simple permutations.
+    """
+    if Model is None:
+        raise ImportError("pyscipopt is required for SCIP-based generation. Install with `pip install pyscipopt`.")
+
+    N = n * n
+    rng = random.Random(seed)
+
+    partial = np.zeros((N, N), dtype=int)
+
+    digits = list(range(1, N + 1))
+    for br in range(n):
+        for bc in range(n):
+            # cells inside this block
+            cells = [(r, c) for r in range(br * n, br * n + n)
+                             for c in range(bc * n, bc * n + n)]
+            rng.shuffle(cells)
+            rng.shuffle(digits)
+            placed = False
+            for (r, c) in cells:
+                for d in digits:
+                    if is_locally_safe(partial, r, c, d, blank_value=0):
+                        partial[r, c] = d
+                        placed = True
+                        break
+                if placed:
+                    break
+
+    solved = solve_sudoku_with_random_objective(partial, seed=seed)
+
+    digits_perm = list(range(1, N + 1))
+    rng.shuffle(digits_perm)
+    mapping = {d: digits_perm[d - 1] for d in range(1, N + 1)}
+    vfunc = np.vectorize(lambda x: mapping[int(x)])
+    solved = vfunc(solved).astype(int)
+
+    return solved
+
+def is_locally_safe(
+    board: np.ndarray,
+    r: int,
+    c: int,
+    val: int,
+    blank_value: int = 0,
+) -> bool:
+    """
+    Check row/col/block consistency of placing `val` at (r,c) on THIS board.
+    Ignores cells == blank_value.
+    """
+    N, n = _assert_board_size(board)
+
+    # row
+    for cc in range(N):
+        if cc != c and board[r, cc] == val:
+            return False
+    # col
+    for rr in range(N):
+        if rr != r and board[rr, c] == val:
+            return False
+    # block
+    br = (r // n) * n
+    bc = (c // n) * n
+    for rr in range(br, br + n):
+        for cc in range(bc, bc + n):
+            if (rr != r or cc != c) and board[rr, cc] == val:
+                return False
+    return True
