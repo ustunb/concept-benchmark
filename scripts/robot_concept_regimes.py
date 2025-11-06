@@ -1072,7 +1072,7 @@ settings = {
     "force": 0,
 
     # Only run perfect to regenerate interventions/metrics
-    "subjective_grid": [0.2],
+    "subjective_grid": [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4],
     "regimes": ["subjective"],
 
     "concepts_file": None,
