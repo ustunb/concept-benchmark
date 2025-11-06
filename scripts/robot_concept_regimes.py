@@ -28,10 +28,11 @@ import torch
 from torchvision import transforms
 
 from concept_benchmark.synthetic.robot import create_synthetic_dataset
-from concept_benchmark.models import ConceptDetector, FrontEndModel, RobotConceptClassifier
+from concept_benchmark.models import ConceptDetector, FrontEndModel, RobotConceptClassifier, ConceptBasedModel
 from concept_benchmark.lfcbm import LabelFreeCBM, LFTrainingConfig, LFConceptSet
 from scripts.dataset_skewing import create_skewed_splits, filter_training_by_string
-from scripts.robot_interventions import test_interventions
+from concept_benchmark.intervention import InterventionConfig, ConceptInterventionRunner
+from concept_benchmark.kflip import KFlipInterventionStrategy as ScoreIntervention
 from scripts.robot_invariance_test import test_concept_detector_invariance
 from scripts.robot_utils import (
     _apply_missing,
@@ -41,6 +42,81 @@ from scripts.robot_utils import (
     _get_confusion_matrix,
     _get_accuracies_per_subconcept,
 )
+
+def test_interventions(prob_test, sttngs, acc_det, fe, test):
+    intervention_results = {}
+    rng = np.random.default_rng(int(sttngs["seed"]))
+    budgets = sttngs.get('budget', [1])
+    human_acc = sttngs.get("intervention_accuracy", 0.9)
+    err_prob = 1.0 - human_acc
+
+    cbm = ConceptBasedModel(concept_detector=None, front_end_model=fe)
+    runner = ConceptInterventionRunner(cbm)
+
+    for budget in budgets:
+        config = InterventionConfig(
+            max_concepts_per_instance=budget,
+            random_state=int(sttngs["seed"]),
+            score_threshold=sttngs.get("intervention_threshold", 1.0),
+            noise=1.0 - human_acc,
+            select_only_abstained=bool(sttngs.get("select_only_abstained", False)),
+            tau=sttngs.get("tau", None),
+        )
+
+        strategy = ScoreIntervention()
+
+        result = runner.run(
+            strategy=strategy,
+            config=config,
+            dataset=test,
+            concept_proba=prob_test,
+            labels=test.y.astype(int)
+        )
+
+        # Apply human error on masked entries
+        mask = result.mask
+        C_gt = test.C.astype(np.float32)
+        C_after = result.C_intervened.copy()
+        mistake_draw = rng.random(C_after.shape) < err_prob
+        mistakes = mask & mistake_draw
+        C_after[mistakes] = 1.0 - C_gt[mistakes]
+        result.C_intervened = C_after
+
+        # Recompute downstream prediction after error injection
+        C_final_binary = (result.C_intervened >= 0.5).astype(int)
+        result.y_prob_after = fe.predict_proba(C_final_binary)
+        result.y_pred_after = np.argmax(result.y_prob_after, axis=1)
+
+        acc_intervened = float((result.y_pred_after == test.y.astype(int)).mean())
+
+        n_intervened = int(np.sum(result.mask))
+        n_samples = prob_test.shape[0]
+
+        intervened_concepts = np.any(result.mask, axis=0)
+        C_pred_binary = (result.C_pred >= 0.5).astype(int)
+        actual_edits_mask = (C_pred_binary != C_final_binary)
+        prediction_num_concepts_intervened_on = {int(i): int(np.sum(actual_edits_mask[i])) for i in range(n_samples)}
+
+        concept_intervention_counts = {
+            c: f"{int(np.sum(result.mask[:, i]))} ({int(np.sum(actual_edits_mask[:, i]))})"
+            for i, c in enumerate(test.concepts) if intervened_concepts[i]
+        }
+
+        key = f"top_{budget}_human_acc_{int(human_acc * 100)}"
+        intervention_results[key] = {
+            "accuracy": acc_intervened,
+            "accuracy_gain": acc_intervened - acc_det,
+            "predictions_intervened_on": int(np.sum(np.any(result.mask, axis=1))),
+            "interventions_rate": float(np.sum(np.any(result.mask, axis=1)) / n_samples),
+            "intervention_rate": float(np.sum(np.any(result.mask, axis=1)) / n_samples),
+            "avg_edits_per_intervention": float(sum(prediction_num_concepts_intervened_on.values())) / n_samples,
+            "total_concept_checks": n_intervened,
+            "total_concept_edits_made": int(sum(prediction_num_concepts_intervened_on.values())),
+            "concept_interventions": concept_intervention_counts,
+            "human_accuracy": human_acc
+        }
+
+    return budgets, human_acc, intervention_results
 
 class FEOnProbs(FrontEndModel):
     def __init__(self, clf):
@@ -356,8 +432,8 @@ def _train_concept_detector(
         det_path = save_dir / det_name
         torch.save(cd.state_dict(), det_path)
 
-    for concept in [c for c in test.concepts if c.startswith("foot_shape_")]:
-        _ = test_concept_detector_invariance(cd, concept, train.concepts, test, device, num_tests=10)
+    # for concept in [c for c in test.concepts if c.startswith("foot_shape_")]:
+    #     _ = test_concept_detector_invariance(cd, concept, train.concepts, test, device, num_tests=10)
     return cd, det_path
 
 def _train_frontend(
@@ -466,7 +542,7 @@ def _run_fixed_regime(
     )
 
     ia_val = 1.0 if regime == "perfect" else float(S.get("human_annotation_accuracy", 0.8))
-    _, _, intervention_results = test_interventions(P_te, {**S, "intervention_accuracy": ia_val}, acc_det, fe, rng, test)
+    _, _, intervention_results = test_interventions(P_te, {**S, "intervention_accuracy": ia_val}, acc_det, fe, test)
 
     per_sub_acc = _emit_confusion(run_dir, fe, H_te, P_te, test, S.get("drop_concepts", []))
     catalog_csv_path, meta_extra = _write_catalogs(run_dir, data.meta)
@@ -538,19 +614,25 @@ def _run_subjective_rate(
     tr_noisy = _clone_with_C(train, Ctr_noisy)
     va_noisy = _clone_with_C(valid, Cva_noisy)
 
-    cd, det_path = _train_concept_detector(
-        S, config, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, rate_dir, seed_tag, skew_tag, tr_noisy, va_noisy, test
-    )
-    P_tr = cd.predict(tr_noisy, embed_params={"device": device})
-    if (not force) and prob_cache is not None and "P_te" in set(prob_cache.files):
+    if (not force) and prob_cache is not None and {"P_tr", "P_te"}.issubset(set(prob_cache.files)):
+        P_tr = prob_cache["P_tr"]
         P_te = prob_cache["P_te"]
+        cd = None
+        det_path = Path(S.get("load_detector", "")) if S.get("load_detector") else Path("")
     else:
+        cd, det_path = _train_concept_detector(
+            S, config, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, rate_dir, seed_tag, skew_tag, tr_noisy, va_noisy, test
+        )
+        P_tr = cd.predict(tr_noisy, embed_params={"device": device})
         P_te = cd.predict(test, embed_params={"device": device})
         _merge_save_npz(
             prob_npz_path,
             {
+                "P_tr": P_tr,
                 "P_te": P_te,
+                "C_tr": tr_noisy.C.astype(np.float32),
                 "C_te": test.C.astype(np.float32),
+                "y_tr": tr_noisy.y.astype(int),
                 "y_te": test.y.astype(int),
                 "concepts": np.array(list(test.concepts)),
             },
@@ -563,7 +645,7 @@ def _run_subjective_rate(
     acc_det, acc_gt, concept_acc_mean, fe, fe_path, _ = _train_frontend(
         H_te, H_tr, P_tr, S, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, rate_dir, seed_tag, skew_tag, test, tr_noisy
     )
-    _, _, intervention_results = test_interventions(P_te, S, acc_det, fe, rng, test)
+    _, _, intervention_results = test_interventions(P_te, S, acc_det, fe, test)
 
     per_sub_acc = _emit_confusion(rate_dir, fe, H_te, P_te, test, S.get("drop_concepts", []))
     catalog_csv_path, meta_extra = _write_catalogs(rate_dir, data.meta)
@@ -826,7 +908,7 @@ def run_regimes(settings: Dict) -> Dict:
             # Interventions use probabilities
             ia_val = float(S.get("human_annotation_accuracy", 0.8))
             _, _, intervention_results = test_interventions(P_te, {**S, "intervention_accuracy": ia_val}, acc_det, fe,
-                                                            rng, test)
+                                                            test)
             # Confusion and catalogs
             per_sub_acc = _emit_confusion(run_dir, fe, H_te, P_te, test, S.get("drop_concepts", []))
             catalog_csv_path, meta_extra = _write_catalogs(run_dir, data.meta)
@@ -971,19 +1053,28 @@ settings = {
         {"concepts": {"foot_shape_flat_trapezoid": 1}, "min_fraction": 0.005},
         {"concepts": {"foot_shape_flat_5sided": 1}, "min_fraction": 0.49},
     ],
+
     "budget": [3],
-    "intervention_accuracy": 0.9,
-    "human_annotation_accuracy": 0.9,
+
+    # Keep 0.9 here to match your existing NPZ filename slug (int-acc90),
+    # but "perfect" will still run with 1.0 human accuracy internally.
+    "intervention_accuracy": 0.8,
+    "human_annotation_accuracy": 0.8,
+
     "intervention_threshold": 0.2,
+
     "out_dir": str(results_dir / "robots"),
     "run_name": "cbm_run_1002_subconcepts",
+
+    # Let the script pick up anchors/NPZs; do NOT force recompute.
     "load_detector": "",
     "load_frontend": "",
-    "force": 1,
+    "force": 0,
+
+    # Only run perfect to regenerate interventions/metrics
     "subjective_grid": [0.2],
-    "regimes": ["perfect","expert","subjective"],
-    # "regimes": ["machine"],
-    # "concepts_file": pkg_dir /"synthetic/helper/static/concepts_robot_subconcepts.csv",  # CSV/JSON/JSONL/TXT supported
+    "regimes": ["subjective"],
+
     "concepts_file": None,
     "lfcbm": {
       "clip_model": "ViT-B-32",
