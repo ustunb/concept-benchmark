@@ -42,11 +42,8 @@ settings = {
     "image_size": "medium",
     "color_mode": "color",
     "train_dnn": 0,
-    "seed": 1014,
-    "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy') + int(row['has_knees']=='true'))>= 3 else 'drent'",
-    "train_dnn": 0,
-    "seed": 1014,
-    "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy') + int(row['has_knees']=='true'))>= 3 else 'drent'",
+    "seed": 1002,
+    "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy'))>= 3 else 'drent'",
     'dataset_characterization': "",
     "test_size": 10000,
     "train_size": 3800,
@@ -85,28 +82,13 @@ settings = {
     "drop_concepts": ["foot_shape_flat_rounded",
                       "foot_shape_pointy_trapezoid",
                       'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
-                      'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
-                      'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
+                      'foot_shape'],#'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
     "human_alignment": {
-        "signs": {
-            "has_knees": 1
-        },
+        # "signs": {
+        #     "foot_shape_pointy_square": -1
+        # },
         # "features": [
-        #     (["foot_shape_flat_square"], ["True"], ">=", 0.95),
-        #     (["foot_shape_flat_trapezoid"], ["True"], ">=", 0.95),
-        #     #(["foot_shape_flat_square", "mouth_type"], ["True", "closed"], ">=", 0.95),
-        #     #(["foot_shape_pointy_rounded", "mouth_type"], ["True", "open"], "<=", 0.05),
-        #     #(["foot_shape_pointy_square", "mouth_type"], ["True", "open"], "<=", 0.05)
-        # ]
-        "signs": {
-            "has_knees": 1
-        },
-        # "features": [
-        #     (["foot_shape_flat_square"], ["True"], ">=", 0.95),
-        #     (["foot_shape_flat_trapezoid"], ["True"], ">=", 0.95),
-        #     #(["foot_shape_flat_square", "mouth_type"], ["True", "closed"], ">=", 0.95),
-        #     #(["foot_shape_pointy_rounded", "mouth_type"], ["True", "open"], "<=", 0.05),
-        #     #(["foot_shape_pointy_square", "mouth_type"], ["True", "open"], "<=", 0.05)
+        #     (["foot_shape_pointy_square", "mouth_type"], "<=", 0.05)
         # ]
     },
     "model_type": "stochastic",
@@ -128,14 +110,14 @@ settings = {
                      {'concepts': {'foot_shape_flat_trapezoid': 1}, 'min_fraction': 0.005},
                      {'concepts': {'foot_shape_flat_5sided': 1}, 'min_fraction': 0.49},
                      ],
-    "budget": [9],
+    "budget": [12],
     "intervention_accuracy": 1.0,
     "intervention_threshold": 0.2,
     "epochs": 1,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "cbm_run_1002_ideal",
-    # "load_detector": str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed1002.pt")),
-    # "load_frontend": str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed1002.pkl")),
+    "run_name": "cbm_run_1002_subconcepts_newalignment",
+    "load_detector": str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts_newalignment" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed1002.pt")),
+    "load_frontend": ""#,str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed1002.pkl")),
 }
 
 
@@ -370,7 +352,7 @@ def train_concept_detector(settings, config, device, int_acc_tag, label_noise_ta
                                                       input_size=600 if settings["image_size"] == "large" else
                                                       32 if settings["image_size"] == "medium" else 8))
     det_name = f"detector_dnn_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pt"
-    if settings.get("load_detector", False):
+    if settings["load_detector"]:
         mini_train = train.filter(np.array([True] + [False] * (len(train.C) - 1)))
         mini_valid = valid.filter(np.array([True] + [False] * (len(valid.C) - 1)))
 
@@ -534,6 +516,108 @@ def test_alignment(fe, h_test, h_train, prob_train, prob_test, sttngs, int_acc_t
 
     alignment_stats = {
         'training_accuracy': float(acc_det_tr),
+        'original_accuracy': float(original_acc),
+        'aligned_accuracy': float(aligned_acc),
+        'accuracy_change': float(aligned_acc - original_acc),
+        'predictions_changed': int(np.sum(original_preds != aligned_preds)),
+        'frontend_weights': feweights,
+        'model_accuracies_per_concept': per_concept_acc,
+        'interventions': intervention_results
+    }
+    return alignment_stats
+
+
+def test_alignment(fe, h_test, h_train, prob_train, prob_test, sttngs, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
+                   seed_tag, skew_tag, test, train, monotonicity_constraints, prediction_constraints):
+    test_concepts = h_test
+    test_labels = test.y.astype(int)
+    original_frontend = fe
+    print(f"Aligning the model with the following constraints: {monotonicity_constraints} {prediction_constraints}")
+    acc_det, _, _, aligned_frontend, _, _ = train_frontend(h_test, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag,
+                                                     miss_tag, model_type_tag, run_dir, seed_tag, skew_tag, test, train,
+                                                     monotonicity_constraints, prediction_constraints)
+
+    original_probs = original_frontend.predict_proba(test_concepts)
+    aligned_probs = aligned_frontend.predict_proba(test_concepts)
+    original_preds = original_probs.argmax(1)
+    aligned_preds = aligned_probs.argmax(1)
+
+    original_acc = (original_preds == test_labels).mean()
+    aligned_acc = (aligned_preds == test_labels).mean()
+
+    print("\n=== Aligned Frontend Weights ===")
+    for i, concept in enumerate(test.concepts):
+        print(f"  {concept}: {aligned_frontend.model.coef_[0, i]:.4f}")
+    print(f"  bias: {aligned_frontend.model.intercept_[0]:.4f}")
+
+    feweights = {}
+    for i, concept in enumerate(test.concepts):
+        feweights[concept] = round(aligned_frontend.model.coef_[0, i], 4)
+    feweights["bias"] = round(aligned_frontend.model.intercept_[0], 4)
+
+    aligned_preds = aligned_frontend.predict(h_test)
+
+    # compute model accuracies per concept
+    subtype_concepts = [c for c in test.concepts if c.startswith('foot_shape_')]
+    missing_concepts = [c for c in sttngs.get("drop_concepts", []) if c.startswith('foot_shape_')]
+    all_preds, confusion_df = _get_confusion_matrix(subtype_concepts, missing_concepts, aligned_frontend, h_test, prob_test, test)
+    per_concept_acc = _get_accuracies_per_subconcept(all_preds, missing_concepts, subtype_concepts)
+
+    # testing interventions
+    _, _, intervention_results = test_interventions(prob_test, sttngs, acc_det, aligned_frontend, test)
+
+    alignment_stats = {
+        'original_accuracy': float(original_acc),
+        'aligned_accuracy': float(aligned_acc),
+        'accuracy_change': float(aligned_acc - original_acc),
+        'predictions_changed': int(np.sum(original_preds != aligned_preds)),
+        'frontend_weights': feweights,
+        'model_accuracies_per_concept': per_concept_acc,
+        'interventions': intervention_results
+    }
+    return alignment_stats
+
+
+def test_alignment(fe, h_test, h_train, prob_train, prob_test, sttngs, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
+                   seed_tag, skew_tag, test, train, monotonicity_constraints, prediction_constraints):
+    test_concepts = h_test
+    test_labels = test.y.astype(int)
+    original_frontend = fe
+    print(f"Aligning the model with the following constraints: {monotonicity_constraints} {prediction_constraints}")
+    acc_det, _, _, aligned_frontend, _, _ = train_frontend(h_test, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag,
+                                                     miss_tag, model_type_tag, run_dir, seed_tag, skew_tag, test, train,
+                                                     monotonicity_constraints, prediction_constraints)
+
+    original_probs = original_frontend.predict_proba(test_concepts)
+    aligned_probs = aligned_frontend.predict_proba(test_concepts)
+    original_preds = original_probs.argmax(1)
+    aligned_preds = aligned_probs.argmax(1)
+
+    original_acc = (original_preds == test_labels).mean()
+    aligned_acc = (aligned_preds == test_labels).mean()
+
+    print("\n=== Aligned Frontend Weights ===")
+    for i, concept in enumerate(test.concepts):
+        print(f"  {concept}: {aligned_frontend.model.coef_[0, i]:.4f}")
+    print(f"  bias: {aligned_frontend.model.intercept_[0]:.4f}")
+
+    feweights = {}
+    for i, concept in enumerate(test.concepts):
+        feweights[concept] = round(aligned_frontend.model.coef_[0, i], 4)
+    feweights["bias"] = round(aligned_frontend.model.intercept_[0], 4)
+
+    aligned_preds = aligned_frontend.predict(h_test)
+
+    # compute model accuracies per concept
+    subtype_concepts = [c for c in test.concepts if c.startswith('foot_shape_')]
+    missing_concepts = [c for c in sttngs.get("drop_concepts", []) if c.startswith('foot_shape_')]
+    all_preds, confusion_df = _get_confusion_matrix(subtype_concepts, missing_concepts, aligned_frontend, h_test, prob_test, test)
+    per_concept_acc = _get_accuracies_per_subconcept(all_preds, missing_concepts, subtype_concepts)
+
+    # testing interventions
+    _, _, intervention_results = test_interventions(prob_test, sttngs, acc_det, aligned_frontend, test)
+
+    alignment_stats = {
         'original_accuracy': float(original_acc),
         'aligned_accuracy': float(aligned_acc),
         'accuracy_change': float(aligned_acc - original_acc),
