@@ -39,7 +39,7 @@ def test_concept_detector_invariance_point(concept_detector, concept, concept_na
             continue
         cf_pred = cf_preds[i, concept_idx]
         if (original_pred >= 0.5) != (cf_pred >= 0.5):
-            print("Error on matching point", mp, "concept", concept, "value", concept_value, "prediction", cf_pred)
+            #print("Error on matching point", mp, "concept", concept, "value", concept_value, "prediction", cf_pred)
             variant_points.append(mp)
 
     if len(variant_points) > 0:
