@@ -65,27 +65,115 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
 
         strategy = ScoreIntervention()
 
-        result = runner.run(
-            strategy=strategy,
-            config=config,
-            dataset=test,
-            concept_proba=prob_test,
-            labels=test.y.astype(int)
-        )
+        setup_id = int(sttngs.get("setup", -1))
+        if setup_id == 5:
+            sttngs.setdefault("intervention_expert", "llm")
+            sttngs.setdefault("intervention_llm", {"provider": "gemini", "model": "2.5-flash-lite", "api_key_env": "GOOGLE_API_KEY"})
+        elif setup_id == 4:
+            sttngs.pop("intervention_expert", None)
+            sttngs.pop("intervention_llm", None)
 
-        # Apply human error on masked entries
-        mask = result.mask
-        C_gt = test.C.astype(np.float32)
-        C_after = result.C_intervened.copy()
-        mistake_draw = rng.random(C_after.shape) < err_prob
-        mistakes = mask & mistake_draw
-        C_after[mistakes] = 1.0 - C_gt[mistakes]
-        result.C_intervened = C_after
+        if str(sttngs.get("intervention_expert", "")).lower() == "llm":
+            from types import SimpleNamespace
+            llm_cfg = sttngs.get("intervention_llm", {}) or {}
+            provider = str(llm_cfg.get("provider", "gemini"))
+            model_name = str(llm_cfg.get("model", "2.5-flash-lite"))
+            api_key_env = str(llm_cfg.get("api_key_env", "GOOGLE_API_KEY"))
+            api_key = os.environ.get(api_key_env, "")
+            if not api_key:
+                raise SystemExit(f"missing API key in env: {api_key_env}")
 
-        # Recompute downstream prediction after error injection
-        C_final_binary = (result.C_intervened >= 0.5).astype(int)
-        result.y_prob_after = fe.predict_proba(C_final_binary)
-        result.y_pred_after = np.argmax(result.y_prob_after, axis=1)
+            try:
+                from scripts.generate_llm_candidates import _make_client as _llm_make_client
+            except Exception as e:
+                raise SystemExit("LLM client unavailable; ensure scripts/generate_llm_candidates.py is importable.") from e
+            client = _llm_make_client(provider, model_name, api_key)
+
+            def _resolve_img_path(i: int) -> str:
+                p = Path(str(test.X[i]))
+                base = getattr(test, "base_dir", Path("."))
+                q = p if p.is_absolute() else (base / p)
+                return str(q.resolve())
+
+            def _llm_judge(image_path: str, names: List[str]) -> Dict[str, int]:
+                prompt = (
+                    "You will be shown one robot image. "
+                    "For each concept below, output 0 or 1 indicating ABSENT(0) or PRESENT(1). "
+                    "Return ONLY one JSON object with string keys and 0/1 integer values.\n\n"
+                    "concepts:\n- " + "\n- ".join(names) + "\n\n"
+                    "Respond like: {\"conceptA\":1,\"conceptB\":0}"
+                )
+                raw = (client.generate(prompt, [image_path]) or "").strip()
+                parsed: Dict[str, int] = {}
+                try:
+                    obj = json.loads(raw)
+                    if isinstance(obj, dict):
+                        for k, v in obj.items():
+                            if isinstance(v, bool):
+                                parsed[str(k)] = 1 if v else 0
+                            elif isinstance(v, (int, float, str)):
+                                s = str(v).strip().lower()
+                                parsed[str(k)] = 1 if s in {"1","true","yes","present"} else 0
+                except Exception:
+                    pass
+                return parsed
+
+            # propose interventions first, then ask the LLM only for the selected concepts
+            batch = runner._build_batch(dataset=test, concept_proba=prob_test, labels=test.y.astype(int))
+            proposal = strategy.propose(cbm, batch, config)
+            mask = proposal.mask
+
+            C_before = batch.C_pred
+            y_prob_before = fe.predict_proba((C_before >= 0.5).astype(int))
+
+            C_true_llm = np.full_like(C_before, np.nan, dtype=float)
+            for i in range(C_before.shape[0]):
+                idxs = np.where(mask[i])[0]
+                if idxs.size == 0:
+                    continue
+                image_path = _resolve_img_path(i)
+                names = [str(test.concepts[j]) for j in idxs]
+                votes = _llm_judge(image_path, names)
+                for j, name in zip(idxs, names):
+                    if name in votes:
+                        C_true_llm[i, j] = float(votes[name])
+
+            overwrite_mask = mask & ~np.isnan(C_true_llm)
+            C_after = np.where(overwrite_mask, C_true_llm, C_before)
+            C_final_binary = (C_after >= 0.5).astype(int)
+            y_prob_after = fe.predict_proba(C_final_binary)
+            y_pred_after = np.argmax(y_prob_after, axis=1)
+
+            result = SimpleNamespace(
+                C_pred=C_before,
+                C_intervened=C_after,
+                mask=overwrite_mask,
+                y_prob_before=y_prob_before,
+                y_prob_after=y_prob_after,
+                y_pred_after=y_pred_after,
+            )
+        else:
+            result = runner.run(
+                strategy=strategy,
+                config=config,
+                dataset=test,
+                concept_proba=prob_test,
+                labels=test.y.astype(int)
+            )
+
+            # Apply human error on masked entries
+            mask = result.mask
+            C_gt = test.C.astype(np.float32)
+            C_after = result.C_intervened.copy()
+            mistake_draw = rng.random(C_after.shape) < err_prob
+            mistakes = mask & mistake_draw
+            C_after[mistakes] = 1.0 - C_gt[mistakes]
+            result.C_intervened = C_after
+
+            # Recompute downstream prediction after error injection
+            C_final_binary = (result.C_intervened >= 0.5).astype(int)
+            result.y_prob_after = fe.predict_proba(C_final_binary)
+            result.y_pred_after = np.argmax(result.y_prob_after, axis=1)
 
         acc_intervened = float((result.y_pred_after == test.y.astype(int)).mean())
 
@@ -971,6 +1059,148 @@ def run_regimes(settings: Dict) -> Dict:
                 "concept_acc_mean": float((H_te == test.C).mean()),
             }
 
+        elif regime in {"llm", "llm-annotation", "llm_annotation"}:
+
+        # Label-free CBM with LLM concept list and LLM interventions
+            llm_concepts_file = S.get("llm_concepts_file", "") or S.get("concepts_file", "")
+            if not llm_concepts_file:
+                raise SystemExit("llm-annotation requires a concepts file: set 'llm_concepts_file' or 'concepts_file'.")
+            p_cf = Path(str(llm_concepts_file))
+            if not p_cf.exists():
+                raise SystemExit(f"concepts file not found: {p_cf}")
+            concept_set = LFConceptSet.from_file(str(p_cf), dataset_keys=list(test.concepts))
+            if not getattr(concept_set, "texts", None):
+                raise SystemExit(f"concepts file parsed empty: {p_cf}")
+            lf_cfg = S.get("lfcbm", {})
+            cfg = LFTrainingConfig(
+                clip_model=str(lf_cfg.get("clip_model", "ViT-B-32")),
+                clip_pretrained=str(lf_cfg.get("clip_pretrained", "laion2b_s34b_b79k")),
+                device=device,
+                lr=float(lf_cfg.get("lr", 1e-2)),
+                weight_decay=float(lf_cfg.get("weight_decay", 1e-4)),
+                max_epochs=int(lf_cfg.get("max_epochs", 200)),
+                patience=int(lf_cfg.get("patience", 10)),
+                seed=int(S["seed"]),
+                l1_ratio=float(lf_cfg.get("l1_ratio", 0.99)),
+                C_grid=tuple(map(float, lf_cfg.get("C_grid", (0.05, 0.1, 0.2, 0.5, 1.0, 2.0)))),
+                target_nonzero_per_class=tuple(map(int, lf_cfg.get("target_nonzero_per_class", (25, 35)))),
+                cache_dir=run_dir / "lfcbm_cache",
+                batch_size=int(lf_cfg.get("batch_size", 256)),
+            )
+            lf = LabelFreeCBM(cfg)
+
+            stats = lf.fit(
+                train_X=_resolve_items(train.X, getattr(train, "base_dir", Path("."))),
+                train_y=train.y.astype(int),
+                valid_X=_resolve_items(valid.X, getattr(valid, "base_dir", Path("."))),
+                valid_y=valid.y.astype(int),
+                concept_set=concept_set,
+                cache_dir=cfg.cache_dir,
+            )
+
+            resolved_te = _resolve_items(test.X, getattr(test, "base_dir", Path(".")))
+            missing = [p for p in resolved_te if not Path(p).exists()]
+            print("missing test files:", len(missing), missing[:3])
+
+            P_tr = lf.concept_proba(
+                [str((getattr(train, "base_dir", Path(".")) / Path(p)).resolve()) for p in train.X]
+            )
+            P_te = lf.concept_proba(
+                [str((getattr(test, "base_dir", Path(".")) / Path(p)).resolve()) for p in test.X]
+            )
+            H_tr = (P_tr > 0.5).astype(np.float32)
+            H_te = (P_te > 0.5).astype(np.float32)
+
+            prob_npz_path = run_dir / f"probs_{slug}_{seed_tag}.npz"
+            _merge_save_npz(
+                prob_npz_path,
+                {
+                    "P_tr": P_tr,
+                    "P_te": P_te,
+                    "C_tr": train.C.astype(np.float32),
+                    "C_te": test.C.astype(np.float32),
+                    "y_tr": train.y.astype(int),
+                    "y_te": test.y.astype(int),
+                    "concepts": np.array(list(test.concepts)),
+                },
+            )
+
+            fe = FEOnProbs(lf.classifier)
+            import pickle
+            fe_name = f"frontend_{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
+            fe_path = run_dir / fe_name
+            with open(fe_path, "wb") as f:
+                pickle.dump(fe, f)
+
+            y_pred_det = fe.predict_proba(P_te)
+            acc_det = float((y_pred_det.argmax(1) == test.y.astype(int)).mean())
+
+            C_oracle = np.clip(test.C.astype(np.float32), 1e-6, 1 - 1e-6)
+            y_pred_gt = fe.predict_proba(C_oracle)
+            acc_gt = float((y_pred_gt.argmax(1) == test.y.astype(int)).mean())
+
+            per_concept_acc, train_per_concept_acc = _get_concept_accuracies(H_te, H_tr, test, train)
+
+            S_int = dict(S)
+            S_int.setdefault("intervention_expert", "llm")
+            S_int.setdefault("intervention_llm",
+                             {"provider": "gemini", "model": "2.5-flash-lite", "api_key_env": "GOOGLE_API_KEY"})
+            ia_val = float(S.get("human_annotation_accuracy", 0.8))
+            _, _, intervention_results = test_interventions(P_te, {**S_int, "intervention_accuracy": ia_val}, acc_det,
+                                                            fe, test)
+
+            per_sub_acc = _emit_confusion(run_dir, fe, H_te, P_te, test, S.get("drop_concepts", []))
+            catalog_csv_path, meta_extra = _write_catalogs(run_dir, data.meta)
+
+            lf_paths = lf.save(run_dir / "lfcbm_artifacts")
+            meta = {
+                "settings": S,
+                "run_dir": str(run_dir),
+                "artifacts": {**lf_paths, "detector": "", "frontend": str(fe_path), "probs_npz": str(prob_npz_path)},
+                "splits": {"n_train": _len(train), "n_valid": _len(valid), "n_test": _len(test)},
+                "concepts": list(test.concepts),
+                "intervention_budgets": S.get("budget", []),
+                "intervention_acc": ia_val,
+                "naming_slug": slug,
+                "catalog_csv": catalog_csv_path,
+                "df_indices": {
+                    "train": list(map(int, train.meta.get("df_indices", []))),
+                    "valid": list(map(int, valid.meta.get("df_indices", []))),
+                    "test": list(map(int, test.meta.get("df_indices", []))),
+                },
+                "robot_ids": {
+                    "train": list(map(int, train.meta.get("robot_ids", []))),
+                    "valid": list(map(int, valid.meta.get("robot_ids", []))),
+                    "test": list(map(int, test.meta.get("robot_ids", []))),
+                },
+            }
+            meta.update(meta_extra)
+
+            metrics = {
+                "cbm_acc_detected": float(acc_det),
+                "cbm_acc_oracle": float(acc_gt),
+                "concept_det_acc_mean": float((H_te == test.C).mean()),
+                "interventions": intervention_results,
+                "concept_accuracies": per_concept_acc,
+                "model_accuracies_per_concept": per_sub_acc,
+                "train_concept_accuracies": train_per_concept_acc,
+                "prob_test_npz": str(prob_npz_path),
+                "concept_names": list(test.concepts),
+                "lfcbm_train_stats": stats,
+            }
+
+            with open(run_dir / f"meta_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
+                json.dump(meta, f, indent=2)
+
+            with open(run_dir / f"metrics_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
+                json.dump(metrics, f, indent=2)
+
+            results[regime] = {
+                "acc_detected": acc_det,
+                "acc_ground_truth": acc_gt,
+                "concept_acc_mean": float((H_te == test.C).mean()),
+            }
+
     def _jsonify(o):
         if isinstance(o, dict):
             out = {}
@@ -1082,7 +1312,7 @@ settings = {
 
     # Only run perfect to regenerate interventions/metrics
     "subjective_grid": [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4],
-    "regimes": ["subjective"],
+    "regimes": ["perfect", "expert", "subjective", "machine", "llm"],
 
     "concepts_file": None,
     "lfcbm": {
