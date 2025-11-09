@@ -694,11 +694,12 @@ def run_regimes(settings: Dict) -> Dict:
     set_seed(settings["seed"])
 
     S = dict(settings)
+    if S.get("draw_only", 0):
+        S["draw"] = 1
     force = bool(S.get("force", False))
     if force:
         S.pop("load_detector", None)
         S.pop("load_frontend", None)
-
     rng = np.random.default_rng(int(S["seed"]))
     base_root = Path(S["out_dir"])
     base_out = base_root
@@ -742,6 +743,13 @@ def run_regimes(settings: Dict) -> Dict:
     tf = transforms.Compose([transforms.ToTensor()])
     data.transform = tf
     data.generate_cvindices(seed=int(S["seed"]))
+
+    if S.get("draw_only", 0):
+        draw_dir = base_out / f"{S['run_name']}__draw_only"
+        draw_dir.mkdir(parents=True, exist_ok=True)
+        catalog_csv_path, _ = _write_catalogs(draw_dir, data.meta)
+        return {"draw_only": {"catalog_csv": catalog_csv_path, "n_images": int(data.meta["catalog_df"].shape[0])}}
+
     test, train, valid = _define_train_valid_test(S, data, miss, params, rate, rng, tf)
 
     device = _device()
@@ -994,9 +1002,10 @@ from concept_benchmark.paths import results_dir
 settings = {
     "samples_per_instance": 4,
     "draw": 0,
+    "draw_only": 1,
     "CBM_type": "separate",
     "image_dir": str(results_dir.parent / "data" / "robot_images"),
-    "image_size": "medium",
+    "image_size": "large",
     "color_mode": "color",
     "seed": 1002,
     "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy'))>= 3 else 'drent'",
