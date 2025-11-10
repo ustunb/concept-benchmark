@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import copy
+import optuna
 from itertools import combinations, product
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern
@@ -31,8 +32,8 @@ settings = {
     "image_dir": "./data/robot_images",
     "image_size": "medium",
     "color_mode": "color",
-    "train_dnn": 0,
-    "seed": 1002,
+    "train_dnn": 1,
+    "seed": 1012,
     "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy') + int(row['has_knees']=='true'))>= 3 else 'drent'",
     'dataset_characterization': "",
     "test_size": 10000,
@@ -86,9 +87,9 @@ settings = {
         # ]
     },
     "model_type": "stochastic",
-    "logit_scalar": 1.0,
-    "logit_intercept": 3,
-    "logit_weights": {"foot_shape": 10, "has_knees": 5},
+    "logit_scalar": 4.2,
+    "logit_intercept": -2,
+    "logit_weights": {"mouth_type": 5, "foot_shape": 8, "has_knees": -5},
     "label_noise_rate": 0,
     "missingness": "complete",
     "missing_rate": 1.0,
@@ -102,12 +103,12 @@ settings = {
                      {'concepts': {'foot_shape_flat_5sided': 1}, 'min_fraction': 0.49},
                      ],
     "budget": [3],
-    "intervention_accuracy": 0.9,
+    "intervention_accuracy": 1.0,
     "intervention_threshold": 0.1,
     "epochs": 1,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "cbm_run_1002_newlabeling",
-    "load_detector": str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts_newalignment" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed1002.pt")),
+    "run_name": "scbm_run_1002_newer_alignment_trials",
+    "load_detector": "",#str(Path(results_dir / "robots" / "cbm_run_1002_newer_alignment" / "detector_dnn_robots_image_stochastic_complete__skewint-acc100_seed1005.pt")),
     "load_frontend": ""#,str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed1002.pkl")),
 }
 
@@ -776,7 +777,5 @@ def alignment_hyperparam_search(base_settings, max_iterations=50, n_random_init=
     }
 
     return results
-
-#results = alignment_hyperparam_search(settings, max_iterations=100, n_random_init=20)
 
 main(settings)
