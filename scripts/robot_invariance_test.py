@@ -29,7 +29,7 @@ def test_concept_detector_invariance_point(concept_detector, concept, concept_na
     # Get the dataset with just the original point
     dataset_point = dataset.filter(np.array([i == point for i in range(len(dataset))]))
     original_pred = concept_detector.predict(dataset_point, embed_params={"device": device})[0, concept_idx]
-    print("Original prediction for point", point, "concept", concept, "value", concept_value, "is", original_pred)
+    #print("Original prediction for point", point, "concept", concept, "value", concept_value, "is", original_pred)
     # count the number of matching points that have different predictions
     variant_points = []
     dataset_mp = dataset.filter(np.array([i in matching_points for i in range(len(dataset))]))
@@ -39,7 +39,7 @@ def test_concept_detector_invariance_point(concept_detector, concept, concept_na
             continue
         cf_pred = cf_preds[i, concept_idx]
         if (original_pred >= 0.5) != (cf_pred >= 0.5):
-            #print("Error on matching point", mp, "concept", concept, "value", concept_value, "prediction", cf_pred)
+            print("Error on matching point", mp, "concept", concept, "value", concept_value, "prediction", cf_pred)
             variant_points.append(mp)
 
     if len(variant_points) > 0:
