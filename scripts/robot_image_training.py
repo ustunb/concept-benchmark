@@ -107,7 +107,7 @@ settings = {
     "intervention_threshold": 0.1,
     "epochs": 1,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "scbm_run_1002_newer_alignment_trials",
+    "run_name": "aaa_Test",
     "load_detector": "",#str(Path(results_dir / "robots" / "cbm_run_1002_newer_alignment" / "detector_dnn_robots_image_stochastic_complete__skewint-acc100_seed1005.pt")),
     "load_frontend": ""#,str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed1002.pkl")),
 }
@@ -226,13 +226,14 @@ def train_frontend(H_te, h_train, prob_train, sttngs, int_acc_tag, label_noise_t
     acc_det = float((y_pred_det.argmax(1) == test.y.astype(int)).mean())
     acc_gt = float((y_pred_gt.argmax(1) == test.y.astype(int)).mean())
     concept_acc_mean = float((H_te == test.C).mean())
+    acc_det_tr = float((fe.predict(h_train) == train.y.astype(int)).mean())
 
     if not cvxpy:
         print("\n=== Learned Frontend Weights ===")
         for i, concept in enumerate(test.concepts):
             print(f"  {concept}: {fe.model.coef_[0, i]:.4f}")
         print(f"  bias: {fe.model.intercept_[0]:.4f}")
-    return acc_det, acc_gt, concept_acc_mean, fe, fe_path, y_pred_det
+    return acc_det, acc_gt, concept_acc_mean, fe, fe_path, y_pred_det, acc_det_tr
 
 
 def test_alignment(fe, h_test, h_train, prob_train, prob_test, sttngs, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
@@ -241,7 +242,7 @@ def test_alignment(fe, h_test, h_train, prob_train, prob_test, sttngs, int_acc_t
     test_labels = test.y.astype(int)
     original_frontend = fe
     print(f"Aligning the model with the following constraints: {monotonicity_constraints} {prediction_constraints}")
-    acc_det, _, _, aligned_frontend, _, _ = train_frontend(h_test, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag,
+    acc_det, _, _, aligned_frontend, _, _, acc_det_tr = train_frontend(h_test, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag,
                                                      miss_tag, model_type_tag, run_dir, seed_tag, skew_tag, test, train,
                                                      monotonicity_constraints, prediction_constraints)
 
@@ -275,6 +276,7 @@ def test_alignment(fe, h_test, h_train, prob_train, prob_test, sttngs, int_acc_t
     _, _, intervention_results = test_interventions(prob_test, sttngs, acc_det, aligned_frontend, test)
 
     alignment_stats = {
+        'training_accuracy': float(acc_det_tr),
         'original_accuracy': float(original_acc),
         'aligned_accuracy': float(aligned_acc),
         'accuracy_change': float(aligned_acc - original_acc),
@@ -470,7 +472,7 @@ def main(sttngs):
 
     per_concept_acc, train_per_concept_acc = _get_concept_accuracies(H_te, H_tr, test, train)
 
-    acc_det, acc_gt, concept_acc_mean, fe, fe_path, y_pred_det = train_frontend(H_te, H_tr, P_tr, S, int_acc_tag,
+    acc_det, acc_gt, concept_acc_mean, fe, fe_path, y_pred_det, acc_det_tr = train_frontend(H_te, H_tr, P_tr, S, int_acc_tag,
                                                                                 label_noise_tag, miss_tag,
                                                                                 model_type_tag, run_dir, seed_tag,
                                                                                 skew_tag, test, train)
@@ -530,6 +532,7 @@ def main(sttngs):
     }
 
     metrics = {
+        "cbm_training_accuracy": float(acc_det_tr),
         "cbm_acc_detected": acc_det,
         "cbm_acc_oracle": acc_gt,
         "concept_det_acc_mean": concept_acc_mean,
@@ -578,204 +581,5 @@ def main(sttngs):
 
     return metrics
 
-
-# a function that tries out different combinations of concepts in the sign human alignment constraint and different sigsn
-# positive / negative, and searches for the optimum alignment where the accuracy of the model after interventions before
-# alignment and after alignemnt si the highest AND the alignment does not break the accurayc of the model by more than 4%
-
-
-def alignment_hyperparam_search(base_settings, max_iterations=50, n_random_init=10):
-    """
-    Search for optimal sign constraint combinations that maximize intervention accuracy drop
-    while keeping model accuracy drop below 4%.
-
-    Args:
-        base_settings: The base settings dictionary to modify
-        max_iterations: Maximum number of optimization iterations
-        n_random_init: Number of random initializations before GP optimization
-
-    Returns:
-        dict: Best configuration found and search results
-    """
-
-    feature_names = [
-        "mouth_type",
-        "has_knees",
-        "head_shape",
-        "body_shape",
-        "has_antennae",
-        "ears_shape"
-    ]
-
-    signs = [-1, 1]
-
-    evaluations = []
-    best_config = None
-    best_score = -np.inf
-
-    def encode_config(sign_constraints):
-        """Encode sign constraints as feature vector for GP"""
-        # Each feature can be: no constraint (0), negative (-1), or positive (+1)
-        encoding = np.zeros(len(feature_names))
-        for i, feature in enumerate(feature_names):
-            if feature in sign_constraints:
-                encoding[i] = sign_constraints[feature]
-        return encoding
-
-    def evaluate_config(sign_constraints):
-        """Evaluate a single configuration"""
-        settings = copy.deepcopy(base_settings)
-        settings["human_alignment"]["signs"] = sign_constraints
-        settings["run_name"] = f"alignment_search_{len(evaluations)}"
-
-        results = main(settings)
-
-        # Extract metrics
-        original_acc = results["cbm_acc_detected"]
-        aligned_acc = results["alignment"]["aligned_accuracy"]
-        original_int_acc = results["interventions"]["top_3_human_acc_90"]["accuracy"]
-        aligned_int_acc = results["alignment"]["interventions"]["top_3_human_acc_90"]["accuracy"]
-
-        # Calculate drops
-        model_acc_drop = original_acc - aligned_acc
-        intervention_acc_drop = original_int_acc - aligned_int_acc
-
-        # Objective: maximize intervention accuracy drop, penalize model accuracy drop
-        if model_acc_drop > 0.04:  # Model accuracy drops more than 4%
-            score = -1000  # Heavy penalty
-        else:
-            # Reward intervention accuracy drop, small penalty for model drop
-            score = intervention_acc_drop - 0.1 * model_acc_drop
-
-        evaluation = {
-            "sign_constraints": sign_constraints,
-            "original_acc": float(original_acc),
-            "aligned_acc": float(aligned_acc),
-            "original_int_acc": float(original_int_acc),
-            "aligned_int_acc": float(aligned_int_acc),
-            "model_acc_drop": float(model_acc_drop),
-            "intervention_acc_drop": float(intervention_acc_drop),
-            "score": float(score),
-            "valid": bool(model_acc_drop <= 0.04)
-        }
-
-        print(f"Config {len(evaluations)}: {sign_constraints}")
-        print(f"  Model acc: {original_acc:.3f} -> {aligned_acc:.3f} after alignment (drop: {model_acc_drop:.3f})")
-        print(f"  Int acc: {original_int_acc:.3f} -> {aligned_int_acc:.3f} after alignment (drop: {intervention_acc_drop:.3f})")
-        print(f"  Score: {score:.3f}, Valid: {evaluation['valid']}")
-
-        return evaluation
-
-    # Random initialization phase
-    print("=== Random Initialization Phase ===")
-    rng = np.random.default_rng()
-    for i in range(n_random_init):
-        # Randomly select 1-3 features to constrain
-        n_constraints = rng.integers(1, 4)
-        selected_features = rng.choice(feature_names, size=n_constraints, replace=False)
-        sign_constraints = {str(feature): int(np.random.choice(signs)) for feature in selected_features}
-        print(f"n_constraints: {n_constraints}, selected_features: {selected_features}")
-        print(f"\nEvaluating random config {i}: {sign_constraints}\n\n\n\n")
-
-        evaluation = evaluate_config(sign_constraints)
-        evaluations.append(evaluation)
-
-        if evaluation.get("valid", False) and evaluation["score"] > best_score:
-            best_score = evaluation["score"]
-            best_config = evaluation
-
-    # Prepare data for GP optimization
-    X_train = np.array([encode_config(eval["sign_constraints"]) for eval in evaluations])
-    y_train = np.array([eval["score"] for eval in evaluations])
-
-    # Initialize GP
-    kernel = Matern(length_scale=1.0, nu=2.5)
-    gp = GaussianProcessRegressor(kernel=kernel, alpha=1e-6, normalize_y=True)
-
-    # Bayesian optimization phase
-    print(f"\n=== Bayesian Optimization Phase ===")
-    for iteration in range(max_iterations - n_random_init):
-        # Fit GP to current data
-        gp.fit(X_train, y_train)
-
-        # Generate candidate configurations
-        candidates = []
-        candidate_encodings = []
-
-        # Systematic exploration of feature combinations
-        for n_constraints in range(1, 5):  # 1-3 constraints
-            for features in combinations(feature_names, n_constraints):
-                for sign_combo in product(signs, repeat=n_constraints):
-                    sign_constraints = dict(zip(features, sign_combo))
-                    encoding = encode_config(sign_constraints)
-                    candidates.append(sign_constraints)
-                    candidate_encodings.append(encoding)
-
-        candidate_encodings = np.array(candidate_encodings)
-
-        # Predict mean and std for all candidates
-        mu, sigma = gp.predict(candidate_encodings, return_std=True)
-
-        # Acquisition function: Upper Confidence Bound
-        acquisition = mu + 2.0 * sigma
-
-        # Select best candidate not yet evaluated
-        for best_idx in np.argsort(-acquisition):
-            candidate_config = candidates[best_idx]
-
-            # Check if already evaluated
-            already_evaluated = any(
-                eval["sign_constraints"] == candidate_config
-                for eval in evaluations
-            )
-
-            if not already_evaluated:
-                break
-        else:
-            print("All reasonable candidates have been evaluated")
-            break
-
-        # Evaluate selected candidate
-        evaluation = evaluate_config(candidate_config)
-        evaluations.append(evaluation)
-
-        # Update training data
-        X_train = np.vstack([X_train, encode_config(evaluation["sign_constraints"])])
-        y_train = np.append(y_train, evaluation["score"])
-
-        # Update best configuration
-        if evaluation.get("valid", False) and evaluation["score"] > best_score:
-            best_score = evaluation["score"]
-            best_config = evaluation
-            print(f"  *** NEW BEST CONFIG! Score: {best_score:.3f}")
-
-    # Summary
-    valid_evaluations = [e for e in evaluations if e.get("valid", False)]
-
-    print(f"\n=== Search Complete ===")
-    print(f"Total evaluations: {len(evaluations)}")
-    print(f"Valid configurations: {len(valid_evaluations)}")
-
-    if best_config:
-        print(f"\nBest configuration:")
-        print(f"  Sign constraints: {best_config['sign_constraints']}")
-        print(f"  Model accuracy drop: {best_config['model_acc_drop']:.3f}")
-        print(f"  Intervention accuracy drop: {best_config['intervention_acc_drop']:.3f}")
-        print(f"  Score: {best_config['score']:.3f}")
-    else:
-        print("No valid configuration found!")
-
-    # Save results
-    results = {
-        "best_config": best_config,
-        "all_evaluations": evaluations,
-        "search_params": {
-            "max_iterations": max_iterations,
-            "n_random_init": n_random_init,
-            "feature_names": feature_names,
-        }
-    }
-
-    return results
 
 main(settings)
