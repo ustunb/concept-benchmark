@@ -1232,13 +1232,13 @@ from concept_benchmark.paths import results_dir
 settings = {
     "samples_per_instance": 4,
     "draw": 0,
-    "draw_only": 1,
+    "draw_only": 0,
     "CBM_type": "separate",
-    "image_dir": str(results_dir.parent / "data" / "robot_images"),
-    "image_size": "large",
+    "image_dir": str(data_dir / "robot_images"),
+    "image_size": "medium",
     "color_mode": "color",
-    "seed": 1002,
-    "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy'))>= 3 else 'drent'",
+    "seed": 1012,
+    "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy') + int(row['has_knees']=='true'))>= 3 else 'drent'",
     "dataset_characterization": "",
     "test_size": 10000,
     "train_size": 3800,
@@ -1266,20 +1266,11 @@ settings = {
         "foot_shape_flat_rounded","foot_shape_pointy_trapezoid",
         "foot_shape_pointy_3sided","foot_shape_flat_lshaped","foot_shape"
     ],
-    "human_alignment": {
-        "foot_shape_pointy_4sided": 5,
-        "foot_shape_pointy_rounded": 3,
-        "foot_shape_pointy_square": 1,
-        "foot_shape_flat_5sided": -5,
-        "foot_shape_flat_square": -1,
-        "foot_shape_flat_trapezoid": 0,
-        "mouth_type": -5,
-        "bias": 4
-    },
+    "human_alignment": {},
     "model_type": "stochastic",
-    "logit_scalar": 1.0,
-    "logit_intercept": 3,
-    "logit_weights": {"mouth_type": 5, "foot_shape": 10},
+    "logit_scalar": 4.2,
+    "logit_intercept": -2,
+    "logit_weights": {"mouth_type": 5, "foot_shape": 8, "has_knees": -5},
     "label_noise_rate": 0,
     "missingness": "complete",
     "missing_rate": 1.0,
@@ -1303,7 +1294,7 @@ settings = {
     "intervention_threshold": 0.2,
 
     "out_dir": str(results_dir / "robots"),
-    "run_name": "cbm_run_1002_subconcepts",
+    "run_name": "scbm_run_1002_newer_alignment_trials",
 
     # Let the script pick up anchors/NPZs; do NOT force recompute.
     "load_detector": "",
