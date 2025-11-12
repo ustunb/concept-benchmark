@@ -729,28 +729,35 @@ class ConceptInterventionRunner:
         )
 
     def _build_batch(
-        self,
-        dataset: ConceptDatasetSample,
-        *,
-        concept_proba: Optional[np.ndarray],
-        concept_true: Optional[np.ndarray],
-        labels: Optional[np.ndarray],
-        instance_ids: Optional[np.ndarray],
+            self,
+            dataset: ConceptDatasetSample,
+            *,
+            concept_proba: Optional[np.ndarray] = None,
+            concept_true: Optional[np.ndarray] = None,
+            labels: Optional[np.ndarray] = None,
+            instance_ids: Optional[np.ndarray] = None,
     ) -> InterventionBatch:
         C_pred = concept_proba
         if C_pred is None:
-            if self.model.concept_detector is None:
-                raise InterventionError(
-                    "Cannot obtain concept predictions: model.concept_detector is None."
-                )
+            if getattr(self.model, "concept_detector", None) is None:
+                raise InterventionError("Cannot obtain concept predictions: model.concept_detector is None.")
             C_pred = self.model.concept_detector.predict(dataset)
 
-        C_true = concept_true if concept_true is not None else dataset.C
+        C_true = concept_true if concept_true is not None else getattr(dataset, "C", None)
+        if C_true is None:
+            C_true = np.zeros_like(C_pred, dtype=int)
+
         if C_true.shape != C_pred.shape:
-            raise InterventionError(
-                "Concept ground truth and predictions must have the same shape."
-            )
+            raise InterventionError("Concept ground truth and predictions must have the same shape.")
+
         y_true = labels if labels is not None else getattr(dataset, "y", None)
+
+        if instance_ids is None:
+            ids = getattr(dataset, "ids", None)
+            if ids is None:
+                ids = np.arange(C_pred.shape[0])
+            instance_ids = np.asarray(ids)
+
         return InterventionBatch(
             C_pred=C_pred,
             C_true=C_true,

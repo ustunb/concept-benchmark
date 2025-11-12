@@ -45,12 +45,19 @@ from scripts.robot_utils import (
 from concept_benchmark.clip_dissect_concepts import extract_concepts_from_descriptions_csv
 from concept_benchmark.clip_dissect_probe import export_probe_dataset
 
-def test_interventions(prob_test, sttngs, acc_det, fe, test):
+def test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None):
     intervention_results = {}
     rng = np.random.default_rng(int(sttngs["seed"]))
     budgets = sttngs.get('budget', [1])
+    if not isinstance(budgets, (list, tuple, np.ndarray)):
+        budgets = [budgets]
     human_acc = sttngs.get("intervention_accuracy", 0.9)
     err_prob = 1.0 - human_acc
+
+    if concept_names is None:
+        concept_names = list(getattr(test, "concepts", []))
+    else:
+        concept_names = list(concept_names)
 
     cbm = ConceptBasedModel(concept_detector=None, front_end_model=fe)
     runner = ConceptInterventionRunner(cbm)
@@ -58,6 +65,22 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
     _intervention_cache = None
 
     for budget in budgets:
+        if int(budget) <= 0:
+            key = f"top_{budget}_human_acc_{int(human_acc * 100)}"
+            n_samples = prob_test.shape[0]
+            intervention_results[key] = {
+                "accuracy": float(acc_det),
+                "accuracy_gain": 0.0,
+                "predictions_intervened_on": 0,
+                "interventions_rate": 0.0,
+                "intervention_rate": 0.0,
+                "avg_edits_per_intervention": 0.0,
+                "total_concept_checks": 0,
+                "total_concept_edits_made": 0,
+                "concepts_intervened": {},
+                "concepts_edits": {},
+            }
+            continue
         config = InterventionConfig(
             max_concepts_per_instance=budget,
             random_state=int(sttngs["seed"]),
@@ -85,6 +108,7 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
             model_name = str(llm_cfg.get("model", "gemini-2.5-flash-lite"))
             api_key_env = str(llm_cfg.get("api_key_env", "GOOGLE_API_KEY"))
             api_key = os.environ.get(api_key_env, "")
+
             if not api_key:
                 raise SystemExit(f"missing API key in env: {api_key_env}")
 
@@ -209,7 +233,7 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
 
                 def _concepts_sig():
                     h = hashlib.sha1()
-                    for name in map(str, test.concepts):
+                    for name in map(str, concept_names):
                         h.update(name.encode("utf-8")); h.update(b"\x00")
                     return h.hexdigest()
 
@@ -256,7 +280,7 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
                     if not missing:
                         continue
                     image_path = _resolve_img_path(i)
-                    names = [str(test.concepts[j]) for j in missing]
+                    names = [str(concept_names[j]) for j in missing]
                     tasks.append((i, image_path, names, missing))
 
                 bs = int((llm_cfg.get("batch_size") or sttngs.get("llm_batch_size") or 64))  # 32x32 → larger batch
@@ -401,7 +425,8 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
 
         concept_intervention_counts = {
             c: f"{int(np.sum(result.mask[:, i]))} ({int(np.sum(actual_edits_mask[:, i]))})"
-            for i, c in enumerate(test.concepts) if intervened_concepts[i]
+            for i, c in enumerate(concept_names)
+            if i < intervened_concepts.shape[0] and intervened_concepts[i]
         }
 
         key = f"top_{budget}_human_acc_{int(human_acc * 100)}"
@@ -1272,11 +1297,12 @@ def run_regimes(settings: Dict) -> Dict:
                 "acc_ground_truth": acc_gt,
                 "concept_acc_mean": float((H_te == test.C).mean()),
             }
-
         elif regime in {"llm", "llm-annotation", "llm_annotation", "clip-annotation", "clip_annotation"}:
-            # Label-free CBM with external concept list and LLM interventions
+            lf_cfg = S.get("lfcbm", {}) or {}
+
             if regime in {"clip-annotation", "clip_annotation"}:
                 cd_cfg = S.get("clip_dissect", {}) or {}
+
                 if int(cd_cfg.get("export_probe", 0)) == 1:
                     probe_out = Path(cd_cfg.get("probe_out_dir", run_dir / "clip_probe"))
                     export_probe_dataset(train, valid, test, cd_cfg, probe_out)
@@ -1285,28 +1311,27 @@ def run_regimes(settings: Dict) -> Dict:
 
                 desc_csv = str(cd_cfg.get("descriptions_csv", "")).strip()
                 n_k = int(cd_cfg.get("n_concepts", S.get("n_concepts", 12)))
-
                 if not desc_csv:
                     raise SystemExit("clip-annotation requires clip_dissect.descriptions_csv")
 
                 p_cf = run_dir / "candidates.clip.jsonl"
                 extract_concepts_from_descriptions_csv(desc_csv, p_cf, n_concepts=n_k)
-
+                p_cf_abs = p_cf.resolve()
             else:
                 llm_concepts_file = S.get("llm_concepts_file", "") or S.get("concepts_file", "")
                 if not llm_concepts_file:
                     raise SystemExit(
-                        "llm-annotation requires a concepts file: set 'llm_concepts_file' or 'concepts_file'.")
-
+                        "llm-annotation requires a concepts file: set 'llm_concepts_file' or 'concepts_file'."
+                    )
                 p_cf = Path(str(llm_concepts_file))
-                if not p_cf.exists():
-                    raise SystemExit(f"concepts file not found: {p_cf}")
+                p_cf_abs = (p_cf if p_cf.is_absolute() else (Path.cwd() / p_cf)).resolve()
+                if not p_cf_abs.exists():
+                    raise SystemExit(f"concepts file not found: {p_cf_abs}")
 
-            concept_set = LFConceptSet.from_file(str(p_cf), dataset_keys=list(test.concepts))
-
+            concept_set = LFConceptSet.from_file(str(p_cf_abs))
             if not getattr(concept_set, "texts", None):
                 raise SystemExit(f"concepts file parsed empty: {p_cf}")
-            lf_cfg = S.get("lfcbm", {})
+
             cfg = LFTrainingConfig(
                 clip_model=str(lf_cfg.get("clip_model", "ViT-B-32")),
                 clip_pretrained=str(lf_cfg.get("clip_pretrained", "laion2b_s34b_b79k")),
@@ -1322,8 +1347,8 @@ def run_regimes(settings: Dict) -> Dict:
                 cache_dir=run_dir / "lfcbm_cache",
                 batch_size=int(lf_cfg.get("batch_size", 256)),
             )
-            lf = LabelFreeCBM(cfg)
 
+            lf = LabelFreeCBM(cfg)
             stats = lf.fit(
                 train_X=_resolve_items(train.X, getattr(train, "base_dir", Path("."))),
                 train_y=train.y.astype(int),
@@ -1356,7 +1381,8 @@ def run_regimes(settings: Dict) -> Dict:
                     "C_te": test.C.astype(np.float32),
                     "y_tr": train.y.astype(int),
                     "y_te": test.y.astype(int),
-                    "concepts": np.array(list(test.concepts)),
+                    "concepts": np.array(list(getattr(test, "concepts", []))),
+                    "lf_concepts": np.array(list(concept_set.keys)),
                 },
             )
 
@@ -1370,30 +1396,38 @@ def run_regimes(settings: Dict) -> Dict:
             y_pred_det = fe.predict_proba(P_te)
             acc_det = float((y_pred_det.argmax(1) == test.y.astype(int)).mean())
 
-            C_oracle = np.clip(test.C.astype(np.float32), 1e-6, 1 - 1e-6)
-            y_pred_gt = fe.predict_proba(C_oracle)
-            acc_gt = float((y_pred_gt.argmax(1) == test.y.astype(int)).mean())
-
-            per_concept_acc, train_per_concept_acc = _get_concept_accuracies(H_te, H_tr, test, train)
+            acc_gt = None
+            concept_det_acc_mean = None
+            per_concept_acc = {}
+            train_per_concept_acc = {}
+            per_sub_acc = {}
 
             S_int = dict(S)
             S_int.setdefault("intervention_expert", "llm")
-            S_int.setdefault("intervention_llm",
-                             {"provider": "gemini", "model": "gemini-2.5-flash-lite", "api_key_env": "GOOGLE_API_KEY"})
+            S_int.setdefault(
+                "intervention_llm",
+                {"provider": "gemini", "model": "gemini-2.5-flash-lite", "api_key_env": "GOOGLE_API_KEY"},
+            )
+
             ia_val = float(S.get("human_annotation_accuracy", 0.8))
-            _, _, intervention_results = test_interventions(P_te, {**S_int, "intervention_accuracy": ia_val}, acc_det,
-                                                            fe, test)
+            _, _, intervention_results = test_interventions(
+                P_te,
+                {**S_int, "intervention_accuracy": ia_val},
+                acc_det,
+                fe,
+                test,
+                concept_names=list(concept_set.keys),
+            )
 
-            per_sub_acc = _emit_confusion(run_dir, fe, H_te, P_te, test, S.get("drop_concepts", []))
             catalog_csv_path, meta_extra = _write_catalogs(run_dir, data.meta)
-
             lf_paths = lf.save(run_dir / "lfcbm_artifacts")
+
             meta = {
                 "settings": S,
                 "run_dir": str(run_dir),
                 "artifacts": {**lf_paths, "detector": "", "frontend": str(fe_path), "probs_npz": str(prob_npz_path)},
                 "splits": {"n_train": _len(train), "n_valid": _len(valid), "n_test": _len(test)},
-                "concepts": list(test.concepts),
+                "concepts": list(concept_set.keys),
                 "intervention_budgets": S.get("budget", []),
                 "intervention_acc": ia_val,
                 "naming_slug": slug,
@@ -1413,27 +1447,26 @@ def run_regimes(settings: Dict) -> Dict:
 
             metrics = {
                 "cbm_acc_detected": float(acc_det),
-                "cbm_acc_oracle": float(acc_gt),
-                "concept_det_acc_mean": float((H_te == test.C).mean()),
+                "cbm_acc_oracle": None,
+                "concept_det_acc_mean": None,
                 "interventions": intervention_results,
                 "concept_accuracies": per_concept_acc,
                 "model_accuracies_per_concept": per_sub_acc,
                 "train_concept_accuracies": train_per_concept_acc,
                 "prob_test_npz": str(prob_npz_path),
-                "concept_names": list(test.concepts),
+                "concept_names": list(concept_set.keys),
                 "lfcbm_train_stats": stats,
             }
 
             with open(run_dir / f"meta_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
                 json.dump(meta, f, indent=2)
-
             with open(run_dir / f"metrics_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
                 json.dump(metrics, f, indent=2)
 
             results[regime] = {
                 "acc_detected": acc_det,
-                "acc_ground_truth": acc_gt,
-                "concept_acc_mean": float((H_te == test.C).mean()),
+                "acc_ground_truth": None,
+                "concept_mean": None,
             }
 
     def _jsonify(o):
@@ -1469,7 +1502,7 @@ settings = {
     "draw": 0,
     "draw_only": 0,
     "CBM_type": "separate",
-    "image_dir": str(data_dir / "robot_images_large"),
+    "image_dir": str(data_dir / "robot_images_low_res"),
     "image_size": "medium",
     "color_mode": "color",
     "seed": 1012,
@@ -1519,7 +1552,7 @@ settings = {
         {"concepts": {"foot_shape_flat_5sided": 1}, "min_fraction": 0.49},
     ],
 
-    "budget": [3],
+    "budget": [0],
 
     # Keep 0.9 here to match your existing NPZ filename slug (int-acc90),
     # but "perfect" will still run with 1.0 human accuracy internally.
@@ -1538,7 +1571,8 @@ settings = {
 
     # Only run perfect to regenerate interventions/metrics
     "subjective_grid": [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4],
-    "regimes": ["clip-annotation"],
+    "regimes": ["llm-annotation"],
+    "llm_concepts_file": data_dir /"robot_images/candidates.llm.jsonl",
 
     "concepts_file": None,
     "lfcbm": {
