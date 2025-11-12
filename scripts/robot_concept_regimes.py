@@ -42,6 +42,8 @@ from scripts.robot_utils import (
     _get_confusion_matrix,
     _get_accuracies_per_subconcept,
 )
+from concept_benchmark.clip_dissect_concepts import extract_concepts_from_descriptions_csv
+from concept_benchmark.clip_dissect_probe import export_probe_dataset
 
 def test_interventions(prob_test, sttngs, acc_det, fe, test):
     intervention_results = {}
@@ -68,7 +70,8 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
         setup_id = int(sttngs.get("setup", -1))
         if setup_id == 5:
             sttngs.setdefault("intervention_expert", "llm")
-            sttngs.setdefault("intervention_llm", {"provider": "gemini", "model": "2.5-flash-lite", "api_key_env": "GOOGLE_API_KEY"})
+            sttngs.setdefault("intervention_llm",
+                              {"provider": "gemini", "model": "gemini-2.5-flash-lite", "api_key_env": "GOOGLE_API_KEY"})
         elif setup_id == 4:
             sttngs.pop("intervention_expert", None)
             sttngs.pop("intervention_llm", None)
@@ -77,7 +80,7 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
             from types import SimpleNamespace
             llm_cfg = sttngs.get("intervention_llm", {}) or {}
             provider = str(llm_cfg.get("provider", "gemini"))
-            model_name = str(llm_cfg.get("model", "2.5-flash-lite"))
+            model_name = str(llm_cfg.get("model", "gemini-2.5-flash-lite"))
             api_key_env = str(llm_cfg.get("api_key_env", "GOOGLE_API_KEY"))
             api_key = os.environ.get(api_key_env, "")
             if not api_key:
@@ -1059,16 +1062,37 @@ def run_regimes(settings: Dict) -> Dict:
                 "concept_acc_mean": float((H_te == test.C).mean()),
             }
 
-        elif regime in {"llm", "llm-annotation", "llm_annotation"}:
+        elif regime in {"llm", "llm-annotation", "llm_annotation", "clip-annotation", "clip_annotation"}:
+            # Label-free CBM with external concept list and LLM interventions
+            if regime in {"clip-annotation", "clip_annotation"}:
+                cd_cfg = S.get("clip_dissect", {}) or {}
+                if int(cd_cfg.get("export_probe", 0)) == 1:
+                    probe_out = Path(cd_cfg.get("probe_out_dir", run_dir / "clip_probe"))
+                    export_probe_dataset(train, valid, test, cd_cfg, probe_out)
+                    if int(cd_cfg.get("export_only", 0)) == 1:
+                        return {"status": "exported_probe", "probe_out": str(probe_out)}
 
-        # Label-free CBM with LLM concept list and LLM interventions
-            llm_concepts_file = S.get("llm_concepts_file", "") or S.get("concepts_file", "")
-            if not llm_concepts_file:
-                raise SystemExit("llm-annotation requires a concepts file: set 'llm_concepts_file' or 'concepts_file'.")
-            p_cf = Path(str(llm_concepts_file))
-            if not p_cf.exists():
-                raise SystemExit(f"concepts file not found: {p_cf}")
+                desc_csv = str(cd_cfg.get("descriptions_csv", "")).strip()
+                n_k = int(cd_cfg.get("n_concepts", S.get("n_concepts", 12)))
+
+                if not desc_csv:
+                    raise SystemExit("clip-annotation requires clip_dissect.descriptions_csv")
+
+                p_cf = run_dir / "candidates.clip.jsonl"
+                extract_concepts_from_descriptions_csv(desc_csv, p_cf, n_concepts=n_k)
+
+            else:
+                llm_concepts_file = S.get("llm_concepts_file", "") or S.get("concepts_file", "")
+                if not llm_concepts_file:
+                    raise SystemExit(
+                        "llm-annotation requires a concepts file: set 'llm_concepts_file' or 'concepts_file'.")
+
+                p_cf = Path(str(llm_concepts_file))
+                if not p_cf.exists():
+                    raise SystemExit(f"concepts file not found: {p_cf}")
+
             concept_set = LFConceptSet.from_file(str(p_cf), dataset_keys=list(test.concepts))
+
             if not getattr(concept_set, "texts", None):
                 raise SystemExit(f"concepts file parsed empty: {p_cf}")
             lf_cfg = S.get("lfcbm", {})
@@ -1144,7 +1168,7 @@ def run_regimes(settings: Dict) -> Dict:
             S_int = dict(S)
             S_int.setdefault("intervention_expert", "llm")
             S_int.setdefault("intervention_llm",
-                             {"provider": "gemini", "model": "2.5-flash-lite", "api_key_env": "GOOGLE_API_KEY"})
+                             {"provider": "gemini", "model": "gemini-2.5-flash-lite", "api_key_env": "GOOGLE_API_KEY"})
             ia_val = float(S.get("human_annotation_accuracy", 0.8))
             _, _, intervention_results = test_interventions(P_te, {**S_int, "intervention_accuracy": ia_val}, acc_det,
                                                             fe, test)
@@ -1234,7 +1258,7 @@ settings = {
     "draw": 0,
     "draw_only": 0,
     "CBM_type": "separate",
-    "image_dir": str(data_dir / "robot_images"),
+    "image_dir": str(data_dir / "robot_images_large"),
     "image_size": "medium",
     "color_mode": "color",
     "seed": 1012,
@@ -1303,7 +1327,7 @@ settings = {
 
     # Only run perfect to regenerate interventions/metrics
     "subjective_grid": [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4],
-    "regimes": ["perfect", "expert", "subjective", "machine", "llm"],
+    "regimes": ["clip-annotation"],
 
     "concepts_file": None,
     "lfcbm": {
@@ -1314,6 +1338,13 @@ settings = {
       "target_nonzero_per_class": [25, 35],
       "max_epochs": 200,
       "patience": 10
+    },
+    "clip_dissect": {
+      "export_probe": 1,
+      "probe_select": "train",
+      "probe_subset": {},
+      "descriptions_csv": "",
+      "n_concepts": 12
     }
 }
 

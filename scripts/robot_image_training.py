@@ -22,17 +22,17 @@ from scripts.robot_utils import _apply_missing, _apply_label_noise, _rate_tag, _
 
 settings = {
     "samples_per_instance": 4,
-    "draw": 0,
+    "draw": 1,
     "CBM_type": "separate", #"sequential"
     "image_dir": "./data/robot_images",
-    "image_size": "medium",
+    "image_size": "large",
     "color_mode": "color",
     "train_dnn": 0,
-    "seed": 1002,
+    "seed": 1001,
     "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy'))>= 3 else 'drent'",
     'dataset_characterization': "",
-    "test_size": 10000,
-    "train_size": 3800,
+    "test_size": 1,
+    "train_size": 100,
     "knows_concepts": False,
     "concepts": {
                 "head_shape": ["square", "round"],
@@ -365,6 +365,27 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
     return budgets, human_acc, intervention_results
 
 
+def _persist_image_meta_to_folder(data, image_dir: Path):
+    df = data.meta.get("catalog_df")
+    if df is None:
+        return
+    cols = [c for c in ["path", "filepath", "filename", "image", "image_path", "relative_path"] if c in df.columns]
+    if not cols:
+        return
+    path_col = cols[0]
+    image_dir = Path(image_dir)
+    for _, row in df.iterrows():
+        p = Path(row[path_col])
+        if not p.is_absolute():
+            p = image_dir / p
+        sidecar = p.with_suffix(p.suffix + ".json")
+        meta = {k: (v.item() if hasattr(v, "item") else (v.tolist() if hasattr(v, "tolist") else v)) for k, v in row.items()}
+        sidecar.parent.mkdir(parents=True, exist_ok=True)
+        with open(sidecar, "w") as f:
+            json.dump(meta, f, ensure_ascii=False)
+    (image_dir / "catalog.csv").parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(image_dir / "catalog.csv", index=False)
+
 def main(sttngs):
     ###########################################################################
     ##############################    NAMING    ##############################
@@ -410,6 +431,7 @@ def main(sttngs):
     })
 
     data = create_synthetic_dataset(**params)
+    _persist_image_meta_to_folder(data, Path(params["output_directory"]))
 
     tf = transforms.Compose([transforms.ToTensor()])
     data.transform = tf
