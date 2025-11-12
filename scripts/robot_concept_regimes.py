@@ -54,6 +54,8 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
 
     cbm = ConceptBasedModel(concept_detector=None, front_end_model=fe)
     runner = ConceptInterventionRunner(cbm)
+    llm_cache = None
+    _intervention_cache = None
 
     for budget in budgets:
         config = InterventionConfig(
@@ -71,7 +73,7 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
         if setup_id == 5:
             sttngs.setdefault("intervention_expert", "llm")
             sttngs.setdefault("intervention_llm",
-                              {"provider": "gemini", "model": "gemini-2.5-flash-lite", "api_key_env": "GOOGLE_API_KEY"})
+                              {"provider": "gemini", "model": "gemini-2.5-flash-lite", "api_key_env": "GOOGLE_API_KEY", "batch_size": 64})
         elif setup_id == 4:
             sttngs.pop("intervention_expert", None)
             sttngs.pop("intervention_llm", None)
@@ -121,25 +123,233 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
                     pass
                 return parsed
 
-            # propose interventions first, then ask the LLM only for the selected concepts
-            batch = runner._build_batch(dataset=test, concept_proba=prob_test, labels=test.y.astype(int))
-            proposal = strategy.propose(cbm, batch, config)
-            mask = proposal.mask
+            def _llm_judge_batch(image_paths: List[str], per_image_names: List[List[str]]) -> List[Dict[str, int]]:
+                N = len(image_paths)
+                lines = []
+                for i, names in enumerate(per_image_names):
+                    lines.append(f"Image {i}: " + ", ".join(names))
+                prompt = (
+                    f"You will be shown {N} robot image(s) in order. "
+                    f"For each image i (0..{N-1}), output ONLY a JSON array of length {N} "
+                    "where array[i] is a JSON object mapping the listed concepts to 0/1 integers "
+                    "(ABSENT=0, PRESENT=1). No extra keys. Integers only.\n\n"
+                    "Per-image concepts:\n- " + "\n- ".join(lines)
+                )
+                raw = (client.generate(prompt, image_paths) or "").strip()
 
-            C_before = batch.C_pred
-            y_prob_before = fe.predict_proba((C_before >= 0.5).astype(int))
+                def _to01(v):
+                    if isinstance(v, bool):
+                        return 1 if v else 0
+                    s = str(v).strip().lower()
+                    return 1 if s in {"1","true","yes","present"} else 0
 
-            C_true_llm = np.full_like(C_before, np.nan, dtype=float)
-            for i in range(C_before.shape[0]):
-                idxs = np.where(mask[i])[0]
-                if idxs.size == 0:
-                    continue
-                image_path = _resolve_img_path(i)
-                names = [str(test.concepts[j]) for j in idxs]
-                votes = _llm_judge(image_path, names)
-                for j, name in zip(idxs, names):
-                    if name in votes:
-                        C_true_llm[i, j] = float(votes[name])
+                out: List[Dict[str,int]] = [dict() for _ in range(N)]
+                try:
+                    obj = json.loads(raw)
+                    if isinstance(obj, list):
+                        for i, d in enumerate(obj[:N]):
+                            if isinstance(d, dict):
+                                allow = set(per_image_names[i])
+                                for k, v in d.items():
+                                    if k in allow:
+                                        out[i][str(k)] = _to01(v)
+                    elif isinstance(obj, dict):
+                        for i_str, d in obj.items():
+                            try:
+                                i = int(i_str)
+                            except Exception:
+                                continue
+                            if 0 <= i < N and isinstance(d, dict):
+                                allow = set(per_image_names[i])
+                                for k, v in d.items():
+                                    if k in allow:
+                                        out[i][str(k)] = _to01(v)
+                except Exception:
+                    for i, line in enumerate(raw.splitlines()):
+                        if i >= N:
+                            break
+                        line = line.strip()
+                        if not (line.startswith("{") and line.endswith("}")):
+                            continue
+                        try:
+                            d = json.loads(line)
+                        except Exception:
+                            continue
+                        if isinstance(d, dict):
+                            allow = set(per_image_names[i])
+                            for k, v in d.items():
+                                if k in allow:
+                                    out[i][str(k)] = _to01(v)
+                return out
+
+            # compute-once at K=5 (or the max requested), batch LLM once, reuse for smaller budgets
+            if llm_cache is None:
+                batch = runner._build_batch(dataset=test, concept_proba=prob_test, labels=test.y.astype(int))
+                maxK = int(min(5, batch.C_pred.shape[1]))
+                config_max = InterventionConfig(
+                    max_concepts_per_instance=maxK,
+                    random_state=int(sttngs["seed"]),
+                    score_threshold=sttngs.get("intervention_threshold", 1.0),
+                    noise=1.0 - human_acc,
+                    select_only_abstained=bool(sttngs.get("select_only_abstained", False)),
+                    tau=sttngs.get("tau", None),
+                )
+                proposal_max = strategy.propose(cbm, batch, config_max)
+                mask_max = proposal_max.mask
+
+                C_before = batch.C_pred
+                y_prob_before = fe.predict_proba((C_before >= 0.5).astype(int))
+
+                C_true_llm = np.full_like(C_before, np.nan, dtype=float)
+
+                # batched LLM call over only the selected concepts at K=maxK, with on-disk cache
+                run_root = Path(str(sttngs.get("run_dir", sttngs.get("out_dir", "."))))
+                cache_dir = run_root / "cache"
+                cache_dir.mkdir(parents=True, exist_ok=True)
+
+                def _concepts_sig():
+                    h = hashlib.sha1()
+                    for name in map(str, test.concepts):
+                        h.update(name.encode("utf-8")); h.update(b"\x00")
+                    return h.hexdigest()
+
+                def _dataset_sig():
+                    h = hashlib.sha1()
+                    for pth in map(str, test.X):
+                        h.update(pth.encode("utf-8")); h.update(b"\x00")
+                    return h.hexdigest()
+
+                cache_path = cache_dir / f"llm_interventions_{_concepts_sig()}_{_dataset_sig()}_n5.jsonl"
+
+                def _load_cache():
+                    d = {}
+                    if cache_path.exists():
+                        with open(cache_path, "r", encoding="utf-8") as f:
+                            for line in f:
+                                try:
+                                    rec = json.loads(line)
+                                    i0 = int(rec["i"])
+                                    votes_idx = {int(k): int(v) for k, v in rec.get("votes_idx", {}).items()}
+                                    d[i0] = votes_idx
+                                except Exception:
+                                    continue
+                    return d
+
+                def _flush_cache(d):
+                    with open(cache_path, "w", encoding="utf-8") as f:
+                        for i0, votes_idx in d.items():
+                            f.write(json.dumps({"i": int(i0), "votes_idx": {str(k): int(v) for k, v in votes_idx.items()}}) + "\n")
+
+                if _intervention_cache is None:
+                    _intervention_cache = _load_cache()
+
+                tasks = []
+                for i in range(C_before.shape[0]):
+                    idxs = np.where(mask_max[i])[0]
+                    if idxs.size == 0:
+                        continue
+                    known = _intervention_cache.get(i, {})
+                    for j in idxs:
+                        if j in known:
+                            C_true_llm[i, j] = float(known[j])
+                    missing = [j for j in idxs if j not in known]
+                    if not missing:
+                        continue
+                    image_path = _resolve_img_path(i)
+                    names = [str(test.concepts[j]) for j in missing]
+                    tasks.append((i, image_path, names, missing))
+
+                bs = int((llm_cfg.get("batch_size") or sttngs.get("llm_batch_size") or 64))  # 32x32 → larger batch
+                for s in range(0, len(tasks), bs):
+                    chunk = tasks[s:s + bs]
+                    prompt_lines = [
+                        "You will be shown multiple robot images.",
+                        "For each image, output 0/1 for the listed concepts.",
+                        "Return ONE JSON object mapping image indices (as strings) to per-image maps.",
+                        'Example: {"12":{"conceptA":1,"conceptB":0},"27":{"conceptA":0}}'
+                    ]
+                    for (i_idx, _p, names, _idxs) in chunk:
+                        prompt_lines.append("\n# image " + str(i_idx) + "\nconcepts:\n- " + "\n- ".join(names))
+                    prompt = "\n".join(prompt_lines)
+                    image_paths = [p for (_i, p, _n, _j) in chunk]
+                    raw = (client.generate(prompt, image_paths) or "").strip()
+
+                    parsed = {}
+                    try:
+                        obj = json.loads(raw)
+                        if isinstance(obj, dict):
+                            parsed = {str(k): v for k, v in obj.items() if isinstance(v, dict)}
+                    except Exception:
+                        parsed = {}
+
+                    if not parsed:
+                        for (i_idx, pth, names, idxs) in chunk:
+                            votes = _llm_judge(pth, names)
+                            if i_idx not in _intervention_cache:
+                                _intervention_cache[i_idx] = {}
+                            for j, name in zip(idxs, names):
+                                if name in votes:
+                                    v = 1 if votes[name] else 0
+                                    C_true_llm[i_idx, j] = float(v)
+                                    _intervention_cache[i_idx][j] = v
+                    else:
+                        for (i_idx, _pth, names, idxs) in chunk:
+                            d = parsed.get(str(i_idx), {})
+                            if isinstance(d, dict):
+                                if i_idx not in _intervention_cache:
+                                    _intervention_cache[i_idx] = {}
+                                for j, name in zip(idxs, names):
+                                    v = d.get(name)
+                                    if isinstance(v, bool):
+                                        vv = 1 if v else 0
+                                    elif isinstance(v, (int, float, str)):
+                                        s = str(v).strip().lower()
+                                        vv = 1 if s in {"1", "true", "yes", "present"} else 0
+                                    else:
+                                        continue
+                                    C_true_llm[i_idx, j] = float(vv)
+                                    _intervention_cache[i_idx][j] = vv
+                _flush_cache(_intervention_cache)
+
+                # rank the K concepts per instance by single-bit flip effect (to reuse for budgets < K)
+                order = [np.array([], dtype=int)] * C_before.shape[0]
+                for i in range(C_before.shape[0]):
+                    sel = np.where(mask_max[i])[0]
+                    if sel.size == 0:
+                        order[i] = np.array([], dtype=int)
+                        continue
+                    base_vec = (C_before[i] >= 0.5).astype(int)
+                    base_prob = fe.predict_proba(base_vec[None, :])[0]
+                    pairs = []
+                    for j in sel:
+                        flipped = base_vec.copy()
+                        flipped[j] = 1 - flipped[j]
+                        p_after = fe.predict_proba(flipped[None, :])[0]
+                        score = float(np.max(np.abs(p_after - base_prob)))
+                        pairs.append((j, score))
+                    order[i] = np.asarray([j for (j, _) in sorted(pairs, key=lambda t: t[1], reverse=True)], dtype=int)
+
+                llm_cache = {
+                    "mask_max": mask_max,
+                    "C_true_llm": C_true_llm,
+                    "C_before": C_before,
+                    "y_prob_before": y_prob_before,
+                    "order": order,
+                }
+
+            # derive current-budget mask from the cached K=5 selection
+            mask_max = llm_cache["mask_max"]
+            C_true_llm = llm_cache["C_true_llm"]
+            C_before = llm_cache["C_before"]
+            y_prob_before = llm_cache["y_prob_before"]
+            order = llm_cache["order"]
+
+            mask = np.zeros_like(mask_max, dtype=bool)
+            for i in range(mask.shape[0]):
+                if order[i].size:
+                    k_take = int(min(budget, order[i].size))
+                    if k_take > 0:
+                        mask[i, order[i][:k_take]] = True
 
             overwrite_mask = mask & ~np.isnan(C_true_llm)
             C_after = np.where(overwrite_mask, C_true_llm, C_before)
@@ -155,6 +365,7 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
                 y_prob_after=y_prob_after,
                 y_pred_after=y_pred_after,
             )
+
         else:
             result = runner.run(
                 strategy=strategy,
