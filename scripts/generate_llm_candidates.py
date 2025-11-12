@@ -33,7 +33,7 @@ settings = {
     "ext": ".png",
     "llm": True,
     "provider": "gemini",
-    "model": "gemini-2.5-pro",
+    "model": "gemini-2.5-flash-lite",
     "api_key_env": "GEMINI_API_KEY",
     "out_file": "candidates.llm.jsonl",
     "from_catalog": "results/robots/cbm_run_1002_subconcepts__draw_only/catalog.csv",
@@ -43,6 +43,7 @@ settings = {
     "debug": True,
     "force_all_subtypes": True,
     "n_concepts": 12,
+    "use_full_train": False,
 }
 
 
@@ -268,6 +269,7 @@ def parse_cli(argv=None):
                    default=settings.get("force_all_subtypes", False))
     p.add_argument("--subtypes-csv", default=settings.get("subtypes_csv", "catalog_with_spurious.csv"))
     p.add_argument("--n-concepts", type=int, default=settings.get("n_concepts", 12))
+    p.add_argument("--use-full-train", action="store_true", default=settings.get("use_full_train", False))
     args, _ = p.parse_known_args(argv)
     return vars(args)
 
@@ -292,6 +294,7 @@ def run(cfg):
     force_all_subtypes = bool(cfg.get("force_all_subtypes", False))
     subtypes_csv_name = str(cfg.get("subtypes_csv") or "catalog_with_spurious.csv")
     n_concepts = int(cfg.get("n_concepts") or settings.get("n_concepts", 12))
+    use_full_train = bool(cfg.get("use_full_train") or settings.get("use_full_train", False))
 
     if not classes:
         raise SystemExit("missing --classes")
@@ -300,7 +303,7 @@ def run(cfg):
     from_catalog = (cfg.get("from_catalog") or settings.get("from_catalog", "")).strip()
     per_class = int(cfg.get("per_class") or settings.get("per_class", 0) or 0)
     seed = int(cfg.get("seed") or settings.get("seed", 0) or 0)
-    if from_catalog and (per_class > 0 or force_all_subtypes):
+    if from_catalog and (per_class > 0 or force_all_subtypes or use_full_train):
         import csv, random
         cat_path = Path(from_catalog)
         if not cat_path.exists():
@@ -522,7 +525,10 @@ def run(cfg):
             print("bucket counts before sampling:", pre_counts)
             print("roots tried:", [str(x) for x in bases])
 
-        if force_all_subtypes:
+        if use_full_train:
+            for c in classes:
+                examples[c] = list(dict.fromkeys(buckets.get(c, [])))
+        elif force_all_subtypes:
             sp_path = cat_path.with_name(subtypes_csv_name)
             if not sp_path.exists():
                 raise SystemExit(f"subtypes csv not found: {sp_path}")
@@ -727,6 +733,7 @@ def run(cfg):
         for c in classes:
             image_list.extend(examples.get(c, []))
         key = os.environ.get(api_key_env, "")
+
         if not key:
             raise SystemExit(f"missing API key in env: {api_key_env}")
         client = _make_client(provider, model_name, key)
