@@ -209,7 +209,8 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None)
             # compute-once at K=5 (or the max requested), batch LLM once, reuse for smaller budgets
             if llm_cache is None:
                 batch = runner._build_batch(dataset=test, concept_proba=prob_test, labels=test.y.astype(int))
-                maxK = int(min(5, batch.C_pred.shape[1]))
+                max_budget = max(int(b) for b in budgets)
+                maxK = int(min(max_budget, batch.C_pred.shape[1]))
                 config_max = InterventionConfig(
                     max_concepts_per_instance=maxK,
                     random_state=int(sttngs["seed"]),
@@ -243,7 +244,7 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None)
                         h.update(pth.encode("utf-8")); h.update(b"\x00")
                     return h.hexdigest()
 
-                cache_path = cache_dir / f"llm_interventions_{_concepts_sig()}_{_dataset_sig()}_n5.jsonl"
+                cache_path = cache_dir / f"llm_interventions_{_concepts_sig()}_{_dataset_sig()}.jsonl"
 
                 def _load_cache():
                     d = {}
@@ -1552,7 +1553,7 @@ settings = {
         {"concepts": {"foot_shape_flat_5sided": 1}, "min_fraction": 0.49},
     ],
 
-    "budget": [0],
+    "budget": [1],
 
     # Keep 0.9 here to match your existing NPZ filename slug (int-acc90),
     # but "perfect" will still run with 1.0 human accuracy internally.
