@@ -65,14 +65,17 @@ def train_eval_image(paths_tr, y_tr, paths_te, y_te, epochs, batch_size, lr, dev
     model.eval()
     correct = 0
     total = 0
+    preds = []
     with torch.no_grad():
         for xb, yb in dl_te:
             xb = xb.to(device)
             yb = yb.to(device)
             out = model(xb)
             pred = out.argmax(dim=-1)
+            preds.append(pred.cpu().numpy())
             correct += (pred == yb).sum().item()
             total += yb.numel()
 
+
     acc = correct / total if total > 0 else 0.0
-    return float(acc), model
+    return float(acc), model, preds
