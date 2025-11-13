@@ -101,7 +101,7 @@ def create_sudoku_dataset(
 
     # ---- valid boards
     for i in range(n_valid):
-        b = generate_valid_board(n=n)
+        b = generate_valid_board(n=n, use_scip=True)
         if data_type == "image":
             img_path = ds_path / f"valid_{i}.png"
             transform(b, outfile=img_path)
@@ -126,7 +126,7 @@ def create_sudoku_dataset(
     # ---- invalid boards
     for i in range(n_invalid):
         num_actions = max(1, int(random.randint(1, max_corrupt)))
-        b = generate_invalid_board(base_board=generate_valid_board(n=n), num_actions=num_actions)
+        b = generate_invalid_board(base_board=generate_valid_board(n=n, use_scip=True), num_actions=num_actions)
         concepts = get_concepts(b, return_label=False)
         c_base = np.array(list(concepts.values()), dtype=np.int32).flatten()
 

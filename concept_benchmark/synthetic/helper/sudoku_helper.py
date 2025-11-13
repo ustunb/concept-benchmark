@@ -3,6 +3,12 @@ from typing import Optional, Sequence, Tuple
 
 import numpy as np
 
+# try to import SCIP; if missing, we'll fall back to the old permutation generator
+try:
+    from pyscipopt import Model  # type: ignore
+except ImportError:
+    Model = None
+
 # --------------------------
 # Parametric base board & valid board generation (supports N = n*n)
 # --------------------------
@@ -73,8 +79,8 @@ def relabel_digits(board: np.ndarray, N: int | None = None) -> np.ndarray:
     return vfunc(board).astype(int)
 
 
-def generate_valid_board(n: int = 3) -> np.ndarray:
-    """Generate a valid N=n*n Sudoku board using isotopy-safe shuffles and relabeling."""
+def _generate_valid_board_permutation(n: int = 3) -> np.ndarray:
+    """Original isotopy-safe generator, kept for fallback."""
     N = n * n
     board = build_base_board(n)
     board = shuffle_rows(board, n)
@@ -83,6 +89,21 @@ def generate_valid_board(n: int = 3) -> np.ndarray:
     board = shuffle_col_stacks(board, n)
     board = relabel_digits(board, N)
     return board
+
+
+def generate_valid_board(n: int = 3) -> np.ndarray:
+    """
+    Drop-in replacement: same name/signature.
+
+    Now prefers the SCIP-based generator (more varied), but if SCIP isn't
+    available we'll fall back to the original permutation-based generator.
+    """
+    if Model is not None:
+        # use SCIP-based one below
+        return generate_valid_board_scip(n=n)
+    # fallback to old behavior
+    return _generate_valid_board_permutation(n=n)
+
 
 # Backward-compatibility constant for 9x9 (n=3)
 BASE_BOARD = build_base_board(3)
@@ -612,11 +633,18 @@ def solve_sudoku_with_random_objective(board: np.ndarray, seed: int | None = Non
     """
     Like solve_sudoku_with_scip, but add a random objective so SCIP picks
     a random feasible solution instead of the first one it finds.
+
+    CHANGE: if seed is None, we now generate a fresh random seed so that
+    each call can differ even under stable outer randomness.
     """
     if Model is None:
         raise ImportError("pyscipopt is required. Install with `pip install pyscipopt`.")
     N, n = _assert_board_size(board)
     digits = range(1, N + 1)
+
+    # ensure we have a concrete seed for this SCIP call
+    if seed is None:
+        seed = random.SystemRandom().randrange(1 << 30)
     rng = random.Random(seed)
 
     m = Model("sudoku-rand")
@@ -678,50 +706,6 @@ def solve_sudoku_with_random_objective(board: np.ndarray, seed: int | None = Non
     return out
 
 
-def generate_valid_board_scip(n: int = 3, seed: int | None = None) -> np.ndarray:
-    """
-    Generate a valid Sudoku board by:
-    1) pre-filling 1 random legal cell per block,
-    2) solving with a random objective,
-    3) applying a final random digit relabel.
-    This produces boards that look less like simple permutations.
-    """
-    if Model is None:
-        raise ImportError("pyscipopt is required for SCIP-based generation. Install with `pip install pyscipopt`.")
-
-    N = n * n
-    rng = random.Random(seed)
-
-    partial = np.zeros((N, N), dtype=int)
-
-    digits = list(range(1, N + 1))
-    for br in range(n):
-        for bc in range(n):
-            # cells inside this block
-            cells = [(r, c) for r in range(br * n, br * n + n)
-                             for c in range(bc * n, bc * n + n)]
-            rng.shuffle(cells)
-            rng.shuffle(digits)
-            placed = False
-            for (r, c) in cells:
-                for d in digits:
-                    if is_locally_safe(partial, r, c, d, blank_value=0):
-                        partial[r, c] = d
-                        placed = True
-                        break
-                if placed:
-                    break
-
-    solved = solve_sudoku_with_random_objective(partial, seed=seed)
-
-    digits_perm = list(range(1, N + 1))
-    rng.shuffle(digits_perm)
-    mapping = {d: digits_perm[d - 1] for d in range(1, N + 1)}
-    vfunc = np.vectorize(lambda x: mapping[int(x)])
-    solved = vfunc(solved).astype(int)
-
-    return solved
-
 def is_locally_safe(
     board: np.ndarray,
     r: int,
@@ -751,3 +735,50 @@ def is_locally_safe(
             if (rr != r or cc != c) and board[rr, cc] == val:
                 return False
     return True
+
+
+def generate_valid_board_scip(n: int = 3, seed: int | None = None) -> np.ndarray:
+    """
+    Generate a valid Sudoku board by:
+    1) pre-filling 1 random legal cell per block,
+    2) solving with a random objective (with a fresh derived seed),
+    3) applying a final random digit relabel.
+    """
+    if Model is None:
+        raise ImportError("pyscipopt is required for SCIP-based generation. Install with `pip install pyscipopt`.")
+
+    N = n * n
+    rng = random.Random(seed)
+
+    partial = np.zeros((N, N), dtype=int)
+
+    digits = list(range(1, N + 1))
+    for br in range(n):
+        for bc in range(n):
+            # cells inside this block
+            cells = [(r, c) for r in range(br * n, br * n + n)
+                             for c in range(bc * n, bc * n + n)]
+            rng.shuffle(cells)
+            rng.shuffle(digits)
+            placed = False
+            for (r, c) in cells:
+                for d in digits:
+                    if is_locally_safe(partial, r, c, d, blank_value=0):
+                        partial[r, c] = d
+                        placed = True
+                        break
+                if placed:
+                    break
+
+    # derive a NEW seed for the actual SCIP solve so each call is different
+    scip_seed = rng.randrange(1 << 30)
+    solved = solve_sudoku_with_random_objective(partial, seed=scip_seed)
+
+    # random digit relabel, still tied to the outer RNG
+    digits_perm = list(range(1, N + 1))
+    rng.shuffle(digits_perm)
+    mapping = {d: digits_perm[d - 1] for d in range(1, N + 1)}
+    vfunc = np.vectorize(lambda x: mapping[int(x)])
+    solved = vfunc(solved).astype(int)
+
+    return solved
