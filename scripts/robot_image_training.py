@@ -1,9 +1,9 @@
 import json, time, pickle
-from pathlib import Path
 import numpy as np
 import torch
 import copy
 import optuna
+from sklearn.metrics import confusion_matrix
 from itertools import combinations, product
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern
@@ -108,8 +108,8 @@ settings = {
     "epochs": 1,
     "out_dir": str(results_dir / "robots"),
     "run_name": "aaa_Test",
-    "load_detector": "",#str(Path(results_dir / "robots" / "cbm_run_1002_newer_alignment" / "detector_dnn_robots_image_stochastic_complete__skewint-acc100_seed1005.pt")),
-    "load_frontend": ""#,str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed1002.pkl")),
+    "load_detector": str(Path(results_dir / "robots" / "aaa_Test2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc100_seed1012.pt")),
+    "load_frontend": str(Path(results_dir / "robots" / "aaa_Test2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc100_seed1012.pkl")),
 }
 
 
@@ -298,7 +298,7 @@ def train_dnn(sttngs, device, int_acc_tag, label_noise_tag, miss_tag, model_type
     paths_te = [test.base_dir / p for p in test.X]
     yte = test.y.astype(int)
 
-    dnn_acc, dnn_model = train_eval_image(
+    dnn_acc, dnn_model, dnn_preds = train_eval_image(
         paths_tr, ytr, paths_te, yte,
         epochs=int(sttngs["epochs"]),
         batch_size=16,
@@ -317,7 +317,7 @@ def train_dnn(sttngs, device, int_acc_tag, label_noise_tag, miss_tag, model_type
     torch.save({
         "model_state_dict": dnn_model.state_dict(),
     }, dnn_path)
-    return dnn_stats
+    return dnn_stats, dnn_model, dnn_preds
 
 
 def test_interventions(prob_test, sttngs, acc_det, fe, test):
@@ -476,10 +476,18 @@ def main(sttngs):
                                                                                 label_noise_tag, miss_tag,
                                                                                 model_type_tag, run_dir, seed_tag,
                                                                                 skew_tag, test, train)
+
+    # get confusion matrix per each class
+    glorps_pred = (y_pred_det.argmax(1) == 1)
+    true_glorps = (test.y.astype(int) == 1)
+    cm = confusion_matrix(true_glorps, glorps_pred)
     dnn_stats = {}
     if S.get("train_dnn", False):
-        dnn_stats = train_dnn(S, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
-                              seed_tag, skew_tag, test, train, tf)
+        dnn_stats, mdnn, preds = train_dnn(S, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
+                                           seed_tag, skew_tag, test, train, tf)
+        # get confusion matrix for the DNN
+        dnn_glorps_pred = (np.array(preds).flatten() == 1)
+        dnn_cm = confusion_matrix(true_glorps, dnn_glorps_pred)
     ###########################################################################
 
     ###########################################################################
