@@ -1113,9 +1113,9 @@ def run_regimes(settings: Dict) -> Dict:
                 params
             )
             with open(meta_path, "w") as f:
-                json.dump(meta, f, indent=2)
+                json.dump(meta, f, indent=2, default=str)
             with open(metrics_path, "w") as f:
-                json.dump(metrics, f, indent=2)
+                json.dump(metrics, f, indent=2, default=str)
             results[regime] = res
 
 
@@ -1138,10 +1138,10 @@ def run_regimes(settings: Dict) -> Dict:
 
                 )
                 with open(rate_dir / f"meta_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
-                    json.dump(meta, f, indent=2)
+                    json.dump(meta, f, indent=2, default=str)
 
                 with open(rate_dir / f"metrics_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
-                    json.dump(metrics, f, indent=2)
+                    json.dump(metrics, f, indent=2, default=str)
 
                 results[(regime, float(rate_subj))] = res
 
@@ -1287,10 +1287,10 @@ def run_regimes(settings: Dict) -> Dict:
             }
 
             with open(run_dir / f"meta_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
-                json.dump(meta, f, indent=2)
+                json.dump(meta, f, indent=2, default=str)
 
             with open(run_dir / f"metrics_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
-                json.dump(metrics, f, indent=2)
+                json.dump(metrics, f, indent=2, default=str)
 
             results[regime] = {
                 "acc_detected": acc_det,
@@ -1459,9 +1459,9 @@ def run_regimes(settings: Dict) -> Dict:
             }
 
             with open(run_dir / f"meta_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
-                json.dump(meta, f, indent=2)
+                json.dump(meta, f, indent=2, default=str)
             with open(run_dir / f"metrics_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
-                json.dump(metrics, f, indent=2)
+                json.dump(metrics, f, indent=2, default=str)
 
             results[regime] = {
                 "acc_detected": acc_det,
