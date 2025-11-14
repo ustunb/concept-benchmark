@@ -10,7 +10,7 @@ from sklearn.gaussian_process.kernels import Matern
 from pathlib import Path
 from torchvision import transforms
 from concept_benchmark.models import ConceptDetector, FrontEndModel, RobotConceptClassifier, FrontEndModelCVXPY
-from concept_benchmark.paths import results_dir
+from concept_benchmark.paths import results_dir, data_dir
 from concept_benchmark.synthetic.robot import create_synthetic_dataset
 from concept_benchmark.models import ConceptBasedModel
 from concept_benchmark.intervention import (
@@ -108,8 +108,8 @@ settings = {
     "epochs": 1,
     "out_dir": str(results_dir / "robots"),
     "run_name": "aaa_Test",
-    "load_detector": str(Path(results_dir / "robots" / "aaa_Test2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc100_seed1012.pt")),
-    "load_frontend": str(Path(results_dir / "robots" / "aaa_Test2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc100_seed1012.pkl")),
+    "load_detector": "",#str(Path(results_dir / "robots" / "aaa_Test2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc100_seed1012.pt")),
+    "load_frontend": "",#str(Path(results_dir / "robots" / "aaa_Test2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc100_seed1012.pkl")),
 }
 
 
