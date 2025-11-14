@@ -1,10 +1,12 @@
 import pandas as pd
+from itertools import product
 
 from concept_benchmark.ext.fileutils import load
 from concept_benchmark.paths import results_dir
 from scripts.robot_demo.utils import (
     DEFAULT_ROBOT_SETTINGS,
     INPUT_MAP,
+    MISSING_PROP,
     get_dataset_file,
     get_model_file,
     get_results_file,
@@ -15,11 +17,6 @@ from scripts.robot_demo.utils import (
 
 device = determine_device()
 settings = DEFAULT_ROBOT_SETTINGS.copy()
-METRICS = {
-    "accuracy": "accuracy",
-    "monitored": "predictions_intervened_on",
-    "work_done": "total_concept_edits_made"
-}
 data = load(get_dataset_file(**settings))
 loader_config = {
     'batch_size': 32,
@@ -35,39 +32,50 @@ dnn = RobotClassifierCNN(input_size=INPUT_MAP[settings['size']]).to(device)
 dnn.load_state_dict(dnn_weights)
 test_loader = data.test.loader(shuffle=False, **loader_config)
 dnn_accuracy = compute_accuracy(dnn, test_loader, device)
-acc_rows.append(["ideal", "dnn", "accuracy", dnn_accuracy])
-acc_rows.append(["subconcept", "dnn", "accuracy", dnn_accuracy])
+acc_rows.append(["ideal", 0.0, "none", "dnn", "accuracy", dnn_accuracy])
+acc_rows.append(["subconcept", 0.0, "none", "dnn", "accuracy", dnn_accuracy])
 
 COLS = [
     "accuracy",
     "predictions_intervened_on",
-    "total_concept_checks",
-    "total_concept_edits_made",
+    "predictions_changed",
+    "total_concept_confirmations",
 ]
 
 interv_lst = []
 # CBM metrics
-for subconcept in [True, False]:
+for subconcept, (missing, missing_mech) \
+    in product(
+        [False, True],
+        [
+            (0.0, "none"),
+            (MISSING_PROP, "mcar"),
+            (MISSING_PROP, "mnar"),
+        ]
+    ):
+
+    print(f"Processing CBM - subconcept: {subconcept}, missing: {missing}, mech: {missing_mech}")
     settings['subconcept'] = subconcept
+    settings['concept_missing'] = missing
+    settings['concept_missing_mech'] = missing_mech
     # raw accuracy
     cbm = load(get_model_file(model_class="cbm", **settings))
     cbm_acc = (cbm.predict(data.test) == data.test.y).mean().item()
     data_name = "subconcept" if subconcept else "ideal"
-    acc_rows.append([data_name, "cbm_no_int", "accuracy", cbm_acc])
+    acc_rows.append([data_name, missing, missing_mech, "cbm_no_int", "accuracy", cbm_acc])
 
     # intervention metrics
     metrics = pd.read_csv(get_results_file(model_class="cbm", **settings))
     metrics = metrics.melt(
-        id_vars=["data_name", "budget", "threshold"],
+        id_vars=["data_name", "concept_missing", "concept_missing_mech", "budget", "threshold"],
         value_vars=COLS,
         var_name="metric",
         value_name="value"
     )
     metrics['model'] = "cbm_with_int_" + metrics['budget'].astype(str)
-    metrics = metrics[metrics['metric'].isin(METRICS.values())]
     interv_lst.append(metrics)
     
-acc_df = pd.DataFrame(acc_rows, columns=["data_name", "model", "metric", "value"])
+acc_df = pd.DataFrame(acc_rows, columns=["data_name", "concept_missing", "concept_missing_mech", "model", "metric", "value"])
 interv_df = pd.concat(interv_lst, ignore_index=True).reset_index(drop=True)
 
 final_df = pd.concat([acc_df, interv_df], ignore_index=True).reset_index(drop=True)

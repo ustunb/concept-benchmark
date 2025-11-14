@@ -728,6 +728,9 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
         result.y_prob_after = fe.predict_proba(C_final_binary)
         result.y_pred_after = np.argmax(result.y_prob_after, axis=1)
 
+        y_pred_before = np.argmax(result.y_prob_before, axis=1)
+
+        num_preds_change = int(np.sum(result.y_pred_after != y_pred_before))
         acc_intervened = float((result.y_pred_after == test.y.astype(int)).mean())
 
         prediction_num_concepts_intervened_on = {int(i): int(np.sum(actual_edits_mask[i])) for i in range(n_samples)}
@@ -742,6 +745,9 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
         result.y_prob_after = fe.predict_proba(C_final_binary)
         result.y_pred_after = np.argmax(result.y_prob_after, axis=1)
 
+        y_pred_before = np.argmax(result.y_prob_before, axis=1)
+
+        num_preds_change = int(np.sum(result.y_pred_after != y_pred_before))
         acc_intervened = float((result.y_pred_after == test.y.astype(int)).mean())
 
         prediction_num_concepts_intervened_on = {int(i): int(np.sum(actual_edits_mask[i])) for i in range(n_samples)}
@@ -756,10 +762,9 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
             "accuracy_gain": acc_intervened - acc_det,
             "predictions_intervened_on": int(np.sum(np.any(result.mask, axis=1))),
             "interventions_rate": float(np.sum(np.any(result.mask, axis=1)) / n_samples),
+            "predictions_changed": num_preds_change,
             "avg_edits_per_intervention": float(sum(prediction_num_concepts_intervened_on.values())) / n_samples,
-            "avg_edits_per_intervention": float(sum(prediction_num_concepts_intervened_on.values())) / n_samples,
-            "total_concept_checks": int(n_intervened),
-            "total_concept_edits_made": sum(prediction_num_concepts_intervened_on.values()),
+            "total_concept_confirmations": int(n_intervened),
             "total_concept_edits_made": sum(prediction_num_concepts_intervened_on.values()),
             "concept_interventions": concept_intervention_counts,
             "human_accuracy": human_acc
