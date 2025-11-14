@@ -26,11 +26,24 @@ if Process(pid=os.getppid()).name() not in ("node"):
     p = ArgumentParser()
     p.add_argument('--data_type', type=str, choices=['image', 'text'], default=settings['data_type'])
     p.add_argument('--subconcept', action='store_true') 
+    p.add_argument('--concept_missing', type=float, default=settings['concept_missing'])
+    p.add_argument('--concept_missing_mech', type=str, choices=['mcar', 'mnar'], default='none')
     p.add_argument('--seed', type=int, default=settings['seed'])
     args, _ = p.parse_known_args()
     settings.update(vars(args))
 
 data = load(get_dataset_file(**settings))
+
+if settings['concept_missing_mech'] != 'none':
+    if settings['concept_missing'] <= 0.0:
+        raise ValueError("concept_missing must be > 0 when concept_missing_mech is not 'none'")
+    data.sample_concept_missingness(
+        p=settings['concept_missing'], 
+        mechanism=settings['concept_missing_mech'], 
+        rng=np.random.default_rng(settings['seed'])
+    )
+    data.training.concept_missing = True
+    # data.validation.concept_missing = True
 
 config = {
     'device': device,

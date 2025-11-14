@@ -5,6 +5,8 @@ from pathlib import Path
 from concept_benchmark.paths import results_dir, data_dir
 
 
+MISSING_PROP = 0.2
+
 IDEAL_DROP = [
     "foot_shape_flat_rounded",
     "foot_shape_pointy_trapezoid",
@@ -85,6 +87,8 @@ DEFAULT_ROBOT_SETTINGS = {
                      {'concepts': {'foot_shape_flat_trapezoid': 1}, 'min_fraction': 0.005},
                      {'concepts': {'foot_shape_flat_5sided': 1}, 'min_fraction': 0.49},
                      ],
+    "concept_missing": 0.0,
+    "concept_missing_mech": "none",
 }
 
 INPUT_MAP = {
@@ -95,7 +99,7 @@ INPUT_MAP = {
 
 INTERVENTION_SETTINGS = {
     "budget": [1, 3],
-    "intervention_accuracy": 0.9,
+    "intervention_accuracy": 1,
     "intervention_threshold": 0.2,
 }
 
@@ -121,6 +125,8 @@ def get_model_file(
     samples_per_instance: int,
     subconcept: bool,
     model_class: str,
+    concept_missing: float = 0.0,
+    concept_missing_mech: str = "none",
     **kwargs
 ) -> Path:
     """Get the file path for the model based on its parameters."""
@@ -130,6 +136,9 @@ def get_model_file(
         filename += "_subconcept"
     else:
         filename += "_ideal"
+
+    if concept_missing_mech != "none":
+        filename += f"_{concept_missing_mech}_{int(concept_missing*100)}"
         
     filename += f"_{model_class}.model"
 
@@ -140,6 +149,8 @@ def get_results_file(
     model_type: str,
     subconcept: bool,
     model_class: str = "cbm",
+    concept_missing: float = 0.0,
+    concept_missing_mech: str = "none",
     **kwargs
 ) -> Path:
     """Get the file path for the results based on its parameters."""
@@ -150,6 +161,9 @@ def get_results_file(
             filename += "_subconcept"
         else:
             filename += "_ideal"
+
+    if concept_missing_mech != "none":
+        filename += f"_{concept_missing_mech}_{int(concept_missing*100)}"
         
     filename += f"_{model_class}_results.csv"
 

@@ -1,10 +1,9 @@
 from argparse import ArgumentParser
-import itertools
 import subprocess
 import sys
 import rich
 from rich.panel import Panel
-from scripts.robot_demo.utils import DEFAULT_ROBOT_SETTINGS
+from scripts.robot_demo.utils import DEFAULT_ROBOT_SETTINGS, MISSING_PROP
 
 
 def main():
@@ -16,6 +15,7 @@ def main():
         default=["setup", "cbm", "dnn", "intervene"],
     )
     p.add_argument("--seed", type=int, default=DEFAULT_ROBOT_SETTINGS['seed'])
+    p.add_argument("--missing", action="store_true", help="use concept missingness")
     p.add_argument("--ignore-errors", action="store_true", help="continue on errors")
     args = p.parse_args()
 
@@ -33,6 +33,19 @@ def main():
             f"python scripts/robot_demo/train_cbm.py --subconcept --seed {args.seed}"
         )
 
+        if args.missing:
+            for concept_missing_mech in ['mcar', 'mnar']:
+                pipeline.append(
+                    f"python scripts/robot_demo/train_cbm.py --concept_missing {MISSING_PROP} "
+                    f"--concept_missing_mech {concept_missing_mech} --seed {args.seed}"
+                )
+                pipeline.append(
+                    f"python scripts/robot_demo/train_cbm.py --subconcept "
+                    f"--concept_missing {MISSING_PROP} --concept_missing_mech {concept_missing_mech} "
+                    f"--seed {args.seed}"
+                )
+            
+
     if "dnn" in args.stages:
         pipeline.append(
             f"python scripts/robot_demo/train_dnn.py --seed {args.seed}"
@@ -45,6 +58,18 @@ def main():
         pipeline.append(
             f"python scripts/robot_demo/intervene.py --subconcept --seed {args.seed}"
         )
+
+        if args.missing:
+            for concept_missing_mech in ['mcar', 'mnar']:
+                pipeline.append(
+                    f"python scripts/robot_demo/intervene.py --concept_missing {MISSING_PROP} "
+                    f"--concept_missing_mech {concept_missing_mech} --seed {args.seed}"
+                )
+                pipeline.append(
+                    f"python scripts/robot_demo/intervene.py --subconcept "
+                    f"--concept_missing {MISSING_PROP} --concept_missing_mech {concept_missing_mech} "
+                    f"--seed {args.seed}"
+                )
 
     # Run each command in the list
     failed = False
