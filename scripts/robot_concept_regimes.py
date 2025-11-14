@@ -1573,7 +1573,7 @@ settings = {
     # Only run perfect to regenerate interventions/metrics
     "subjective_grid": [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4],
     "regimes": ["llm-annotation"],
-    "llm_concepts_file": data_dir /"robot_images/candidates.llm.jsonl",
+    "llm_concepts_file": data_dir /"robot_images/clip.jsonl",
 
     "concepts_file": None,
     "lfcbm": {
@@ -1586,7 +1586,7 @@ settings = {
       "patience": 10
     },
     "clip_dissect": {
-      "export_probe": 1,
+      "export_probe": 0,
       "probe_select": "train",
       "probe_subset": {},
       "descriptions_csv": "",
