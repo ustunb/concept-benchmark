@@ -5,9 +5,10 @@ import os
 import json
 import random
 import hashlib
+import time
 from pathlib import Path
+from google.api_core.exceptions import ResourceExhausted
 
-# join base/item; if not found, try parent-of-base (handles ".../test_images" + "test_images/..")
 def _resolve_items(items, base_dir):
     base = Path(base_dir)
     out = []
@@ -95,8 +96,15 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None)
         setup_id = int(sttngs.get("setup", -1))
         if setup_id == 5:
             sttngs.setdefault("intervention_expert", "llm")
-            sttngs.setdefault("intervention_llm",
-                              {"provider": "gemini", "model": "gemini-2.5-flash-lite", "api_key_env": "GOOGLE_API_KEY", "batch_size": 64})
+            sttngs.setdefault(
+                "intervention_llm",
+                {
+                    "provider": "gemini",
+                    "model": "gemini-2.5-flash-lite",
+                    "api_key_env": "GOOGLE_API_KEY",
+                    "batch_size": 32,
+                },
+            )
         elif setup_id == 4:
             sttngs.pop("intervention_expert", None)
             sttngs.pop("intervention_llm", None)
@@ -108,7 +116,6 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None)
             model_name = str(llm_cfg.get("model", "gemini-2.5-flash-lite"))
             api_key_env = str(llm_cfg.get("api_key_env", "GOOGLE_API_KEY"))
             api_key = os.environ.get(api_key_env, "")
-
             if not api_key:
                 raise SystemExit(f"missing API key in env: {api_key_env}")
 
@@ -132,7 +139,25 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None)
                     "concepts:\n- " + "\n- ".join(names) + "\n\n"
                     "Respond like: {\"conceptA\":1,\"conceptB\":0}"
                 )
-                raw = (client.generate(prompt, [image_path]) or "").strip()
+                attempts = 0
+                print(f"[LLM] fallback judge start image={image_path}, concepts={len(names)}", flush=True)
+                while True:
+                    try:
+                        print(f"[LLM]  single-image call attempt {attempts + 1} ...", flush=True)
+                        raw = (client.generate(prompt, [image_path]) or "").strip()
+                        print("[LLM]  single-image call ok", flush=True)
+                        break
+                    except ResourceExhausted as e:
+                        attempts += 1
+                        print(
+                            f"[LLM]  ResourceExhausted on single-image attempt {attempts}: {e}. "
+                            "Backing off 30s before retry.",
+                            flush=True,
+                        )
+                        if attempts >= 5:
+                            print("[LLM]  giving up after 5 ResourceExhausted errors in fallback.", flush=True)
+                            raise
+                        time.sleep(30.0)
                 parsed: Dict[str, int] = {}
                 try:
                     obj = json.loads(raw)
@@ -152,58 +177,83 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None)
                 lines = []
                 for i, names in enumerate(per_image_names):
                     lines.append(f"Image {i}: " + ", ".join(names))
+
                 prompt = (
-                    f"You will be shown {N} robot image(s) in order. "
-                    f"For each image i (0..{N-1}), output ONLY a JSON array of length {N} "
-                    "where array[i] is a JSON object mapping the listed concepts to 0/1 integers "
-                    "(ABSENT=0, PRESENT=1). No extra keys. Integers only.\n\n"
-                    "Per-image concepts:\n- " + "\n- ".join(lines)
+                        f"You will be shown {N} robot image(s) in order. "
+                        f"For each image i (0..{N - 1}), output ONLY a JSON array of length {N} "
+                        "where array[i] is a JSON object mapping the listed concepts to 0/1 integers "
+                        "(ABSENT=0, PRESENT=1). No Markdown code fences, no extra keys, "
+                        "and no text outside the JSON.\n\n"
+                        "Per-image concepts:\n- " + "\n- ".join(lines)
                 )
+
                 raw = (client.generate(prompt, image_paths) or "").strip()
+
+                # Strip Markdown ``` fences if the model ignores instructions
+                if raw.startswith("```"):
+                    fence_lines = raw.splitlines()
+                    fence_lines = fence_lines[1:]
+                    if fence_lines and fence_lines[-1].strip().startswith("```"):
+                        fence_lines = fence_lines[:-1]
+                    raw_clean = "\n".join(fence_lines).strip()
+                else:
+                    raw_clean = raw
 
                 def _to01(v):
                     if isinstance(v, bool):
                         return 1 if v else 0
                     s = str(v).strip().lower()
-                    return 1 if s in {"1","true","yes","present"} else 0
+                    return 1 if s in {"1", "true", "yes", "present"} else 0
 
-                out: List[Dict[str,int]] = [dict() for _ in range(N)]
+                out: List[Dict[str, int]] = [dict() for _ in range(N)]
+
                 try:
-                    obj = json.loads(raw)
-                    if isinstance(obj, list):
-                        for i, d in enumerate(obj[:N]):
-                            if isinstance(d, dict):
-                                allow = set(per_image_names[i])
-                                for k, v in d.items():
-                                    if k in allow:
-                                        out[i][str(k)] = _to01(v)
-                    elif isinstance(obj, dict):
-                        for i_str, d in obj.items():
-                            try:
-                                i = int(i_str)
-                            except Exception:
-                                continue
-                            if 0 <= i < N and isinstance(d, dict):
-                                allow = set(per_image_names[i])
-                                for k, v in d.items():
-                                    if k in allow:
-                                        out[i][str(k)] = _to01(v)
-                except Exception:
-                    for i, line in enumerate(raw.splitlines()):
-                        if i >= N:
-                            break
-                        line = line.strip()
-                        if not (line.startswith("{") and line.endswith("}")):
+                    obj = json.loads(raw_clean)
+                except Exception as e:
+                    print("[LLM-DEBUG] json.loads failed in _llm_judge_batch:", repr(e), flush=True)
+                    print(
+                        "[LLM-DEBUG] raw_clean (first 400 chars):",
+                        raw_clean[:400].replace("\n", "\\n"),
+                        flush=True,
+                    )
+                    return out
+
+                if isinstance(obj, list):
+                    if len(obj) == 1 and isinstance(obj[0], list):
+                        arr = obj[0]
+                    else:
+                        arr = obj
+
+                    for i in range(min(N, len(arr))):
+                        d = arr[i]
+                        if not isinstance(d, dict):
                             continue
+                        allow = set(per_image_names[i])
+                        for k, v in d.items():
+                            if k in allow:
+                                out[i][str(k)] = _to01(v)
+
+                elif isinstance(obj, dict):
+                    for i_str, d in obj.items():
                         try:
-                            d = json.loads(line)
+                            i = int(i_str)
                         except Exception:
                             continue
-                        if isinstance(d, dict):
-                            allow = set(per_image_names[i])
-                            for k, v in d.items():
-                                if k in allow:
-                                    out[i][str(k)] = _to01(v)
+                        if not (0 <= i < N and isinstance(d, dict)):
+                            continue
+                        allow = set(per_image_names[i])
+                        for k, v in d.items():
+                            if k in allow:
+                                out[i][str(k)] = _to01(v)
+
+                # Debug: first few images
+                for i in range(min(3, N)):
+                    print(
+                        f"[LLM-DEBUG] batch parsed image {i}: "
+                        f"expected_names={per_image_names[i]}, votes_keys={list(out[i].keys())}",
+                        flush=True,
+                    )
+
                 return out
 
             # compute-once at K=5 (or the max requested), batch LLM once, reuse for smaller budgets
@@ -269,72 +319,103 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None)
                     _intervention_cache = _load_cache()
 
                 tasks = []
+                total_pairs = 0
+                missing_pairs = 0
                 for i in range(C_before.shape[0]):
                     idxs = np.where(mask_max[i])[0]
                     if idxs.size == 0:
                         continue
+                    total_pairs += int(idxs.size)
                     known = _intervention_cache.get(i, {})
                     for j in idxs:
                         if j in known:
                             C_true_llm[i, j] = float(known[j])
                     missing = [j for j in idxs if j not in known]
+                    missing_pairs += len(missing)
                     if not missing:
                         continue
                     image_path = _resolve_img_path(i)
                     names = [str(concept_names[j]) for j in missing]
                     tasks.append((i, image_path, names, missing))
 
-                bs = int((llm_cfg.get("batch_size") or sttngs.get("llm_batch_size") or 64))  # 32x32 → larger batch
-                for s in range(0, len(tasks), bs):
+                cached_pairs = total_pairs - missing_pairs
+                print(
+                    f"[LLM] intervention selection: total={total_pairs}, "
+                    f"from_cache={cached_pairs}, to_query={missing_pairs}, "
+                    f"images_needing_llm={len(tasks)}",
+                    flush=True,
+                )
+
+                bs = int((llm_cfg.get("batch_size") or sttngs.get("llm_batch_size") or 32))
+                if bs < 1:
+                    bs = 1
+                n_batches = (len(tasks) + bs - 1) // bs
+                if n_batches > 0:
+                    print(
+                        f"[LLM] starting batched calls: {len(tasks)} images, "
+                        f"batch_size={bs}, n_batches={n_batches}",
+                        flush=True,
+                    )
+
+                for batch_idx, s in enumerate(range(0, len(tasks), bs), start=1):
                     chunk = tasks[s:s + bs]
-                    prompt_lines = [
-                        "You will be shown multiple robot images.",
-                        "For each image, output 0/1 for the listed concepts.",
-                        "Return ONE JSON object mapping image indices (as strings) to per-image maps.",
-                        'Example: {"12":{"conceptA":1,"conceptB":0},"27":{"conceptA":0}}'
-                    ]
-                    for (i_idx, _p, names, _idxs) in chunk:
-                        prompt_lines.append("\n# image " + str(i_idx) + "\nconcepts:\n- " + "\n- ".join(names))
-                    prompt = "\n".join(prompt_lines)
                     image_paths = [p for (_i, p, _n, _j) in chunk]
-                    raw = (client.generate(prompt, image_paths) or "").strip()
+                    per_image_names = [names for (_i, _p, names, _idxs) in chunk]
 
-                    parsed = {}
-                    try:
-                        obj = json.loads(raw)
-                        if isinstance(obj, dict):
-                            parsed = {str(k): v for k, v in obj.items() if isinstance(v, dict)}
-                    except Exception:
-                        parsed = {}
+                    attempts = 0
+                    while True:
+                        try:
+                            print(
+                                f"[LLM] batch {batch_idx}/{n_batches}: "
+                                f"{len(chunk)} images, attempt {attempts + 1} ...",
+                                flush=True,
+                            )
+                            # robust batched call; _llm_judge_batch handles JSON weirdness
+                            votes_list = _llm_judge_batch(image_paths, per_image_names)
+                            sleep_time = 10.0
+                            print(
+                                f"[LLM] batch {batch_idx}/{n_batches} ok; "
+                                f"sleeping {sleep_time} seconds to respect rate limits",
+                                flush=True,
+                            )
+                            time.sleep(sleep_time)
+                            break
+                        except ResourceExhausted as e:
+                            attempts += 1
+                            print(
+                                f"[LLM] ResourceExhausted on batch {batch_idx}/{n_batches}, "
+                                f"attempt {attempts}: {e}. Backing off 30s.",
+                                flush=True,
+                            )
+                            if attempts >= 5:
+                                print(
+                                    f"[LLM] giving up on batch {batch_idx}/{n_batches} "
+                                    f"after {attempts} ResourceExhausted errors.",
+                                    flush=True,
+                                )
+                                raise
+                            time.sleep(30.0)
 
-                    if not parsed:
-                        for (i_idx, pth, names, idxs) in chunk:
-                            votes = _llm_judge(pth, names)
-                            if i_idx not in _intervention_cache:
-                                _intervention_cache[i_idx] = {}
-                            for j, name in zip(idxs, names):
-                                if name in votes:
-                                    v = 1 if votes[name] else 0
-                                    C_true_llm[i_idx, j] = float(v)
-                                    _intervention_cache[i_idx][j] = v
-                    else:
-                        for (i_idx, _pth, names, idxs) in chunk:
-                            d = parsed.get(str(i_idx), {})
-                            if isinstance(d, dict):
-                                if i_idx not in _intervention_cache:
-                                    _intervention_cache[i_idx] = {}
-                                for j, name in zip(idxs, names):
-                                    v = d.get(name)
-                                    if isinstance(v, bool):
-                                        vv = 1 if v else 0
-                                    elif isinstance(v, (int, float, str)):
-                                        s = str(v).strip().lower()
-                                        vv = 1 if s in {"1", "true", "yes", "present"} else 0
-                                    else:
-                                        continue
-                                    C_true_llm[i_idx, j] = float(vv)
-                                    _intervention_cache[i_idx][j] = vv
-                _flush_cache(_intervention_cache)
+                    # Apply batched votes; do not fall back per image.
+                    # Concepts missing from `votes` are simply left untouched (no intervention).
+                    for (i_idx, _pth, names, idxs), votes in zip(chunk, votes_list):
+                        if i_idx not in _intervention_cache:
+                            _intervention_cache[i_idx] = {}
+
+                        for j, name in zip(idxs, names):
+                            if name in votes:
+                                v = 1 if votes[name] else 0
+                                C_true_llm[i_idx, j] = float(v)
+                                _intervention_cache[i_idx][j] = v
+
+                    _flush_cache(_intervention_cache)
+                    print(
+                        f"[LLM] batch {batch_idx}/{n_batches} complete; cache flushed.",
+                        flush=True,
+                    )
+
+                if n_batches > 0:
+                    print(f"[LLM] all {n_batches} batches complete.", flush=True)
 
                 # rank the K concepts per instance by single-bit flip effect (to reuse for budgets < K)
                 order = [np.array([], dtype=int)] * C_before.shape[0]
@@ -1073,7 +1154,11 @@ def run_regimes(settings: Dict) -> Dict:
     data.generate_cvindices(seed=int(S["seed"]))
 
     if S.get("draw_only", 0):
-        draw_dir = base_out / f"{S['run_name']}__draw_only"
+        try:
+            draw_dir = base_out / f"{S['run_name']}__draw_only"
+        except Exception:
+            draw_dir = base_out / f"{S['run_name']}"
+
         draw_dir.mkdir(parents=True, exist_ok=True)
         catalog_csv_path, _ = _write_catalogs(draw_dir, data.meta)
         return {"draw_only": {"catalog_csv": catalog_csv_path, "n_images": int(data.meta["catalog_df"].shape[0])}}
@@ -1495,7 +1580,6 @@ def run_regimes(settings: Dict) -> Dict:
     return results
 
 
-# optional example settings block kept for parity with training (no __main__ guard)
 from concept_benchmark.paths import results_dir
 
 settings = {
@@ -1503,7 +1587,7 @@ settings = {
     "draw": 0,
     "draw_only": 0,
     "CBM_type": "separate",
-    "image_dir": str(data_dir / "robot_images_low_res"),
+    "image_dir": str(data_dir / "robot_images"),
     "image_size": "medium",
     "color_mode": "color",
     "seed": 1012,
@@ -1553,10 +1637,8 @@ settings = {
         {"concepts": {"foot_shape_flat_5sided": 1}, "min_fraction": 0.49},
     ],
 
-    "budget": [1],
+    "budget": [1,2,3,4,5],
 
-    # Keep 0.9 here to match your existing NPZ filename slug (int-acc90),
-    # but "perfect" will still run with 1.0 human accuracy internally.
     "intervention_accuracy": 0.8,
     "human_annotation_accuracy": 0.8,
 
@@ -1565,7 +1647,6 @@ settings = {
     "out_dir": str(results_dir / "robots"),
     "run_name": "scbm_run_1002_newer_alignment_trials",
 
-    # Let the script pick up anchors/NPZs; do NOT force recompute.
     "load_detector": "",
     "load_frontend": "",
     "force": 0,
@@ -1573,7 +1654,7 @@ settings = {
     # Only run perfect to regenerate interventions/metrics
     "subjective_grid": [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4],
     "regimes": ["llm-annotation"],
-    "llm_concepts_file": data_dir /"robot_images/clip.jsonl",
+    "llm_concepts_file": data_dir /"robot_images/llm.jsonl",
 
     "concepts_file": None,
     "lfcbm": {
