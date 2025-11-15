@@ -7,9 +7,8 @@ import random
 import hashlib
 import time
 from pathlib import Path
-from google.api_core.exceptions import ResourceExhausted
 
-# join base/item; if not found, try parent-of-base (handles ".../test_images" + "test_images/..")
+
 def _resolve_items(items, base_dir):
     base = Path(base_dir)
     out = []
@@ -111,6 +110,7 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None)
             sttngs.pop("intervention_llm", None)
 
         if str(sttngs.get("intervention_expert", "")).lower() == "llm":
+            from google.api_core.exceptions import ResourceExhausted
             from types import SimpleNamespace
             llm_cfg = sttngs.get("intervention_llm", {}) or {}
             provider = str(llm_cfg.get("provider", "gemini"))
@@ -752,6 +752,8 @@ def _define_train_valid_test(
     tf,
 ):
     if settings.get("skew_concept"):
+        print("foot_shape-related concepts:",
+              sorted([c for c in concept_dataset.concepts if "foot_shape" in c]))
         train, valid, test = create_skewed_splits(
             concept_dataset,
             skew_specs=settings["skew_concept"],
@@ -1155,7 +1157,11 @@ def run_regimes(settings: Dict) -> Dict:
     data.generate_cvindices(seed=int(S["seed"]))
 
     if S.get("draw_only", 0):
-        draw_dir = base_out / f"{S['run_name']}__draw_only"
+        try:
+            draw_dir = base_out / f"{S['run_name']}__draw_only"
+        except Exception:
+            draw_dir = base_out / f"{S['run_name']}"
+
         draw_dir.mkdir(parents=True, exist_ok=True)
         catalog_csv_path, _ = _write_catalogs(draw_dir, data.meta)
         return {"draw_only": {"catalog_csv": catalog_csv_path, "n_images": int(data.meta["catalog_df"].shape[0])}}
@@ -1593,7 +1599,7 @@ settings = {
     "dataset_characterization": "",
     "test_size": 10000,
     "train_size": 3800,
-    "knows_concepts": False,
+    "knows_concepts": True,
     "concepts": {
         "head_shape": ["square", "round"],
         "body_shape": ["square", "round"],
@@ -1613,10 +1619,16 @@ settings = {
     },
     "subconcepts": ["foot_shape_subtype"],
     "spurious_features": ["has_elbows", "hand_shape"],
-    "drop_concepts": [
-        "foot_shape_flat_rounded","foot_shape_pointy_trapezoid",
-        "foot_shape_pointy_3sided","foot_shape_flat_lshaped","foot_shape"
-    ],
+    # "drop_concepts": [
+    #     "foot_shape_flat_rounded","foot_shape_pointy_trapezoid",
+    #     "foot_shape_pointy_3sided","foot_shape_flat_lshaped","foot_shape"
+    # ],
+    "drop_concepts": ["foot_shape_flat_rounded",
+                      "foot_shape_pointy_trapezoid",
+                      'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
+                      'foot_shape_pointy_4sided', 'foot_shape_pointy_square',
+                      'foot_shape_pointy_rounded', 'foot_shape_flat_5sided',
+                      'foot_shape_flat_square','foot_shape_flat_trapezoid'],
     "human_alignment": {},
     "model_type": "stochastic",
     "logit_scalar": 4.2,
@@ -1650,11 +1662,12 @@ settings = {
     # Let the script pick up anchors/NPZs; do NOT force recompute.
     "load_detector": "",
     "load_frontend": "",
-    "force": 0,
+    "force": 1,
 
     # Only run perfect to regenerate interventions/metrics
     "subjective_grid": [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4],
-    "regimes": ["llm-annotation"],
+    # "regimes": ["perfect", "expert", "subjective", "machine_annotation", "llm_annotation"],
+    "regimes": ["perfect", "expert", "subjective", "machine_annotation"],
     "llm_concepts_file": data_dir /"robot_images/llm.jsonl",
 
     "concepts_file": None,
