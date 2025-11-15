@@ -1582,7 +1582,6 @@ def run_regimes(settings: Dict) -> Dict:
         json.dump(_jsonify(results), f, indent=2, sort_keys=True)
     return results
 
-
 # optional example settings block kept for parity with training (no __main__ guard)
 from concept_benchmark.paths import results_dir
 
