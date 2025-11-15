@@ -5,17 +5,18 @@ import os
 import base64
 from pathlib import Path
 
-
 PROMPT = """You are helping to brainstorm visual concepts that distinguish two SYNTHETIC robot classes. Do not use any real-world knowledge of the names; rely ONLY on the example images listed below.
 Return exactly {n} JSONL lines, one object per line: {{"text":"<short visual concept>"}}.
 No brackets, no commas after objects, no numbering, no commentary, no code fences.
 
 Requirements:
-- Each concept is a short visual phrase (<= 30 chars)
-- Avoid class names or near-synonyms
-- Avoid near-duplicates
-- Prefer parts, shapes, textures, colors, materials, layouts, counts
-- Focus on features that are discriminative between the classes, based on the examples
+- Each concept is a short visual phrase (<= 15 chars)
+- Avoid class names
+- Avoid concepts that do not differ clearly in meaning. For instance, if you have "Bicolored", do not also include "Split color body".
+- Avoid concepts that negate each other if they are binary. For instance, if you have "has umbrella", do not also include "no umbrella".
+- As a set, the concepts should cover multiple kinds of cues (e.g. body shape, appendages, layout, texture);
+- It is better to describe different discriminative features across the robots than to list many descriptors of the same feature
+- Focus on features that are clearly discriminative between the classes, based on the examples, and that would be useful for classifying new images of these robots
 
 Classes:
 {classes}
@@ -25,19 +26,20 @@ Example images:
 """
 
 
+
 settings = {
     "classes": ["Glorp", "Drent"],
     "out_dir": "results/robots/llm_glorp_drent_1002",
     "format": "jsonl",
-    "image_root": "data/robot_images",
+    "image_root": "data/robot_images_large",
     "ext": ".png",
     "llm": True,
     "provider": "gemini",
-    "model": "gemini-2.5-flash-lite",
+    "model": "gemini-2.5-pro",  # switched to Pro
     "api_key_env": "GEMINI_API_KEY",
     "out_file": "candidates.llm.jsonl",
     "from_catalog": "results/robots/cbm_run_1002_subconcepts__draw_only/catalog.csv",
-    "per_class": 20,
+    "per_class": 40,             # still fine; currently ignored when force_all_subtypes=True
     "seed": 1002,
     "label-map": "1=Glorp,0=Drent",
     "debug": True,
@@ -517,7 +519,6 @@ def run(cfg):
                     print("MISS:", str(candidates[0]), "q=", q)
                     miss_prints += 1
                 continue
-
             buckets[lbl].append(str(found))
 
         if debug:
@@ -642,7 +643,7 @@ def run(cfg):
                     by_foot.setdefault((fs, fsub), []).append((path, hs, hsub, fs, fsub))
                     by_hand.setdefault((hs, hsub), []).append((path, hs, hsub, fs, fsub))
 
-                target_n = 12
+                target_n = 50
                 selected = []
                 covered_hand = set()
 
@@ -733,7 +734,7 @@ def run(cfg):
         for c in classes:
             image_list.extend(examples.get(c, []))
         key = os.environ.get(api_key_env, "")
-
+        
         if not key:
             raise SystemExit(f"missing API key in env: {api_key_env}")
         client = _make_client(provider, model_name, key)
