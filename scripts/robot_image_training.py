@@ -2,11 +2,7 @@ import json, time, pickle
 import numpy as np
 import torch
 import copy
-import optuna
 from sklearn.metrics import confusion_matrix
-from itertools import combinations, product
-from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import Matern
 from pathlib import Path
 from torchvision import transforms
 from concept_benchmark.models import ConceptDetector, FrontEndModel, RobotConceptClassifier, FrontEndModelCVXPY
@@ -32,8 +28,8 @@ settings = {
     "image_dir": "./data/robot_images",
     "image_size": "medium",
     "color_mode": "color",
-    "train_dnn": 1,
-    "seed": 1012,
+    "train_dnn": 0,
+    "seed": 1014,
     "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy') + int(row['has_knees']=='true'))>= 3 else 'drent'",
     'dataset_characterization': "",
     "test_size": 10000,
@@ -104,10 +100,10 @@ settings = {
                      ],
     "budget": [3],
     "intervention_accuracy": 1.0,
-    "intervention_threshold": 0.1,
+    "intervention_threshold": 0.2,
     "epochs": 1,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "aaa_Test",
+    "run_name": "lol",
     "load_detector": "",#str(Path(results_dir / "robots" / "aaa_Test2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc100_seed1012.pt")),
     "load_frontend": "",#str(Path(results_dir / "robots" / "aaa_Test2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc100_seed1012.pkl")),
 }
