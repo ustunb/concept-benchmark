@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
@@ -40,7 +41,8 @@ DEFAULT_CONCEPTS = {
 
 
 DEFAULT_LABEL_EXPR = (
-    "'glorp' if (str(row['mouth_type']) == 'closed' or str(row['foot_shape']).startswith('pointy_')) else 'drent'"
+    "'glorp' if (str(row['mouth_type']) == 'closed' or "
+    "str(row['foot_shape']).startswith('pointy_')) else 'drent'"
 )
 
 
@@ -50,8 +52,9 @@ settings: Dict[str, Any] = {
     "mode": "template",
     "samples_per_instance": 3,
     "use_llm": 0,
-    "llm_provider": "openai",
-    "llm_model": "gpt-4.1-mini",
+    "llm_provider": "gemini",
+    "llm_model": "gemini-2.5-flash-lite",
+    "llm_api_key_env": "GOOGLE_API_KEY",
     "llm_system_prompt": "",
     "llm_user_prompt": "",
     "wrinkles": "",
@@ -380,23 +383,29 @@ def _generate_template_sentence(
     return text.strip()
 
 
-def _call_openai_chat(model: str, system_prompt: str, user_prompt: str, seed: int | None = None) -> str:
+def _make_llm_client(provider: str, model_name: str, api_key_env: str | None) -> Any:
+    prov = (provider or "gemini").strip().lower()
+    if not api_key_env:
+        api_key_env = "GOOGLE_API_KEY" if prov == "gemini" else "OPENAI_API_KEY"
+    api_key = os.environ.get(api_key_env, "")
+    if not api_key:
+        raise SystemExit(f"missing API key in env: {api_key_env}")
     try:
-        from openai import OpenAI  # type: ignore
-    except ImportError as e:
-        raise RuntimeError("openai package is required for LLM-based generation/audit") from e
-    client = OpenAI()
-    kwargs: Dict[str, Any] = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    }
-    if seed is not None:
-        kwargs["seed"] = int(seed)
-    resp = client.chat.completions.create(**kwargs)
-    return resp.choices[0].message.content.strip()
+        from scripts.generate_llm_candidates import _make_client as _llm_make_client
+    except Exception as e:
+        raise SystemExit("LLM client unavailable; ensure scripts/generate_llm_candidates.py is importable.") from e
+    return _llm_make_client(prov, model_name, api_key)
+
+
+def _call_llm_generate(client: Any, system_prompt: str | None, user_prompt: str | None, seed: int | None = None) -> str:
+    sys_txt = (system_prompt or "").strip()
+    usr_txt = (user_prompt or "").strip()
+    if sys_txt and usr_txt:
+        prompt = sys_txt + "\n\n" + usr_txt
+    else:
+        prompt = sys_txt or usr_txt
+    raw = client.generate(prompt, []) or ""
+    return str(raw).strip()
 
 
 def _build_llm_generation_prompt(
@@ -443,13 +452,15 @@ def _generate_llm_sentence(
     mask: Set[str],
     omit: Set[str],
     spurious: List[str],
-    llm_model: str,
+    llm_client: Any,
     llm_system_prompt: str | None,
     llm_user_prompt: str | None,
     wrinkles: str | None,
     seed: int | None = None,
 ) -> str:
-    base_system, default_user = _build_llm_generation_prompt(row, label, mask, omit, spurious, llm_system_prompt, wrinkles)
+    base_system, default_user = _build_llm_generation_prompt(
+        row, label, mask, omit, spurious, llm_system_prompt, wrinkles
+    )
     if llm_user_prompt:
         user = llm_user_prompt.format(
             text="",
@@ -461,7 +472,7 @@ def _generate_llm_sentence(
         )
     else:
         user = default_user
-    return _call_openai_chat(llm_model, base_system, user, seed)
+    return _call_llm_generate(llm_client, base_system, user, seed)
 
 
 def generate_text_dataset(
@@ -473,6 +484,7 @@ def generate_text_dataset(
     use_llm: bool,
     llm_provider: str | None,
     llm_model: str | None,
+    llm_api_key_env: str | None,
     llm_system_prompt: str | None,
     llm_user_prompt: str | None,
     wrinkles: str | None,
@@ -523,11 +535,19 @@ def generate_text_dataset(
     y_list: List[int] = []
 
     use_llm_flag = use_llm or (mode == "llm")
+    llm_client = None
+    llm_provider_used = None
+    llm_model_used = None
+    llm_api_key_env_used = None
+
     if use_llm_flag:
-        if llm_provider and llm_provider.lower() != "openai":
-            raise SystemExit("Only 'openai' provider is supported for LLM-based generation in this script.")
-        if not llm_model:
-            raise SystemExit("llm_model must be set when using LLM-based generation.")
+        prov = (llm_provider or "gemini").strip().lower()
+        model_name = llm_model or ("gemini-2.5-flash-lite" if prov == "gemini" else "gpt-4.1-mini")
+        api_env = llm_api_key_env or ("GOOGLE_API_KEY" if prov == "gemini" else "OPENAI_API_KEY")
+        llm_client = _make_llm_client(prov, model_name, api_env)
+        llm_provider_used = prov
+        llm_model_used = model_name
+        llm_api_key_env_used = api_env
 
     total_instances = len(df)
     total_samples = total_instances * int(samples_per_instance)
@@ -572,7 +592,7 @@ def generate_text_dataset(
                 }
             else:
                 masked_now = set()
-            if use_llm_flag:
+            if use_llm_flag and llm_client is not None:
                 text = _generate_llm_sentence(
                     row=row_dict,
                     label=label_str,
@@ -580,7 +600,7 @@ def generate_text_dataset(
                     mask=masked_now,
                     omit=omit_set,
                     spurious=spurious_concepts,
-                    llm_model=llm_model,
+                    llm_client=llm_client,
                     llm_system_prompt=llm_system_prompt,
                     llm_user_prompt=llm_user_prompt,
                     wrinkles=wrinkles,
@@ -628,6 +648,9 @@ def generate_text_dataset(
             for c in correlations
         ],
         "seed": int(seed),
+        "llm_provider": llm_provider_used,
+        "llm_model": llm_model_used,
+        "llm_api_key_env": llm_api_key_env_used,
     }
 
     return TextConceptDataset(
@@ -720,20 +743,18 @@ def run_audit(
     *,
     every: int,
     max_samples: int,
+    provider: str,
     model: str,
+    api_key_env: str | None,
     system_prompt: str | None,
     user_prompt: str | None,
     output_path: Path | None = None,
 ) -> Dict[str, Any]:
     if every <= 0:
         return {"audited": 0, "failures": 0, "failure_rate": 0.0}
-    try:
-        from openai import OpenAI  # type: ignore
-    except ImportError:
-        print("Audit requested but openai package is not installed; skipping audit.")
-        return {"audited": 0, "failures": 0, "failure_rate": 0.0}
 
-    client = OpenAI()
+    client = _make_llm_client(provider, model, api_key_env)
+
     concept_values = ds.meta.get("concept_values", {})
     label_names = ds.label_names
     concept_names = ds.concept_names
@@ -778,14 +799,7 @@ def run_audit(
         sys_prompt = system_prompt or _build_default_audit_system_prompt()
         usr_prompt = _render_audit_user_prompt(user_prompt, text, concepts, label, masked, omitted)
 
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": usr_prompt},
-            ],
-        )
-        raw = resp.choices[0].message.content.strip()
+        raw = _call_llm_generate(client, sys_prompt, usr_prompt, seed=None)
         ok = False
         reason = ""
         try:
@@ -829,6 +843,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--use-llm", type=int, default=settings["use_llm"])
     ap.add_argument("--llm-provider", type=str, default=settings["llm_provider"])
     ap.add_argument("--llm-model", type=str, default=settings["llm_model"])
+    ap.add_argument("--llm-api-key-env", type=str, default=settings["llm_api_key_env"])
     ap.add_argument("--llm-system-prompt", type=str, default=settings["llm_system_prompt"])
     ap.add_argument("--llm-user-prompt", type=str, default=settings["llm_user_prompt"])
     ap.add_argument("--wrinkles", type=str, default=settings["wrinkles"])
@@ -868,6 +883,7 @@ def run_from_settings(cfg: Dict[str, Any]) -> None:
         use_llm=bool(int(cfg["use_llm"])),
         llm_provider=str(cfg["llm_provider"]) or None,
         llm_model=str(cfg["llm_model"]) or None,
+        llm_api_key_env=str(cfg["llm_api_key_env"]) or None,
         llm_system_prompt=str(cfg["llm_system_prompt"]) or None,
         llm_user_prompt=str(cfg["llm_user_prompt"]) or None,
         wrinkles=str(cfg["wrinkles"]) or None,
@@ -890,6 +906,7 @@ def run_from_settings(cfg: Dict[str, Any]) -> None:
         "use_llm": bool(int(cfg["use_llm"])),
         "llm_provider": cfg["llm_provider"],
         "llm_model": cfg["llm_model"],
+        "llm_api_key_env": cfg["llm_api_key_env"],
         "wrinkles": cfg["wrinkles"],
         "spurious_concepts": spurious,
         "subconcepts": subconcepts,
@@ -923,12 +940,18 @@ def run_from_settings(cfg: Dict[str, Any]) -> None:
         audit_model = str(cfg["audit_model"]) or str(cfg["llm_model"])
         if not audit_model:
             raise SystemExit("Audit requested but no audit-model or llm-model specified.")
+        provider = str(cfg["llm_provider"]) or "gemini"
+        api_key_env = str(cfg["llm_api_key_env"]) or (
+            "GOOGLE_API_KEY" if provider.strip().lower() == "gemini" else "OPENAI_API_KEY"
+        )
         audit_output = str(cfg["audit_output"]) or str(out_dir / f"{cfg['output_prefix']}_{suffix}_audit.jsonl")
         run_audit(
             ds,
             every=audit_every,
             max_samples=int(cfg["audit_max_samples"]),
+            provider=provider,
             model=audit_model,
+            api_key_env=api_key_env,
             system_prompt=str(cfg["audit_system_prompt"]) or None,
             user_prompt=str(cfg["audit_user_prompt"]) or None,
             output_path=Path(audit_output),
