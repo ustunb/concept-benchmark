@@ -1723,13 +1723,6 @@ settings = {
       "max_epochs": 200,
       "patience": 10
     },
-    "clip_dissect": {
-      "export_probe": 0,
-      "probe_select": "train",
-      "probe_subset": {},
-      "descriptions_csv": "",
-      "n_concepts": 12
-    }
 }
 
 run_regimes(settings)
