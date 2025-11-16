@@ -43,9 +43,6 @@ from scripts.robot_utils import (
     _get_confusion_matrix,
     _get_accuracies_per_subconcept,
 )
-from concept_benchmark.clip_dissect_concepts import extract_concepts_from_descriptions_csv
-from concept_benchmark.clip_dissect_probe import export_probe_dataset
-
 def test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None):
     intervention_results = {}
     rng = np.random.default_rng(int(sttngs["seed"]))
@@ -59,6 +56,19 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None)
         concept_names = list(getattr(test, "concepts", []))
     else:
         concept_names = list(concept_names)
+
+    # Coerce concept_proba to match dataset concept ground truth shape
+    if hasattr(test, "C"):
+        n_gt = int(test.C.shape[1])
+        n_pred = int(prob_test.shape[1])
+        if n_pred != n_gt:
+            if n_pred > n_gt:
+                prob_test = prob_test[:, :n_gt]
+            else:
+                pad = np.zeros((prob_test.shape[0], n_gt - n_pred), dtype=prob_test.dtype)
+                prob_test = np.concatenate([prob_test, pad], axis=1)
+        if len(concept_names) != prob_test.shape[1]:
+            concept_names = concept_names[: prob_test.shape[1]]
 
     cbm = ConceptBasedModel(concept_detector=None, front_end_model=fe)
     runner = ConceptInterventionRunner(cbm)
@@ -101,7 +111,7 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None)
                 {
                     "provider": "gemini",
                     "model": "gemini-2.5-flash-lite",
-                    "api_key_env": "GOOGLE_API_KEY",
+                    "api_key_env": "GEMINI_API_KEY",
                     "batch_size": 32,
                 },
             )
@@ -115,7 +125,7 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None)
             llm_cfg = sttngs.get("intervention_llm", {}) or {}
             provider = str(llm_cfg.get("provider", "gemini"))
             model_name = str(llm_cfg.get("model", "gemini-2.5-flash-lite"))
-            api_key_env = str(llm_cfg.get("api_key_env", "GOOGLE_API_KEY"))
+            api_key_env = str(llm_cfg.get("api_key_env", "GEMINI_API_KEY"))
             api_key = os.environ.get(api_key_env, "")
             if not api_key:
                 raise SystemExit(f"missing API key in env: {api_key_env}")
@@ -572,6 +582,31 @@ def _len(dset) -> int:
         return int(dset.n)
     except Exception:
         return int(len(dset))
+
+def _resolve_auto_det_tags(settings: Dict) -> List[str]:
+    def _norm(val) -> List[str]:
+        if val is None:
+            return []
+        if isinstance(val, (list, tuple)):
+            out: List[str] = []
+            for x in val:
+                if x is None:
+                    continue
+                s = str(x).strip()
+                if not s:
+                    continue
+                out.extend(t.strip() for t in s.split(",") if t.strip())
+            return out
+        s = str(val).strip()
+        if not s:
+            return []
+        return [t.strip() for t in s.split(",") if t.strip()]
+
+    for key in ("auto_det_tags", "automated_detection_tags", "auto_det_tag", "automated_detection_tag"):
+        tags = _norm(settings.get(key))
+        if tags:
+            return tags
+    return [""]
 
 def _build_groups(concept_names: List[str], spec: Dict) -> Dict[str, List[int]]:
     groups: Dict[str, List[int]] = {}
@@ -1179,384 +1214,392 @@ def run_regimes(settings: Dict) -> Dict:
     regimes = [str(r).lower() for r in S.get("regimes", [])]
     subjective_grid = S.get("subjective_grid", [0.2])
 
+    auto_regime_aliases = {
+        "automated_detection",
+        "automated-detection",
+        "automated detection",
+        "automated",
+        "llm",
+        "llm-annotation",
+        "llm_annotation",
+    }
+
     results: Dict = {}
     results_file = base_out / f"{S['run_name']}__regime_results.json"
 
     for regime in regimes:
-        run_dir = base_out / f"{S['run_name']}__regime-{regime}"
-        run_dir.mkdir(parents=True, exist_ok=True)
+        is_auto = regime in auto_regime_aliases
+        if is_auto:
+            tags = _resolve_auto_det_tags(S)
+        else:
+            tags = [""]
 
-        slug = _build_slug(S, miss_tag, filter_tag, label_noise_tag, skew_tag, int_acc_tag)
-        seed_tag = f"seed{int(S['seed'])}"
+        for ad_tag in tags:
+            tag_suffix = f"__{ad_tag}" if ad_tag else ""
+            run_dir = base_out / f"{S['run_name']}__regime-{regime}{tag_suffix}"
+            run_dir.mkdir(parents=True, exist_ok=True)
 
-        if regime in {"perfect", "expert"}:
-            # Anchor = noise-free training; reuse across different intervention settings
-            S_anchor, _ = _resolve_anchor(dict(S), base_out, S["run_name"], concept_noise_rate=0.0)
-            # Prefer anchor artifacts over per-regime meta
-            S_anchor, prob_cache, prob_npz_path, meta_path, metrics_path = _load_artifacts_and_cache(
-                S_anchor, run_dir, slug, seed_tag, force
-            )
-            meta, metrics, res = _run_fixed_regime(
-                regime, S_anchor, config, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag,
-                run_dir, seed_tag, skew_tag, slug, train, valid, test, data, prob_npz_path, prob_cache, force, rng,
-                params
-            )
-            with open(meta_path, "w") as f:
-                json.dump(meta, f, indent=2, default=str)
-            with open(metrics_path, "w") as f:
-                json.dump(metrics, f, indent=2, default=str)
-            results[regime] = res
+            slug = _build_slug(S, miss_tag, filter_tag, label_noise_tag, skew_tag, int_acc_tag)
+            if ad_tag:
+                slug = f"{slug}_{ad_tag}"
+            seed_tag = f"seed{int(S['seed'])}"
+            results_key = regime if not ad_tag else (regime, ad_tag)
 
-
-        elif regime == "subjective":
-            for rate_subj in subjective_grid:
-                rate_dir = run_dir / f"rate{int(float(rate_subj) * 100):02d}"
-                rate_dir.mkdir(parents=True, exist_ok=True)
-
-                # Anchor keyed by concept noise rate; independent of intervention accuracy
-                S_rate = dict(S)
-                S_rate, _anchor_paths_dict = _resolve_anchor(S_rate, base_out, S_rate["run_name"],
-                                                             concept_noise_rate=float(rate_subj))
-                S_rate, prob_cache, prob_npz_path, meta_path_unused, metrics_path_unused = _load_artifacts_and_cache(
-                    S_rate, rate_dir, slug, seed_tag, force
+            if regime in {"perfect", "expert"}:
+                S_anchor, _ = _resolve_anchor(dict(S), base_out, S["run_name"], concept_noise_rate=0.0)
+                S_anchor, prob_cache, prob_npz_path, meta_path, metrics_path = _load_artifacts_and_cache(
+                    S_anchor, run_dir, slug, seed_tag, force
                 )
-                meta, metrics, res = _run_subjective_rate(
-                    float(rate_subj), S_rate, config, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag,
-                    rate_dir, seed_tag, skew_tag, slug, train, valid, test, data, prob_npz_path, prob_cache, force, rng,
+                meta, metrics, res = _run_fixed_regime(
+                    regime, S_anchor, config, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag,
+                    run_dir, seed_tag, skew_tag, slug, train, valid, test, data, prob_npz_path, prob_cache, force, rng,
                     params
-
                 )
-                with open(rate_dir / f"meta_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
+                with open(meta_path, "w") as f:
+                    json.dump(meta, f, indent=2, default=str)
+                with open(metrics_path, "w") as f:
+                    json.dump(metrics, f, indent=2, default=str)
+                results[results_key] = res
+
+            elif regime == "subjective":
+                for rate_subj in subjective_grid:
+                    rate_dir = run_dir / f"rate{int(float(rate_subj) * 100):02d}"
+                    rate_dir.mkdir(parents=True, exist_ok=True)
+
+                    S_rate = dict(S)
+                    S_rate, _anchor_paths_dict = _resolve_anchor(
+                        S_rate, base_out, S_rate["run_name"], concept_noise_rate=float(rate_subj)
+                    )
+                    S_rate, prob_cache, prob_npz_path, meta_path_unused, metrics_path_unused = _load_artifacts_and_cache(
+                        S_rate, rate_dir, slug, seed_tag, force
+                    )
+                    meta, metrics, res = _run_subjective_rate(
+                        float(rate_subj), S_rate, config, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag,
+                        rate_dir, seed_tag, skew_tag, slug, train, valid, test, data, prob_npz_path, prob_cache, force,
+                        rng, params
+                    )
+                    with open(rate_dir / f"meta_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
+                        json.dump(meta, f, indent=2, default=str)
+
+                    with open(rate_dir / f"metrics_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
+                        json.dump(metrics, f, indent=2, default=str)
+
+                    results[(regime, float(rate_subj))] = res
+
+            elif regime in {"machine", "machine_annotation"}:
+
+                concepts_file = S.get("concepts_file", "")
+                if concepts_file:
+                    concept_set = LFConceptSet.from_file(concepts_file, dataset_keys=list(test.concepts))
+                else:
+                    ds_keys = list(test.concepts)
+                    concept_set = LFConceptSet(keys=ds_keys, texts=[LFConceptSet._normalize_key(k) for k in ds_keys])
+
+                lf_cfg = S.get("lfcbm", {})
+                cfg = LFTrainingConfig(
+                    clip_model=str(lf_cfg.get("clip_model", "ViT-B-32")),
+                    clip_pretrained=str(lf_cfg.get("clip_pretrained", "laion2b_s34b_b79k")),
+                    device=device,
+                    lr=float(lf_cfg.get("lr", 1e-2)),
+                    weight_decay=float(lf_cfg.get("weight_decay", 1e-4)),
+                    max_epochs=int(lf_cfg.get("max_epochs", 200)),
+                    patience=int(lf_cfg.get("patience", 10)),
+                    seed=int(S["seed"]),
+                    l1_ratio=float(lf_cfg.get("l1_ratio", 0.99)),
+                    C_grid=tuple(map(float, lf_cfg.get("C_grid", (0.05, 0.1, 0.2, 0.5, 1.0, 2.0)))),
+                    target_nonzero_per_class=tuple(map(int, lf_cfg.get("target_nonzero_per_class", (25, 35)))),
+                    cache_dir=run_dir / "lfcbm_cache",
+                    batch_size=int(lf_cfg.get("batch_size", 256)),
+                )
+                lf = LabelFreeCBM(cfg)
+
+                stats = lf.fit(
+                    train_X=_resolve_items(train.X, getattr(train, "base_dir", Path("."))),
+                    train_y=train.y.astype(int),
+                    valid_X=_resolve_items(valid.X, getattr(valid, "base_dir", Path("."))),
+                    valid_y=valid.y.astype(int),
+                    concept_set=concept_set,
+                    cache_dir=cfg.cache_dir,
+                )
+
+                resolved_te = _resolve_items(test.X, getattr(test, "base_dir", Path(".")))
+                missing = [p for p in resolved_te if not Path(p).exists()]
+                print("missing test files:", len(missing), missing[:3])
+
+                P_tr = lf.concept_proba(
+                    [str((getattr(train, "base_dir", Path(".")) / Path(p)).resolve()) for p in train.X]
+                )
+                P_te = lf.concept_proba(
+                    [str((getattr(test, "base_dir", Path(".")) / Path(p)).resolve()) for p in test.X]
+                )
+                H_tr = (P_tr > 0.5).astype(np.float32)
+                H_te = (P_te > 0.5).astype(np.float32)
+
+                prob_npz_path = run_dir / f"probs_{slug}_{seed_tag}.npz"
+                _merge_save_npz(
+                    prob_npz_path,
+                    {
+                        "P_tr": P_tr,
+                        "P_te": P_te,
+                        "C_tr": train.C.astype(np.float32),
+                        "C_te": test.C.astype(np.float32),
+                        "y_tr": train.y.astype(int),
+                        "y_te": test.y.astype(int),
+                        "concepts": np.array(list(test.concepts)),
+                    },
+                )
+
+                fe = FEOnProbs(lf.classifier)
+                import pickle
+                fe_name = f"frontend_{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
+                fe_path = run_dir / fe_name
+                with open(fe_path, "wb") as f:
+                    pickle.dump(fe, f)
+
+                y_pred_det = fe.predict_proba(P_te)
+                acc_det = float((y_pred_det.argmax(1) == test.y.astype(int)).mean())
+
+                C_oracle = np.clip(test.C.astype(np.float32), 1e-6, 1 - 1e-6)
+                y_pred_gt = fe.predict_proba(C_oracle)
+                acc_gt = float((y_pred_gt.argmax(1) == test.y.astype(int)).mean())
+
+                per_concept_acc, train_per_concept_acc = _get_concept_accuracies(H_te, H_tr, test, train)
+
+                ia_val = float(S.get("human_annotation_accuracy", 0.8))
+                _, _, intervention_results = test_interventions(
+                    P_te, {**S, "intervention_accuracy": ia_val}, acc_det, fe, test
+                )
+
+                per_sub_acc = _emit_confusion(run_dir, fe, H_te, P_te, test, S.get("drop_concepts", []))
+                catalog_csv_path, meta_extra = _write_catalogs(run_dir, data.meta)
+
+                lf_paths = lf.save(run_dir / "lfcbm_artifacts")
+                meta = {
+                    "settings": S,
+                    "run_dir": str(run_dir),
+                    "artifacts": {**lf_paths, "detector": "", "frontend": str(fe_path), "probs_npz": str(prob_npz_path)},
+                    "splits": {"n_train": _len(train), "n_valid": _len(valid), "n_test": _len(test)},
+                    "concepts": list(test.concepts),
+                    "intervention_budgets": S.get("budget", []),
+                    "intervention_acc": ia_val,
+                    "naming_slug": slug,
+                    "catalog_csv": catalog_csv_path,
+                    "df_indices": {
+                        "train": list(map(int, train.meta.get("df_indices", []))),
+                        "valid": list(map(int, valid.meta.get("df_indices", []))),
+                        "test": list(map(int, test.meta.get("df_indices", []))),
+                    },
+                    "robot_ids": {
+                        "train": list(map(int, train.meta.get("robot_ids", []))),
+                        "valid": list(map(int, valid.meta.get("robot_ids", []))),
+                        "test": list(map(int, test.meta.get("robot_ids", []))),
+                    },
+                }
+                meta.update(meta_extra)
+                metrics = {
+                    "cbm_acc_detected": float(acc_det),
+                    "cbm_acc_oracle": float(acc_gt),
+                    "concept_det_acc_mean": float((H_te == test.C).mean()),
+                    "interventions": intervention_results,
+                    "concept_accuracies": per_concept_acc,
+                    "model_accuracies_per_concept": per_sub_acc,
+                    "train_concept_accuracies": train_per_concept_acc,
+                    "prob_test_npz": str(prob_npz_path),
+                    "concept_names": list(test.concepts),
+                    "lfcbm_train_stats": stats,
+                }
+
+                with open(run_dir / f"meta_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
                     json.dump(meta, f, indent=2, default=str)
 
-                with open(rate_dir / f"metrics_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
+                with open(run_dir / f"metrics_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
                     json.dump(metrics, f, indent=2, default=str)
 
-                results[(regime, float(rate_subj))] = res
+                results[results_key] = {
+                    "acc_detected": acc_det,
+                    "acc_ground_truth": acc_gt,
+                    "concept_acc_mean": float((H_te == test.C).mean()),
+                }
 
+            elif regime in auto_regime_aliases:
+                lf_cfg = S.get("lfcbm", {}) or {}
 
-        elif regime in {"machine", "machine_annotation"}:
-
-            # ---- Label-free CBM regime (machine annotation) ----
-
-            # Requirements:
-
-            #   - settings["concepts_file"] points to a CSV/JSON/JSONL/TXT concept list
-
-            #   - concept keys align with dataset concepts (or are aligned by LFConceptSet)
-
-            concepts_file = S.get("concepts_file", "")
-            # Accept either a concept file or the in-memory concept list used elsewhere.
-            if concepts_file:
-                concept_set = LFConceptSet.from_file(concepts_file, dataset_keys=list(test.concepts))
-            else:
-                ds_keys = list(test.concepts)
-                concept_set = LFConceptSet(keys=ds_keys, texts=[LFConceptSet._normalize_key(k) for k in ds_keys])
-
-            # Config: respect user overrides under S["lfcbm"], default to paper settings
-            lf_cfg = S.get("lfcbm", {})
-            cfg = LFTrainingConfig(
-                clip_model=str(lf_cfg.get("clip_model", "ViT-B-32")),
-                clip_pretrained=str(lf_cfg.get("clip_pretrained", "laion2b_s34b_b79k")),
-                device=device,
-                lr=float(lf_cfg.get("lr", 1e-2)),
-                weight_decay=float(lf_cfg.get("weight_decay", 1e-4)),
-                max_epochs=int(lf_cfg.get("max_epochs", 200)),
-                patience=int(lf_cfg.get("patience", 10)),
-                seed=int(S["seed"]),
-                l1_ratio=float(lf_cfg.get("l1_ratio", 0.99)),
-                C_grid=tuple(map(float, lf_cfg.get("C_grid", (0.05, 0.1, 0.2, 0.5, 1.0, 2.0)))),
-                target_nonzero_per_class=tuple(map(int, lf_cfg.get("target_nonzero_per_class", (25, 35)))),
-                cache_dir=run_dir / "lfcbm_cache",
-                batch_size=int(lf_cfg.get("batch_size", 256)),
-            )
-            lf = LabelFreeCBM(cfg)
-
-            # Fit label-free CBM on current split
-            stats = lf.fit(
-                train_X=_resolve_items(train.X, getattr(train, "base_dir", Path("."))),
-                train_y=train.y.astype(int),
-                valid_X=_resolve_items(valid.X, getattr(valid, "base_dir", Path("."))),
-                valid_y=valid.y.astype(int),
-                concept_set=concept_set,
-                cache_dir=cfg.cache_dir,
-            )
-
-            resolved_te = _resolve_items(test.X, getattr(test, "base_dir", Path(".")))
-            missing = [p for p in resolved_te if not Path(p).exists()]
-            print("missing test files:", len(missing), missing[:3])
-
-            # Compute concept probabilities on train/test
-            P_tr = lf.concept_proba(
-                [str((getattr(train, "base_dir", Path(".")) / Path(p)).resolve()) for p in train.X])  # (Ntr, Mk)
-            P_te = lf.concept_proba(
-                [str((getattr(test, "base_dir", Path(".")) / Path(p)).resolve()) for p in test.X])  # (Nte, Mk)
-            H_tr = (P_tr > 0.5).astype(np.float32)
-            H_te = (P_te > 0.5).astype(np.float32)
-
-            # Save probabilities to match the rest of the pipeline convention
-            prob_npz_path = run_dir / f"probs_{slug}_{seed_tag}.npz"
-            _merge_save_npz(
-                prob_npz_path,
-                {
-                    "P_tr": P_tr,
-                    "P_te": P_te,
-                    "C_tr": train.C.astype(np.float32),
-                    "C_te": test.C.astype(np.float32),
-                    "y_tr": train.y.astype(int),
-                    "y_te": test.y.astype(int),
-                    "concepts": np.array(list(test.concepts)),
-                },
-            )
-
-            # Build a lightweight front-end adapter that expects probabilities P and internally uses logit(P).
-            fe = FEOnProbs(lf.classifier)
-            import pickle
-            fe_name = f"frontend_{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
-            fe_path = run_dir / fe_name
-            with open(fe_path, "wb") as f:
-                pickle.dump(fe, f)
-
-            # Accuracies
-            y_pred_det = fe.predict_proba(P_te)
-            acc_det = float((y_pred_det.argmax(1) == test.y.astype(int)).mean())
-
-            # Oracle (use ground-truth concepts; clamp to avoid inf logit)
-            C_oracle = np.clip(test.C.astype(np.float32), 1e-6, 1 - 1e-6)
-            y_pred_gt = fe.predict_proba(C_oracle)
-            acc_gt = float((y_pred_gt.argmax(1) == test.y.astype(int)).mean())
-
-            # Per-concept accuracies vs. ground truth
-            per_concept_acc, train_per_concept_acc = _get_concept_accuracies(H_te, H_tr, test, train)
-
-            # Interventions use probabilities
-            ia_val = float(S.get("human_annotation_accuracy", 0.8))
-            _, _, intervention_results = test_interventions(P_te, {**S, "intervention_accuracy": ia_val}, acc_det, fe,
-                                                            test)
-            # Confusion and catalogs
-            per_sub_acc = _emit_confusion(run_dir, fe, H_te, P_te, test, S.get("drop_concepts", []))
-            catalog_csv_path, meta_extra = _write_catalogs(run_dir, data.meta)
-
-            # Persist LF-CBM artefacts
-            lf_paths = lf.save(run_dir / "lfcbm_artifacts")
-            meta = {
-                "settings": S,
-                "run_dir": str(run_dir),
-                "artifacts": {**lf_paths, "detector": "", "frontend": str(fe_path), "probs_npz": str(prob_npz_path)},
-                "splits": {"n_train": _len(train), "n_valid": _len(valid), "n_test": _len(test)},
-                "concepts": list(test.concepts),
-                "intervention_budgets": S.get("budget", []),
-                "intervention_acc": ia_val,
-                "naming_slug": slug,
-                "catalog_csv": catalog_csv_path,
-                "df_indices": {
-                    "train": list(map(int, train.meta.get("df_indices", []))),
-                    "valid": list(map(int, valid.meta.get("df_indices", []))),
-                    "test": list(map(int, test.meta.get("df_indices", []))),
-                },
-
-                "robot_ids": {
-                    "train": list(map(int, train.meta.get("robot_ids", []))),
-                    "valid": list(map(int, valid.meta.get("robot_ids", []))),
-                    "test": list(map(int, test.meta.get("robot_ids", []))),
-                },
-            }
-            meta.update(meta_extra)
-            metrics = {
-                "cbm_acc_detected": float(acc_det),
-                "cbm_acc_oracle": float(acc_gt),
-                "concept_det_acc_mean": float((H_te == test.C).mean()),
-                "interventions": intervention_results,
-                "concept_accuracies": per_concept_acc,
-                "model_accuracies_per_concept": per_sub_acc,
-                "train_concept_accuracies": train_per_concept_acc,
-                "prob_test_npz": str(prob_npz_path),
-                "concept_names": list(test.concepts),
-                "lfcbm_train_stats": stats,
-            }
-
-            with open(run_dir / f"meta_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
-                json.dump(meta, f, indent=2, default=str)
-
-            with open(run_dir / f"metrics_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
-                json.dump(metrics, f, indent=2, default=str)
-
-            results[regime] = {
-                "acc_detected": acc_det,
-                "acc_ground_truth": acc_gt,
-                "concept_acc_mean": float((H_te == test.C).mean()),
-            }
-        elif regime in {"llm", "llm-annotation", "llm_annotation", "clip-annotation", "clip_annotation"}:
-            lf_cfg = S.get("lfcbm", {}) or {}
-
-            if regime in {"clip-annotation", "clip_annotation"}:
-                cd_cfg = S.get("clip_dissect", {}) or {}
-
-                if int(cd_cfg.get("export_probe", 0)) == 1:
-                    probe_out = Path(cd_cfg.get("probe_out_dir", run_dir / "clip_probe"))
-                    export_probe_dataset(train, valid, test, cd_cfg, probe_out)
-                    if int(cd_cfg.get("export_only", 0)) == 1:
-                        return {"status": "exported_probe", "probe_out": str(probe_out)}
-
-                desc_csv = str(cd_cfg.get("descriptions_csv", "")).strip()
-                n_k = int(cd_cfg.get("n_concepts", S.get("n_concepts", 12)))
-                if not desc_csv:
-                    raise SystemExit("clip-annotation requires clip_dissect.descriptions_csv")
-
-                p_cf = run_dir / "candidates.clip.jsonl"
-                extract_concepts_from_descriptions_csv(desc_csv, p_cf, n_concepts=n_k)
-                p_cf_abs = p_cf.resolve()
-            else:
-                llm_concepts_file = S.get("llm_concepts_file", "") or S.get("concepts_file", "")
-                if not llm_concepts_file:
+                concepts_root = S.get("llm_concepts_file", "") or S.get("concepts_file", "")
+                if not concepts_root:
                     raise SystemExit(
-                        "llm-annotation requires a concepts file: set 'llm_concepts_file' or 'concepts_file'."
+                        "Automated Detection requires a concepts file: set 'llm_concepts_file' or 'concepts_file'."
                     )
-                p_cf = Path(str(llm_concepts_file))
-                p_cf_abs = (p_cf if p_cf.is_absolute() else (Path.cwd() / p_cf)).resolve()
+
+                p_root = Path(str(concepts_root))
+
+                if ad_tag:
+                    if p_root.is_dir():
+                        p_cf = p_root / f"{ad_tag}.jsonl"
+                        if not p_cf.exists():
+                            raise SystemExit(
+                                f"auto_det_tag='{ad_tag}' requested but concept file not found: {p_cf}"
+                            )
+                    else:
+                        p_cf = p_root
+                        if p_cf.suffix.lower() not in {".jsonl", ".json"}:
+                            raise SystemExit(
+                                f"auto_det_tag='{ad_tag}' requires llm_concepts_file to be a directory "
+                                f"or a .json/.jsonl file; got: {p_cf}"
+                            )
+                        stem = p_cf.stem
+                        if stem != ad_tag:
+                            raise SystemExit(
+                                f"auto_det_tag='{ad_tag}' does not match concept file stem='{stem}' "
+                                f"for llm_concepts_file={p_cf}"
+                            )
+                else:
+                    p_cf = p_root
+
+                p_cf = Path(str(p_cf))
+                p_cf_abs = p_cf if p_cf.is_absolute() else (Path.cwd() / p_cf).resolve()
                 if not p_cf_abs.exists():
                     raise SystemExit(f"concepts file not found: {p_cf_abs}")
 
-            concept_set = LFConceptSet.from_file(str(p_cf_abs))
-            if not getattr(concept_set, "texts", None):
-                raise SystemExit(f"concepts file parsed empty: {p_cf}")
+                concept_set = LFConceptSet.from_file(str(p_cf_abs))
+                if not getattr(concept_set, "texts", None):
+                    raise SystemExit(f"concepts file parsed empty: {p_cf}")
 
-            cfg = LFTrainingConfig(
-                clip_model=str(lf_cfg.get("clip_model", "ViT-B-32")),
-                clip_pretrained=str(lf_cfg.get("clip_pretrained", "laion2b_s34b_b79k")),
-                device=device,
-                lr=float(lf_cfg.get("lr", 1e-2)),
-                weight_decay=float(lf_cfg.get("weight_decay", 1e-4)),
-                max_epochs=int(lf_cfg.get("max_epochs", 200)),
-                patience=int(lf_cfg.get("patience", 10)),
-                seed=int(S["seed"]),
-                l1_ratio=float(lf_cfg.get("l1_ratio", 0.99)),
-                C_grid=tuple(map(float, lf_cfg.get("C_grid", (0.05, 0.1, 0.2, 0.5, 1.0, 2.0)))),
-                target_nonzero_per_class=tuple(map(int, lf_cfg.get("target_nonzero_per_class", (25, 35)))),
-                cache_dir=run_dir / "lfcbm_cache",
-                batch_size=int(lf_cfg.get("batch_size", 256)),
-            )
+                cfg = LFTrainingConfig(
+                    clip_model=str(lf_cfg.get("clip_model", "ViT-B-32")),
+                    clip_pretrained=str(lf_cfg.get("clip_pretrained", "laion2b_s34b_b79k")),
+                    device=device,
+                    lr=float(lf_cfg.get("lr", 1e-2)),
+                    weight_decay=float(lf_cfg.get("weight_decay", 1e-4)),
+                    max_epochs=int(lf_cfg.get("max_epochs", 200)),
+                    patience=int(lf_cfg.get("patience", 10)),
+                    seed=int(S["seed"]),
+                    l1_ratio=float(lf_cfg.get("l1_ratio", 0.99)),
+                    C_grid=tuple(map(float, lf_cfg.get("C_grid", (0.05, 0.1, 0.2, 0.5, 1.0, 2.0)))),
+                    target_nonzero_per_class=tuple(map(int, lf_cfg.get("target_nonzero_per_class", (25, 35)))),
+                    cache_dir=run_dir / "lfcbm_cache",
+                    batch_size=int(lf_cfg.get("batch_size", 256)),
+                )
 
-            lf = LabelFreeCBM(cfg)
-            stats = lf.fit(
-                train_X=_resolve_items(train.X, getattr(train, "base_dir", Path("."))),
-                train_y=train.y.astype(int),
-                valid_X=_resolve_items(valid.X, getattr(valid, "base_dir", Path("."))),
-                valid_y=valid.y.astype(int),
-                concept_set=concept_set,
-                cache_dir=cfg.cache_dir,
-            )
+                lf = LabelFreeCBM(cfg)
+                stats = lf.fit(
+                    train_X=_resolve_items(train.X, getattr(train, "base_dir", Path("."))),
+                    train_y=train.y.astype(int),
+                    valid_X=_resolve_items(valid.X, getattr(valid, "base_dir", Path("."))),
+                    valid_y=valid.y.astype(int),
+                    concept_set=concept_set,
+                    cache_dir=cfg.cache_dir,
+                )
 
-            resolved_te = _resolve_items(test.X, getattr(test, "base_dir", Path(".")))
-            missing = [p for p in resolved_te if not Path(p).exists()]
-            print("missing test files:", len(missing), missing[:3])
+                resolved_te = _resolve_items(test.X, getattr(test, "base_dir", Path(".")))
+                missing = [p for p in resolved_te if not Path(p).exists()]
+                print("missing test files:", len(missing), missing[:3])
 
-            P_tr = lf.concept_proba(
-                [str((getattr(train, "base_dir", Path(".")) / Path(p)).resolve()) for p in train.X]
-            )
-            P_te = lf.concept_proba(
-                [str((getattr(test, "base_dir", Path(".")) / Path(p)).resolve()) for p in test.X]
-            )
-            H_tr = (P_tr > 0.5).astype(np.float32)
-            H_te = (P_te > 0.5).astype(np.float32)
+                P_tr = lf.concept_proba(
+                    [str((getattr(train, "base_dir", Path(".")) / Path(p)).resolve()) for p in train.X]
+                )
+                P_te = lf.concept_proba(
+                    [str((getattr(test, "base_dir", Path(".")) / Path(p)).resolve()) for p in test.X]
+                )
+                H_tr = (P_tr > 0.5).astype(np.float32)
+                H_te = (P_te > 0.5).astype(np.float32)
 
-            prob_npz_path = run_dir / f"probs_{slug}_{seed_tag}.npz"
-            _merge_save_npz(
-                prob_npz_path,
-                {
-                    "P_tr": P_tr,
-                    "P_te": P_te,
-                    "C_tr": train.C.astype(np.float32),
-                    "C_te": test.C.astype(np.float32),
-                    "y_tr": train.y.astype(int),
-                    "y_te": test.y.astype(int),
-                    "concepts": np.array(list(getattr(test, "concepts", []))),
-                    "lf_concepts": np.array(list(concept_set.keys)),
-                },
-            )
+                prob_npz_path = run_dir / f"probs_{slug}_{seed_tag}.npz"
+                _merge_save_npz(
+                    prob_npz_path,
+                    {
+                        "P_tr": P_tr,
+                        "P_te": P_te,
+                        "C_tr": train.C.astype(np.float32),
+                        "C_te": test.C.astype(np.float32),
+                        "y_tr": train.y.astype(int),
+                        "y_te": test.y.astype(int),
+                        "concepts": np.array(list(getattr(test, "concepts", []))),
+                        "lf_concepts": np.array(list(concept_set.keys)),
+                    },
+                )
 
-            fe = FEOnProbs(lf.classifier)
-            import pickle
-            fe_name = f"frontend_{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
-            fe_path = run_dir / fe_name
-            with open(fe_path, "wb") as f:
-                pickle.dump(fe, f)
+                fe = FEOnProbs(lf.classifier)
+                import pickle
+                fe_name = f"frontend_{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
+                fe_path = run_dir / fe_name
+                with open(fe_path, "wb") as f:
+                    pickle.dump(fe, f)
 
-            y_pred_det = fe.predict_proba(P_te)
-            acc_det = float((y_pred_det.argmax(1) == test.y.astype(int)).mean())
+                y_pred_det = fe.predict_proba(P_te)
+                acc_det = float((y_pred_det.argmax(1) == test.y.astype(int)).mean())
 
-            acc_gt = None
-            concept_det_acc_mean = None
-            per_concept_acc = {}
-            train_per_concept_acc = {}
-            per_sub_acc = {}
+                acc_gt = None
+                concept_det_acc_mean = None
+                per_concept_acc = {}
+                train_per_concept_acc = {}
+                per_sub_acc = {}
 
-            S_int = dict(S)
-            S_int.setdefault("intervention_expert", "llm")
-            S_int.setdefault(
-                "intervention_llm",
-                {"provider": "gemini", "model": "gemini-2.5-flash-lite", "api_key_env": "GOOGLE_API_KEY"},
-            )
+                S_int = dict(S)
+                S_int.setdefault("intervention_expert", "llm")
+                S_int.setdefault(
+                    "intervention_llm",
+                    {"provider": "gemini", "model": "gemini-2.5-flash-lite", "api_key_env": "GEMINI_API_KEY"},
+                )
 
-            ia_val = float(S.get("human_annotation_accuracy", 0.8))
-            _, _, intervention_results = test_interventions(
-                P_te,
-                {**S_int, "intervention_accuracy": ia_val},
-                acc_det,
-                fe,
-                test,
-                concept_names=list(concept_set.keys),
-            )
+                ia_val = float(S.get("human_annotation_accuracy", 0.8))
+                _, _, intervention_results = test_interventions(
+                    P_te,
+                    {**S_int, "intervention_accuracy": ia_val},
+                    acc_det,
+                    fe,
+                    test,
+                    concept_names=list(concept_set.keys),
+                )
 
-            catalog_csv_path, meta_extra = _write_catalogs(run_dir, data.meta)
-            lf_paths = lf.save(run_dir / "lfcbm_artifacts")
+                catalog_csv_path, meta_extra = _write_catalogs(run_dir, data.meta)
+                lf_paths = lf.save(run_dir / "lfcbm_artifacts")
 
-            meta = {
-                "settings": S,
-                "run_dir": str(run_dir),
-                "artifacts": {**lf_paths, "detector": "", "frontend": str(fe_path), "probs_npz": str(prob_npz_path)},
-                "splits": {"n_train": _len(train), "n_valid": _len(valid), "n_test": _len(test)},
-                "concepts": list(concept_set.keys),
-                "intervention_budgets": S.get("budget", []),
-                "intervention_acc": ia_val,
-                "naming_slug": slug,
-                "catalog_csv": catalog_csv_path,
-                "df_indices": {
-                    "train": list(map(int, train.meta.get("df_indices", []))),
-                    "valid": list(map(int, valid.meta.get("df_indices", []))),
-                    "test": list(map(int, test.meta.get("df_indices", []))),
-                },
-                "robot_ids": {
-                    "train": list(map(int, train.meta.get("robot_ids", []))),
-                    "valid": list(map(int, valid.meta.get("robot_ids", []))),
-                    "test": list(map(int, test.meta.get("robot_ids", []))),
-                },
-            }
-            meta.update(meta_extra)
+                meta = {
+                    "settings": S,
+                    "run_dir": str(run_dir),
+                    "artifacts": {**lf_paths, "detector": "", "frontend": str(fe_path), "probs_npz": str(prob_npz_path)},
+                    "splits": {"n_train": _len(train), "n_valid": _len(valid), "n_test": _len(test)},
+                    "concepts": list(concept_set.keys),
+                    "intervention_budgets": S.get("budget", []),
+                    "intervention_acc": ia_val,
+                    "naming_slug": slug,
+                    "catalog_csv": catalog_csv_path,
+                    "df_indices": {
+                        "train": list(map(int, train.meta.get("df_indices", []))),
+                        "valid": list(map(int, valid.meta.get("df_indices", []))),
+                        "test": list(map(int, test.meta.get("df_indices", []))),
+                    },
+                    "robot_ids": {
+                        "train": list(map(int, train.meta.get("robot_ids", []))),
+                        "valid": list(map(int, valid.meta.get("robot_ids", []))),
+                        "test": list(map(int, test.meta.get("robot_ids", []))),
+                    },
+                }
+                meta.update(meta_extra)
 
-            metrics = {
-                "cbm_acc_detected": float(acc_det),
-                "cbm_acc_oracle": None,
-                "concept_det_acc_mean": None,
-                "interventions": intervention_results,
-                "concept_accuracies": per_concept_acc,
-                "model_accuracies_per_concept": per_sub_acc,
-                "train_concept_accuracies": train_per_concept_acc,
-                "prob_test_npz": str(prob_npz_path),
-                "concept_names": list(concept_set.keys),
-                "lfcbm_train_stats": stats,
-            }
+                metrics = {
+                    "cbm_acc_detected": float(acc_det),
+                    "cbm_acc_oracle": None,
+                    "concept_det_acc_mean": None,
+                    "interventions": intervention_results,
+                    "concept_accuracies": per_concept_acc,
+                    "model_accuracies_per_concept": per_sub_acc,
+                    "train_concept_accuracies": train_per_concept_acc,
+                    "prob_test_npz": str(prob_npz_path),
+                    "concept_names": list(concept_set.keys),
+                    "lfcbm_train_stats": stats,
+                }
 
-            with open(run_dir / f"meta_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
-                json.dump(meta, f, indent=2, default=str)
-            with open(run_dir / f"metrics_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
-                json.dump(metrics, f, indent=2, default=str)
+                with open(run_dir / f"meta_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
+                    json.dump(meta, f, indent=2, default=str)
+                with open(run_dir / f"metrics_cbm_detected_{slug}_{seed_tag}.json", "w") as f:
+                    json.dump(metrics, f, indent=2, default=str)
 
-            results[regime] = {
-                "acc_detected": acc_det,
-                "acc_ground_truth": None,
-                "concept_mean": None,
-            }
+                results[results_key] = {
+                    "acc_detected": acc_det,
+                    "acc_ground_truth": None,
+                    "concept_mean": None,
+                }
 
     def _jsonify(o):
         if isinstance(o, dict):
@@ -1590,7 +1633,7 @@ settings = {
     "draw": 0,
     "draw_only": 0,
     "CBM_type": "separate",
-    "image_dir": str(data_dir / "robot_images"),
+    "image_dir": str(data_dir / "robot_images_low_res"),
     "image_size": "medium",
     "color_mode": "color",
     "seed": 1012,
@@ -1598,7 +1641,7 @@ settings = {
     "dataset_characterization": "",
     "test_size": 10000,
     "train_size": 3800,
-    "knows_concepts": True,
+    "knows_concepts": False,
     "concepts": {
         "head_shape": ["square", "round"],
         "body_shape": ["square", "round"],
@@ -1618,16 +1661,16 @@ settings = {
     },
     "subconcepts": ["foot_shape_subtype"],
     "spurious_features": ["has_elbows", "hand_shape"],
-    # "drop_concepts": [
-    #     "foot_shape_flat_rounded","foot_shape_pointy_trapezoid",
-    #     "foot_shape_pointy_3sided","foot_shape_flat_lshaped","foot_shape"
-    # ],
-    "drop_concepts": ["foot_shape_flat_rounded",
-                      "foot_shape_pointy_trapezoid",
-                      'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
-                      'foot_shape_pointy_4sided', 'foot_shape_pointy_square',
-                      'foot_shape_pointy_rounded', 'foot_shape_flat_5sided',
-                      'foot_shape_flat_square','foot_shape_flat_trapezoid'],
+    "drop_concepts": [
+        "foot_shape_flat_rounded","foot_shape_pointy_trapezoid",
+        "foot_shape_pointy_3sided","foot_shape_flat_lshaped","foot_shape"
+    ],
+    # "drop_concepts": ["foot_shape_flat_rounded",
+    #                   "foot_shape_pointy_trapezoid",
+    #                   'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
+    #                   'foot_shape_pointy_4sided', 'foot_shape_pointy_square',
+    #                   'foot_shape_pointy_rounded', 'foot_shape_flat_5sided',
+    #                   'foot_shape_flat_square','foot_shape_flat_trapezoid'],
     "human_alignment": {},
     "model_type": "stochastic",
     "logit_scalar": 4.2,
@@ -1665,9 +1708,10 @@ settings = {
 
     # Only run perfect to regenerate interventions/metrics
     "subjective_grid": [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4],
-    # "regimes": ["perfect", "expert", "subjective", "machine_annotation", "llm_annotation"],
-    "regimes": ["perfect", "expert", "subjective", "machine_annotation"],
-    "llm_concepts_file": data_dir /"robot_images/llm.jsonl",
+    # "regimes": ["perfect", "expert", "subjective", "machine_annotation", "automated_detection"],
+    "regimes": ["Automated Detection"],
+    "auto_det_tags": ["clip", "llm"],
+    "llm_concepts_file": data_dir / "robot_images",
 
     "concepts_file": None,
     "lfcbm": {
