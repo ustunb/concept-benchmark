@@ -383,7 +383,7 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None)
                             )
                             # robust batched call; _llm_judge_batch handles JSON weirdness
                             votes_list = _llm_judge_batch(image_paths, per_image_names)
-                            sleep_time = 10.0
+                            sleep_time = 5.0
                             print(
                                 f"[LLM] batch {batch_idx}/{n_batches} ok; "
                                 f"sleeping {sleep_time} seconds to respect rate limits",
@@ -1636,7 +1636,7 @@ settings = {
     "image_dir": str(data_dir / "robot_images_low_res"),
     "image_size": "medium",
     "color_mode": "color",
-    "seed": 1012,
+    "seed": 1014,
     "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy') + int(row['has_knees']=='true'))>= 3 else 'drent'",
     "dataset_characterization": "",
     "test_size": 10000,
@@ -1699,7 +1699,7 @@ settings = {
     "intervention_threshold": 0.2,
 
     "out_dir": str(results_dir / "robots"),
-    "run_name": "scbm_run_1002_newer_alignment_trials",
+    "run_name": "scbm_run_1014",
 
     # Let the script pick up anchors/NPZs; do NOT force recompute.
     "load_detector": "",
@@ -1708,9 +1708,9 @@ settings = {
 
     # Only run perfect to regenerate interventions/metrics
     "subjective_grid": [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4],
-    # "regimes": ["perfect", "expert", "subjective", "machine_annotation", "automated_detection"],
-    "regimes": ["Automated Detection"],
-    "auto_det_tags": ["clip", "llm"],
+    "regimes": ["perfect", "expert", "subjective", "machine_annotation","Automated Detection"],
+    # "regimes": ["machine_annotation","Automated Detection"],
+    "auto_det_tags": ["llm","clip"],
     "llm_concepts_file": data_dir / "robot_images",
 
     "concepts_file": None,
