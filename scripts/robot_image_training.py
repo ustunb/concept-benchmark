@@ -23,7 +23,7 @@ from scripts.robot_utils import _apply_missing, _apply_label_noise, _rate_tag, _
 
 settings = {
     "samples_per_instance": 4,
-    "draw": 0,
+    "draw": 1,
     "CBM_type": "separate", #"sequential"
     "image_dir": "./data/robot_images",
     "image_size": "medium",
@@ -69,7 +69,7 @@ settings = {
     "drop_concepts": ["foot_shape_flat_rounded",
                       "foot_shape_pointy_trapezoid",
                       'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
-                      'foot_shape'],#'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
+                      'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
     "human_alignment": {
         "signs": {
             "has_knees": 1
@@ -103,7 +103,7 @@ settings = {
     "intervention_threshold": 0.2,
     "epochs": 1,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "lol",
+    "run_name": "lol cbm",
     "load_detector": "",#str(Path(results_dir / "robots" / "aaa_Test2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc100_seed1012.pt")),
     "load_frontend": "",#str(Path(results_dir / "robots" / "aaa_Test2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc100_seed1012.pkl")),
 }

@@ -143,7 +143,7 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
 
     # elbows
     if "has_elbows" in features.keys():
-        elbow_size = 0.1 * r if width < 120 or features["has_knees"] == "true" else 0
+        elbow_size = 0.1 * r if width < 120 or features["has_elbows"] == "true" else 0
         elbow = pero.Ellipse(y=y_arm, width=elbow_size, height=elbow_size)
         elbow.draw(canvas, x=x_left - 0.5 * arm_length, fill_color=color_left)
         elbow.draw(canvas, x=x_right + 0.5 * arm_length, fill_color=color_right)
