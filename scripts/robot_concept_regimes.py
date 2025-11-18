@@ -1707,8 +1707,8 @@ settings = {
     "force": 1,
 
     # Only run perfect to regenerate interventions/metrics
-    "subjective_grid": [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4],
-    "regimes": ["perfect", "expert", "subjective", "machine_annotation","Automated Detection"],
+    "subjective_grid": [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4],
+    "regimes": ["perfect", "expert", "subjective"],
     # "regimes": ["machine_annotation","Automated Detection"],
     "auto_det_tags": ["llm","clip"],
     "llm_concepts_file": data_dir / "robot_images",
