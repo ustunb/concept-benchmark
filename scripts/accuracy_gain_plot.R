@@ -12,8 +12,18 @@ logi <- function(fmt, ...) cat(sprintf(paste0("[info] ", fmt, "\n"), ...))
 loge <- function(fmt, ...) cat(sprintf(paste0("[error] ", fmt, "\n"), ...))
 
 # ----- theme knobs -----
-AXIS_TITLE_X_SIZE <- NULL
-AXIS_TITLE_Y_SIZE <- NULL
+AXIS_TITLE_X_SIZE  <- 60  # numeric or rel; NULL uses default
+AXIS_TITLE_Y_SIZE  <- 60
+AXIS_TEXT_X_SIZE   <- 60  # tick labels on x-axis
+AXIS_TEXT_Y_SIZE   <- 60  # tick labels on y-axis
+LEGEND_TEXT_SIZE   <- 60
+LEGEND_TITLE_SIZE  <- NULL
+CAPTION_TEXT_SIZE  <- NULL
+LEGEND_SHOW        <- TRUE  # TRUE = show legend, FALSE = hide legend
+
+# Hard-coded subjective rates to KEEP (strings after "rate")
+# e.g. rate10 -> "10", rate0.2 -> "0.2"
+SUBJECTIVE_RATES_KEEP <- c("20")
 
 # ----- arg parsing -----
 
@@ -64,28 +74,24 @@ parse_args <- function() {
     logi("No --outdir given; assuming outdir = %s", kv$outdir)
   }
 
-  if (!is.null(kv$subjective_rates)) {
-    logi("Subjective noise level filter requested: %s", kv$subjective_rates)
-  }
-
   kv
 }
 
 # ----- theme -----
 
 build_base_theme <- function() {
-  xt <- if (is.null(AXIS_TITLE_X_SIZE)) {
-    element_text(face = "bold", size = ggplot2::rel(1.5))
-  } else {
-    element_text(face = "bold", size = AXIS_TITLE_X_SIZE)
-  }
-  yt <- if (is.null(AXIS_TITLE_Y_SIZE)) {
-    element_text(face = "bold", size = ggplot2::rel(1.5))
-  } else {
-    element_text(face = "bold", size = AXIS_TITLE_Y_SIZE)
-  }
+  xt_size <- if (is.null(AXIS_TITLE_X_SIZE)) ggplot2::rel(1.5) else AXIS_TITLE_X_SIZE
+  yt_size <- if (is.null(AXIS_TITLE_Y_SIZE)) ggplot2::rel(1.5) else AXIS_TITLE_Y_SIZE
 
-  theme_bw() +
+  axis_text_x_size <- if (is.null(AXIS_TEXT_X_SIZE)) 15 else AXIS_TEXT_X_SIZE
+  axis_text_y_size <- if (is.null(AXIS_TEXT_Y_SIZE)) 15 else AXIS_TEXT_Y_SIZE
+
+  # Legend text shrunk by factor 0.8
+  legend_text_size  <- if (is.null(LEGEND_TEXT_SIZE)) ggplot2::rel(1.5) else LEGEND_TEXT_SIZE * 0.8
+  legend_title_size <- if (is.null(LEGEND_TITLE_SIZE)) ggplot2::rel(1.0) else LEGEND_TITLE_SIZE
+  caption_size      <- if (is.null(CAPTION_TEXT_SIZE)) ggplot2::rel(1.0) else CAPTION_TEXT_SIZE
+
+   theme_bw() +
     theme(
       # horizontal gridlines only
       panel.grid.major.x = element_blank(),
@@ -100,20 +106,21 @@ build_base_theme <- function() {
       plot.title   = element_blank(),
 
       # legend at bottom instead of inside the plot
-      legend.position = "bottom",
+      legend.position   = if (LEGEND_SHOW) "bottom" else "none",
+      legend.box        = "horizontal",
+      legend.box.just   = "left",
       legend.background = element_rect(fill = "white", color = NA),
-      legend.key       = element_blank(),
-      legend.text      = element_text(size = ggplot2::rel(1.5)),
-      legend.title     = element_text(size = ggplot2::rel(1)),
-      plot.caption     = element_text(size = ggplot2::rel(1)),
+      legend.key        = element_blank(),
+      legend.text       = element_text(size = legend_text_size),
+      legend.title      = element_blank(),  # no legend title
+      plot.caption      = element_text(size = caption_size),
 
-      axis.title.x = xt,
-      axis.title.y = yt,
-      axis.text.x  = element_text(size = 15),
-      axis.text.y  = element_text(size = 15)
+      axis.title.x = element_text(size = xt_size),
+      axis.title.y = element_text(size = yt_size),
+      axis.text.x  = element_text(size = axis_text_x_size),
+      axis.text.y  = element_text(size = axis_text_y_size)
     )
 }
-
 
 .base_theme <- build_base_theme()
 
@@ -307,14 +314,17 @@ compute_gain_deltas <- function(df_raw) {
   # with perfect itself at 0.
   df_join <- df_join %>%
     dplyr::mutate(
+      setup_norm = tolower(gsub(" ", "_", setup)),
       gain_delta = ifelse(setup == "perfect", 0, gain - gain_perf),
       setup_label = dplyr::case_when(
-        setup == "perfect"   ~ "Perfect",
-        setup == "expert"    ~ "Expert",
-        setup == "detected"  ~ "Detected",
-        setup == "subjective" & !is.na(noise_level) ~
-          paste0("Subjective rate ", noise_level),
-        TRUE ~ setup
+        setup_norm == "perfect"                        ~ "Ideal",
+        setup_norm == "expert"                         ~ "Expert",
+        setup_norm == "subjective"                     ~ "Subjective",
+        setup_norm %in% c("machine_annotation",
+                          "detected")                  ~ "Machine Annotation",
+        setup_norm == "automated_detection__llm"       ~ "LLM Discovery",
+        setup_norm == "automated_detection__clip"      ~ "CLIP Discovery",
+        TRUE ~ stringr::str_to_title(setup)
       )
     )
 
@@ -333,7 +343,7 @@ plot_gain_deltas <- function(df, out_file) {
   if ("setup" %in% names(df)) {
     df <- df %>% dplyr::filter(setup != "perfect")
   } else {
-    df <- df %>% dplyr::filter(setup_label != "Perfect")
+    df <- df %>% dplyr::filter(setup_label != "Ideal")
   }
   if (!nrow(df)) {
     loge("No non-perfect setups to plot.")
@@ -342,39 +352,60 @@ plot_gain_deltas <- function(df, out_file) {
 
   df <- df %>%
     dplyr::mutate(
-      step_factor   = factor(step, levels = sort(unique(step))),
       gain_delta_pp = 100 * gain_delta
     )
 
-  # ---- enforce series ordering ----
-  labels_all <- unique(df$setup_label)
-
-  # 1. Expert
-  expert_lab <- labels_all[labels_all == "Expert"]
-
-  # 2. Subjective (sorted by rate)
-  subj_mask   <- grepl("^Subjective rate ", labels_all)
-  subj_labels <- labels_all[subj_mask]
-  subj_order  <- subj_labels
-  if (length(subj_labels)) {
-    subj_num <- suppressWarnings(
-      as.numeric(sub("Subjective rate\\s+", "", subj_labels))
-    )
-    subj_order <- subj_labels[order(subj_num)]
+  # ---- series ordering: by ABSOLUTE delta at largest step ----
+  all_steps <- df$step[is.finite(df$step)]
+  if (!length(all_steps)) {
+    loge("No finite step values for ordering.")
+    return(invisible(NULL))
   }
 
-  # 3. machine_annotation
-  machine_lab <- labels_all[labels_all == "machine_annotation"]
+  max_step <- max(all_steps, na.rm = TRUE)
+  logi("Ordering series by |gain_delta| at largest step k = %s", as.character(max_step))
 
-  # 4. automated detection* (alphabetical)
-  auto_mask   <- grepl("^automated detection", labels_all, ignore.case = TRUE)
-  auto_labels <- sort(labels_all[auto_mask])
+  ref <- df %>%
+    dplyr::filter(step == max_step) %>%
+    dplyr::group_by(setup_label) %>%
+    dplyr::summarise(
+      gain_delta_pp = mean(gain_delta_pp, na.rm = TRUE),
+      .groups = "drop"
+    )
 
-  used  <- c(expert_lab, subj_order, machine_lab, auto_labels)
-  other <- setdiff(labels_all, used)
+  # Sort from smallest |delta| to largest |delta|
+  ref <- ref[order(abs(ref$gain_delta_pp)), , drop = FALSE]
 
-  new_levels <- c(expert_lab, subj_order, machine_lab, auto_labels, sort(other))
+  base_order <- ref$setup_label
+  all_labels <- sort(unique(df$setup_label))
+  missing    <- setdiff(all_labels, base_order)
+  new_levels <- c(base_order, missing)
+
   df$setup_label <- factor(df$setup_label, levels = new_levels)
+
+  logi("Series order (from smallest to largest |delta| at k=%s): %s",
+       as.character(max_step), paste(new_levels, collapse = ", "))
+
+  # ---- restrict x-axis to 1, 2, and max interventions and relabel ----
+  keep_steps <- sort(unique(c(1L, 2L, max_step)))
+  df <- df %>%
+    dplyr::filter(step %in% keep_steps) %>%
+    dplyr::mutate(
+      step_factor = factor(
+        step,
+        levels = keep_steps,
+        labels = c(
+          "1",
+          "2",
+          paste0("5")
+        )[seq_along(keep_steps)]
+      )
+    )
+
+  if (!nrow(df)) {
+    loge("No data to plot after filtering steps.")
+    return(invisible(NULL))
+  }
 
   # ---- y-axis: negative deltas up to 0, dashed 0 line ----
   y_min <- suppressWarnings(min(df$gain_delta_pp, na.rm = TRUE))
@@ -382,24 +413,23 @@ plot_gain_deltas <- function(df, out_file) {
   y_max <- 0
 
   logi("Y-axis range for plot: [%.3f, %.3f] (percentage points)", y_min, y_max)
-  logi("Series order: %s", paste(new_levels, collapse = ", "))
 
-  p <- ggplot(df, aes(x = step_factor, y = gain_delta_pp, fill = setup_label)) +
+    p <- ggplot(df, aes(x = step_factor, y = gain_delta_pp, fill = setup_label)) +
     geom_col(position = position_dodge(width = 0.7), width = 0.6) +
     geom_hline(yintercept = 0, linetype = "dashed") +
     labs(
-      x    = "Intervention step (k)",
-      y    = "Change in accuracy gain (percentage points)",
-      fill = "Setup"
+      x    = "Intervention Step",
+      y    = "Change in accuracy (%)"
+      # no fill -> no legend title text
     ) +
     .base_theme +
-    scale_y_continuous(limits = c(y_min, y_max), expand = c(0, 0))
+    guides(fill = guide_legend(nrow = 3, byrow = TRUE, label.hjust = 0)) +
+    scale_y_continuous(limits = c(y_min, y_max), expand = c(0, 0.02sAdditio))
 
-  # Make the plot larger so legend + bars don’t get clipped
+  # Big figure so nothing gets clipped
   ggsave(out_file, plot = p, width = 16, height = 12, dpi = 300)
   logi("Wrote plot: %s", out_file)
 }
-
 
 # ----- main -----
 
@@ -464,24 +494,21 @@ main <- function() {
   }
   logi("Loaded raw metrics: %d rows", nrow(df_raw))
 
-  # Always write the full, unfiltered raw metrics for debugging
+  # Always write full raw metrics for debugging
   write.csv(df_raw,
             file = file.path(out_root, "raw_metrics_all.csv"),
             row.names = FALSE)
 
-  # Optional: filter subjective by specified noise levels
-  if (!is.null(args$subjective_rates)) {
-    wanted <- strsplit(args$subjective_rates, ",")[[1]]
-    wanted <- trimws(wanted)
-    logi("Filtering subjective runs to noise levels: %s",
-         paste(wanted, collapse = ", "))
+  # Hard-coded subjective filter: KEEP only specified rates
+  if (length(SUBJECTIVE_RATES_KEEP) > 0) {
+    logi("Restricting subjective noise levels to: %s",
+         paste(SUBJECTIVE_RATES_KEEP, collapse = ", "))
 
     before_n <- nrow(df_raw)
     df_raw <- df_raw %>%
       dplyr::filter(
         setup != "subjective" |
-          is.na(noise_level) |
-          noise_level %in% wanted
+          (!is.na(noise_level) & noise_level %in% SUBJECTIVE_RATES_KEEP)
       )
     after_n <- nrow(df_raw)
     logi("Rows before subjective filter: %d, after: %d",
