@@ -1,12 +1,17 @@
 import json, time, pickle
+from typing import Union, List, Optional
+
+import cvxpy as cp
 import numpy as np
 import torch
 import copy
+
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import confusion_matrix
 from pathlib import Path
 from torchvision import transforms
-from concept_benchmark.models import ConceptDetector, FrontEndModel, RobotConceptClassifier, FrontEndModelCVXPY
-from concept_benchmark.paths import results_dir, data_dir
+from concept_benchmark.models import ConceptDetector, FrontEndModel, RobotConceptClassifier
+from concept_benchmark.paths import results_dir
 from concept_benchmark.synthetic.robot import create_synthetic_dataset
 from concept_benchmark.models import ConceptBasedModel
 from concept_benchmark.intervention import (
@@ -23,7 +28,7 @@ from scripts.robot_utils import _apply_missing, _apply_label_noise, _rate_tag, _
 
 settings = {
     "samples_per_instance": 4,
-    "draw": 1,
+    "draw": 0,
     "CBM_type": "separate", #"sequential"
     "image_dir": "./data/robot_images",
     "image_size": "medium",
@@ -107,6 +112,179 @@ settings = {
     "load_detector": "",#str(Path(results_dir / "robots" / "aaa_Test2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc100_seed1012.pt")),
     "load_frontend": "",#str(Path(results_dir / "robots" / "aaa_Test2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc100_seed1012.pkl")),
 }
+
+
+class MockModel:
+    """Mock sklearn-like model for compatibility with existing code"""
+    def __init__(self, weights, bias):
+        self.coef_ = np.array([weights])  # Shape: (1, n_features)
+        self.intercept_ = np.array([bias])
+
+
+class FrontEndModelCVXPY(FrontEndModel):
+    def __init__(self, **kwargs) -> None:
+        """
+        Initialize the front-end model with the ability to add constraints on feature signs and prediction probabilities
+        when certain features are active.
+        """
+        self.model = None
+        self.concept_names = kwargs.get("concept_names", None)
+        self.monotonicity_constraints = {}
+        self.prediction_constraints = []
+        self.concept_pos_value_map = kwargs.get("concept_pos_value_map", None)
+
+    # post init methods to add constraints
+        for feature, sign in kwargs.get("monotonicity_constraints", {}).items():
+            self.add_monotonicity_constraint(feature, sign)
+        for features, values, sign_txt, min_prob in kwargs.get("prediction_constraints", []):
+            sign = sign_txt == ">="
+            self.add_prediction_constraint(features, values, sign, min_prob)
+
+    def _get_feature_idx(self, feature: Union[str, int]) -> int:
+        """Convert feature name to index"""
+        if isinstance(feature, int):
+            return feature
+        if self.concept_names is None:
+            raise ValueError("Concept names not available. Pass names during construction first or use integer indices")
+        if feature not in self.concept_names:
+            raise ValueError(f"Feature '{feature}' not found in {self.concept_names}")
+        return self.concept_names.index(feature)
+
+    def add_monotonicity_constraint(self, feature: Union[str, int], sign: int):
+        """Add sign constraint: sign=1 for positive, sign=-1 for negative"""
+        print("Adding monotonicity constraint:", feature, "sign:", sign)
+        feature_idx = self._get_feature_idx(feature)
+        self.monotonicity_constraints[feature_idx] = sign
+
+    def add_prediction_constraint(self, features: List[Union[str, int]], values: List[str], sign: int = 1 , min_prob: float = 0.5):
+        """Add prediction constraint: when features active, prob >= or <= min_prob"""
+        print("Adding prediction constraint on features:", features, "sign:", sign, "min_prob:", min_prob)
+        feature_indices = [self._get_feature_idx(f) for f in features]
+        feature_vals = [1 if val == self.concept_pos_value_map[feat] else 0 for feat, val in zip(features, values)]
+        print("Feature indices:", feature_indices, "Feature values:", feature_vals)
+        self.prediction_constraints.append((feature_indices, feature_vals, sign, min_prob))
+
+    def fit(self, C: np.ndarray, y: np.ndarray, fit_params: Optional[dict] = None) -> None:
+        """
+        Fit the front-end model to the dataset.
+        """
+        # If no constraints, use regular sklearn
+        if not self.monotonicity_constraints and not self.prediction_constraints:
+            lr_params = {
+                "random_state": 42,
+                "max_iter": 1000,
+                "solver": "lbfgs",
+                "penalty": "l2",
+                "C": 1.0,
+                "n_jobs": -1,
+            }
+            if fit_params:
+                lr_params.update(fit_params)
+
+            self.model = LogisticRegression(**lr_params)
+            self.model.fit(C, y)
+            return
+
+        # Use CVXPY for constrained fitting
+        n_samples, n_features = C.shape
+        y_binary = (y == 1).astype(int)
+        w = cp.Variable(n_features)
+        b = cp.Variable()
+
+        logits = C @ w + b
+        # convert binary labels to -1 and 1 and then set the loss to log(1 + exp(+-logit))
+        loss = cp.sum(cp.logistic(-cp.multiply(2 * y_binary - 1, logits)))
+        objective = cp.Minimize(loss)
+
+        constraints = []
+
+        # slack variables to make sure when some features hae some values ALL concept combinations with this values are
+        # >= min_prob or <= min_prob
+        u_pos = cp.Variable(n_features)
+        v_neg = cp.Variable(n_features)
+        constraints += [
+            u_pos >= 0, u_pos >= w,  # u_pos >= max(0, w)
+            v_neg >= 0, v_neg >= -w,  # v_neg >= -min(0, w)
+        ]
+
+        # monotonicity constraints
+        for feature_idx, sign in self.monotonicity_constraints.items():
+            if sign == 1:
+                constraints.append(w[feature_idx] >= 0)
+            else:
+                constraints.append(w[feature_idx] <= 0)
+
+        # prediction constraints
+        for feature_ind, feature_val, sign, min_prob in self.prediction_constraints:
+            # Convert prob to logit: logit = log(p/(1-p))
+            logit_threshold = np.log(min_prob / (1 - min_prob))
+            fixed_mask = np.zeros(n_features, dtype=bool)
+            fixed_mask[np.array(feature_ind, dtype=int)] = True
+            free_mask = ~fixed_mask
+
+            constraint_vec = np.zeros(n_features)
+            constraint_vec[feature_ind] = feature_val
+            fixed_constraint = constraint_vec @ w
+
+            if sign == 1:  # ">=" lower bound: for all others, P >= min_prob
+                # worst case lowers the logit by turning ON all negative weights:
+                #   fixed_contrib + b + sum_{free} min(0, w_j) >= t
+                constraints.append(fixed_constraint + b - cp.sum(v_neg[free_mask]) >= logit_threshold)
+            else:  # "<=" upper bound: for all others, P <= min_prob
+                # worst case increases the logit by turning ON all positive weights:
+                #   fixed_contrib + b + sum_{free} max(0, w_j) <= t
+                constraints.append(fixed_constraint + b + cp.sum(u_pos[free_mask]) <= logit_threshold)
+        problem = cp.Problem(objective, constraints)
+        problem.solve()
+
+        if problem.status in ["infeasible", "unbounded"]:
+            print(f"Warning: CVXPY optimization failed ({problem.status}), falling back to unconstrained")
+            # Fallback to unconstrained
+            lr_params = {
+                "random_state": 42,
+                "max_iter": 1000,
+                "solver": "lbfgs",
+                "penalty": "l2",
+                "C": 1.0,
+                "n_jobs": -1,
+            }
+            if fit_params:
+                lr_params.update(fit_params)
+            self.model = LogisticRegression(**lr_params)
+            self.model.fit(C, y)
+            return
+
+        self.weights = w.value
+        self.bias = b.value
+
+        # Create a dummy sklearn model for compatibility with existing code
+        self.model = MockModel(self.weights, self.bias)
+
+    def predict(self, C: np.ndarray) -> np.ndarray:
+        """
+        Predict label given concepts.
+        """
+        if hasattr(self, 'weights'):  # CVXPY fitted
+            logits = C @ self.weights + self.bias
+            return (logits >= 0).astype(int)
+        else:  # sklearn fitted
+            if self.model is None:
+                raise RuntimeError("Model has not been fitted yet. Please call fit() first.")
+            return self.model.predict(C)
+
+    def predict_proba(self, C: np.ndarray) -> np.ndarray:
+        """
+        Predict label probabilities given concepts.
+        """
+        if hasattr(self, 'weights'):  # CVXPY fitted
+            logits = C @ self.weights + self.bias
+            probs = 1 / (1 + np.exp(-logits))
+            return np.column_stack([1 - probs, probs])
+        else:  # sklearn fitted
+            if self.model is None:
+                raise RuntimeError("Model has not been fitted yet. Please call fit() first.")
+            return self.model.predict_proba(C)
+
 
 
 def define_train_valid_test(settings, concept_dataset, missingness, params, rate, rng, tf):
