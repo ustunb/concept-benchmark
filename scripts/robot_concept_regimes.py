@@ -1633,7 +1633,7 @@ settings = {
     "draw": 0,
     "draw_only": 0,
     "CBM_type": "separate",
-    "image_dir": str(data_dir / "robot_images_low_res"),
+    "image_dir": str(data_dir / "robot_images"),
     "image_size": "medium",
     "color_mode": "color",
     "seed": 1014,

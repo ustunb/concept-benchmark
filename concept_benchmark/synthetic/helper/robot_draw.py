@@ -2,10 +2,7 @@
 Robot feature taxonomy and drawing utilities for synthetic robot images.
 """
 
-try:
-    import cairo
-except:
-    pass
+import cairo
 import numpy as np
 import pero
 from PIL import Image as PILImage
@@ -145,8 +142,9 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
     ray.draw(canvas, x=x_right, y=y_arm, length=arm_length, angle=pero.rads(0))
 
     # elbows
-    if features.get("has_elbows", False):
-        elbow = pero.Ellipse(y=y_arm, width=0.3 * r, height=0.3 * r)
+    if "has_elbows" in features.keys():
+        elbow_size = 0.1 * r if width < 120 or features["has_elbows"] == "true" else 0
+        elbow = pero.Ellipse(y=y_arm, width=elbow_size, height=elbow_size)
         elbow.draw(canvas, x=x_left - 0.5 * arm_length, fill_color=color_left)
         elbow.draw(canvas, x=x_right + 0.5 * arm_length, fill_color=color_right)
 
@@ -261,9 +259,12 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
     line.draw(canvas, x1=x_right, x2=x_right, y1=y_top * 0.9, y2=y_top + leg_height)
 
     # knees
-    if features.get("has_knees", False):
+    if "has_knees" in features.keys():# and features["has_knees"] == "true":
+        #knee_size = round(0.05 * r)
+        knee_size = 0.1 * r if width < 120 or features["has_knees"] == "true" else 0
+
         knee = pero.Ellipse(
-            x=x_left, y=y_top + 0.5 * leg_height, width=0.3 * r, height=0.3 * r
+            x=x_left, y=y_top + 0.5 * leg_height, width=knee_size, height=knee_size
         )
         knee.draw(canvas, x=x_left, fill_color=color_left)
         knee.draw(canvas, x=x_right, fill_color=color_right)
