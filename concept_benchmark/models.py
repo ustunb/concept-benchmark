@@ -787,7 +787,7 @@ class ConceptBasedModel(object):
 
         if front_end_model:
             assert isinstance(front_end_model, FrontEndModel), (
-                "front_end_model must be an instance of FrontEndModel."
+                "front_end_model must be an instance of FrontEndModel or FrontEndModelCVXPY."
             )
 
         self.concept_detector = (
