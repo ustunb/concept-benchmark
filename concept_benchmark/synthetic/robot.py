@@ -428,6 +428,7 @@ def create_robot_image_dataset(
     meta = {
         "classes": ["drent", "glorp"],
         "concepts": feature_names,
+        "concept_pos_value": pos_map,
         "num_unique_robots": num_combinations,
         "unfiltered_concepts": list(copy_features.keys()),
         "UC": UC,
