@@ -12,67 +12,83 @@ EMPTY_TEX_STRING = "---"
 robot_results <- "./results/robot_demo_results.csv"
 table_tex_path <- "~/Dropbox/Apps/Overleaf/concept-benchmark/tables/robot_cbm.tex"
 
-TAU = 0.6
-metric_order = c("accuracy", "predictions_intervened_on", "total_concept_edits_made")
-model_order = c("dnn", "cbm_no_int", "cbm_with_int_1", "cbm_with_int_3")
+TAU = 0.2
+metric_order = c('accuracy', 'predictions_intervened_on', 'total_concept_confirmations', 'predictions_changed')
+model_order = c("dnn", "cbm_no_int", "cbm_with_int_1", "cbm_with_int_3", "cbm_with_int_max")
+missing_order = c("none", "mcar", "mnar")
 DATASET_TITLES <- c(
-    "ideal" = "\\robotIdeal{}",
-    "subconcept" = "\\robotSubconcept{}"
+    "ideal_none" = "\\robotIdeal{}",
+    "ideal_mcar" = "\\robotIdealMCAR{}",
+    "ideal_mnar" = "\\robotIdealMNAR{}",
+    "subconcept_none" = "\\robotSubconcept{}",
+    "subconcept_mcar" = "\\robotSubconceptMCAR{}",
+    "subconcept_mnar" = "\\robotSubconceptMNAR{}"
 )
 
 df <- read_csv(robot_results, show_col_types = FALSE)
-df$metric <- factor(df$metric, levels = metric_order)
+df <- df %>% mutate(model = ifelse((model == "cbm_with_int_7") | (model == "cbm_with_int_12"), "cbm_with_int_max", model))
+df <- df %>% filter(model %in% model_order)
 df$model <- factor(df$model, levels = model_order)
+df$concept_missing_mech <- factor(df$concept_missing_mech, levels = missing_order)
 df <- df %>%
     # mutate(model = ifelse(is.na(budget), model, paste0(model, "_", budget))) %>%
     filter((threshold == TAU) | is.na(threshold)) %>%
-    select(data_name, model, metric, value)
+    select(data_name, concept_missing_mech, model, metric, value)
 
 table_stats_df <- df %>%
     mutate(svalue_pct = sprintf("%1.1f\\%%", 100 * value),
         svalue_dec = sprintf("%1.3f", value),
         svalue_int = sprintf("%d", round(value))) %>%
-    mutate(svalue = ifelse(metric == "accuracy", svalue_dec,
-                        ifelse(metric == "predictions_intervened_on", svalue_int,
-                               svalue_int))) %>%
+    mutate(svalue = ifelse(metric == "accuracy", svalue_pct, svalue_int)) %>%
     select(-svalue_pct, -svalue_dec, -svalue_int)
 
 cells_df <- table_stats_df %>%
     arrange(model, metric) %>%
     select(-value) %>%
     pivot_wider(
-        names_from = metric,
-        values_from = svalue
+        names_from = c("metric"),
+        # names_from = concept_missing_mech,
+        values_from = svalue,
+        values_fill = EMPTY_TEX_STRING
     )
 
-cells_df[is.na(cells_df)] <- EMPTY_TEX_STRING
-
 table_df <- cells_df %>%
-    group_by(data_name, model) %>%
+    group_by(data_name, model, concept_missing_mech) %>%
     unite(cell_str, sep = "\\\\", metric_order) %>%
     mutate(cell_str = sprintf("\\cell{r}{%s}\n", cell_str)) %>%
     ungroup() %>%
-    arrange(data_name, model)
-
-kable_df <- table_df %>%
-    mutate(
-        metrics = "\\robotMetrics{}",
-        data_name = recode(data_name, !!!DATASET_TITLES)
-    ) %>%
+    arrange(data_name, model) %>%
     pivot_wider(
-        names_from = c(model),
+        names_from = c("model"),
         values_from = cell_str,
         names_sort = FALSE,
-        names_glue = "{model}",
-    )
+        # names_glue = "{model}",
+    ) %>%
+    # fill na values
+    replace_na(list(dnn="\\cell{r}{---\\\\---\\\\---\\\\---}"))
 
-kable_df[is.na(kable_df)] <- "\\cell{r}{---\\\\---\\\\---}"
+kable_df <- table_df %>%
+    mutate(data_name = paste0(data_name, "_", concept_missing_mech)) %>%
+    mutate(data_name = recode(data_name, !!!DATASET_TITLES)) %>%
+    relocate(data_name , .before = everything()) %>%
+    select(-concept_missing_mech) %>%
+    mutate(metrics = "\\robotAllMetrics{}") %>%
+    relocate(metrics , .after = data_name)
 
-top_headers <- c("Dataset", "Metrics", "DNN", "CBM No Int.", "CBM With Int. ($k=1$)", "CBM With Int. ($k=3$)")
-# mid_headers <- c("Concept Noise", "Concept Missing", "Difficulty", "Intervened", "Before", "After")
+top_headers <- c(" " = 3, "CBM" = 4)
+mid_headers <- c("Dataset", "Metrics", "DNN", "No Int.", "w/ Int. ($k=1$)", "w/ Int. ($k=3$)", "w/ Int. (max)")
 
 table <- kable_df %>%
-    kbl(escape = FALSE, toprule = '', align = "c", booktabs = TRUE, linesep = "\\midrule", 
-        col.names = top_headers, format="latex")
+    kable(
+            booktabs = TRUE,
+            escape = FALSE,
+            col.names = mid_headers,
+            format = "latex",
+            table.envir = NULL,
+            linesep = "\\midrule",
+            align = c("l", "l", rep("r", 6))
+        ) %>%
+    add_header_above(header = top_headers, bold=FALSE, escape=FALSE) %>%
+    row_spec(0, bold = TRUE)
 
 cat(table, file = table_tex_path, sep = "\n")
