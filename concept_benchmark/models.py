@@ -1,3 +1,5 @@
+import copy
+import os
 import itertools
 import numpy as np
 import torch
@@ -462,6 +464,332 @@ class ConceptDetector(object):
         """Train the detector and optionally calibrate the resulting logits.
 
         Args:
+class JointConceptModel(nn.Module):
+    """Simple wrapper that links an optional backbone with a concept head."""
+
+    def __init__(
+        self,
+        backbone: Optional[nn.Module],
+        head: nn.Module,
+        *,
+        flatten: bool = True,
+    ) -> None:
+        """Create a joint concept model.
+
+        Args:
+            backbone: Optional feature extractor applied before the concept head.
+                If ``None`` the raw input is forwarded directly to ``head``.
+            head: Module that maps backbone features to per-concept logits.
+            flatten: Whether to flatten high-rank tensors before feeding them to
+                ``head``. Disable when ``head`` expects structured inputs (e.g. CNN).
+        """
+        super().__init__()
+        self.backbone = backbone
+        self.head = head
+        self.flatten = bool(flatten)
+
+    def forward(self, x: Any) -> torch.Tensor:
+        """Return per-concept logits for the provided batch.
+
+        Args:
+            x: Mini-batch of raw inputs consumed by the backbone/head stack.
+
+        Returns:
+            torch.Tensor: Logits of shape ``(batch, n_concepts)``.
+
+        Raises:
+            ValueError: If the backbone returns an empty sequence of features.
+            TypeError: If the backbone output dict lacks recognised keys.
+        """
+        features = x
+        if self.backbone is not None:
+            features = self.backbone(x)
+        if isinstance(features, (list, tuple)):
+            if not features:
+                raise ValueError("Backbone returned an empty sequence of features.")
+            features = features[0]
+        if isinstance(features, dict):
+            if "logits" in features:
+                features = features["logits"]
+            elif "last_hidden_state" in features:
+                features = features["last_hidden_state"][:, 0]
+            else:
+                raise TypeError("Unable to extract tensor from backbone output dictionary.")
+        if not isinstance(features, torch.Tensor):
+            features = torch.as_tensor(features)
+        if self.flatten and features.ndim > 2:
+            features = features.view(features.size(0), -1)
+        return self.head(features)
+
+
+class ConceptDetector(object):
+    """Concept detector with optional calibration and pluggable trainer."""
+
+    def __init__(
+        self,
+        embedding_model: Optional[nn.Module] = None,
+        concept_layers: Optional[Any] = None,
+        *,
+        model: Optional[nn.Module] = None,
+        trainer: Optional[ConceptTrainer] = None,
+        model_builder: Optional[Callable[[int, int, int], nn.Module]] = None,
+    ) -> None:
+        """Initialise a concept detector.
+
+        Args:
+            embedding_model: Optional backbone that produces intermediate
+                representations. If provided, it is wrapped inside a
+                ``JointConceptModel`` when the detector builds its default head.
+            concept_layers: Kept for backwards compatibility; must be ``None``.
+            model: Pre-built joint concept model. When supplied the detector
+                skips automatic model construction.
+            trainer: Custom training callable. Defaults to
+                :class:`~concept_benchmark.train.DefaultConceptTrainer`.
+            model_builder: Optional factory used to create a joint model when
+                ``model`` is not provided. Receives ``(train_dataset, device,
+                hidden_dim)`` and must return an ``nn.Module`` that emits
+                ``n_concepts`` logits.
+
+        Raises:
+            ValueError: If ``concept_layers`` is set (legacy API path).
+        """
+        if concept_layers not in (None, []):
+            raise ValueError(
+                "`concept_layers` is deprecated in the joint-training ConceptDetector."
+            )
+
+        self.embedding_model = embedding_model
+        self.model = model
+        self.model_builder = model_builder
+        self.trainer = trainer or DefaultConceptTrainer()
+        self.calibration_params: Optional[list[Optional[dict]]] = None
+        self.training_result: Optional[TrainerResult] = None
+        self._n_concepts: Optional[int] = None
+        self._eval_config: Dict[str, Any] = {}
+
+    def to(self, device: Union[str, torch.device]) -> "ConceptDetector":
+        """Move the underlying torch modules to a target device."""
+        target = torch.device(device)
+        if self.model is not None:
+            self.model.to(target)
+            if isinstance(self.model, JointConceptModel):
+                self.embedding_model = self.model.backbone
+        elif self.embedding_model is not None:
+            self.embedding_model.to(target)
+        return self
+
+    def state_dict(self) -> Dict[str, Any]:
+        """Return a serialization-friendly snapshot of the detector."""
+        model_copy = None
+        if self.model is not None:
+            model_copy = copy.deepcopy(self.model)
+            model_copy.to("cpu")
+        embedding_copy = None
+        if self.embedding_model is not None:
+            embedding_copy = copy.deepcopy(self.embedding_model)
+            if isinstance(embedding_copy, nn.Module):
+                embedding_copy.to("cpu")
+
+        training_summary = None
+        if self.training_result is not None:
+            training_summary = {
+                "history": copy.deepcopy(self.training_result.history),
+                "best_metric": self.training_result.best_metric,
+            }
+
+        return {
+            "version": 1,
+            "model": model_copy,
+            "embedding_model": embedding_copy,
+            "calibration_params": copy.deepcopy(self.calibration_params),
+            "eval_config": copy.deepcopy(self._eval_config),
+            "n_concepts": self._n_concepts,
+            "training_summary": training_summary,
+        }
+
+    def load_state_dict(self, state: Dict[str, Any]) -> None:
+        """Restore detector state saved with :meth:`state_dict`."""
+        version = state.get("version", 1)
+        if version != 1:
+            raise ValueError(f"Unsupported ConceptDetector state version: {version}")
+
+        self.model = state.get("model")
+        if isinstance(self.model, JointConceptModel):
+            self.embedding_model = self.model.backbone
+        else:
+            self.embedding_model = state.get("embedding_model")
+            if isinstance(self.embedding_model, nn.Module):
+                self.embedding_model.to("cpu")
+        if self.model is not None and isinstance(self.model, nn.Module):
+            self.model.to("cpu")
+            self.model.eval()
+
+        self.calibration_params = state.get("calibration_params")
+        self._eval_config = state.get("eval_config", {})
+        self._n_concepts = state.get("n_concepts")
+
+        summary = state.get("training_summary")
+        if summary is not None:
+            self.training_result = TrainerResult(
+                model=None,
+                history=copy.deepcopy(summary.get("history")),
+                best_metric=summary.get("best_metric"),
+            )
+        else:
+            self.training_result = None
+
+    def save(
+        self,
+        path: Union[str, "os.PathLike"],
+        *,
+        overwrite: bool = False,
+        msg: bool = True,
+    ) -> "os.PathLike":
+        """Persist the detector using concept_benchmark.ext.fileutils.save."""
+        payload = {"version": 1, "state": self.state_dict()}
+        return save_object(payload, path, overwrite=overwrite, msg=msg)
+
+    @classmethod
+    def load(
+        cls,
+        path: Union[str, "os.PathLike"],
+        *,
+        map_location: Optional[Union[str, torch.device]] = "cpu",
+    ) -> "ConceptDetector":
+        """Restore a detector previously saved with ``save``."""
+        payload = load_object(path)
+        if isinstance(payload, dict) and "state" in payload:
+            state = payload["state"]
+        elif isinstance(payload, dict) and "detector" in payload:
+            detector = payload["detector"]
+            if map_location is not None:
+                detector.to(map_location)
+            return detector
+        else:
+            state = payload
+        detector = cls()
+        detector.load_state_dict(state)
+        if map_location is not None:
+            detector.to(map_location)
+        return detector
+
+    def _default_head(self, feature_dim: int, hidden_dim: int, num_concepts: int) -> nn.Module:
+        """Build a simple MLP concept head when the caller does not provide one.
+
+        Args:
+            feature_dim: Size of the flattened backbone feature vector.
+            hidden_dim: Width of the intermediate hidden layer.
+            num_concepts: Number of concept logits to predict.
+
+        Returns:
+            nn.Module: Two-layer MLP that produces ``num_concepts`` logits.
+        """
+        layers = [nn.Linear(feature_dim, hidden_dim), nn.ReLU(inplace=True), nn.Linear(hidden_dim, num_concepts)]
+        return nn.Sequential(*layers)
+
+    def _build_default_model(
+        self,
+        train_dataset: ConceptDatasetSample,
+        *,
+        device: torch.device,
+        hidden_dim: int,
+    ) -> nn.Module:
+        """Infer feature dimensions and assemble a ``JointConceptModel``.
+
+        Args:
+            train_dataset: Dataset used to probe feature dimensionality.
+            device: Device where the probe forward pass should execute.
+            hidden_dim: Width of the default concept head hidden layer.
+
+        Returns:
+            nn.Module: Joint model combining the configured backbone and default
+            head.
+
+        Raises:
+            ValueError: If ``train_dataset`` contains no samples or the backbone
+                returns no features.
+            TypeError: If the backbone output type is unsupported for shape
+                inference.
+        """
+        sample_loader = train_dataset.loader(batch_size=min(8, max(1, getattr(train_dataset, "n", 8))), shuffle=False, num_workers=0, pin_memory=False)
+        try:
+            sample_X, _, _ = next(iter(sample_loader))
+        except StopIteration:
+            raise ValueError("Training dataset is empty; cannot build default model.")
+
+        # Use a small probe batch to discover the size of the backbone features.
+        tensor_X = _prepare_inputs(sample_X, device=torch.device("cpu"))
+
+        feature_source = tensor_X
+        if self.embedding_model is not None:
+            module = self.embedding_model
+            was_training = module.training
+            try:
+                param = next(module.parameters())
+                original_device = param.device
+            except StopIteration:
+                original_device = torch.device("cpu")
+            module = module.to(device)
+            module.eval()
+            with torch.no_grad():
+                feature_source = module(_prepare_inputs(sample_X, device))
+            if was_training:
+                module.train()
+            module.to(original_device)
+        if isinstance(feature_source, (list, tuple)):
+            if not feature_source:
+                raise ValueError("Embedding model returned empty output.")
+            feature_source = feature_source[0]
+        if isinstance(feature_source, dict):
+            if "logits" in feature_source:
+                feature_source = feature_source["logits"]
+            elif "last_hidden_state" in feature_source:
+                feature_source = feature_source["last_hidden_state"][:, 0]
+            else:
+                raise TypeError("Cannot infer feature dimension from embedding output.")
+        if isinstance(feature_source, torch.Tensor):
+            feature_source = feature_source.detach().cpu()
+        else:
+            feature_source = torch.as_tensor(feature_source)
+        flat = feature_source.view(feature_source.size(0), -1)
+        feature_dim = int(flat.size(1))
+
+        head = self._default_head(feature_dim, hidden_dim, train_dataset.n_concepts)
+        flatten_inputs = self.embedding_model is None
+        if flatten_inputs:
+            # absorb flatten into head for raw features
+            head = nn.Sequential(nn.Flatten(), head)
+
+        return JointConceptModel(self.embedding_model, head, flatten=not flatten_inputs)
+
+    def _set_trainable(self, freeze_backbone: bool) -> None:
+        """Freeze or unfreeze the backbone parameters depending on user request."""
+        if not isinstance(self.model, JointConceptModel):
+            return
+        backbone = self.model.backbone
+        if backbone is None:
+            return
+        for param in backbone.parameters():
+            param.requires_grad = not freeze_backbone
+
+    def fit(
+        self,
+        train_dataset: ConceptDatasetSample,
+        valid_dataset: ConceptDatasetSample,
+        freeze: bool = False,
+        embed_params: Optional[dict] = None,
+        fit_params: Optional[dict] = None,
+        l1_size: Optional[int] = 100,
+        calibrate: bool = False,
+        log_training: bool = False,
+        log_interval: Optional[int] = None,
+        *,
+        model: Optional[nn.Module] = None,
+        trainer: Optional[ConceptTrainer] = None,
+    ) -> None:
+        """Train the detector and optionally calibrate the resulting logits.
+
+        Args:
             train_dataset: Dataset providing supervised concept labels for
                 optimisation.
             valid_dataset: Held-out dataset used for early stopping and
@@ -719,6 +1047,27 @@ class FrontEndModel(object):
         """
         Fit the front-end model to the dataset.
         """
+        if not isinstance(C, np.ndarray):
+            C = np.asarray(C)
+        if not isinstance(y, np.ndarray):
+            y = np.asarray(y)
+
+        if C.ndim != 2:
+            raise ValueError("Concept matrix must be two-dimensional.")
+        if y.ndim != 1:
+            raise ValueError("Label vector must be one-dimensional.")
+        if C.shape[0] != y.shape[0]:
+            raise ValueError("Number of samples in C and y must match.")
+
+        valid_rows = ~np.isnan(C).any(axis=1)
+        if not np.any(valid_rows):
+            raise ValueError(
+                "No samples without missing concepts are available for training."
+            )
+        if np.count_nonzero(valid_rows) != C.shape[0]:
+            C = C[valid_rows]
+            y = y[valid_rows]
+
         lr_params = {
             "random_state": 42,
             "max_iter": 1000,
@@ -826,6 +1175,97 @@ class ConceptBasedModel(object):
         Return predicted probabilities for all concept combinations.
         """
         return self._y_proba_all_concepts
+
+    def _config_dict(self) -> Dict[str, Any]:
+        return {
+            "propagate": self._propagate,
+            "mc_mode": self._mc_mode,
+            "mc_samples": self._mc_samples,
+            "mc_max_samples": self._mc_max_samples,
+            "mc_chunk_size": self._mc_chunk_size,
+            "mc_tol": self._mc_tol,
+            "random_state": self._random_state,
+            "mc_exact_threshold": self._mc_exact_threshold,
+        }
+
+    def state_dict(self) -> Dict[str, Any]:
+        """Return a serialization-friendly snapshot of the ConceptBasedModel."""
+        return {
+            "version": 1,
+            "concept_detector": self.concept_detector.state_dict(),
+            "front_end_model": copy.deepcopy(self.front_end_model),
+            "config": self._config_dict(),
+            "concept_poss": copy.deepcopy(self._concept_poss),
+            "y_proba_all_concepts": copy.deepcopy(self._y_proba_all_concepts),
+        }
+
+    def load_state_dict(self, state: Dict[str, Any]) -> None:
+        """Restore model state saved with :meth:`state_dict`."""
+        version = state.get("version", 1)
+        if version != 1:
+            raise ValueError(f"Unsupported ConceptBasedModel state version: {version}")
+
+        detector_state = state.get("concept_detector")
+        if detector_state is None:
+            raise RuntimeError("Serialized ConceptBasedModel missing detector state")
+        if isinstance(detector_state, ConceptDetector):
+            detector_state = detector_state.state_dict()
+        self.concept_detector = ConceptDetector()
+        self.concept_detector.load_state_dict(detector_state)
+
+        self.front_end_model = copy.deepcopy(state.get("front_end_model", FrontEndModel()))
+        config = state.get("config", {})
+        self._propagate = config.get("propagate", False)
+        self._mc_mode = config.get("mc_mode", "auto")
+        self._mc_samples = config.get("mc_samples", 1024)
+        self._mc_max_samples = config.get("mc_max_samples", 16384)
+        self._mc_chunk_size = config.get("mc_chunk_size", 2048)
+        self._mc_tol = config.get("mc_tol", 1e-3)
+        self._random_state = config.get("random_state")
+        self._mc_exact_threshold = config.get("mc_exact_threshold", 4096)
+
+        self._concept_poss = state.get("concept_poss")
+        self._y_proba_all_concepts = state.get("y_proba_all_concepts")
+
+    def save(
+        self,
+        path: Union[str, "os.PathLike"],
+        *,
+        overwrite: bool = False,
+        include_propagation_cache: bool = True,
+        msg: bool = True,
+    ) -> "os.PathLike":
+        """Persist the full ConceptBasedModel to disk."""
+        state = self.state_dict()
+        if not include_propagation_cache:
+            state["concept_poss"] = None
+            state["y_proba_all_concepts"] = None
+        payload = {"version": 1, "state": state}
+        return save_object(payload, path, overwrite=overwrite, msg=msg)
+
+    @classmethod
+    def load(
+        cls,
+        path: Union[str, "os.PathLike"],
+        *,
+        map_location: Optional[Union[str, torch.device]] = "cpu",
+    ) -> "ConceptBasedModel":
+        """Load a ConceptBasedModel saved with :meth:`save`."""
+        payload = load_object(path)
+        if isinstance(payload, ConceptBasedModel):
+            model = payload
+            if map_location is not None:
+                model.concept_detector.to(map_location)
+            return model
+        if isinstance(payload, dict) and "state" in payload:
+            state = payload["state"]
+        else:
+            state = payload
+        model = cls()
+        model.load_state_dict(state)
+        if map_location is not None:
+            model.concept_detector.to(map_location)
+        return model
 
     def fit(
             self,
@@ -1039,14 +1479,15 @@ class ConceptBasedModel(object):
             Z = (rng.random((P_active.shape[0], s, C)) < P_active[:, None, :]).astype(np.float32)
             Z_flat = Z.reshape(-1, C)
 
+            # NOTE: commented out deduplication; often not worth the overhead
             # Deduplicate concept vectors to reduce model calls
-            try:
-                uniq, inv = np.unique(Z_flat, axis=0, return_inverse=True)
-                y_uniq = self.front_end_model.predict_proba(uniq)
-                Y_flat = y_uniq[inv]
-            except Exception:
-                # Fallback without deduplication
-                Y_flat = self.front_end_model.predict_proba(Z_flat)
+            # try:
+            #     uniq, inv = np.unique(Z_flat, axis=0, return_inverse=True)
+            #     y_uniq = self.front_end_model.predict_proba(uniq)
+            #     Y_flat = y_uniq[inv]
+            # except Exception:
+            #     # Fallback without deduplication
+            Y_flat = self.front_end_model.predict_proba(Z_flat)
 
             # Reshape back to (A, s, K)
             Y = Y_flat.reshape(P_active.shape[0], s, -1)

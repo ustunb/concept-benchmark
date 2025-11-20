@@ -4,8 +4,12 @@ import json
 import re
 import numpy as np
 import pandas as pd
+<<<<<<< HEAD
 from typing import Sequence, Iterable
 from concept_benchmark.data import ConceptDataset
+=======
+from typing import Iterable
+>>>>>>> 91701a68 (current changes)
 
 _MOD_RE = re.compile(r"\{([a-zA-Z0-9_]+)~(not|syn)\}")
 
@@ -41,6 +45,7 @@ def _polish_text(s: str) -> str:
 
     s = re.sub(r"\b[Nn]ot\s+([a-z0-9 _-]+)\s+at the head\b", r"The head isn’t \1", s)
     s = re.sub(r"\b[Nn]ot\s+([a-z0-9 _-]+)\s+for the body\b", r"The body isn’t \1", s)
+<<<<<<< HEAD
 
     s = re.sub(r"\b[Ee]ars (are|:)?\s*triangle\b", r"Ears are triangular", s)
     s = re.sub(r"\bhand[s]?\s+edgy\s+square\b", r"hands are square-edged", s, flags=re.I)
@@ -48,6 +53,13 @@ def _polish_text(s: str) -> str:
 
     s = re.sub(r"\b[Cc]olor\s*[:—–-]?\s+(?!is|:)([a-z]+)\b", r"color is \1", s)
     s = re.sub(r"\b[Mm]outh\s*[:—–-]?\s*(open|closed)\b", r"mouth is \1", s, flags=re.I)
+=======
+    s = re.sub(r"\b[Ee]ars (are|:)?\s*triangle\b", r"Ears are triangular", s)
+    s = re.sub(r"\bhand[s]?\s+edgy\s+square\b", r"hands are square-edged", s, flags=re.I)
+    s = re.sub(r"\b[Ff]eet\s+pointy\s+4sided\b", r"feet are pointed four-sided", s)
+    s = re.sub(r"\b[Cc]olor\s+(?!is|:)([a-z]+)\b", r"color is \1", s)
+    s = re.sub(r"\b[Mm]outh\s+(?!is|:)(open|closed)\b", r"mouth is \1", s, flags=re.I)
+>>>>>>> 91701a68 (current changes)
     s = re.sub(r"\b[Cc]olor\s+is\s+([a-z]+)/([a-z]+)\b", r"color is \1 and \2", s)
 
     def _fix_colon_has_no(m):
@@ -57,12 +69,16 @@ def _polish_text(s: str) -> str:
     s = re.sub(r"\b(Knees|Elbows|Antennae):\s*(has|no)\b\.?", _fix_colon_has_no, s, flags=re.I)
     s = re.sub(r"\b(Knees|Elbows|Antennae):\s*has\s+(knees|elbows|antennae)\b\.?", lambda m: f"Has {m.group(2)}.", s, flags=re.I)
     s = re.sub(r"\b(Knees|Elbows|Antennae):\s*no\s+(knees|elbows|antennae)\b\.?",  lambda m: f"No {m.group(2)}.",  s, flags=re.I)
+<<<<<<< HEAD
 
+=======
+>>>>>>> 91701a68 (current changes)
     s = re.sub(r"\b(Elbows|Knees|Antennae)\s+no\s+\1\b",  lambda m: f"No {m.group(1).lower()}",  s, flags=re.I)
     s = re.sub(r"\b(Elbows|Knees|Antennae)\s+has\s+\1\b", lambda m: f"Has {m.group(1).lower()}", s, flags=re.I)
     s = re.sub(r"\b([Ee]lbows|[Kk]nees|[Aa]ntennae)\s+are\s+(has|no)\s+\1\b",
                lambda m: ("Has" if m.group(2).lower()=="has" else "No") + " " + m.group(1).lower(), s)
 
+<<<<<<< HEAD
     s = re.sub(r"\b[Aa]ntennae\s*[:—–-]?\s*no\s+antennae\b\.?", "No antennae", s)
     s = re.sub(r"\b[Aa]ntennae\s*[:—–-]?\s*has\s+antennae\b\.?", "Has antennae", s)
 
@@ -88,16 +104,30 @@ def _polish_text(s: str) -> str:
     s = re.sub(r"\b(is|are|was|were)\s+not\s+not\s+([a-z0-9 _-]+)", lambda m: f"{m.group(1)} {m.group(2)}", s, flags=re.I)
     s = re.sub(r"\b(is|are|was|were)n['’]t not\s+([a-z0-9 _-]+)", lambda m: f"{m.group(1)} {m.group(2)}", s, flags=re.I)
     s = re.sub(r"\bnot\s+not\s+([a-z0-9 _-]+)", r"\1", s, flags=re.I)
+=======
+    s = re.sub(r"\b(is|are|was|were)\s+not\s+not\s+([a-z0-9 _-]+)", lambda m: f"{m.group(1)} {m.group(2)}", s, flags=re.I)
+    s = re.sub(r"\b(is|are|was|were)n['’]t not\s+([a-z0-9 _-]+)", lambda m: f"{m.group(1)} {m.group(2)}", s, flags=re.I)
+    s = re.sub(r"\bnot\s+not\s+([a-z0-9 _-]+)", r"\1", s, flags=re.I)
+
+>>>>>>> 91701a68 (current changes)
     s = re.sub(r"\bhas\s+has\s+(\w+)\s+\1\b", r"has \1", s, flags=re.I)
     s = re.sub(r"\bdoes\s+have\s+has\s+(\w+)\s+\1\b", r"does have \1", s, flags=re.I)
     s = re.sub(r"\b(has|does\s+have)\s+(has|no)\s+(\w+)\s+\3\b",
                lambda m: f"{m.group(1)} {'no ' if m.group(2).lower()=='no' else ''}{m.group(3)}", s, flags=re.I)
 
+<<<<<<< HEAD
     parts = [w.strip() for w in re.split(r"(?<=[.?!])\s+", s) if w.strip()]
     parts = [p[0].upper() + p[1:] if p and p[0].islower() else p for p in parts]
     s = " ".join(parts)
     s = re.sub(r"\s+([,.:;!?])", r"\1", s)
     s = re.sub(r"([,.:;!?])(\w)", r"\1 \2", s)
+=======
+    sentences = [w.strip() for w in re.split(r"(?<=[.?!])\s+", s) if w.strip()]
+    sentences = [sent[0].upper() + sent[1:] if sent and sent[0].islower() else sent for sent in sentences]
+    s = " ".join(sentences)
+    s = re.sub(r"\s+([,.:])", r"\1", s)
+    s = re.sub(r"([,.:])(\w)", r"\1 \2", s)
+>>>>>>> 91701a68 (current changes)
     s = re.sub(r"\b(\w+)\s+\1\b", r"\1", s, flags=re.I)
     s = re.sub(r"\b(Knees|Elbows|Antennae)\.\s+\1\.", r"\1.", s)
     s = s.strip()
@@ -117,6 +147,7 @@ def _polish_text(s: str) -> str:
     s = re.sub(r"\bElbows are no elbows\b\.?", "No elbows.", s, flags=re.I)
     s = re.sub(r"\bAntennae are no antennae\b\.?", "No antennae.", s, flags=re.I)
 
+<<<<<<< HEAD
     s = re.sub(r"\b(?:elbows\s*/\s*knees|knees\s*/\s*elbows)\s+(no|has)\s+elbows\s*/\s+(no|has)\s+knees\b",
                lambda m: f"{m.group(1).lower()} elbows; {m.group(2).lower()} knees", s, flags=re.I)
     s = re.sub(r"\bantennae\s+(?:is|are|read|reads)\s+(no|has)\s+antennae\b",
@@ -124,6 +155,11 @@ def _polish_text(s: str) -> str:
 
     s = re.sub(r"\bstatus\s+(has|no)\s+antennae\b", r"status: \1 antennae", s, flags=re.I)
     return s
+=======
+
+    return s
+
+>>>>>>> 91701a68 (current changes)
 def _synonym(name: str, val: str) -> str:
     v = str(val).replace("_", " ").lower()
     if name == "hand_shape":
@@ -138,9 +174,13 @@ def _synonym(name: str, val: str) -> str:
         num = {"3": "three", "4": "four", "5": "five", "6": "six"}
         v = v.replace("pointy", "pointed")
         v = v.replace("lshaped", "l-shaped").replace("l shaped", "l-shaped")
+<<<<<<< HEAD
         v = re.sub(r"\bflat\s*(\d)\s*sided\b", lambda m: f"{num.get(m.group(1), '?')}-sided, not pointy", v)
         v = re.sub(r"\bpointed?\s*(\d)\s*sided\b", lambda m: f"{num.get(m.group(1), '?')}-sided, pointed", v)
         v = re.sub(r"\b(\d)\s*sided\b", lambda m: f"{num.get(m.group(1), m.group(1))}-sided", v)
+=======
+        v = re.sub(r"(\d)\s*sided", lambda m: f"{num.get(m.group(1), m.group(1))}-sided", v)
+>>>>>>> 91701a68 (current changes)
         return v
     return v
 
@@ -167,6 +207,7 @@ DEFAULT_TEMPLATES = [
     "Robot ({color_mode}): head={head_shape}, body={body_shape}, elbows={has_elbows_bool}, knees={has_knees_bool}, feet={foot_shape}.",
 ]
 
+<<<<<<< HEAD
 def create_synthetic_dataset(source, templates: Sequence[str] | None = None, variants_per_row: int = 3, include_color: bool = True, rng_seed: int = 0, head_col: str = "head_shape", body_col: str = "body_shape", knees_col: str = "has_knees", elbows_col: str = "has_elbows", foot_col: str = "foot_shape", color_mode_col: str = "color_mode", concept_cols: Iterable[str] | None = None, label_col: str | None = None, label_map: dict | None = None, drop_unknown: bool = True, text_mode: str | None = None, use_llm: bool = False, llm_provider: str = "gemini", llm_model: str = "gemini-1.5-flash", llm_api_key: str | None = None, llm_system: str | None = None, llm_user_prompt: str | None = None) -> ConceptDataset:
     return create_robot_text_dataset(source=source, templates=templates, variants_per_row=variants_per_row, include_color=include_color, rng_seed=rng_seed, head_col=head_col, body_col=body_col, knees_col=knees_col, elbows_col=elbows_col, foot_col=foot_col, color_mode_col=color_mode_col, concept_cols=concept_cols, label_col=label_col, label_map=label_map, drop_unknown=drop_unknown, text_mode=text_mode, use_llm=use_llm, llm_provider=llm_provider, llm_model=llm_model, llm_api_key=llm_api_key, llm_system=llm_system, llm_user_prompt=llm_user_prompt)
 
@@ -307,6 +348,8 @@ def create_robot_text_dataset(source, templates: Sequence[str] | None = None, va
     }
     return ConceptDataset(X=list(X), C=np.asarray(C_out, dtype=np.int8), y=np.asarray(y_out, dtype=np.int32), meta=meta)
 
+=======
+>>>>>>> 91701a68 (current changes)
 def _binarize_concepts(df: pd.DataFrame, cols: Iterable[str]):
     mats, names = [], []
     for col in cols:
@@ -336,6 +379,10 @@ def _to_label(arr, label_map: dict | None):
             m = {"glorp": 1, "drent": 0}
             return s_lower.map(m).astype(int).to_numpy()
         return s_lower.isin({"1", "true", "t", "yes", "y"}).astype(int).to_numpy()
+<<<<<<< HEAD
+=======
+    # label_map is provided
+>>>>>>> 91701a68 (current changes)
     return s.map(lambda v: label_map.get(v, v)).astype(int).to_numpy()
 
 def unstructured_caption_via_llm(concepts: dict, *, provider: str = "gemini", model: str = "", api_key: str | None = None, system: str | None = None, user_prompt: str | None = None, n: int = 1, temperature: float = 0.7):

@@ -1026,20 +1026,12 @@ class ConceptDatasetSample(Dataset):
         assert isinstance(indices, np.ndarray)
         assert indices.ndim == 1 and indices.shape[0] == self.n
         assert np.isin(indices, (0, 1)).all()
-
-        filtered_meta = self.meta.copy()
-        if 'UC' in filtered_meta:
-            filtered_meta['UC'] = filtered_meta['UC'][indices]
-            filtered_meta["df_indices"] = filtered_meta["df_indices"][indices]
-        if "robot_ids" in filtered_meta:
-            filtered_meta["robot_ids"] = np.asarray(filtered_meta["robot_ids"])[indices]
-
-        new_sample = self.__class__(
+        return self.__class__(
             parent=self.parent,
             X=self.X[indices],
-            C=self.base_concepts[indices],
-            y=self.base_labels[indices],
-            meta=filtered_meta,
+            C=self.C[indices],
+            y=self.y[indices],
+            meta=self.meta,
             indices=indices,
             concept_noise=self.concept_noise,
             concept_missing=self.concept_missing,
@@ -1177,7 +1169,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             warnings.warn(f"{e}; cannot open image, returning path", RuntimeWarning)
             image = img_path
 
-        c = torch.from_numpy(np.array(c, dtype=np.int64))
+        c = torch.from_numpy(np.array(c))
         y = torch.from_numpy(np.array(y, dtype=np.int64))
 
         if self.concept_transform is not None:
@@ -1207,20 +1199,12 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         assert isinstance(indices, np.ndarray)
         assert indices.ndim == 1 and indices.shape[0] == self.n
         assert np.isin(indices, (0, 1)).all()
-
-        filtered_meta = self.meta.copy()
-        if 'UC' in filtered_meta:
-            filtered_meta['UC'] = filtered_meta['UC'][indices]
-            filtered_meta["df_indices"] = filtered_meta["df_indices"][indices]
-        if "robot_ids" in filtered_meta:
-            filtered_meta["robot_ids"] = np.asarray(filtered_meta["robot_ids"])[indices]
-
-        new_sample = self.__class__(
+        return self.__class__(
             parent=self.parent,
             X=self.X[indices],
-            C=self.base_concepts[indices],
-            y=self.base_labels[indices],
-            meta=filtered_meta,
+            C=self.C[indices],
+            y=self.y[indices],
+            meta=self.meta,
             indices=indices,
             concept_noise=self.concept_noise,
             concept_missing=self.concept_missing,
@@ -1230,15 +1214,4 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             concept_transform=self.concept_transform,
             target_transform=self.target_transform,
             base_dir=self.base_dir,
-            **self._extra_kwargs,
         )
-        if self.concept_noise_mask is not None:
-            new_sample.set_concept_noise_mask(self.concept_noise_mask[indices])
-        if self.concept_missing_mask is not None:
-            new_sample.set_concept_missing_mask(
-                self.concept_missing_mask[indices],
-                fill_value=self.concept_missing_fill_value,
-            )
-        if self.label_noise_labels is not None:
-            new_sample.set_label_noise_labels(self.label_noise_labels[indices])
-        return new_sample

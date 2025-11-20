@@ -6,7 +6,10 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 from collections.abc import Sequence
+<<<<<<< HEAD
 import hashlib
+=======
+>>>>>>> 91701a68 (current changes)
 
 import numpy as np
 import pandas as pd
@@ -120,7 +123,12 @@ def generate_robot_catalog(
     draw: bool = False,
     color_mode: str = "color",
     blur: dict | None = None,
+<<<<<<< HEAD
     additional_features: Sequence[str] | None = None,
+=======
+    drop_irrelevant: bool = True,
+    irrelevant_features: Sequence[str] | None = None,
+>>>>>>> 91701a68 (current changes)
     verbose: bool = False,
     **unused,
 ):
@@ -147,6 +155,7 @@ def generate_robot_catalog(
 
     init_catalog_df = copy.deepcopy(catalog_df)
 
+<<<<<<< HEAD
     ids = init_catalog_df["id"].astype(str)
     hb = ids.map(lambda s: int.from_bytes(hashlib.sha256(s.encode()).digest()[:4], "big") & 1).astype(int)
     init_catalog_df["foot_orientation"] = np.where(hb.values == 1, "vertex", "side")
@@ -157,6 +166,18 @@ def generate_robot_catalog(
     catalog_df, new_features = collapse_robot_subtypes(
         df=catalog_df, robot_features=list(concepts.keys()),
         collapse_as_new_feature=additional_features or [],
+=======
+    if drop_irrelevant and irrelevant_features:
+        # check if irrelevant featuers are in the catalog
+        existing_irrelevant_features = [
+            f for f in irrelevant_features if f in catalog_df.columns
+        ]
+        if existing_irrelevant_features:
+            catalog_df.drop(columns=existing_irrelevant_features, inplace=True)
+
+    catalog_df = collapse_robot_subtypes(
+        df=catalog_df, robot_features=list(concepts.keys())
+>>>>>>> 91701a68 (current changes)
     )
     print(f"After collapse: {new_features}")
 
