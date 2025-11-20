@@ -36,7 +36,7 @@ DEFAULT_ROBOT_SETTINGS = {
     "size": "medium",
     "color_mode": "color",
     "train_dnn": 0,
-    "seed": 1002,
+    "seed": 1014,
     "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy') + int(row['has_knees']=='true'))>= 3 else 'drent'",
     "test_size": 10000,
     "train_skew_size": 3800,

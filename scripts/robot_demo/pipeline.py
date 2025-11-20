@@ -15,6 +15,7 @@ def main():
         default=["setup", "cbm", "dnn", "intervene"],
     )
     p.add_argument("--seed", type=int, default=DEFAULT_ROBOT_SETTINGS['seed'])
+    p.add_argument("--draw", action="store_true", help="draw robots at setup")
     p.add_argument("--missing", action="store_true", help="use concept missingness")
     p.add_argument("--ignore-errors", action="store_true", help="continue on errors")
     args = p.parse_args()
@@ -22,8 +23,13 @@ def main():
     # setup pipeline tasks
     pipeline = []
     if "setup" in args.stages:
-        pipeline.append("python scripts/robot_demo/setup_dataset_robot.py")
-        pipeline.append("python scripts/robot_demo/setup_dataset_robot.py --subconcept")
+        cmd = "python scripts/robot_demo/setup_dataset_robot.py"
+        sub_cmd = cmd + " --subconcept"
+        if args.draw:
+            cmd += " --draw"
+
+        pipeline.append(cmd)
+        pipeline.append(sub_cmd)
 
     if "cbm" in args.stages:
         pipeline.append(
