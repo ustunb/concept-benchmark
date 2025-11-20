@@ -14,7 +14,7 @@ python make_sudoku_dataset.py --data-type tabular --transform onehot --save-dir 
 # 9x9, per-unit histograms (3N x N), save as .pkl
 python make_sudoku_dataset.py --data-type tabular --transform histogram --save-dir out/hist_pkl
 
-# 9x9 image dataset; images + CSVs land in <repo_root>/data/sudoku/<ds_name>
+# 9x9 image dataset; images + CSVs land in <data_dir>/sudoku/<ds_name>
 # and the ConceptDataset is saved as a .pkl via fileutils.save
 python make_sudoku_dataset.py --data-type image --dataset_name demo_imgs --n-samples 2000 --valid-ratio 0.4 --cell-px 24 --font-size 14 --save-dir out/image_pkl
 
@@ -28,15 +28,13 @@ import json
 from pathlib import Path
 import sys
 import os
-sys.path.append(os.getcwd())
 
 import numpy as np
-import torch
 
 # progress bar
 try:
-    from tqdm import tqdm
-except Exception:
+    from tqdm import tqdm  # noqa: F401
+except Exception:  # pragma: no cover
     tqdm = None
 
 # --- repo path shim (safe if already installed) ---
@@ -44,10 +42,7 @@ repo_root = Path(__file__).resolve().parents[1]
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-# where image datasets live by default
-DATA_SUDOKU = repo_root / "data" / "sudoku"
-DIGITS_DIR = DATA_SUDOKU / "digits"
-
+from concept_benchmark.paths import data_dir
 from concept_benchmark.synthetic.sudoku import (
     create_sudoku_dataset,
     default_transform,
@@ -55,45 +50,80 @@ from concept_benchmark.synthetic.sudoku import (
     histogram_transform,
     image_transform,
 )
-
 from concept_benchmark.ext.fileutils import save as save_object
+
+# where image datasets live by default: MUST match create_sudoku_dataset
+DATA_SUDOKU = data_dir / "sudoku"
+DIGITS_DIR = DATA_SUDOKU / "digits"
 
 # we’ll use cv2 to render digit examples
 try:
     import cv2
-except Exception:
+except Exception:  # pragma: no cover
     cv2 = None
 
 
 # ---------------- image transform wrapper ----------------
 def make_image_transform(args):
+    """
+    Wrap image_transform so that:
+      - It still renders and saves the image.
+      - It ALSO collects per-board 9x9 board/starters/candidates
+        for later use when building the OCR JSONL.
+    """
+    boards_list = []
+    starters_list = []
+    candidates_list = []
+
     def _wrapped(board, *, outfile=None):
-        return image_transform(
+        # image_transform must support return_meta=True and return:
+        #   (img_or_path, starters, candidates_meta)
+        img_or_path, starters, _candidates = image_transform(
             board,
             cell_px=args.cell_px,
             margin_px=args.margin_px,
             line_px=args.line_px,
+            bold_px=args.bold_px,
             font_size=args.font_size,
             standardize=(not args.no_standardize),
             font_path=args.font_path,
             handwriting=args.handwriting,
             outfile=outfile,
+            return_meta=True,
         )
+
+        # ensure numpy arrays
+        board_arr = np.array(board, copy=True)
+        starters_arr = np.array(starters, copy=True).astype(int)
+
+        # candidates = inverse of starters (1 for non-starter cell, 0 for starter)
+        candidates_arr = (1 - starters_arr).astype(int)
+
+        boards_list.append(board_arr)
+        starters_list.append(starters_arr)
+        candidates_list.append(candidates_arr)
+
+        return img_or_path
+
+    _wrapped.boards = boards_list
+    _wrapped.starters = starters_list
+    _wrapped.candidates = candidates_list
     _wrapped.__name__ = "image_transform"
     return _wrapped
 
 
 # ---------------- helpers ----------------
 def infer_meta_like(ds, data_type: str, transform_name: str):
-    """Build a summary dict without touching ds.meta."""
+    """Fallback summary dict if ds.meta is missing."""
     C = ds.C
     N = n = None
     if isinstance(C, np.ndarray) and C.ndim == 2 and C.shape[1] % 3 == 0:
-        # C.shape[1] = 3 * N^2 -> N^2 = C.shape[1] // 3
+        # Heuristic: C.shape[1] = 3 * N^2 -> N^2 = C.shape[1] // 3
         N_cells = C.shape[1] // 3
         rt = int(np.sqrt(N_cells))
-        n = rt if rt * rt == N_cells else None
-        N = rt if n is not None else None
+        if rt * rt == N_cells:
+            n = rt
+            N = rt
     return {
         "data_type": data_type,
         "N": N,
@@ -102,24 +132,19 @@ def infer_meta_like(ds, data_type: str, transform_name: str):
     }
 
 
-def save_dataset_pkl(ds, meta_full, save_dir: Path):
+def save_dataset_pkl(ds, meta_full: dict, save_dir: Path):
     """
-    Save the dataset using fileutils.save as a .pkl file and write
+    Save the *entire* ConceptDataset instance as a .pkl file and write
     both meta.json and blue_blob.json (for downstream preprocessing)
     into save_dir.
+
+    This is what run_sudoku expects: when you load the pkl, you get a
+    ConceptDataset back, not a wrapper dict.
     """
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    obj = {
-        "X": ds.X,
-        "C": ds.C,
-        "y": ds.y,
-        "meta_like": meta_full,
-    }
     out = save_dir / "sudoku_dataset.pkl"
-    # NOTE: if your fileutils.save has signature save(path, obj),
-    # flip the arguments here.
-    save_object(obj, out)
+    save_object(ds, out)
     print(f"Saved ConceptDataset pickle to {out}")
 
     meta_path = save_dir / "meta.json"
@@ -194,7 +219,6 @@ def ensure_digits_dir(args):
     print(f"Creating example digits for OCR under {DIGITS_DIR}...")
     DIGITS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # You can tune this if you want more/less examples per class
     digits_per_class = getattr(args, "digits_per_class", 64)
     h = w = args.cell_px
 
@@ -206,7 +230,6 @@ def ensure_digits_dir(args):
             img = np.ones((h, w, 3), dtype=np.uint8) * 255
 
             text = str(d)
-            # Rough centering heuristic
             font = cv2.FONT_HERSHEY_SIMPLEX
             font_scale = 0.8
             thickness = 2
@@ -222,46 +245,76 @@ def ensure_digits_dir(args):
     print("Finished generating example digits.")
 
 
-def build_ocr_preprocessing(ds, meta_full: dict, args, ds_name: str | None):
+def build_ocr_preprocessing(
+    ds,
+    meta_full: dict,
+    args,
+    ds_name: str | None,
+    image_transform_wrapper=None,
+):
     """
     Build the ocr_preprocessing folder with a JSONL file:
 
       data/sudoku/<dataset_name>/ocr_preprocessing/ocr_preprocessing.jsonl
 
     Each line looks like:
-      {"img": "valid_1.png", "starters": [...9x9...],
-       "candidates": [...9x9...], "board": [...9x9...]}
+      {
+        "img": "<actual filename>.png",
+        "starters": [...9x9...],
+        "candidates": [...9x9...],
+        "board": [...9x9...]
+      }
 
-    We assume:
-      - ds.C has shape (num_samples, 3 * N^2)
-      - channels are [board, starters, candidates] per cell.
+    We NO LONGER use ds.C. Instead we rely on the metadata collected by
+    the wrapped image transform created via make_image_transform(args).
+
+    - boards:    9x9 int grids (same as used to render images)
+    - starters:  9x9 mask (1 = starter / given digit, 0 = non-starter)
+    - candidates: 9x9 mask = 1 - starters (inverse of starters)
     """
-    C = np.asarray(ds.C)
+    if image_transform_wrapper is None:
+        print("WARNING: build_ocr_preprocessing called without image_transform_wrapper; cannot build OCR JSON.")
+        return
+
+    # Extract collected per-board metadata from the wrapper
+    boards_list = getattr(image_transform_wrapper, "boards", None)
+    starters_list = getattr(image_transform_wrapper, "starters", None)
+
+    if boards_list is None or starters_list is None:
+        print("WARNING: image_transform_wrapper is missing boards/starters; cannot build OCR JSON.")
+        return
+
+    boards = np.asarray(boards_list)
+    starters = np.asarray(starters_list).astype(int)
     y = np.asarray(ds.y)
 
-    if C.ndim != 2 or C.shape[1] % 3 != 0:
-        print("WARNING: C does not have shape (num_samples, 3 * N^2); "
-              "cannot build ocr_preprocessing.")
+    if boards.ndim != 3:
+        print(f"WARNING: boards array has unexpected shape {boards.shape}; cannot build OCR JSON.")
         return
 
-    num_samples, dim = C.shape
-    N_cells = dim // 3
-    rt = int(np.sqrt(N_cells))
-    if rt * rt != N_cells:
-        print("WARNING: C second dimension not consistent with square board; "
-              "cannot build ocr_preprocessing.")
+    num_samples, N1, N2 = boards.shape
+    if N1 != N2:
+        print(f"WARNING: boards are not square: shape={boards.shape}; cannot build OCR JSON.")
         return
 
-    N = rt
+    if num_samples != len(y):
+        print(
+            f"WARNING: boards count {num_samples} != len(y) {len(y)}; "
+            "mismatch between collected metadata and dataset."
+        )
+        return
 
-    # reshape to (num_samples, N_cells, 3)
-    flat = C.reshape(num_samples, N_cells, 3)
+    N = N1
+    if N != 9:
+        print(f"WARNING: expected 9x9 boards, got {N}x{N}; OCR JSON will not be generated.")
+        return
 
-    boards = flat[:, :, 0].reshape(num_samples, N, N).astype(int)
-    starters = flat[:, :, 1].reshape(num_samples, N, N).astype(int)
-    candidates = flat[:, :, 2].reshape(num_samples, N, N).astype(int)
+    # candidates = inverse of starters (1 for non-starter cells, 0 for starters)
+    candidates = (1 - starters).astype(int)
 
-    # where to write
+    # Use the actual filenames from ds.X instead of synthesizing names
+    X_paths = np.asarray(ds.X)
+
     if ds_name is None:
         ds_name = meta_full.get("dataset_name", "unnamed")
 
@@ -271,15 +324,14 @@ def build_ocr_preprocessing(ds, meta_full: dict, args, ds_name: str | None):
 
     with out_path.open("w") as f:
         for i in range(num_samples):
-            label_str = "valid" if int(y[i]) == 1 else "invalid"
-            # 1-based index to match your example "valid_1.png"
-            img_name = f"{label_str}_{i+1}.png"
+            img_path = Path(str(X_paths[i]))
+            img_name = img_path.name  # e.g. "valid_0.png" or "invalid_123.png"
 
             row = {
                 "img": img_name,
-                "starters": starters[i].tolist(),
-                "candidates": candidates[i].tolist(),
-                "board": boards[i].tolist(),
+                "starters": starters[i].tolist(),     # 9x9
+                "candidates": candidates[i].tolist(), # 9x9 = inverse of starters
+                "board": boards[i].astype(int).tolist(),  # 9x9
             }
             f.write(json.dumps(row) + "\n")
 
@@ -306,8 +358,7 @@ def choose_tabular_transform(args):
             "Invalid configuration: --data-type tabular with --transform image. "
             "There is no reason to transform tabular data to image data."
         )
-    else:
-        # shouldn't happen due to argparse choices
+    else:  # should not happen due to argparse choices
         return default_transform, "default_transform"
 
 
@@ -342,9 +393,8 @@ def main():
 
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--dataset_name", type=str, default="multimodal_m_21")
-    ap.add_argument("--save-dir", type=Path, default=None)
-    # kept for compatibility, but unused for pkl saving
-    ap.add_argument("--save-format", choices=["npz", "pt"], default="npz")
+    ap.add_argument("--save-dir", type=Path, default="data/sudoku/multimodal_m_21")
+    ap.add_argument("--save-format", choices=["npz", "pt"], default="npz")  # unused, kept for compat
     ap.add_argument("--progress", action="store_true", help="Show a progress bar during generation.")
 
     # image knobs
@@ -381,14 +431,15 @@ def main():
         else:
             ds_name = args.dataset_name
 
+        # Choose transform
         if data_type == "image":
-            # image always uses image_transform
+            # wrap image_transform so we can capture boards/starters
             transform = make_image_transform(args)
             transform_name = "image_transform"
         else:
-            # tabular uses CLI-specified transform
             transform, transform_name = choose_tabular_transform(args)
 
+        # ---- actually generate the ConceptDataset (this calls image rendering) ----
         ds = create_sudoku_dataset(
             n=args.n,
             n_samples=args.n_samples,
@@ -400,11 +451,29 @@ def main():
             dataset_name=ds_name,
         )
 
-        # -------- summary WITHOUT touching ds.meta ----------
         X, C, y = ds.X, ds.C, ds.y
-        meta = getattr(getattr(ds, "_full", None), "meta", None)
+
+        # Prefer the ConceptDataset's own meta, fall back if needed
+        meta = getattr(ds, "meta", None)
+        if meta is None:
+            meta = getattr(getattr(ds, "_full", None), "meta", None)
         if meta is None:
             meta = infer_meta_like(ds, data_type=data_type, transform_name=transform_name)
+
+        meta_full = dict(meta)
+        meta_full.setdefault("data_type", data_type)
+        meta_full.setdefault("transform", transform_name)
+
+        # If N/n are missing, try to infer and fill them
+        if "N" not in meta_full or "n" not in meta_full:
+            inferred = infer_meta_like(ds, data_type=data_type, transform_name=transform_name)
+            if inferred.get("N") is not None:
+                meta_full.setdefault("N", inferred["N"])
+            if inferred.get("n") is not None:
+                meta_full.setdefault("n", inferred["n"])
+
+        if ds_name is not None:
+            meta_full["dataset_name"] = ds_name
 
         def shape_of(x):
             try:
@@ -416,44 +485,38 @@ def main():
                     return ("<unknown>",)
 
         print("=== Dataset Summary ===")
-        print(f"data_type: {meta.get('data_type')}")
-        print(f"N (board size): {meta.get('N')}  |  n (block size): {meta.get('n')}")
+        print(f"data_type: {meta_full.get('data_type')}")
+        print(f"N (board size): {meta_full.get('N')}  |  n (block size): {meta_full.get('n')}")
         print(f"samples: {len(y)}  |  valid: {int((y == 1).sum())}  |  invalid: {int((y == 0).sum())}")
         print(f"X shape: {shape_of(X)}")
         print(f"C shape: {C.shape}")
         print(f"y shape: {y.shape}")
-        print(f"transform: {meta.get('transform')}")
+        print(f"transform: {meta_full.get('transform')}")
         if data_type == "image":
             print(f"Images & CSVs saved under {DATA_SUDOKU / (ds_name or '')}.")
 
-        # Build full meta (including dataset_name) once
-        meta_like = {
-            k: meta.get(k)
-            for k in ("data_type", "N", "n", "transform")
-            if k in meta
-        }
-        meta_full = dict(meta_like)
-        if ds_name is not None:
-            meta_full["dataset_name"] = ds_name
-
-        # save ConceptDataset as .pkl and write blue_blob.json into save_dir (if provided)
+        # Save ConceptDataset as .pkl (+ meta/blue_blob) in save_dir if requested
         if args.save_dir is not None:
-            # If generating multiple types, save each under its own subdir
             save_dir = args.save_dir / data_type if multiple else args.save_dir
             save_dataset_pkl(ds, meta_full, save_dir)
 
-        # For image datasets, drop side artifacts next to the images
+        # For image datasets, drop side artifacts next to the images directory
         if data_type == "image" and ds_name is not None:
             image_dir = DATA_SUDOKU / ds_name
             save_image_side_artifacts(image_dir, meta_full, args)
 
-            # Also ensure the global digits/ folder exists with example digits
             if not digits_done:
                 ensure_digits_dir(args)
                 digits_done = True
 
-            # And build the OCR preprocessing JSONL
-            build_ocr_preprocessing(ds, meta_full, args, ds_name)
+            # Build the OCR preprocessing JSONL using the SAME wrapped image transform
+            build_ocr_preprocessing(
+                ds,
+                meta_full,
+                args,
+                ds_name,
+                image_transform_wrapper=transform,
+            )
 
     print("=" * 60)
     print("Done.")

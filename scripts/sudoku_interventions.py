@@ -2,7 +2,7 @@
 """
 Evaluate the conceptual safeguards intervention strategy with a CBM
 trained from Sudoku boards using ConceptSudokuCNN, plus a Selective DNN
-baseline.
+baseline and a no-intervention CBM baseline.
 
 Key points
 ----------
@@ -20,13 +20,20 @@ Interventions:
 - Greedy conceptual safeguards strategy (Algorithm 1) with budgets,
   at τ calibrated on validation to reach ≥ 90% selective accuracy if possible.
 - CBMSelectiveDNNStrategy baseline with its own calibrated τ.
+- NoInterventionCBMStrategy baseline: standard CBM abstention, no concept fixes.
 
-No concept noise / missingness is modeled here (concept_noise=0, concept_missing=0).
+We additionally support concept missingness:
+- Sweep over mechanisms (none / mcar / mnar) and missingness levels.
+- Missingness is applied via eval_common.apply_missingness, using base_concepts.
 
 We additionally track "work" per board:
 - concepts_checked_per_board: mean # of intervened concepts per board
 - cells_checked_per_board: mean # of cells implicitly inspected per board,
   approximated as concepts_checked_per_board * (81 / 27) = 3 cells per concept.
+
+We also track *global* work:
+- work_total_concepts: total # of concept checks across all boards
+- work_total_concepts_on_abstained: total # of concept checks on abstaining boards
 """
 
 from __future__ import annotations
@@ -62,6 +69,7 @@ from eval_common import (
     MetricRecord,
     build_settings,
     default_target_options,
+    default_missingness_levels,
     iter_splits,
     write_metrics_csv,
     apply_missingness,
@@ -458,16 +466,33 @@ def train_cnn_cbm_from_sidecar(
 # Greedy Conceptual Safeguards Strategy
 # -------------------------------------------------------------------------
 class GreedyConceptualSafeguardsStrategy(ConceptualSafeguardsStrategy):
+    """
+    Greedy conceptual safeguards.
+
+    - `budget_frac` is interpreted as a *fraction of the total number of
+      candidate concepts that can be inspected* (i.e., those in `base_mask`,
+      which here is restricted to abstaining instances).
+      The absolute budget B (in units of "concept checks") is:
+
+          B = floor(budget_frac * base_mask.sum())
+
+    - We also track global work:
+        * work_total_concepts
+        * work_total_concepts_on_abstained
+    """
+
     name = "conceptual_safeguards"
 
     def propose(self, model, batch, config: InterventionConfig) -> StrategyProposal:
         C_pred = batch.C_pred
         n, m = C_pred.shape
 
+        # Label probabilities before interventions
         y_prob_before = model._propagate_predict_proba_mc(C_pred)
         y_pred_before = np.argmax(y_prob_before, axis=1)
         y_true = batch.y_true
 
+        # Abstention region defined by tau
         tau = float(getattr(config, "tau", 0.1))
         p1 = y_prob_before[:, 1]
         abstain_mask = (p1 >= tau) & (p1 <= 1.0 - tau)
@@ -482,7 +507,10 @@ class GreedyConceptualSafeguardsStrategy(ConceptualSafeguardsStrategy):
 
         coverage_before = 1.0 - float(abstain_mask.mean())
 
+        # Greedy gain heuristic
         gain = np.minimum(C_pred, 1.0 - C_pred)
+
+        # Only abstaining instances are eligible for concept checks
         base_mask = np.broadcast_to(abstain_mask[:, None], (n, m))
 
         mask = self._greedy_concept_selection(
@@ -493,6 +521,9 @@ class GreedyConceptualSafeguardsStrategy(ConceptualSafeguardsStrategy):
 
         selected_instances = np.where(abstain_mask)[0]
 
+        # ---- Work accounting ----
+        total_concepts_checked = int(mask.sum())
+
         concepts_per_board = mask.sum(axis=1).astype(float)
         mean_concepts_per_board = float(concepts_per_board.mean()) if n > 0 else 0.0
 
@@ -500,15 +531,25 @@ class GreedyConceptualSafeguardsStrategy(ConceptualSafeguardsStrategy):
         mean_cells_per_board = mean_concepts_per_board * cells_per_concept
 
         if abstain_mask.any():
-            mean_concepts_abstained = float(concepts_per_board[abstain_mask].mean())
+            concepts_abstained = concepts_per_board[abstain_mask]
+            mean_concepts_abstained = float(concepts_abstained.mean())
+            total_concepts_abstained = int(concepts_abstained.sum())
             mean_cells_abstained = mean_concepts_abstained * cells_per_concept
         else:
+            concepts_abstained = np.array([], dtype=float)
             mean_concepts_abstained = 0.0
+            total_concepts_abstained = 0
             mean_cells_abstained = 0.0
 
         details = {
             "selective_acc_before": selective_acc_before,
             "coverage_before": coverage_before,
+
+            # Global work
+            "work_total_concepts": float(total_concepts_checked),
+            "work_total_concepts_on_abstained": float(total_concepts_abstained),
+
+            # Per-board summaries
             "concepts_checked_per_board": mean_concepts_per_board,
             "cells_checked_per_board": mean_cells_per_board,
             "concepts_checked_per_abstained_board": mean_concepts_abstained,
@@ -528,24 +569,35 @@ class GreedyConceptualSafeguardsStrategy(ConceptualSafeguardsStrategy):
         base_mask: np.ndarray,
         config: InterventionConfig,
     ) -> np.ndarray:
+        """
+        Greedy selection of concepts under a *global* budget in units of
+        "concept checks" (i.e., total number of concept interventions),
+        plus an optional per-instance cap Kmax.
+        """
         n, m = gain.shape
         assert base_mask.shape == (n, m)
 
         S_mask = np.zeros((n, m), dtype=bool)
-        total_slots = n * m
 
+        # Candidate positions where we are allowed to intervene
+        candidates = np.argwhere(base_mask)
+        if candidates.size == 0:
+            return S_mask
+
+        # Global budget: max number of concepts that can be investigated
         budget_frac = getattr(config, "budget_frac", None)
         if budget_frac is None:
-            B = float("inf")
+            B = float("inf")  # effectively no global cap
         else:
             frac = max(0.0, min(1.0, float(budget_frac)))
-            B = float(np.floor(frac * total_slots))
+            total_candidates = int(base_mask.sum())
+            B = float(np.floor(frac * total_candidates))
 
+        # Optional per-instance cap
         Kmax = getattr(config, "max_concepts_per_instance", None)
         used_per_instance = np.zeros(n, dtype=int)
 
-        candidates = np.argwhere(base_mask)
-        if candidates.size == 0 or B <= 0:
+        if B <= 0:
             return S_mask
 
         def _best_remaining():
@@ -564,25 +616,15 @@ class GreedyConceptualSafeguardsStrategy(ConceptualSafeguardsStrategy):
                     best_k = k
             return best_i, best_k, best_score
 
-        gamma = 1.0
-
-        while B > 0:
+        remaining_budget = B
+        while remaining_budget > 0:
             i_star, k_star, s_star = _best_remaining()
             if i_star < 0:
-                break
+                break  # no feasible candidate left
 
             S_mask[i_star, k_star] = True
             used_per_instance[i_star] += 1
-            B -= gamma
-            if B <= 0:
-                break
-
-            if Kmax is None:
-                if np.all(S_mask.all(axis=1)):
-                    break
-            else:
-                if np.all(used_per_instance >= Kmax):
-                    break
+            remaining_budget -= 1.0
 
         return S_mask
 
@@ -625,6 +667,9 @@ class CBMSelectiveDNNStrategy(ConceptualSafeguardsStrategy):
         details = {
             "selective_acc_before": selective_acc_before,
             "coverage_before": coverage_before,
+            # No concept checks for this baseline
+            "work_total_concepts": 0.0,
+            "work_total_concepts_on_abstained": 0.0,
             "concepts_checked_per_board": 0.0,
             "cells_checked_per_board": 0.0,
             "concepts_checked_per_abstained_board": 0.0,
@@ -647,20 +692,20 @@ def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=results_dir / "big_demo" / "conceptual_safeguards_metrics_work.csv",
+        default=results_dir / "big_demo" / "conceptual_safeguards_metrics_missingness.csv",
         help="Destination CSV path for the melted metric table.",
     )
     parser.add_argument(
         "--data-name",
         choices=tuple(BASE_DATASET_CONFIGS.keys()),
-        default="multimodal_m_21_image",
+        default="multimodal_m_21_image",  # image config key
         help="Dataset key used for settings + (some) metadata.",
     )
     parser.add_argument(
         "--dataset-file",
         type=Path,
         default=Path(
-            "/home/mds010/concept-benchmark/data/sudoku/multimodel_m_21_image.pkl"
+            "/home/mds010/concept-benchmark/data/sudoku/multimodal_m_21/image/sudoku_dataset.pkl"
         ),
         help=(
             "Path to an existing dataset pickle *with splits* "
@@ -677,11 +722,11 @@ def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--tau",
         type=float,
         nargs="+",
-        default=[0.05, 0.1, 0.2, 0.25, 0.5],
+        default=[0.05, 0.1, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5],
         help=(
             "Candidate confidence margins. For each target label and each "
-            "strategy (CBM conceptual safeguards / selective DNN), tau is "
-            "calibrated on the validation split by choosing the smallest "
+            "strategy (CBM conceptual safeguards / selective DNN / no-intervention), "
+            "tau is calibrated on the validation split by choosing the smallest "
             "candidate with selective accuracy >= 0.9 if possible."
         ),
     )
@@ -701,19 +746,32 @@ def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--budget-frac",
         type=float,
         nargs="+",
-        default=[0.1, 0.25, 0.5],
+        default=[0.1, 0.25, 0.5, 1.0],
         help="Conceptual safeguards budget fractions.",
     )
     parser.add_argument(
         "--max-concepts-per-instance",
         type=str,
-        nargs="+",
-        default=["1", "2", "3", "5", "7", "12", "max_incorrect"],
+        default=['None'],
         help=(
             "Max # concepts per instance that can be intervened on. "
             "Use 'max_incorrect' for settings['max_corrupt'], "
             "'none'/'None'/'-1' for no cap."
         ),
+    )
+    # NEW: missingness options
+    parser.add_argument(
+        "--missing-mechanisms",
+        nargs="+",
+        choices=("none", "mcar", "mnar"),
+        default=["none", "mcar", "mnar"],
+        help="Concept missingness mechanisms to consider.",
+    )
+    parser.add_argument(
+        "--concept-missing",
+        type=float,
+        nargs="+",
+        help="Override concept missingness levels (defaults to utils.CONCEPT_MISSING).",
     )
     parser.add_argument(
         "--no-progress",
@@ -740,15 +798,27 @@ def _estimate_total_configs(
     tau_values: Sequence[float],
     budget_fracs: Sequence[float],
     K_tokens: Sequence[str],
+    mechanisms: Sequence[str],
+    missing_levels: Sequence[float],
 ) -> int:
+    # how many distinct (mechanism, concept_missing) combos?
+    missing_counts = 0
+    for mech in mechanisms:
+        if mech == "none":
+            missing_counts += 1
+        else:
+            missing_counts += len(missing_levels)
+
     cs_configs = (
         len(target_labels)
+        * missing_counts
         * len(budget_fracs)
         * len(K_tokens)
         * len(tau_values)
     )
-    dnn_configs = len(target_labels) * len(tau_values)
-    return cs_configs + dnn_configs
+    dnn_configs = len(target_labels) * missing_counts * len(tau_values)
+    noint_configs = len(target_labels) * missing_counts * len(tau_values)
+    return cs_configs + dnn_configs + noint_configs
 
 
 def repair_legacy_concepts(dataset) -> None:
@@ -788,6 +858,8 @@ def repair_legacy_concepts(dataset) -> None:
             else:
                 noise_mask = np.zeros_like(raw, dtype=bool)
             setattr(split, "_concept_noise_mask", noise_mask)
+        else:
+            noise_mask = getattr(split, "_concept_noise_mask")
 
         # 3) Concept missing mask: _concept_missing_mask
         if not hasattr(split, "_concept_missing_mask"):
@@ -796,6 +868,8 @@ def repair_legacy_concepts(dataset) -> None:
             else:
                 missing_mask = np.zeros_like(raw, dtype=bool)
             setattr(split, "_concept_missing_mask", missing_mask)
+        else:
+            missing_mask = getattr(split, "_concept_missing_mask")
 
         # 4) Missingness mechanism + fill value
         if not hasattr(split, "_concept_missing_mech"):
@@ -805,6 +879,15 @@ def repair_legacy_concepts(dataset) -> None:
         if not hasattr(split, "_concept_missing_fill_value"):
             fill_value = getattr(split, "concept_missing_fill_value", np.nan)
             setattr(split, "_concept_missing_fill_value", fill_value)
+
+        # 5) Flags used by new C property
+        if not hasattr(split, "_concept_noise_enabled"):
+            # In your experiments noise=0, so default False is safe.
+            setattr(split, "_concept_noise_enabled", False)
+
+        if not hasattr(split, "_concept_missing_enabled"):
+            # Will be toggled via apply_missingness anyway; default False.
+            setattr(split, "_concept_missing_enabled", False)
 
 
 def ensure_base_concepts(dataset) -> None:
@@ -820,6 +903,43 @@ def ensure_base_concepts(dataset) -> None:
         if hasattr(split, "C") and not hasattr(split, "base_concepts"):
             split.base_concepts = split.C.copy()
 
+
+def repair_legacy_X_for_full(dataset) -> None:
+    """
+    Older pickled ConceptImageDatasetSample objects may not have the `_X`
+    backing field that the new `X` property expects. This backfills `_X`
+    on `dataset._full` from legacy attributes so that `split()` works.
+    """
+    full = getattr(dataset, "_full", None)
+    if full is None:
+        return
+
+    d = getattr(full, "__dict__", {})
+
+    # If _X already exists and is not None, nothing to do.
+    if hasattr(full, "_X") and getattr(full, "_X", None) is not None:
+        return
+
+    if "_X" in d and d["_X"] is not None:
+        setattr(full, "_X", d["_X"])
+        return
+
+    if "X" in d and d["X"] is not None:
+        setattr(full, "_X", d["X"])
+        return
+
+    if "paths" in d and d["paths"] is not None:
+        setattr(full, "_X", d["paths"])
+        return
+
+    if "images" in d and d["images"] is not None:
+        setattr(full, "_X", d["images"])
+        return
+
+    raise AttributeError(
+        "[repair_legacy_X_for_full] Could not infer `_X` for dataset._full; "
+        "checked `_X`, `X`, `paths`, and `images`."
+    )
 
 
 def _inject_work_metrics_from_result(result, metrics: dict) -> None:
@@ -846,6 +966,8 @@ def _inject_work_metrics_from_result(result, metrics: dict) -> None:
         "cells_checked_per_board",
         "concepts_checked_per_abstained_board",
         "cells_checked_per_abstained_board",
+        "work_total_concepts",
+        "work_total_concepts_on_abstained",
     ]:
         if key in details and details[key] is not None:
             metrics[key] = float(details[key])
@@ -996,6 +1118,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     target_pairs = default_target_options(args.target_accuracy_labels)
     target_labels = [label for label, _ in target_pairs]
 
+    # NEW: missingness levels
+    missing_levels = default_missingness_levels(args.concept_missing)
+
     total = None
     if not args.no_progress:
         total = _estimate_total_configs(
@@ -1003,12 +1128,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             tau_values=tau_values,
             budget_fracs=budget_fracs,
             K_tokens=args.max_concepts_per_instance,
+            mechanisms=args.missing_mechanisms,
+            missing_levels=missing_levels,
         )
     progress = None if total is None else tqdm(total=total, desc="Configs")
 
     records: List[MetricRecord] = []
     cs_strategy = GreedyConceptualSafeguardsStrategy()
     dnn_strategy = CBMSelectiveDNNStrategy()
+    noint_strategy = NoInterventionCBMStrategy()
 
     if not args.concept_json.is_file():
         raise FileNotFoundError(f"Concept JSON not found: {args.concept_json}")
@@ -1017,6 +1145,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     try:
         for target_label, target_value in target_pairs:
+            # Settings used mainly for metadata and CBM training
             settings = build_settings(
                 data_name=args.data_name,
                 concept_noise=0.0,
@@ -1036,9 +1165,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(f"[main] Loading dataset from: {args.dataset_file}")
             dataset = fileutils.load(args.dataset_file)
 
+            # Fix legacy X backing on the full dataset BEFORE splitting
+            repair_legacy_X_for_full(dataset)
+
+            # Ensure we have splits (if not already in pickle)
+            dataset.generate_cvindices(seed=42)
+            dataset.split("K05N01", fold_num_validation=4, fold_num_test=5)
+
             # Fix legacy concept backing and snapshot base concepts
             ensure_base_concepts(dataset)
 
+            # Train CBM once per target label (on full concepts, no missingness)
             cbm = train_cnn_cbm_from_sidecar(
                 settings=settings,
                 dataset=dataset,
@@ -1049,84 +1186,280 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
             runner = ConceptInterventionRunner(model=cbm)
 
-            cs_tau_values = calibrate_tau_on_validation(
-                runner=runner,
-                strategy=cs_strategy,
-                dataset=dataset,
-                tau_candidates=tau_values,
-                target_label=target_label,
-                target_value=target_value,
-                settings=settings,
-                verbose=args.verbose,
-                acc_target=ACC_TARGET,
-            )
-
-            # *** THIS is the DNN tau calibration ***
-            dnn_tau_values = calibrate_tau_on_validation(
-                runner=runner,
-                strategy=dnn_strategy,
-                dataset=dataset,
-                tau_candidates=tau_values,
-                target_label=target_label,
-                target_value=target_value,
-                settings=settings,
-                verbose=args.verbose,
-                acc_target=ACC_TARGET,
-            )
-            if args.verbose:
-                print(
-                    f"[main] DNN tau candidates for "
-                    f"target_label={target_label} target_value={target_value}: {dnn_tau_values}"
-                )
-
-            K_values: List[Optional[int]] = []
-            max_incorrect_default = int(settings.get("max_corrupt", 27))
-            for token in args.max_concepts_per_instance:
-                if token in ("none", "None", "-1"):
-                    K_values.append(None)
-                elif token == "max_incorrect":
-                    K_values.append(max_incorrect_default)
+            # ----- Sweep over missingness configs -----
+            for mechanism in args.missing_mechanisms:
+                if mechanism == "none":
+                    levels = (0.0,)
                 else:
-                    K_values.append(int(token))
+                    levels = missing_levels
 
-            # ---- Conceptual safeguards runs ----
-            for budget_frac in budget_fracs:
-                for K in K_values:
-                    for tau in cs_tau_values:
-                        config = InterventionConfig(tau=float(tau))
-                        setattr(config, "budget_frac", budget_frac)
-                        setattr(config, "max_concepts_per_instance", K)
+                for concept_missing in levels:
+                    # Apply missingness IN PLACE using base_concepts as source
+                    apply_missingness(dataset, mechanism, float(concept_missing))
+
+                    if args.verbose:
+                        print(
+                            f"[main] Missingness config: mech={mechanism}, "
+                            f"concept_missing={concept_missing}"
+                        )
+
+                    # τ calibration per strategy, per missingness config
+                    cs_tau_values = calibrate_tau_on_validation(
+                        runner=runner,
+                        strategy=cs_strategy,
+                        dataset=dataset,
+                        tau_candidates=tau_values,
+                        target_label=target_label,
+                        target_value=target_value,
+                        settings=settings,
+                        verbose=args.verbose,
+                        acc_target=ACC_TARGET,
+                    )
+
+                    dnn_tau_values = calibrate_tau_on_validation(
+                        runner=runner,
+                        strategy=dnn_strategy,
+                        dataset=dataset,
+                        tau_candidates=tau_values,
+                        target_label=target_label,
+                        target_value=target_value,
+                        settings=settings,
+                        verbose=args.verbose,
+                        acc_target=ACC_TARGET,
+                    )
+
+                    noint_tau_values = calibrate_tau_on_validation(
+                        runner=runner,
+                        strategy=noint_strategy,
+                        dataset=dataset,
+                        tau_candidates=tau_values,
+                        target_label=target_label,
+                        target_value=target_value,
+                        settings=settings,
+                        verbose=args.verbose,
+                        acc_target=ACC_TARGET,
+                    )
+
+                    if args.verbose:
+                        print(
+                            f"[main] Tau (cs={cs_tau_values}, "
+                            f"dnn={dnn_tau_values}, noint={noint_tau_values}) "
+                            f"for mechanism={mechanism}, missing={concept_missing}"
+                        )
+
+                    K_values: List[Optional[int]] = []
+                    max_incorrect_default = int(settings.get("max_corrupt", 27))
+                    for token in args.max_concepts_per_instance:
+                        if token in ("none", "None", "-1"):
+                            K_values.append(None)
+                        elif token == "max_incorrect":
+                            K_values.append(max_incorrect_default)
+                        else:
+                            K_values.append(int(token))
+
+                    # ---- Conceptual safeguards runs ----
+                    for budget_frac in budget_fracs:
+                        for K in K_values:
+                            for tau in cs_tau_values:
+                                config = InterventionConfig(tau=float(tau))
+                                setattr(config, "budget_frac", budget_frac)
+                                setattr(config, "max_concepts_per_instance", K)
+
+                                for split_name, split_data in iter_splits(dataset):
+                                    if split_name not in INTERVENTION_SPLITS:
+                                        continue
+
+                                    result = runner.run(
+                                        strategy=cs_strategy,
+                                        config=config,
+                                        dataset=split_data,
+                                    )
+
+                                    m = result.strat_metrics
+                                    _inject_work_metrics_from_result(result, m)
+
+                                    if args.verbose:
+                                        print(
+                                            "[run] strategy={strategy} "
+                                            "data={data_name} ({data_type}) "
+                                            "target_label={target_label} target_value={target_value} "
+                                            "split={split} tau={tau:.3f} "
+                                            "budget_frac={budget_frac} "
+                                            "max_concepts_per_instance={K} "
+                                            "mech={mech} missing={missing}".format(
+                                                strategy=cs_strategy.name,
+                                                data_name=settings["data_name"],
+                                                data_type=settings["data_type"],
+                                                target_label=target_label,
+                                                target_value=target_value,
+                                                split=split_name,
+                                                tau=tau,
+                                                budget_frac=budget_frac,
+                                                K=K,
+                                                mech=mechanism,
+                                                missing=concept_missing,
+                                            )
+                                        )
+                                        print(
+                                            "      selective_acc_before={sel_before} "
+                                            "selective_acc_after={sel_after} "
+                                            "coverage_before={cov_before} "
+                                            "coverage_after={cov_after}".format(
+                                                sel_before=m.get("selective_acc_before"),
+                                                sel_after=m.get("selective_acc_after"),
+                                                cov_before=m.get("coverage_before"),
+                                                cov_after=m.get("coverage_after"),
+                                            )
+                                        )
+
+                                    for metric_name, metric_value in m.items():
+                                        if metric_value is None:
+                                            continue
+                                        records.append(
+                                            MetricRecord(
+                                                strategy=cs_strategy.name,
+                                                metric=metric_name,
+                                                value=float(metric_value),
+                                                split=split_name,
+                                                data_name=settings["data_name"],
+                                                data_type=settings["data_type"],
+                                                concept_noise=0.0,
+                                                concept_missing=float(concept_missing),
+                                                concept_missing_mech=mechanism,
+                                                target_accuracy_label=target_label,
+                                                target_accuracy_value=target_value,
+                                                params={
+                                                    "tau": float(tau),
+                                                    "budget_frac": budget_frac,
+                                                    "max_concepts_per_instance": K,
+                                                },
+                                            )
+                                        )
+
+                                    sel_after = m.get("selective_acc_after", None)
+                                    cov_before = m.get("coverage_before", None)
+                                    cov_after = m.get("coverage_after", None)
+
+                                    if sel_after is not None:
+                                        records.append(
+                                            MetricRecord(
+                                                strategy=cs_strategy.name,
+                                                metric="selective_accuracy",
+                                                value=float(sel_after),
+                                                split=split_name,
+                                                data_name=settings["data_name"],
+                                                data_type=settings["data_type"],
+                                                concept_noise=0.0,
+                                                concept_missing=float(concept_missing),
+                                                concept_missing_mech=mechanism,
+                                                target_accuracy_label=target_label,
+                                                target_accuracy_value=target_value,
+                                                params={
+                                                    "tau": float(tau),
+                                                    "budget_frac": budget_frac,
+                                                    "max_concepts_per_instance": K,
+                                                },
+                                            )
+                                        )
+
+                                    if cov_after is not None:
+                                        records.append(
+                                            MetricRecord(
+                                                strategy=cs_strategy.name,
+                                                metric="coverage_pct_handled_by_ai",
+                                                value=float(cov_after) * 100.0,
+                                                split=split_name,
+                                                data_name=settings["data_name"],
+                                                data_type=settings["data_type"],
+                                                concept_noise=0.0,
+                                                concept_missing=float(concept_missing),
+                                                concept_missing_mech=mechanism,
+                                                target_accuracy_label=target_label,
+                                                target_accuracy_value=target_value,
+                                                params={
+                                                    "tau": float(tau),
+                                                    "budget_frac": budget_frac,
+                                                    "max_concepts_per_instance": K,
+                                                },
+                                            )
+                                        )
+
+                                    if cov_after is not None and cov_before is not None:
+                                        cov_gain = (float(cov_after) - float(cov_before)) * 100.0
+                                        records.append(
+                                            MetricRecord(
+                                                strategy=cs_strategy.name,
+                                                metric="coverage_gain",
+                                                value=cov_gain,
+                                                split=split_name,
+                                                data_name=settings["data_name"],
+                                                data_type=settings["data_type"],
+                                                concept_noise=0.0,
+                                                concept_missing=float(concept_missing),
+                                                concept_missing_mech=mechanism,
+                                                target_accuracy_label=target_label,
+                                                target_accuracy_value=target_value,
+                                                params={
+                                                    "tau": float(tau),
+                                                    "budget_frac": budget_frac,
+                                                    "max_concepts_per_instance": K,
+                                                },
+                                            )
+                                        )
+
+                                if progress is not None:
+                                    progress.update(1)
+
+                    # ---- CBM selective DNN baseline (no concept interventions) ----
+                    dnn_before = len(records)
+                    for tau in dnn_tau_values:
+                        dnn_config = InterventionConfig(tau=float(tau))
+                        setattr(dnn_config, "budget_frac", 0.0)
+                        setattr(dnn_config, "max_concepts_per_instance", None)
 
                         for split_name, split_data in iter_splits(dataset):
                             if split_name not in INTERVENTION_SPLITS:
                                 continue
 
-                            result = runner.run(
-                                strategy=cs_strategy,
-                                config=config,
+                            dnn_result = runner.run(
+                                strategy=dnn_strategy,
+                                config=dnn_config,
                                 dataset=split_data,
                             )
 
-                            m = result.strat_metrics
-                            _inject_work_metrics_from_result(result, m)
+                            m = dnn_result.strat_metrics
+                            _inject_work_metrics_from_result(dnn_result, m)
+
+                            if "concepts_checked_per_board" not in m:
+                                m["concepts_checked_per_board"] = 0.0
+                            if "cells_checked_per_board" not in m:
+                                m["cells_checked_per_board"] = 0.0
+                            if "concepts_checked_per_abstained_board" not in m:
+                                m["concepts_checked_per_abstained_board"] = 0.0
+                            if "cells_checked_per_abstained_board" not in m:
+                                m["cells_checked_per_abstained_board"] = 0.0
+                            if "work_total_concepts" not in m:
+                                m["work_total_concepts"] = 0.0
+                            if "work_total_concepts_on_abstained" not in m:
+                                m["work_total_concepts_on_abstained"] = 0.0
 
                             if args.verbose:
                                 print(
-                                    "[run] strategy={strategy} "
+                                    "[run-dnn] strategy={strategy} "
                                     "data={data_name} ({data_type}) "
                                     "target_label={target_label} target_value={target_value} "
                                     "split={split} tau={tau:.3f} "
-                                    "budget_frac={budget_frac} "
-                                    "max_concepts_per_instance={K}".format(
-                                        strategy=cs_strategy.name,
+                                    "budget_frac=0.0 max_concepts_per_instance=None "
+                                    "mech={mech} missing={missing}".format(
+                                        strategy=dnn_strategy.name,
                                         data_name=settings["data_name"],
                                         data_type=settings["data_type"],
                                         target_label=target_label,
                                         target_value=target_value,
                                         split=split_name,
                                         tau=tau,
-                                        budget_frac=budget_frac,
-                                        K=K,
+                                        mech=mechanism,
+                                        missing=concept_missing,
                                     )
                                 )
                                 print(
@@ -1146,47 +1479,47 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                     continue
                                 records.append(
                                     MetricRecord(
-                                        strategy=cs_strategy.name,
+                                        strategy=dnn_strategy.name,
                                         metric=metric_name,
                                         value=float(metric_value),
                                         split=split_name,
                                         data_name=settings["data_name"],
                                         data_type=settings["data_type"],
                                         concept_noise=0.0,
-                                        concept_missing=0.0,
-                                        concept_missing_mech="none",
+                                        concept_missing=float(concept_missing),
+                                        concept_missing_mech=mechanism,
                                         target_accuracy_label=target_label,
                                         target_accuracy_value=target_value,
                                         params={
                                             "tau": float(tau),
-                                            "budget_frac": budget_frac,
-                                            "max_concepts_per_instance": K,
+                                            "budget_frac": 0.0,
+                                            "max_concepts_per_instance": None,
                                         },
                                     )
                                 )
 
                             sel_after = m.get("selective_acc_after", None)
-                            cov_before = m.get("coverage_before", None)
                             cov_after = m.get("coverage_after", None)
+                            cov_before = m.get("coverage_before", cov_after)
 
                             if sel_after is not None:
                                 records.append(
                                     MetricRecord(
-                                        strategy=cs_strategy.name,
+                                        strategy=dnn_strategy.name,
                                         metric="selective_accuracy",
                                         value=float(sel_after),
                                         split=split_name,
                                         data_name=settings["data_name"],
                                         data_type=settings["data_type"],
                                         concept_noise=0.0,
-                                        concept_missing=0.0,
-                                        concept_missing_mech="none",
+                                        concept_missing=float(concept_missing),
+                                        concept_missing_mech=mechanism,
                                         target_accuracy_label=target_label,
                                         target_accuracy_value=target_value,
                                         params={
                                             "tau": float(tau),
-                                            "budget_frac": budget_frac,
-                                            "max_concepts_per_instance": K,
+                                            "budget_frac": 0.0,
+                                            "max_concepts_per_instance": None,
                                         },
                                     )
                                 )
@@ -1194,21 +1527,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                             if cov_after is not None:
                                 records.append(
                                     MetricRecord(
-                                        strategy=cs_strategy.name,
+                                        strategy=dnn_strategy.name,
                                         metric="coverage_pct_handled_by_ai",
                                         value=float(cov_after) * 100.0,
                                         split=split_name,
                                         data_name=settings["data_name"],
                                         data_type=settings["data_type"],
                                         concept_noise=0.0,
-                                        concept_missing=0.0,
-                                        concept_missing_mech="none",
+                                        concept_missing=float(concept_missing),
+                                        concept_missing_mech=mechanism,
                                         target_accuracy_label=target_label,
                                         target_accuracy_value=target_value,
                                         params={
                                             "tau": float(tau),
-                                            "budget_frac": budget_frac,
-                                            "max_concepts_per_instance": K,
+                                            "budget_frac": 0.0,
+                                            "max_concepts_per_instance": None,
                                         },
                                     )
                                 )
@@ -1217,21 +1550,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                 cov_gain = (float(cov_after) - float(cov_before)) * 100.0
                                 records.append(
                                     MetricRecord(
-                                        strategy=cs_strategy.name,
+                                        strategy=dnn_strategy.name,
                                         metric="coverage_gain",
                                         value=cov_gain,
                                         split=split_name,
                                         data_name=settings["data_name"],
                                         data_type=settings["data_type"],
                                         concept_noise=0.0,
-                                        concept_missing=0.0,
-                                        concept_missing_mech="none",
+                                        concept_missing=float(concept_missing),
+                                        concept_missing_mech=mechanism,
                                         target_accuracy_label=target_label,
                                         target_accuracy_value=target_value,
                                         params={
                                             "tau": float(tau),
-                                            "budget_frac": budget_frac,
-                                            "max_concepts_per_instance": K,
+                                            "budget_frac": 0.0,
+                                            "max_concepts_per_instance": None,
                                         },
                                     )
                                 )
@@ -1239,167 +1572,180 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         if progress is not None:
                             progress.update(1)
 
-            # ---- CBM selective DNN baseline (no concept interventions) ----
-            dnn_before = len(records)
-            for tau in dnn_tau_values:
-                dnn_config = InterventionConfig(tau=float(tau))
-                setattr(dnn_config, "budget_frac", 0.0)
-                setattr(dnn_config, "max_concepts_per_instance", None)
+                    if args.verbose:
+                        dnn_added = len(records) - dnn_before
+                        print(
+                            f"[main] DNN records added for "
+                            f"target_label={target_label}, "
+                            f"target_value={target_value}, "
+                            f"mech={mechanism}, missing={concept_missing}: {dnn_added}"
+                        )
 
-                for split_name, split_data in iter_splits(dataset):
-                    if split_name not in INTERVENTION_SPLITS:
-                        continue
+                    # ---- No-intervention CBM baseline ----
+                    noint_before = len(records)
+                    for tau in noint_tau_values:
+                        noint_config = InterventionConfig(tau=float(tau))
+                        setattr(noint_config, "budget_frac", 0.0)
+                        setattr(noint_config, "max_concepts_per_instance", None)
 
-                    dnn_result = runner.run(
-                        strategy=dnn_strategy,
-                        config=dnn_config,
-                        dataset=split_data,
-                    )
+                        for split_name, split_data in iter_splits(dataset):
+                            if split_name not in INTERVENTION_SPLITS:
+                                continue
 
-                    m = dnn_result.strat_metrics
-                    _inject_work_metrics_from_result(dnn_result, m)
+                            noint_result = runner.run(
+                                strategy=noint_strategy,
+                                config=noint_config,
+                                dataset=split_data,
+                            )
 
-                    if "concepts_checked_per_board" not in m:
-                        m["concepts_checked_per_board"] = 0.0
-                    if "cells_checked_per_board" not in m:
-                        m["cells_checked_per_board"] = 0.0
-                    if "concepts_checked_per_abstained_board" not in m:
-                        m["concepts_checked_per_abstained_board"] = 0.0
-                    if "cells_checked_per_abstained_board" not in m:
-                        m["cells_checked_per_abstained_board"] = 0.0
+                            m = noint_result.strat_metrics
+                            _inject_work_metrics_from_result(noint_result, m)
+
+                            # For no-intervention we expect 0 work; enforce it.
+                            m.setdefault("concepts_checked_per_board", 0.0)
+                            m.setdefault("cells_checked_per_board", 0.0)
+                            m.setdefault("concepts_checked_per_abstained_board", 0.0)
+                            m.setdefault("cells_checked_per_abstained_board", 0.0)
+                            m.setdefault("work_total_concepts", 0.0)
+                            m.setdefault("work_total_concepts_on_abstained", 0.0)
+
+                            if args.verbose:
+                                print(
+                                    "[run-noint] strategy={strategy} "
+                                    "data={data_name} ({data_type}) "
+                                    "target_label={target_label} target_value={target_value} "
+                                    "split={split} tau={tau:.3f} "
+                                    "budget_frac=0.0 max_concepts_per_instance=None "
+                                    "mech={mech} missing={missing}".format(
+                                        strategy=noint_strategy.name,
+                                        data_name=settings["data_name"],
+                                        data_type=settings["data_type"],
+                                        target_label=target_label,
+                                        target_value=target_value,
+                                        split=split_name,
+                                        tau=tau,
+                                        mech=mechanism,
+                                        missing=concept_missing,
+                                    )
+                                )
+                                print(
+                                    "      selective_acc_before={sel_before} "
+                                    "selective_acc_after={sel_after} "
+                                    "coverage_before={cov_before} "
+                                    "coverage_after={cov_after}".format(
+                                        sel_before=m.get("selective_acc_before"),
+                                        sel_after=m.get("selective_acc_after"),
+                                        cov_before=m.get("coverage_before"),
+                                        cov_after=m.get("coverage_after"),
+                                    )
+                                )
+
+                            for metric_name, metric_value in m.items():
+                                if metric_value is None:
+                                    continue
+                                records.append(
+                                    MetricRecord(
+                                        strategy=noint_strategy.name,
+                                        metric=metric_name,
+                                        value=float(metric_value),
+                                        split=split_name,
+                                        data_name=settings["data_name"],
+                                        data_type=settings["data_type"],
+                                        concept_noise=0.0,
+                                        concept_missing=float(concept_missing),
+                                        concept_missing_mech=mechanism,
+                                        target_accuracy_label=target_label,
+                                        target_accuracy_value=target_value,
+                                        params={
+                                            "tau": float(tau),
+                                            "budget_frac": 0.0,
+                                            "max_concepts_per_instance": None,
+                                        },
+                                    )
+                                )
+
+                            sel_after = m.get("selective_acc_after", None)
+                            cov_after = m.get("coverage_after", None)
+                            cov_before = m.get("coverage_before", cov_after)
+
+                            if sel_after is not None:
+                                records.append(
+                                    MetricRecord(
+                                        strategy=noint_strategy.name,
+                                        metric="selective_accuracy",
+                                        value=float(sel_after),
+                                        split=split_name,
+                                        data_name=settings["data_name"],
+                                        data_type=settings["data_type"],
+                                        concept_noise=0.0,
+                                        concept_missing=float(concept_missing),
+                                        concept_missing_mech=mechanism,
+                                        target_accuracy_label=target_label,
+                                        target_accuracy_value=target_value,
+                                        params={
+                                            "tau": float(tau),
+                                            "budget_frac": 0.0,
+                                            "max_concepts_per_instance": None,
+                                        },
+                                    )
+                                )
+
+                            if cov_after is not None:
+                                records.append(
+                                    MetricRecord(
+                                        strategy=noint_strategy.name,
+                                        metric="coverage_pct_handled_by_ai",
+                                        value=float(cov_after) * 100.0,
+                                        split=split_name,
+                                        data_name=settings["data_name"],
+                                        data_type=settings["data_type"],
+                                        concept_noise=0.0,
+                                        concept_missing=float(concept_missing),
+                                        concept_missing_mech=mechanism,
+                                        target_accuracy_label=target_label,
+                                        target_accuracy_value=target_value,
+                                        params={
+                                            "tau": float(tau),
+                                            "budget_frac": 0.0,
+                                            "max_concepts_per_instance": None,
+                                        },
+                                    )
+                                )
+
+                            if cov_after is not None and cov_before is not None:
+                                cov_gain = (float(cov_after) - float(cov_before)) * 100.0
+                                records.append(
+                                    MetricRecord(
+                                        strategy=noint_strategy.name,
+                                        metric="coverage_gain",
+                                        value=cov_gain,
+                                        split=split_name,
+                                        data_name=settings["data_name"],
+                                        data_type=settings["data_type"],
+                                        concept_noise=0.0,
+                                        concept_missing=float(concept_missing),
+                                        concept_missing_mech=mechanism,
+                                        target_accuracy_label=target_label,
+                                        target_accuracy_value=target_value,
+                                        params={
+                                            "tau": float(tau),
+                                            "budget_frac": 0.0,
+                                            "max_concepts_per_instance": None,
+                                        },
+                                    )
+                                )
+
+                        if progress is not None:
+                            progress.update(1)
 
                     if args.verbose:
+                        noint_added = len(records) - noint_before
                         print(
-                            "[run-dnn] strategy={strategy} "
-                            "data={data_name} ({data_type}) "
-                            "target_label={target_label} target_value={target_value} "
-                            "split={split} tau={tau:.3f} "
-                            "budget_frac=0.0 max_concepts_per_instance=None".format(
-                                strategy=dnn_strategy.name,
-                                data_name=settings["data_name"],
-                                data_type=settings["data_type"],
-                                target_label=target_label,
-                                target_value=target_value,
-                                split=split_name,
-                                tau=tau,
-                            )
+                            f"[main] No-intervention records added for "
+                            f"target_label={target_label}, "
+                            f"target_value={target_value}, "
+                            f"mech={mechanism}, missing={concept_missing}: {noint_added}"
                         )
-                        print(
-                            "      selective_acc_before={sel_before} "
-                            "selective_acc_after={sel_after} "
-                            "coverage_before={cov_before} "
-                            "coverage_after={cov_after}".format(
-                                sel_before=m.get("selective_acc_before"),
-                                sel_after=m.get("selective_acc_after"),
-                                cov_before=m.get("coverage_before"),
-                                cov_after=m.get("coverage_after"),
-                            )
-                        )
-
-                    for metric_name, metric_value in m.items():
-                        if metric_value is None:
-                            continue
-                        records.append(
-                            MetricRecord(
-                                strategy="selective_dnn_cbm",
-                                metric=metric_name,
-                                value=float(metric_value),
-                                split=split_name,
-                                data_name=settings["data_name"],
-                                data_type=settings["data_type"],
-                                concept_noise=0.0,
-                                concept_missing=0.0,
-                                concept_missing_mech="none",
-                                target_accuracy_label=target_label,
-                                target_accuracy_value=target_value,
-                                params={
-                                    "tau": float(tau),
-                                    "budget_frac": 0.0,
-                                    "max_concepts_per_instance": None,
-                                },
-                            )
-                        )
-
-                    sel_after = m.get("selective_acc_after", None)
-                    cov_after = m.get("coverage_after", None)
-                    cov_before = m.get("coverage_before", cov_after)
-
-                    if sel_after is not None:
-                        records.append(
-                            MetricRecord(
-                                strategy="selective_dnn_cbm",
-                                metric="selective_accuracy",
-                                value=float(sel_after),
-                                split=split_name,
-                                data_name=settings["data_name"],
-                                data_type=settings["data_type"],
-                                concept_noise=0.0,
-                                concept_missing=0.0,
-                                concept_missing_mech="none",
-                                target_accuracy_label=target_label,
-                                target_accuracy_value=target_value,
-                                params={
-                                    "tau": float(tau),
-                                    "budget_frac": 0.0,
-                                    "max_concepts_per_instance": None,
-                                },
-                            )
-                        )
-
-                    if cov_after is not None:
-                        records.append(
-                            MetricRecord(
-                                strategy="selective_dnn_cbm",
-                                metric="coverage_pct_handled_by_ai",
-                                value=float(cov_after) * 100.0,
-                                split=split_name,
-                                data_name=settings["data_name"],
-                                data_type=settings["data_type"],
-                                concept_noise=0.0,
-                                concept_missing=0.0,
-                                concept_missing_mech="none",
-                                target_accuracy_label=target_label,
-                                target_accuracy_value=target_value,
-                                params={
-                                    "tau": float(tau),
-                                    "budget_frac": 0.0,
-                                    "max_concepts_per_instance": None,
-                                },
-                            )
-                        )
-
-                    if cov_after is not None and cov_before is not None:
-                        cov_gain = (float(cov_after) - float(cov_before)) * 100.0
-                        records.append(
-                            MetricRecord(
-                                strategy="selective_dnn_cbm",
-                                metric="coverage_gain",
-                                value=cov_gain,
-                                split=split_name,
-                                data_name=settings["data_name"],
-                                data_type=settings["data_type"],
-                                concept_noise=0.0,
-                                concept_missing=0.0,
-                                concept_missing_mech="none",
-                                target_accuracy_label=target_label,
-                                target_accuracy_value=target_value,
-                                params={
-                                    "tau": float(tau),
-                                    "budget_frac": 0.0,
-                                    "max_concepts_per_instance": None,
-                                },
-                            )
-                        )
-
-                if progress is not None:
-                    progress.update(1)
-
-            if args.verbose:
-                dnn_added = len(records) - dnn_before
-                print(
-                    f"[main] DNN records added for target_label={target_label}, "
-                    f"target_value={target_value}: {dnn_added}"
-                )
 
     finally:
         if progress is not None:
@@ -1408,17 +1754,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     n_total = len(records)
     n_cs = sum(1 for r in records if r.strategy == cs_strategy.name)
     n_dnn = sum(1 for r in records if r.strategy == dnn_strategy.name)
+    n_noint = sum(1 for r in records if r.strategy == noint_strategy.name)
     print(
         f"[main] Collected {n_total} metric records "
-        f"({n_cs} {cs_strategy.name}, {n_dnn} {dnn_strategy.name})"
+        f"({n_cs} {cs_strategy.name}, {n_dnn} {dnn_strategy.name}, "
+        f"{n_noint} {noint_strategy.name})"
     )
 
     write_metrics_csv(records, args.output)
     print(f"[main] Wrote aggregated metrics to {args.output}")
 
-    raw_output = args.output.with_name(args.output.stem + "_raw_with_dnn.csv")
+    raw_output = args.output.with_name(args.output.stem + "_raw_with_dnn_noint.csv")
     write_raw_metrics_csv(records, raw_output)
-    print(f"[main] Wrote raw metrics (including DNN) to {raw_output}")
+    print(f"[main] Wrote raw metrics (including DNN + no-intervention) to {raw_output}")
 
     return 0
 

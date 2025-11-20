@@ -5,7 +5,7 @@ from pathlib import Path
 from concept_benchmark.paths import results_dir
 
 CONCEPT_NOISE = np.arange(0, 0.35, 0.05).round(2)
-CONCEPT_MISSING = np.arange(0.05, 0.35, 0.05).round(2)
+CONCEPT_MISSING = [0.0, 0.1, 0.25, 0.5]
 MISSING_TYPES = ["mcar", "mnar"]
 
 DIFFICULTY = {
