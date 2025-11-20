@@ -403,6 +403,7 @@ def image_transform(
             wimg.sketch(radius=radius, sigma=sigma, angle=angle)
             blob = wimg.make_blob(format="PNG")
         final_img = Image.open(io.BytesIO(blob)).convert("RGB")
+        
 
     if outfile:
         final_img.save(outfile)

@@ -29,7 +29,6 @@ from pathlib import Path
 import sys
 import os
 sys.path.append(os.getcwd())
-import concept_benchmark.ext.fileutils
 
 import numpy as np
 import torch
@@ -68,61 +67,20 @@ except Exception:
 
 # ---------------- image transform wrapper ----------------
 def make_image_transform(args):
-    """
-    Wrap image_transform so that:
-      - It still renders and saves the image.
-      - It ALSO collects per-board 9x9 board/starters/candidates
-        for later use when building the OCR JSONL.
-    """
-    boards_list = []
-    starters_list = []
-    candidates_list = []
-
-def make_image_transform(args):
-    """
-    Wrap image_transform so that:
-      - It still renders and saves the image.
-      - It ALSO collects per-board 9x9 board/starters/candidates
-        for later use when building the OCR JSONL.
-    """
-    boards_list = []
-    starters_list = []
-    candidates_list = []
-
     def _wrapped(board, *, outfile=None):
-        # image_transform returns (img_or_path, starters, candidates_meta)
-        img_or_path, starters, _candidates = image_transform(
+        return image_transform(
             board,
             cell_px=args.cell_px,
             margin_px=args.margin_px,
             line_px=args.line_px,
-            bold_px=args.bold_px,
             font_size=args.font_size,
             standardize=(not args.no_standardize),
             font_path=args.font_path,
             handwriting=args.handwriting,
             outfile=outfile,
-            return_meta=True,
         )
-
-        # ensure numpy arrays
-        board_arr = np.array(board, copy=True)
-        starters_arr = np.array(starters, copy=True).astype(int)
-
-        candidates_arr = (1 - starters_arr).astype(int)
-
-        boards_list.append(board_arr)
-        starters_list.append(starters_arr)
-        candidates_list.append(candidates_arr)
-
-        return img_or_path
-
-    _wrapped.boards = boards_list
-    _wrapped.starters = starters_list
-    _wrapped.candidates = candidates_list
     _wrapped.__name__ = "image_transform"
     return _wrapped
-
 
 
 # ---------------- helpers ----------------
@@ -152,10 +110,16 @@ def save_dataset_pkl(ds, meta_full, save_dir: Path):
     """
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    out = save_dir / "data.pkl"
+    obj = {
+        "X": ds.X,
+        "C": ds.C,
+        "y": ds.y,
+        "meta_like": meta_full,
+    }
+    out = save_dir / "sudoku_dataset.pkl"
     # NOTE: if your fileutils.save has signature save(path, obj),
     # flip the arguments here.
-    save_object(ds, out)
+    save_object(obj, out)
     print(f"Saved ConceptDataset pickle to {out}")
 
     meta_path = save_dir / "meta.json"
@@ -258,7 +222,7 @@ def ensure_digits_dir(args):
     print("Finished generating example digits.")
 
 
-def build_ocr_preprocessing(ds, meta_full: dict, args, ds_name: str | None, image_transform_wrapper=None):
+def build_ocr_preprocessing(ds, meta_full: dict, args, ds_name: str | None):
     """
     Build the ocr_preprocessing folder with a JSONL file:
 
@@ -268,55 +232,34 @@ def build_ocr_preprocessing(ds, meta_full: dict, args, ds_name: str | None, imag
       {"img": "valid_1.png", "starters": [...9x9...],
        "candidates": [...9x9...], "board": [...9x9...]}
 
-    We now use the metadata captured by make_image_transform instead of ds.C.
+    We assume:
+      - ds.C has shape (num_samples, 3 * N^2)
+      - channels are [board, starters, candidates] per cell.
     """
-    if image_transform_wrapper is None:
-        print("WARNING: build_ocr_preprocessing called without image_transform_wrapper; cannot build OCR JSON.")
-        return
-
-    boards_list = getattr(image_transform_wrapper, "boards", None)
-    starters_list = getattr(image_transform_wrapper, "starters", None)
-    candidates_list = getattr(image_transform_wrapper, "candidates", None)
-
-    if boards_list is None or starters_list is None or candidates_list is None:
-        print("WARNING: image_transform_wrapper is missing boards/starters/candidates; cannot build OCR JSON.")
-        return
-
-    boards = np.asarray(boards_list)
-    starters = np.asarray(starters_list)
-    candidates = np.asarray(candidates_list)
+    C = np.asarray(ds.C)
     y = np.asarray(ds.y)
 
-    if boards.ndim != 3:
-        print(f"WARNING: boards array has unexpected shape {boards.shape}; cannot build OCR JSON.")
+    if C.ndim != 2 or C.shape[1] % 3 != 0:
+        print("WARNING: C does not have shape (num_samples, 3 * N^2); "
+              "cannot build ocr_preprocessing.")
         return
 
-    num_samples, N1, N2 = boards.shape
-    if N1 != N2:
-        print(f"WARNING: boards are not square: shape={boards.shape}; cannot build OCR JSON.")
+    num_samples, dim = C.shape
+    N_cells = dim // 3
+    rt = int(np.sqrt(N_cells))
+    if rt * rt != N_cells:
+        print("WARNING: C second dimension not consistent with square board; "
+              "cannot build ocr_preprocessing.")
         return
 
-    if num_samples != len(y):
-        print(
-            f"WARNING: boards count {num_samples} != len(y) {len(y)}; "
-            "mismatch between collected metadata and dataset."
-        )
-        return
+    N = rt
 
-    N = N1
-    if N != 9:
-        print(f"WARNING: expected 9x9 boards, got {N}x{N}; OCR JSON will not be generated.")
-        return
+    # reshape to (num_samples, N_cells, 3)
+    flat = C.reshape(num_samples, N_cells, 3)
 
-    # DEBUG: print first 5 boards + starters
-    debug_k = min(5, num_samples)
-    for i in range(debug_k):
-        print(f"\n=== DEBUG sample {i} ===")
-        print("BOARD (9x9):")
-        print(boards[i])
-        print("STARTERS (9x9):")
-        print(starters[i].astype(int))
-        print("========================")
+    boards = flat[:, :, 0].reshape(num_samples, N, N).astype(int)
+    starters = flat[:, :, 1].reshape(num_samples, N, N).astype(int)
+    candidates = flat[:, :, 2].reshape(num_samples, N, N).astype(int)
 
     # where to write
     if ds_name is None:
@@ -327,23 +270,20 @@ def build_ocr_preprocessing(ds, meta_full: dict, args, ds_name: str | None, imag
     out_path = ocr_dir / "ocr_preprocessing.jsonl"
 
     with out_path.open("w") as f:
-        # ds.X should be an array of image paths for the image dataset
-        X_paths = np.asarray(ds.X)
-
         for i in range(num_samples):
-            # Use the actual filename from the dataset, not a synthesized one
-            img_path = Path(X_paths[i])
-            img_name = img_path.name  # e.g., "valid_0.png", "invalid_123.png"
+            label_str = "valid" if int(y[i]) == 1 else "invalid"
+            # 1-based index to match your example "valid_1.png"
+            img_name = f"{label_str}_{i+1}.png"
 
             row = {
                 "img": img_name,
-                "starters": starters[i].astype(int).tolist(),     # 9x9
-                "candidates": candidates[i].astype(int).tolist(), # 9x9 (inverse of starters from wrapper)
-                "board": boards[i].astype(int).tolist(),          # 9x9
+                "starters": starters[i].tolist(),
+                "candidates": candidates[i].tolist(),
+                "board": boards[i].tolist(),
             }
             f.write(json.dumps(row) + "\n")
 
-        print(f"Saved OCR preprocessing JSONL to {out_path}")
+    print(f"Saved OCR preprocessing JSONL to {out_path}")
 
 
 def choose_tabular_transform(args):
@@ -402,7 +342,7 @@ def main():
 
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--dataset_name", type=str, default="multimodal_m_21")
-    ap.add_argument("--save-dir", type=Path, default=f"{DATA_SUDOKU}/multimodal_m_21")
+    ap.add_argument("--save-dir", type=Path, default=None)
     # kept for compatibility, but unused for pkl saving
     ap.add_argument("--save-format", choices=["npz", "pt"], default="npz")
     ap.add_argument("--progress", action="store_true", help="Show a progress bar during generation.")
@@ -442,7 +382,7 @@ def main():
             ds_name = args.dataset_name
 
         if data_type == "image":
-            # image always uses wrapped image_transform
+            # image always uses image_transform
             transform = make_image_transform(args)
             transform_name = "image_transform"
         else:
@@ -500,8 +440,6 @@ def main():
         if args.save_dir is not None:
             # If generating multiple types, save each under its own subdir
             save_dir = args.save_dir / data_type if multiple else args.save_dir
-            ds.generate_cvindices(seed=42)
-            ds.split("K05N01", fold_num_validation=4, fold_num_test=5)
             save_dataset_pkl(ds, meta_full, save_dir)
 
         # For image datasets, drop side artifacts next to the images
@@ -514,8 +452,8 @@ def main():
                 ensure_digits_dir(args)
                 digits_done = True
 
-            # And build the OCR preprocessing JSONL using the captured metadata
-            build_ocr_preprocessing(ds, meta_full, args, ds_name, image_transform_wrapper=transform)
+            # And build the OCR preprocessing JSONL
+            build_ocr_preprocessing(ds, meta_full, args, ds_name)
 
     print("=" * 60)
     print("Done.")
