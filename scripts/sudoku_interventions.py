@@ -331,6 +331,45 @@ def train_cnn_cbm_from_sidecar(
             "[CBM train] Dataset must have training, validation, and test splits."
         )
 
+    # ------------------------------------------------------------------
+    # Use clean base concepts for supervision; disable noise/missingness
+    # ------------------------------------------------------------------
+    for split in (train_split, val_split, test_split):
+        if hasattr(split, "concept_noise"):
+            split.concept_noise = False
+        if hasattr(split, "concept_missing"):
+            split.concept_missing = False
+
+    def _get_base_concepts(split, tag: str) -> np.ndarray:
+        if hasattr(split, "base_concepts"):
+            Y = np.asarray(split.base_concepts, dtype=np.float32)
+        else:
+            # Fallback if ensure_base_concepts wasn't called
+            Y = np.asarray(split.C, dtype=np.float32)
+
+        if not np.isfinite(Y).all():
+            raise ValueError(
+                f"[CBM train] Non-finite values in {tag} concepts: "
+                f"min={np.nanmin(Y)}, max={np.nanmax(Y)}"
+            )
+        y_min, y_max = float(Y.min()), float(Y.max())
+        if y_min < 0.0 or y_max > 1.0:
+            # Either binarize or raise; here we binarize for safety
+            print(
+                f"[CBM train] WARNING: {tag} concepts outside [0,1] "
+                f"(min={y_min:.3f}, max={y_max:.3f}); "
+                "mapping to {0,1} via (Y > 0)."
+            )
+            Y = (Y > 0).astype(np.float32)
+        return Y
+
+    Y_train = _get_base_concepts(train_split, "train")
+    Y_val = _get_base_concepts(val_split, "val")
+    Y_test = _get_base_concepts(test_split, "test")
+
+    # ------------------------------------------------------------------
+    # Boards from JSON sidecar
+    # ------------------------------------------------------------------
     def boards_for_split(split, which: str) -> np.ndarray:
         arrs = []
         raw_X = _raw_X_from_split(split)
@@ -348,17 +387,14 @@ def train_cnn_cbm_from_sidecar(
     X_val_gt = boards_for_split(val_split, "gt")
     X_test_gt = boards_for_split(test_split, "gt")
 
-    Y_train = train_split.C.astype(np.float32)
-    Y_val = val_split.C.astype(np.float32)
-    Y_test = test_split.C.astype(np.float32)
-
     X_train = X_train_gt
     Y_train_aug = Y_train
     train_gt_n = X_train_gt.shape[0]
     train_pred_n = 0
 
     has_train_pred = all(
-        "pred" in boards.get(Path(str(x)).name, {}) for x in _raw_X_from_split(train_split)
+        "pred" in boards.get(Path(str(x)).name, {})
+        for x in _raw_X_from_split(train_split)
     )
     if has_train_pred:
         X_train_pred = boards_for_split(train_split, "pred")
@@ -440,6 +476,7 @@ def train_cnn_cbm_from_sidecar(
         print("[CBM train] Evaluating CNN on predicted boards...")
         _ = concept_metrics(X_test_pred, Y_test, tag="PRED")
 
+    # Front-end model still uses concepts; noise/missingness are disabled above
     fe_model = FrontEndModel()
     fe_model.fit(train_split.C, train_split.y)
 
@@ -460,7 +497,6 @@ def train_cnn_cbm_from_sidecar(
     )
 
     return cbm
-
 
 # -------------------------------------------------------------------------
 # Greedy Conceptual Safeguards Strategy
@@ -821,127 +857,6 @@ def _estimate_total_configs(
     return cs_configs + dnn_configs + noint_configs
 
 
-def repair_legacy_concepts(dataset) -> None:
-    """
-    For older pickled ConceptImageDatasetSample objects that predate the
-    `_C_base` / `_concept_noise_mask` / `_concept_missing_mask` backing attrs,
-    backfill them from legacy fields so that the new `C` property works.
-    """
-    for split_name, split in iter_splits(dataset):
-        d = getattr(split, "__dict__", {})
-
-        # 1) Backing concept matrix: _C_base
-        raw = None
-        if "_C_base" in d and d["_C_base"] is not None:
-            raw = d["_C_base"]
-        elif "_C" in d and d["_C"] is not None:
-            raw = d["_C"]
-        elif "base_concepts" in d and d["base_concepts"] is not None:
-            raw = d["base_concepts"]
-        elif "C" in d and isinstance(d["C"], np.ndarray):
-            raw = d["C"]
-
-        if raw is None:
-            raise AttributeError(
-                f"[repair_legacy_concepts] Split '{split_name}' ({type(split)}) "
-                "has no concept matrix for `_C_base`; checked `_C_base`, `_C`, "
-                "`base_concepts`, and `C`."
-            )
-
-        raw = np.asarray(raw)
-        setattr(split, "_C_base", raw)
-
-        # 2) Concept noise mask: _concept_noise_mask
-        if not hasattr(split, "_concept_noise_mask"):
-            if "concept_noise_mask" in d and d["concept_noise_mask"] is not None:
-                noise_mask = np.asarray(d["concept_noise_mask"], dtype=bool)
-            else:
-                noise_mask = np.zeros_like(raw, dtype=bool)
-            setattr(split, "_concept_noise_mask", noise_mask)
-        else:
-            noise_mask = getattr(split, "_concept_noise_mask")
-
-        # 3) Concept missing mask: _concept_missing_mask
-        if not hasattr(split, "_concept_missing_mask"):
-            if "concept_missing_mask" in d and d["concept_missing_mask"] is not None:
-                missing_mask = np.asarray(d["concept_missing_mask"], dtype=bool)
-            else:
-                missing_mask = np.zeros_like(raw, dtype=bool)
-            setattr(split, "_concept_missing_mask", missing_mask)
-        else:
-            missing_mask = getattr(split, "_concept_missing_mask")
-
-        # 4) Missingness mechanism + fill value
-        if not hasattr(split, "_concept_missing_mech"):
-            mech = getattr(split, "concept_missing_mech", "none")
-            setattr(split, "_concept_missing_mech", mech)
-
-        if not hasattr(split, "_concept_missing_fill_value"):
-            fill_value = getattr(split, "concept_missing_fill_value", np.nan)
-            setattr(split, "_concept_missing_fill_value", fill_value)
-
-        # 5) Flags used by new C property
-        if not hasattr(split, "_concept_noise_enabled"):
-            # In your experiments noise=0, so default False is safe.
-            setattr(split, "_concept_noise_enabled", False)
-
-        if not hasattr(split, "_concept_missing_enabled"):
-            # Will be toggled via apply_missingness anyway; default False.
-            setattr(split, "_concept_missing_enabled", False)
-
-
-def ensure_base_concepts(dataset) -> None:
-    """
-    Ensure each split has both `_C_base` and `base_concepts` populated.
-
-    - `repair_legacy_concepts` makes sure the new backing attrs exist so
-      `split.C` works without attribute errors.
-    - `base_concepts` gives us an explicit copy of the uncorrupted concepts.
-    """
-    repair_legacy_concepts(dataset)
-    for split_name, split in iter_splits(dataset):
-        if hasattr(split, "C") and not hasattr(split, "base_concepts"):
-            split.base_concepts = split.C.copy()
-
-
-def repair_legacy_X_for_full(dataset) -> None:
-    """
-    Older pickled ConceptImageDatasetSample objects may not have the `_X`
-    backing field that the new `X` property expects. This backfills `_X`
-    on `dataset._full` from legacy attributes so that `split()` works.
-    """
-    full = getattr(dataset, "_full", None)
-    if full is None:
-        return
-
-    d = getattr(full, "__dict__", {})
-
-    # If _X already exists and is not None, nothing to do.
-    if hasattr(full, "_X") and getattr(full, "_X", None) is not None:
-        return
-
-    if "_X" in d and d["_X"] is not None:
-        setattr(full, "_X", d["_X"])
-        return
-
-    if "X" in d and d["X"] is not None:
-        setattr(full, "_X", d["X"])
-        return
-
-    if "paths" in d and d["paths"] is not None:
-        setattr(full, "_X", d["paths"])
-        return
-
-    if "images" in d and d["images"] is not None:
-        setattr(full, "_X", d["images"])
-        return
-
-    raise AttributeError(
-        "[repair_legacy_X_for_full] Could not infer `_X` for dataset._full; "
-        "checked `_X`, `X`, `paths`, and `images`."
-    )
-
-
 def _inject_work_metrics_from_result(result, metrics: dict) -> None:
     proposal = getattr(result, "proposal", None)
 
@@ -1145,18 +1060,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     try:
         for target_label, target_value in target_pairs:
-            # Settings used mainly for metadata and CBM training
-            settings = build_settings(
-                data_name=args.data_name,
-                concept_noise=0.0,
-                target_accuracy=target_value,
-                concept_missing=0.0,
-                concept_missing_mech="none",
-            )
-
-            if args.verbose:
-                print(f"[main] Settings: {settings}")
-
             if not args.dataset_file.is_file():
                 raise FileNotFoundError(
                     f"Dataset file not found: {args.dataset_file}"
@@ -1165,26 +1068,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(f"[main] Loading dataset from: {args.dataset_file}")
             dataset = fileutils.load(args.dataset_file)
 
-            # Fix legacy X backing on the full dataset BEFORE splitting
-            repair_legacy_X_for_full(dataset)
-
             # Ensure we have splits (if not already in pickle)
             dataset.generate_cvindices(seed=42)
             dataset.split("K05N01", fold_num_validation=4, fold_num_test=5)
-
-            # Fix legacy concept backing and snapshot base concepts
-            ensure_base_concepts(dataset)
-
-            # Train CBM once per target label (on full concepts, no missingness)
-            cbm = train_cnn_cbm_from_sidecar(
-                settings=settings,
-                dataset=dataset,
-                boards=boards,
-                epochs=args.cbm_train_epochs,
-                verbose=args.verbose,
-            )
-
-            runner = ConceptInterventionRunner(model=cbm)
 
             # ----- Sweep over missingness configs -----
             for mechanism in args.missing_mechanisms:
@@ -1193,7 +1079,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 else:
                     levels = missing_levels
 
+
                 for concept_missing in levels:
+                    # Settings used mainly for metadata and CBM training
+                    settings = build_settings(
+                        data_name=args.data_name,
+                        target_accuracy=target_value,
+                        concept_missing=concept_missing,
+                        concept_noise=0.0,
+                        concept_missing_mech=mechanism,
+                    )
+
+                    if args.verbose:
+                        print(f"[main] Settings: {settings}")
+                    # Train CBM once per target label (on full concepts, no missingness)
+                    cbm = train_cnn_cbm_from_sidecar(
+                        settings=settings,
+                        dataset=dataset,
+                        boards=boards,
+                        epochs=args.cbm_train_epochs,
+                        verbose=args.verbose,
+                    )
+
+                    runner = ConceptInterventionRunner(model=cbm)
                     # Apply missingness IN PLACE using base_concepts as source
                     apply_missingness(dataset, mechanism, float(concept_missing))
 
@@ -1301,7 +1209,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                             )
                                         )
                                         print(
-                                            "      selective_acc_before={sel_before} "
+                                            "selective_acc_before={sel_before} "
                                             "selective_acc_after={sel_after} "
                                             "coverage_before={cov_before} "
                                             "coverage_after={cov_after}".format(
@@ -1323,7 +1231,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                                 split=split_name,
                                                 data_name=settings["data_name"],
                                                 data_type=settings["data_type"],
-                                                concept_noise=0.0,
                                                 concept_missing=float(concept_missing),
                                                 concept_missing_mech=mechanism,
                                                 target_accuracy_label=target_label,
@@ -1349,7 +1256,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                                 split=split_name,
                                                 data_name=settings["data_name"],
                                                 data_type=settings["data_type"],
-                                                concept_noise=0.0,
                                                 concept_missing=float(concept_missing),
                                                 concept_missing_mech=mechanism,
                                                 target_accuracy_label=target_label,
@@ -1371,7 +1277,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                                 split=split_name,
                                                 data_name=settings["data_name"],
                                                 data_type=settings["data_type"],
-                                                concept_noise=0.0,
                                                 concept_missing=float(concept_missing),
                                                 concept_missing_mech=mechanism,
                                                 target_accuracy_label=target_label,
@@ -1394,7 +1299,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                                 split=split_name,
                                                 data_name=settings["data_name"],
                                                 data_type=settings["data_type"],
-                                                concept_noise=0.0,
                                                 concept_missing=float(concept_missing),
                                                 concept_missing_mech=mechanism,
                                                 target_accuracy_label=target_label,
@@ -1485,7 +1389,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                         split=split_name,
                                         data_name=settings["data_name"],
                                         data_type=settings["data_type"],
-                                        concept_noise=0.0,
                                         concept_missing=float(concept_missing),
                                         concept_missing_mech=mechanism,
                                         target_accuracy_label=target_label,
@@ -1511,7 +1414,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                         split=split_name,
                                         data_name=settings["data_name"],
                                         data_type=settings["data_type"],
-                                        concept_noise=0.0,
                                         concept_missing=float(concept_missing),
                                         concept_missing_mech=mechanism,
                                         target_accuracy_label=target_label,
@@ -1533,7 +1435,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                         split=split_name,
                                         data_name=settings["data_name"],
                                         data_type=settings["data_type"],
-                                        concept_noise=0.0,
                                         concept_missing=float(concept_missing),
                                         concept_missing_mech=mechanism,
                                         target_accuracy_label=target_label,
@@ -1556,7 +1457,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                         split=split_name,
                                         data_name=settings["data_name"],
                                         data_type=settings["data_type"],
-                                        concept_noise=0.0,
                                         concept_missing=float(concept_missing),
                                         concept_missing_mech=mechanism,
                                         target_accuracy_label=target_label,
@@ -1651,7 +1551,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                         split=split_name,
                                         data_name=settings["data_name"],
                                         data_type=settings["data_type"],
-                                        concept_noise=0.0,
                                         concept_missing=float(concept_missing),
                                         concept_missing_mech=mechanism,
                                         target_accuracy_label=target_label,
@@ -1677,7 +1576,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                         split=split_name,
                                         data_name=settings["data_name"],
                                         data_type=settings["data_type"],
-                                        concept_noise=0.0,
                                         concept_missing=float(concept_missing),
                                         concept_missing_mech=mechanism,
                                         target_accuracy_label=target_label,
@@ -1699,7 +1597,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                         split=split_name,
                                         data_name=settings["data_name"],
                                         data_type=settings["data_type"],
-                                        concept_noise=0.0,
                                         concept_missing=float(concept_missing),
                                         concept_missing_mech=mechanism,
                                         target_accuracy_label=target_label,
@@ -1722,7 +1619,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                         split=split_name,
                                         data_name=settings["data_name"],
                                         data_type=settings["data_type"],
-                                        concept_noise=0.0,
                                         concept_missing=float(concept_missing),
                                         concept_missing_mech=mechanism,
                                         target_accuracy_label=target_label,

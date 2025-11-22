@@ -59,7 +59,6 @@ class MetricRecord:
     split: str
     data_name: str
     data_type: str
-    concept_noise: float
     concept_missing: float
     concept_missing_mech: str
     target_accuracy_label: str
@@ -214,7 +213,6 @@ def write_metrics_csv(records: Sequence[MetricRecord], output_path: Path) -> Non
         "split",
         "data_name",
         "data_type",
-        "concept_noise",
         "concept_missing",
         "concept_missing_mech",
         "target_accuracy_label",
@@ -236,7 +234,6 @@ def write_metrics_csv(records: Sequence[MetricRecord], output_path: Path) -> Non
                 record.split,
                 record.data_name,
                 record.data_type,
-                f"{record.concept_noise:.6f}",
                 f"{record.concept_missing:.6f}",
                 record.concept_missing_mech,
                 record.target_accuracy_label,
