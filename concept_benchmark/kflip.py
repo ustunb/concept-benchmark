@@ -66,8 +66,11 @@ class KFlipInterventionStrategy(InterventionStrategy):
         base_lbl = base_probs.argmax(axis=1)
         n_classes = int(base_probs.shape[1])
 
-        # enumerate candidate subsets
-        all_subsets = list(itertools.combinations(range(n_concepts), k))
+        # enumerate candidate subsets for all sizes up to k
+        all_subsets = []
+        for j in range(1, k+1):
+            all_subsets_j = list(itertools.combinations(range(n_concepts), j))
+            all_subsets.extend(all_subsets_j)
         if self.limit_subsets is not None and self.limit_subsets < len(all_subsets):
             # simple heuristic: closeness to 0.5 weighted by |coef|
             try:
@@ -82,14 +85,15 @@ class KFlipInterventionStrategy(InterventionStrategy):
             except Exception:
                 w = np.ones((1, n_concepts), dtype=np.float32)
             feat_score = np.mean((0.5 - np.abs(P - 0.5)) * w, axis=0)
-            m = max(k, int(np.ceil(self.limit_subsets ** (1.0 / max(1, k)) * k)))
-            top_idx = np.argsort(feat_score)[::-1][:min(n_concepts, m)]
-            pruned = list(itertools.combinations(list(top_idx), k))
-            all_subsets = pruned[: self.limit_subsets]
 
-        # precompute assignment grid for intervened concepts
-        assign = np.array(list(itertools.product([0.0, 1.0], repeat=k)), dtype=np.float32)  # (A,k)
-        A = int(assign.shape[0])
+            subset_scores = []
+            for subset in all_subsets:
+                avg_score = np.mean([feat_score[i] for i in subset])
+                subset_scores.append((avg_score, subset))
+
+            # Take top scoring subsets
+            subset_scores.sort(key=lambda x: x[0], reverse=True)
+            all_subsets = [subset for _, subset in subset_scores[:self.limit_subsets]]
 
         flip_prob = np.zeros(n_samples, dtype=np.float64)
         best_subset: List[Tuple[int, ...]] = [tuple() for _ in range(n_samples)]
@@ -97,26 +101,31 @@ class KFlipInterventionStrategy(InterventionStrategy):
 
         # batching
         rows_per_eval = max(1, self.batch_size)
-        samples_per_chunk = max(1, rows_per_eval // A)
 
         # evaluate all subsets
         for subset in all_subsets:
             subset = np.asarray(subset, dtype=int)
+            subset_size = len(subset)
+
+            # Create assignment grid for the particular subset size
+            assign = np.array(list(itertools.product([0.0, 1.0], repeat=subset_size)), dtype=np.float32)
+            A = int(assign.shape[0])
+            samples_per_chunk = max(1, rows_per_eval // A)
 
             for s in range(0, n_samples, samples_per_chunk):
                 m = min(samples_per_chunk, n_samples - s)
 
-                pS = P[s : s + m][:, subset]  # (m,k)
+                pS = P[s: s + m][:, subset]  # (m, subset_size)
                 w_assign = np.prod(
                     np.where(assign[None, :, :] == 1.0, pS[:, None, :], 1.0 - pS[:, None, :]),
                     axis=2,
                 )  # (m, A)
 
-                Z_chunk = np.repeat(base_Z[s : s + m], A, axis=0)  # (m*A, C)
-                AS = np.tile(assign, (m, 1))                       # (m*A, k)
+                Z_chunk = np.repeat(base_Z[s: s + m], A, axis=0)  # (m*A, C)
+                AS = np.tile(assign, (m, 1))  # (m*A, subset_size)
                 Z_chunk[:, subset] = AS
 
-                Y = model.front_end_model.predict_proba(Z_chunk)    # (m*A, K)
+                Y = model.front_end_model.predict_proba(Z_chunk)    # (m*A, j)
                 Y_lbl = Y.argmax(axis=1).reshape(m, A)              # (m, A)
 
                 flip_mask = (Y_lbl != base_lbl[s : s + m][:, None])  # (m, A)
