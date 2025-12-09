@@ -17,7 +17,7 @@ from concept_benchmark.paths import results_dir
 
 from scripts.robot_image_training import test_interventions
 
-THRESH = [0.2, 0.4, 0.6, 0.8]
+THRESH = [0.2, 0.4]
 METRIC_COLS = [
     "accuracy",
     "predictions_intervened_on",

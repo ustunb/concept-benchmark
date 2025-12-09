@@ -1,38 +1,42 @@
-import json, time, pickle
-from typing import Union, List, Optional
-
-import cvxpy as cp
-from typing import Union, List, Optional
+import copy
+import json
+import pickle
+import time
+from pathlib import Path
+from typing import List, Optional, Union
 
 import cvxpy as cp
 import numpy as np
 import torch
-import copy
-
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import confusion_matrix
-from pathlib import Path
-
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import confusion_matrix
-from pathlib import Path
 from torchvision import transforms
-from concept_benchmark.models import ConceptDetector, FrontEndModel, RobotConceptClassifier
-from concept_benchmark.paths import results_dir
-from concept_benchmark.synthetic.robot import create_synthetic_dataset
-from concept_benchmark.models import ConceptBasedModel
+
 from concept_benchmark.intervention import (
-    InterventionConfig,
     ConceptInterventionRunner,
+    InterventionConfig,
 )
 from concept_benchmark.kflip import KFlipInterventionStrategy as ScoreIntervention
-from concept_benchmark.kflip import KFlipInterventionStrategy as ScoreIntervention
+from concept_benchmark.models import (
+    ConceptBasedModel,
+    ConceptDetector,
+    FrontEndModel,
+    RobotConceptClassifier,
+)
+from concept_benchmark.paths import results_dir
+from concept_benchmark.synthetic.robot import create_synthetic_dataset
 from scripts.dataset_skewing import create_skewed_splits, filter_training_by_string
 from scripts.dnn_training import train_eval_image
 from scripts.robot_alignment import test_alignment
 from scripts.robot_invariance_test import test_concept_detector_invariance
-from scripts.robot_utils import _apply_missing, _apply_label_noise, _rate_tag, _get_concept_accuracies, \
-    _get_confusion_matrix, _get_accuracies_per_subconcept
+from scripts.robot_utils import (
+    _apply_label_noise,
+    _apply_missing,
+    _get_accuracies_per_subconcept,
+    _get_concept_accuracies,
+    _get_confusion_matrix,
+    _rate_tag,
+)
 
 settings = {
     "samples_per_instance": 4,
@@ -467,13 +471,6 @@ def test_alignment(fe, h_test, h_train, prob_train, prob_test, sttngs, int_acc_t
         'interventions': intervention_results
     }
     return alignment_stats
-    if not cvxpy:
-        print("\n=== Learned Frontend Weights ===")
-        for i, concept in enumerate(test.concepts):
-            print(f"  {concept}: {fe.model.coef_[0, i]:.4f}")
-        print(f"  bias: {fe.model.intercept_[0]:.4f}")
-    return acc_det, acc_gt, concept_acc_mean, fe, fe_path, y_pred_det, acc_det_tr
-
 
 def test_alignment(fe, h_test, h_train, prob_train, prob_test, sttngs, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
                    seed_tag, skew_tag, test, train, monotonicity_constraints, prediction_constraints):
@@ -640,7 +637,6 @@ def train_dnn(sttngs, device, int_acc_tag, label_noise_tag, miss_tag, model_type
     yte = test.y.astype(int)
 
     dnn_acc, dnn_model, dnn_preds = train_eval_image(
-    dnn_acc, dnn_model, dnn_preds = train_eval_image(
         paths_tr, ytr, paths_te, yte,
         epochs=int(sttngs["epochs"]),
         batch_size=16,
@@ -682,7 +678,6 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
             max_concepts_per_instance=budget,
             random_state=int(sttngs["seed"]),
             score_threshold=sttngs.get("intervention_threshold", 1.0),
-            noise = 1.0 - human_acc,
             noise = 1.0 - human_acc,
         )
 
@@ -849,7 +844,6 @@ def main(sttngs):
     per_concept_acc, train_per_concept_acc = _get_concept_accuracies(H_te, H_tr, test, train)
 
     acc_det, acc_gt, concept_acc_mean, fe, fe_path, y_pred_det, acc_det_tr = train_frontend(H_te, H_tr, P_tr, S, int_acc_tag,
-    acc_det, acc_gt, concept_acc_mean, fe, fe_path, y_pred_det, acc_det_tr = train_frontend(H_te, H_tr, P_tr, S, int_acc_tag,
                                                                                 label_noise_tag, miss_tag,
                                                                                 model_type_tag, run_dir, seed_tag,
                                                                                 skew_tag, test, train)
@@ -894,11 +888,6 @@ def main(sttngs):
 
     # align the model with new weights
     alignment_stats = {}
-    if S.get("human_alignment", {}) != None:
-        sign_alignment = S["human_alignment"].get("signs", {})
-        prediction_alignment = S["human_alignment"].get("features", [])
-        alignment_stats = test_alignment(fe, H_te, H_tr, P_tr, P_te, S, int_acc_tag, label_noise_tag, miss_tag, model_type_tag,
-                                         run_dir, seed_tag, skew_tag, test, train, sign_alignment, prediction_alignment)
     if S.get("human_alignment", {}) != None:
         sign_alignment = S["human_alignment"].get("signs", {})
         prediction_alignment = S["human_alignment"].get("features", [])
