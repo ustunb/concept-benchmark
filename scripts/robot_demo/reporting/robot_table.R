@@ -13,7 +13,7 @@ robot_results <- "./results/robot_demo_results.csv"
 table_tex_path <- "~/Dropbox/Apps/Overleaf/concept-benchmark/tables/robot_cbm.tex"
 
 TAU = 0.2
-metric_order = c('accuracy', 'predictions_intervened_on', 'total_concept_confirmations', 'predictions_changed')
+metric_order = c('accuracy', 'predictions_intervened_on', 'concept_confirmations_per_instance', 'predictions_changed')
 model_order = c("dnn", "cbm_no_int", "cbm_with_int_1", "cbm_with_int_3", "cbm_with_int_max")
 missing_order = c("none", "mcar", "mnar")
 DATASET_TITLES <- c(
@@ -35,11 +35,38 @@ df <- df %>%
     filter((threshold == TAU) | is.na(threshold)) %>%
     select(data_name, concept_missing_mech, model, metric, value)
 
+# Calculate concept confirmations per instance
+df_wide <- df %>%
+    pivot_wider(names_from = metric, values_from = value)
+
+df_wide <- df_wide %>%
+    mutate(concept_confirmations_per_instance =
+               ifelse(!is.na(total_concept_confirmations) &
+                        !is.na(predictions_intervened_on) &
+                        predictions_intervened_on > 0,
+                      total_concept_confirmations / predictions_intervened_on,
+                      NA_real_))
+
+df <- df_wide %>%
+    pivot_longer(
+        cols = c(accuracy, predictions_intervened_on,
+                 total_concept_confirmations, predictions_changed,
+                 concept_confirmations_per_instance),
+        names_to = "metric",
+        values_to = "value"
+    ) %>%
+    filter(!is.na(value)) %>%
+    filter(metric %in% metric_order)
+
 table_stats_df <- df %>%
     mutate(svalue_pct = sprintf("%1.1f\\%%", 100 * value),
-        svalue_dec = sprintf("%1.3f", value),
+        svalue_dec = sprintf("%1.2f", value),
         svalue_int = sprintf("%d", round(value))) %>%
-    mutate(svalue = ifelse(metric == "accuracy", svalue_pct, svalue_int)) %>%
+    mutate(svalue = case_when(
+        metric == "accuracy" ~ svalue_pct,
+        metric == "concept_confirmations_per_instance" ~ svalue_dec,
+        TRUE ~ svalue_int
+    )) %>%
     select(-svalue_pct, -svalue_dec, -svalue_int)
 
 cells_df <- table_stats_df %>%
