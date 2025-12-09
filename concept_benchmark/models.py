@@ -1442,7 +1442,6 @@ class ConceptBasedModel(object):
         Monte Carlo propagation: approximate E_y[ y | concept probabilities ]
         by sampling concept vectors and averaging front-end predictions.
         """
-        print("Using MC concept propagation...")
         P = np.asarray(concept_preds, dtype=np.float64)
         P = np.clip(P, 1e-9, 1.0 - 1e-9)
         N, C = P.shape

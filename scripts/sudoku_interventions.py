@@ -20,7 +20,8 @@ Interventions:
 - Greedy conceptual safeguards strategy (Algorithm 1) with budgets,
   at τ calibrated on validation to reach ≥ 90% selective accuracy if possible.
 - CBMSelectiveDNNStrategy baseline with its own calibrated τ.
-- NoInterventionCBMStrategy baseline: standard CBM abstention, no concept fixes.
+- NoInterventionConceptualSafeguardsStrategy baseline: same abstention rule
+  as conceptual safeguards, but *no* concept fixes.
 
 We additionally support concept missingness:
 - Sweep over mechanisms (none / mcar / mnar) and missingness levels.
@@ -57,7 +58,6 @@ from concept_benchmark.intervention import (
     ConceptualSafeguardsStrategy,
     InterventionConfig,
     StrategyProposal,
-    NoInterventionCBMStrategy,
 )
 from concept_benchmark.models import ConceptBasedModel, FrontEndModel, ConceptDetector
 from concept_benchmark.paths import results_dir
@@ -666,6 +666,48 @@ class GreedyConceptualSafeguardsStrategy(ConceptualSafeguardsStrategy):
 
 
 # -------------------------------------------------------------------------
+# No-intervention conceptual safeguards baseline
+# -------------------------------------------------------------------------
+class NoInterventionConceptualSafeguardsStrategy(GreedyConceptualSafeguardsStrategy):
+    """
+    Same abstention rule as GreedyConceptualSafeguardsStrategy (same τ, same
+    notion of abstaining instances), but *no* concept interventions:
+
+    - mask is all False
+    - work metrics forced to 0
+    """
+
+    name = "conceptual_safeguards_no_intervention"
+
+    def propose(self, model, batch, config: InterventionConfig) -> StrategyProposal:
+        # First, compute the usual CS proposal to reuse abstention behaviour
+        base_proposal = super().propose(model, batch, config)
+        details = dict(getattr(base_proposal, "details", {}) or {})
+
+        # Zero work metrics explicitly
+        for key in [
+            "concepts_checked_per_board",
+            "cells_checked_per_board",
+            "concepts_checked_per_abstained_board",
+            "cells_checked_per_abstained_board",
+            "work_total_concepts",
+            "work_total_concepts_on_abstained",
+        ]:
+            details[key] = 0.0
+
+        # Replace mask with all-False (no interventions)
+        n, m = batch.C_pred.shape
+        mask = np.zeros((n, m), dtype=bool)
+        selected_instances = np.array([], dtype=int)
+
+        return StrategyProposal(
+            mask=mask,
+            selected_instances=selected_instances,
+            details=details,
+        )
+
+
+# -------------------------------------------------------------------------
 # CBM-compatible Selective DNN baseline
 # -------------------------------------------------------------------------
 class CBMSelectiveDNNStrategy(ConceptualSafeguardsStrategy):
@@ -728,7 +770,7 @@ def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=results_dir / "big_demo" / "conceptual_safeguards_metrics_missingness.csv",
+        default=results_dir / "big_demo" / "conceptual_safeguards_metrics_missingness_all_same_model.csv",
         help="Destination CSV path for the melted metric table.",
     )
     parser.add_argument(
@@ -782,7 +824,7 @@ def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--budget-frac",
         type=float,
         nargs="+",
-        default=[0.1, 0.25, 0.5, 1.0],
+        default=[0, 0.1, 0.25, 0.5, 1.0],
         help="Conceptual safeguards budget fractions.",
     )
     parser.add_argument(
@@ -824,6 +866,17 @@ def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         type=int,
         default=10,
         help="Number of epochs to train ConceptSudokuCNN CBM.",
+    )
+    # NEW: where to save trained CBM checkpoints
+    parser.add_argument(
+        "--save-model-dir",
+        type=Path,
+        default=None,
+        help=(
+            "If set, save the trained CBM components (ConceptSudokuCNN state_dict "
+            "and FrontEndModel object) for each (target_label, mechanism, missing) "
+            "combo into this directory."
+        ),
     )
     return parser.parse_args(argv)
 
@@ -1024,11 +1077,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             raise ValueError("All tau values must lie within [0, 0.5].")
 
     budget_fracs = list(args.budget_frac)
-    for bf in budget_fracs:
-        if not (0.0 < bf <= 1.0):
-            raise ValueError(
-                f"All budget_frac values must lie within (0, 1], got {bf}."
-            )
 
     target_pairs = default_target_options(args.target_accuracy_labels)
     target_labels = [label for label, _ in target_pairs]
@@ -1051,7 +1099,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     records: List[MetricRecord] = []
     cs_strategy = GreedyConceptualSafeguardsStrategy()
     dnn_strategy = CBMSelectiveDNNStrategy()
-    noint_strategy = NoInterventionCBMStrategy()
+    noint_strategy = NoInterventionConceptualSafeguardsStrategy()
 
     if not args.concept_json.is_file():
         raise FileNotFoundError(f"Concept JSON not found: {args.concept_json}")
@@ -1079,7 +1127,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 else:
                     levels = missing_levels
 
-
                 for concept_missing in levels:
                     # Settings used mainly for metadata and CBM training
                     settings = build_settings(
@@ -1100,6 +1147,37 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         epochs=args.cbm_train_epochs,
                         verbose=args.verbose,
                     )
+
+                    # ---------- save trained CBM components if requested ----------
+                    if args.save_model_dir is not None:
+                        save_dir = args.save_model_dir
+                        save_dir.mkdir(parents=True, exist_ok=True)
+
+                        concept_detector = cbm.concept_detector
+                        cnn = getattr(concept_detector, "_cnn", None)
+                        fe_model = getattr(cbm, "front_end_model", None)
+
+                        ckpt = {
+                            "settings": settings,
+                            "target_label": target_label,
+                            "target_value": target_value,
+                            "mechanism": mechanism,
+                            "concept_missing": float(concept_missing),
+                            "cnn_state_dict": None if cnn is None else cnn.state_dict(),
+                            "front_end_model": fe_model,
+                        }
+
+                        model_name = (
+                            f"cbm_sudoku_{args.data_name}_"
+                            f"{target_label}_"
+                            f"{mechanism}_"
+                            f"missing_{concept_missing:.3f}.pt"
+                        )
+                        save_path = save_dir / model_name
+                        torch.save(ckpt, save_path)
+                        if args.verbose:
+                            print(f"[main] Saved CBM checkpoint to: {save_path}")
+                    # -------------------------------------------------------------------
 
                     runner = ConceptInterventionRunner(model=cbm)
                     # Apply missingness IN PLACE using base_concepts as source
@@ -1481,7 +1559,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                             f"mech={mechanism}, missing={concept_missing}: {dnn_added}"
                         )
 
-                    # ---- No-intervention CBM baseline ----
+                    # ---- No-intervention conceptual safeguards baseline ----
                     noint_before = len(records)
                     for tau in noint_tau_values:
                         noint_config = InterventionConfig(tau=float(tau))

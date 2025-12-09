@@ -306,7 +306,6 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
             details={"selective_acc_before": selective_acc_before}
         )
 
-
 class OrderedCBMStrategy(InterventionStrategy):
     """Reproduce the ordered intervention strategy from the original CBM paper."""
 
