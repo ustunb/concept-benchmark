@@ -20,8 +20,8 @@ settings = DEFAULT_ROBOT_SETTINGS.copy()
 data = load(get_dataset_file(**settings))
 loader_config = {
     'batch_size': 32,
-    'num_workers': 12,
-    'pin_memory': True
+    'num_workers': 0 if str(device) == 'mps' else 12,
+    'pin_memory': False if str(device) == 'mps' else True,
 }
 
 acc_rows = []

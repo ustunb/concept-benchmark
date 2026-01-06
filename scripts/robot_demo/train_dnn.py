@@ -42,8 +42,8 @@ optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
 loader_config = {
     'batch_size': 32,
-    'num_workers': 12,
-    'pin_memory': True
+    'num_workers': 0 if str(device) == 'mps' else 12,
+    'pin_memory': False if str(device) == 'mps' else True,
 }
 
 train_loader = data.training.loader(shuffle=True, **loader_config)

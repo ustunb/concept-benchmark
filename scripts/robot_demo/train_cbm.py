@@ -19,7 +19,22 @@ from concept_benchmark.models import (
     RobotConceptClassifier,
 )
 
+import torch.utils.data
+_original = torch.utils.data.DataLoader
+
+def force_safe_dataloader(*args, **kwargs):
+    kwargs['num_workers'] = 0
+    kwargs['pin_memory'] = False
+    return _original(*args, **kwargs)
+
+torch.utils.data.DataLoader = force_safe_dataloader
+
+
 device = determine_device()
+print(f"Detected device: {device}")
+print(f"MPS available: {torch.backends.mps.is_available()}")
+
+
 settings = DEFAULT_ROBOT_SETTINGS.copy()
 
 if Process(pid=os.getppid()).name() not in ("node"):
@@ -48,8 +63,8 @@ if settings['concept_missing_mech'] != 'none':
 config = {
     'device': device,
     'batch_size': 32,
-    'num_workers': 0 if device == 'mps' else 12,
-    'pin_memory': False if device == 'mps' else True,
+    'num_workers': 0 if str(device) == 'mps' else 12,
+    'pin_memory': False if str(device) == 'mps' else True,
 }
 torch.manual_seed(int(settings["seed"]))
 
