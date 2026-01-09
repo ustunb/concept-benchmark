@@ -2,16 +2,9 @@ import json, time, pickle
 from typing import Union, List, Optional
 
 import cvxpy as cp
-from typing import Union, List, Optional
-
-import cvxpy as cp
 import numpy as np
 import torch
 import copy
-
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import confusion_matrix
-from pathlib import Path
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import confusion_matrix
@@ -25,7 +18,6 @@ from concept_benchmark.intervention import (
     InterventionConfig,
     ConceptInterventionRunner,
 )
-from concept_benchmark.kflip import KFlipInterventionStrategy as ScoreIntervention
 from concept_benchmark.kflip import KFlipInterventionStrategy as ScoreIntervention
 from scripts.dataset_skewing import create_skewed_splits, filter_training_by_string
 from scripts.dnn_training import train_eval_image
@@ -41,9 +33,6 @@ settings = {
     "image_dir": "./data/robot_images",
     "image_size": "medium",
     "color_mode": "color",
-    "train_dnn": 0,
-    "seed": 1014,
-    "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy') + int(row['has_knees']=='true'))>= 3 else 'drent'",
     "train_dnn": 0,
     "seed": 1014,
     "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy') + int(row['has_knees']=='true'))>= 3 else 'drent'",
@@ -86,18 +75,7 @@ settings = {
                       "foot_shape_pointy_trapezoid",
                       'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
                       'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
-                      'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
     "human_alignment": {
-        "signs": {
-            "has_knees": 1
-        },
-        # "features": [
-        #     (["foot_shape_flat_square"], ["True"], ">=", 0.95),
-        #     (["foot_shape_flat_trapezoid"], ["True"], ">=", 0.95),
-        #     #(["foot_shape_flat_square", "mouth_type"], ["True", "closed"], ">=", 0.95),
-        #     #(["foot_shape_pointy_rounded", "mouth_type"], ["True", "open"], "<=", 0.05),
-        #     #(["foot_shape_pointy_square", "mouth_type"], ["True", "open"], "<=", 0.05)
-        # ]
         "signs": {
             "has_knees": 1
         },
@@ -113,9 +91,6 @@ settings = {
     "logit_scalar": 4.2,
     "logit_intercept": -2,
     "logit_weights": {"mouth_type": 5, "foot_shape": 8, "has_knees": -5},
-    "logit_scalar": 4.2,
-    "logit_intercept": -2,
-    "logit_weights": {"mouth_type": 5, "foot_shape": 8, "has_knees": -5},
     "label_noise_rate": 0,
     "missingness": "complete",
     "missing_rate": 1.0,
@@ -128,12 +103,12 @@ settings = {
                      {'concepts': {'foot_shape_flat_trapezoid': 1}, 'min_fraction': 0.005},
                      {'concepts': {'foot_shape_flat_5sided': 1}, 'min_fraction': 0.49},
                      ],
-    "budget": [9],
+    "budget": [3],
     "intervention_accuracy": 1.0,
     "intervention_threshold": 0.2,
     "epochs": 1,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "maxed",
+    "run_name": "lol cbm",
     "load_detector": "",#str(Path(results_dir / "robots" / "aaa_Test2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc100_seed1012.pt")),
     "load_frontend": "",#str(Path(results_dir / "robots" / "aaa_Test2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc100_seed1012.pkl")),
 }
@@ -334,7 +309,6 @@ def define_train_valid_test(settings, concept_dataset, missingness, params, rate
         train = concept_dataset.training
         valid = concept_dataset.validation
         test = concept_dataset.test
-        test = concept_dataset.test
 
 
     if settings.get("label_noise_rate", 0.0) > 0:
@@ -347,13 +321,6 @@ def define_train_valid_test(settings, concept_dataset, missingness, params, rate
         train = train.__class__(parent=train.parent, X=train.X, C=Ctr, y=train.y, meta=train.meta,
                                 transform=train.transform, concept_transform=train.concept_transform,
                                 target_transform=train.target_transform, base_dir=train.base_dir)
-
-
-    #print distribution of concepts in the test set:
-    for c in test.concepts:
-        unique, counts = np.unique(test.C[:, test.concepts.index(c)], return_counts=True)
-        dist = dict(zip(unique, counts))
-        print(f"Concept '{c}' distribution in test set: {dist}")
 
 
     #print distribution of concepts in the test set:
@@ -407,18 +374,6 @@ def train_frontend(H_te, h_train, prob_train, sttngs, int_acc_tag, label_noise_t
     else:
         fe = FrontEndModel()
         fe_name = f"frontend_logreg_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
-                   seed_tag, skew_tag, test, train, monotonicity_constraints={}, prediction_constraints=[]):
-    cvxpy = False
-    if monotonicity_constraints or prediction_constraints:
-        cvxpy = True
-        fe = FrontEndModelCVXPY(monotonicity_constraints=monotonicity_constraints,
-                                prediction_constraints=prediction_constraints,
-                                concept_names=test.concepts,
-                                concept_pos_value_map=test.meta['concept_pos_value'])
-        fe_name = f"frontend_aligned_logreg_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
-    else:
-        fe = FrontEndModel()
-        fe_name = f"frontend_logreg_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
     if sttngs["load_frontend"]:
         with open(sttngs["load_frontend"], "rb") as f:
             fe = pickle.load(f)
@@ -446,66 +401,7 @@ def train_frontend(H_te, h_train, prob_train, sttngs, int_acc_tag, label_noise_t
     acc_gt = float((y_pred_gt.argmax(1) == test.y.astype(int)).mean())
     concept_acc_mean = float((H_te == test.C).mean())
     acc_det_tr = float((fe.predict(h_train) == train.y.astype(int)).mean())
-    acc_det_tr = float((fe.predict(h_train) == train.y.astype(int)).mean())
 
-    if not cvxpy:
-        print("\n=== Learned Frontend Weights ===")
-        for i, concept in enumerate(test.concepts):
-            print(f"  {concept}: {fe.model.coef_[0, i]:.4f}")
-        print(f"  bias: {fe.model.intercept_[0]:.4f}")
-    return acc_det, acc_gt, concept_acc_mean, fe, fe_path, y_pred_det, acc_det_tr
-
-
-def test_alignment(fe, h_test, h_train, prob_train, prob_test, sttngs, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
-                   seed_tag, skew_tag, test, train, monotonicity_constraints, prediction_constraints):
-    test_concepts = h_test
-    test_labels = test.y.astype(int)
-    original_frontend = fe
-    print(f"Aligning the model with the following constraints: {monotonicity_constraints} {prediction_constraints}")
-    acc_det, _, _, aligned_frontend, _, _, acc_det_tr = train_frontend(h_test, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag,
-                                                     miss_tag, model_type_tag, run_dir, seed_tag, skew_tag, test, train,
-                                                     monotonicity_constraints, prediction_constraints)
-
-    original_probs = original_frontend.predict_proba(test_concepts)
-    aligned_probs = aligned_frontend.predict_proba(test_concepts)
-    original_preds = original_probs.argmax(1)
-    aligned_preds = aligned_probs.argmax(1)
-
-    original_acc = (original_preds == test_labels).mean()
-    aligned_acc = (aligned_preds == test_labels).mean()
-
-    print("\n=== Aligned Frontend Weights ===")
-    for i, concept in enumerate(test.concepts):
-        print(f"  {concept}: {aligned_frontend.model.coef_[0, i]:.4f}")
-    print(f"  bias: {aligned_frontend.model.intercept_[0]:.4f}")
-
-    feweights = {}
-    for i, concept in enumerate(test.concepts):
-        feweights[concept] = round(aligned_frontend.model.coef_[0, i], 4)
-    feweights["bias"] = round(aligned_frontend.model.intercept_[0], 4)
-
-    aligned_preds = aligned_frontend.predict(h_test)
-
-    # compute model accuracies per concept
-    subtype_concepts = [c for c in test.concepts if c.startswith('foot_shape_')]
-    missing_concepts = [c for c in sttngs.get("drop_concepts", []) if c.startswith('foot_shape_')]
-    all_preds, confusion_df = _get_confusion_matrix(subtype_concepts, missing_concepts, aligned_frontend, h_test, prob_test, test)
-    per_concept_acc = _get_accuracies_per_subconcept(all_preds, missing_concepts, subtype_concepts)
-
-    # testing interventions
-    _, _, intervention_results = test_interventions(prob_test, sttngs, acc_det, aligned_frontend, test)
-
-    alignment_stats = {
-        'training_accuracy': float(acc_det_tr),
-        'original_accuracy': float(original_acc),
-        'aligned_accuracy': float(aligned_acc),
-        'accuracy_change': float(aligned_acc - original_acc),
-        'predictions_changed': int(np.sum(original_preds != aligned_preds)),
-        'frontend_weights': feweights,
-        'model_accuracies_per_concept': per_concept_acc,
-        'interventions': intervention_results
-    }
-    return alignment_stats
     if not cvxpy:
         print("\n=== Learned Frontend Weights ===")
         for i, concept in enumerate(test.concepts):
@@ -577,7 +473,6 @@ def train_dnn(sttngs, device, int_acc_tag, label_noise_tag, miss_tag, model_type
     yte = test.y.astype(int)
 
     dnn_acc, dnn_model, dnn_preds = train_eval_image(
-    dnn_acc, dnn_model, dnn_preds = train_eval_image(
         paths_tr, ytr, paths_te, yte,
         epochs=int(sttngs["epochs"]),
         batch_size=16,
@@ -597,17 +492,14 @@ def train_dnn(sttngs, device, int_acc_tag, label_noise_tag, miss_tag, model_type
         "model_state_dict": dnn_model.state_dict(),
     }, dnn_path)
     return dnn_stats, dnn_model, dnn_preds
-    return dnn_stats, dnn_model, dnn_preds
 
 
 def test_interventions(prob_test, sttngs, acc_det, fe, test):
     """Test interventions using the intervention framework."""
     intervention_results = {}
     rng = np.random.default_rng(int(sttngs["seed"]))
-    rng = np.random.default_rng(int(sttngs["seed"]))
     budgets = sttngs.get('budget', [1])
     human_acc = sttngs.get("intervention_accuracy", 0.9)
-    err_prob = 1.0 - human_acc
     err_prob = 1.0 - human_acc
 
     # Create a CBM wrapper for the intervention framework
@@ -619,7 +511,6 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
             max_concepts_per_instance=budget,
             random_state=int(sttngs["seed"]),
             score_threshold=sttngs.get("intervention_threshold", 1.0),
-            noise = 1.0 - human_acc,
             noise = 1.0 - human_acc,
         )
 
@@ -633,15 +524,6 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
             concept_proba=prob_test,
             labels=test.y.astype(int)
         )
-
-        mask = result.mask
-        C_gt = test.C.astype(np.float32)
-        C_after = result.C_intervened.copy()  # GT at masked entries
-
-        mistake_draw = rng.random(C_after.shape) < err_prob
-        mistakes = mask & mistake_draw
-        C_after[mistakes] = 1.0 - C_gt[mistakes]
-        result.C_intervened = C_after
 
         mask = result.mask
         C_gt = test.C.astype(np.float32)
@@ -673,20 +555,6 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
             for i, c in enumerate(test.concepts) if intervened_concepts[i]
         }
 
-        C_pred_binary = (result.C_pred >= 0.5).astype(int)
-        C_final_binary = (result.C_intervened >= 0.5).astype(int)
-        actual_edits_mask = (C_pred_binary != C_final_binary)
-        result.y_prob_after = fe.predict_proba(C_final_binary)
-        result.y_pred_after = np.argmax(result.y_prob_after, axis=1)
-
-        acc_intervened = float((result.y_pred_after == test.y.astype(int)).mean())
-
-        prediction_num_concepts_intervened_on = {int(i): int(np.sum(actual_edits_mask[i])) for i in range(n_samples)}
-        concept_intervention_counts = {
-            c: f"{int(np.sum(result.mask[:, i]))} ({int(np.sum(actual_edits_mask[:, i]))})"
-            for i, c in enumerate(test.concepts) if intervened_concepts[i]
-        }
-
         key = f"top_{budget}_human_acc_{int(human_acc * 100)}"
         intervention_results[key] = {
             "accuracy": acc_intervened,
@@ -694,9 +562,7 @@ def test_interventions(prob_test, sttngs, acc_det, fe, test):
             "predictions_intervened_on": int(np.sum(np.any(result.mask, axis=1))),
             "interventions_rate": float(np.sum(np.any(result.mask, axis=1)) / n_samples),
             "avg_edits_per_intervention": float(sum(prediction_num_concepts_intervened_on.values())) / n_samples,
-            "avg_edits_per_intervention": float(sum(prediction_num_concepts_intervened_on.values())) / n_samples,
             "total_concept_checks": int(n_intervened),
-            "total_concept_edits_made": sum(prediction_num_concepts_intervened_on.values()),
             "total_concept_edits_made": sum(prediction_num_concepts_intervened_on.values()),
             "concept_interventions": concept_intervention_counts,
             "human_accuracy": human_acc
@@ -781,7 +647,6 @@ def main(sttngs):
     per_concept_acc, train_per_concept_acc = _get_concept_accuracies(H_te, H_tr, test, train)
 
     acc_det, acc_gt, concept_acc_mean, fe, fe_path, y_pred_det, acc_det_tr = train_frontend(H_te, H_tr, P_tr, S, int_acc_tag,
-    acc_det, acc_gt, concept_acc_mean, fe, fe_path, y_pred_det, acc_det_tr = train_frontend(H_te, H_tr, P_tr, S, int_acc_tag,
                                                                                 label_noise_tag, miss_tag,
                                                                                 model_type_tag, run_dir, seed_tag,
                                                                                 skew_tag, test, train)
@@ -790,18 +655,8 @@ def main(sttngs):
     glorps_pred = (y_pred_det.argmax(1) == 1)
     true_glorps = (test.y.astype(int) == 1)
     cm = confusion_matrix(true_glorps, glorps_pred)
-
-    # get confusion matrix per each class
-    glorps_pred = (y_pred_det.argmax(1) == 1)
-    true_glorps = (test.y.astype(int) == 1)
-    cm = confusion_matrix(true_glorps, glorps_pred)
     dnn_stats = {}
     if S.get("train_dnn", False):
-        dnn_stats, mdnn, preds = train_dnn(S, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
-                                           seed_tag, skew_tag, test, train, tf)
-        # get confusion matrix for the DNN
-        dnn_glorps_pred = (np.array(preds).flatten() == 1)
-        dnn_cm = confusion_matrix(true_glorps, dnn_glorps_pred)
         dnn_stats, mdnn, preds = train_dnn(S, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
                                            seed_tag, skew_tag, test, train, tf)
         # get confusion matrix for the DNN
@@ -826,11 +681,6 @@ def main(sttngs):
 
     # align the model with new weights
     alignment_stats = {}
-    if S.get("human_alignment", {}) != None:
-        sign_alignment = S["human_alignment"].get("signs", {})
-        prediction_alignment = S["human_alignment"].get("features", [])
-        alignment_stats = test_alignment(fe, H_te, H_tr, P_tr, P_te, S, int_acc_tag, label_noise_tag, miss_tag, model_type_tag,
-                                         run_dir, seed_tag, skew_tag, test, train, sign_alignment, prediction_alignment)
     if S.get("human_alignment", {}) != None:
         sign_alignment = S["human_alignment"].get("signs", {})
         prediction_alignment = S["human_alignment"].get("features", [])
@@ -864,7 +714,6 @@ def main(sttngs):
     }
 
     metrics = {
-        "cbm_training_accuracy": float(acc_det_tr),
         "cbm_training_accuracy": float(acc_det_tr),
         "cbm_acc_detected": acc_det,
         "cbm_acc_oracle": acc_gt,
