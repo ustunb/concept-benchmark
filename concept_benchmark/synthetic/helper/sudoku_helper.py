@@ -629,17 +629,22 @@ def cell_digit_concept_vector(board: np.ndarray,
 # ----------------------------------------------------------
 # SCIP-based generator (more varied)
 # ----------------------------------------------------------
-def solve_sudoku_with_random_objective(board: np.ndarray, seed: int | None = None) -> np.ndarray:
-    """
-    Like solve_sudoku_with_scip, but add a random objective so SCIP picks
-    a random feasible solution instead of the first one it finds.
+    return np.asarray(vals, dtype=np.int32)
 
-    CHANGE: if seed is None, we now generate a fresh random seed so that
-    each call can differ even under stable outer randomness.
+
+# ----------------------------------------------------------
+# SCIP-based generator (more varied)
+# ----------------------------------------------------------
+def solve_sudoku_with_random_objective(n: int, seed: int | None = None) -> np.ndarray:
+    """
+    Generate a full valid Sudoku board of size N=n*n using SCIP with a random objective.
+    
+    This solver creates the board from scratch, ignoring any prior state.
     """
     if Model is None:
         raise ImportError("pyscipopt is required. Install with `pip install pyscipopt`.")
-    N, n = _assert_board_size(board)
+    
+    N = n * n
     digits = range(1, N + 1)
 
     # ensure we have a concrete seed for this SCIP call
@@ -678,13 +683,6 @@ def solve_sudoku_with_random_objective(board: np.ndarray, seed: int | None = Non
                     ) == 1
                 )
 
-    # fix given cells
-    for r in range(N):
-        for c in range(N):
-            v = int(board[r, c])
-            if v > 0:
-                m.addCons(x[r, c, v] == 1)
-
     # random objective
     expr = 0
     for r in range(N):
@@ -692,7 +690,7 @@ def solve_sudoku_with_random_objective(board: np.ndarray, seed: int | None = Non
             for d in digits:
                 w = rng.random()
                 expr += w * x[r, c, d]
-    m.setObjective(expr)  # maximize
+    m.setObjective(expr, "maximize")
     m.optimize()
 
     sol = m.getBestSol()
@@ -706,74 +704,22 @@ def solve_sudoku_with_random_objective(board: np.ndarray, seed: int | None = Non
     return out
 
 
-def is_locally_safe(
-    board: np.ndarray,
-    r: int,
-    c: int,
-    val: int,
-    blank_value: int = 0,
-) -> bool:
-    """
-    Check row/col/block consistency of placing `val` at (r,c) on THIS board.
-    Ignores cells == blank_value.
-    """
-    N, n = _assert_board_size(board)
-
-    # row
-    for cc in range(N):
-        if cc != c and board[r, cc] == val:
-            return False
-    # col
-    for rr in range(N):
-        if rr != r and board[rr, c] == val:
-            return False
-    # block
-    br = (r // n) * n
-    bc = (c // n) * n
-    for rr in range(br, br + n):
-        for cc in range(bc, bc + n):
-            if (rr != r or cc != c) and board[rr, cc] == val:
-                return False
-    return True
-
-
 def generate_valid_board_scip(n: int = 3, seed: int | None = None) -> np.ndarray:
     """
     Generate a valid Sudoku board by:
-    1) pre-filling 1 random legal cell per block,
-    2) solving with a random objective (with a fresh derived seed),
-    3) applying a final random digit relabel.
+    1) Solving with a random objective (from scratch) via SCIP,
+    2) Applying a final random digit relabel.
     """
     if Model is None:
         raise ImportError("pyscipopt is required for SCIP-based generation. Install with `pip install pyscipopt`.")
 
-    N = n * n
     rng = random.Random(seed)
 
-    partial = np.zeros((N, N), dtype=int)
-
-    digits = list(range(1, N + 1))
-    for br in range(n):
-        for bc in range(n):
-            # cells inside this block
-            cells = [(r, c) for r in range(br * n, br * n + n)
-                             for c in range(bc * n, bc * n + n)]
-            rng.shuffle(cells)
-            rng.shuffle(digits)
-            placed = False
-            for (r, c) in cells:
-                for d in digits:
-                    if is_locally_safe(partial, r, c, d, blank_value=0):
-                        partial[r, c] = d
-                        placed = True
-                        break
-                if placed:
-                    break
-
-    # derive a NEW seed for the actual SCIP solve so each call is different
+    # Direct solve (derived seed ensures variety if seed provided)
     scip_seed = rng.randrange(1 << 30)
-    solved = solve_sudoku_with_random_objective(partial, seed=scip_seed)
+    solved = solve_sudoku_with_random_objective(n=n, seed=scip_seed)
 
+    N = n * n
     # random digit relabel, still tied to the outer RNG
     digits_perm = list(range(1, N + 1))
     rng.shuffle(digits_perm)
@@ -782,3 +728,4 @@ def generate_valid_board_scip(n: int = 3, seed: int | None = None) -> np.ndarray
     solved = vfunc(solved).astype(int)
 
     return solved
+
