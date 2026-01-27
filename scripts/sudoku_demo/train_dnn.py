@@ -13,27 +13,31 @@ from scripts.sudoku_demo.utils import (
     get_model_file,
     compute_accuracy
 )
-from scripts.sudoku_demo.sudoku_models import SudokuValidatorCNN  # Placeholder
+from scripts.sudoku_demo.sudoku_models import SudokuValidatorCNN as DNNSudokuModel
 
 from concept_benchmark.ext.fileutils import load, save
+from concept_benchmark.paths import data_dir
 
 
 settings = DEFAULT_SUDOKU_SETTINGS.copy()
 
 if Process(pid=os.getppid()).name() not in ("node"):
     p = ArgumentParser()
-    p.add_argument('--data_type', type=str, choices=['tabular', 'image', 'handwriting'], default=settings['data_type'])
     p.add_argument('--n', type=int, default=settings['n'])
     p.add_argument('--max_corrupt', type=int, default=settings['max_corrupt'])
     p.add_argument('--seed', type=int, default=settings['seed'])
-    p.add_argument('--epochs', type=int, default=50)
+    p.add_argument('--epochs', type=int, default=20)
     args, _ = p.parse_known_args()
     settings.update(vars(args))
 
 torch.manual_seed(int(settings["seed"]))
-model = SudokuValidatorCNN()  # TODO: Replace with actual model class
+model = DNNSudokuModel()
 
-data = load(get_dataset_file(**settings))
+settings['data_type'] = 'tabular'
+tab_ds_dir = get_dataset_file(**settings)
+data = load(tab_ds_dir / "sudoku_dataset.pkl")
+data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=settings['seed'])
+data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
 
 # --- Training Run ---
 device = determine_device()

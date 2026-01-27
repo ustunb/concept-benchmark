@@ -12,7 +12,7 @@ def main():
     p.add_argument(
         "--stages",
         nargs="+",
-        default=["setup", "cbm", "cbm_missing", "dnn", "intervene"],
+        default=["setup", "cs", "dnn", "intervene"],
     )
     p.add_argument("--seed", type=int, default=DEFAULT_SUDOKU_SETTINGS['seed'])
     p.add_argument("--ignore-errors", action="store_true", help="continue on errors")
@@ -21,19 +21,11 @@ def main():
     # setup pipeline tasks
     pipeline = []
     if "setup" in args.stages:
-        pipeline.append("python scripts/sudoku_demo/setup_dataset_sudoku.py")
+        pipeline.append("python scripts/sudoku_demo/make_ocr_dataset.py")
 
-    if "cbm" in args.stages:
+    if "cs" in args.stages:
         pipeline.append(
-            f"python scripts/sudoku_demo/train_cbm.py --seed {args.seed}"
-        )
-
-    if "cbm_missing" in args.stages:
-        pipeline.append(
-            f"python scripts/sudoku_demo/train_cbm.py --seed {args.seed} --concept_missing_mech mcar"
-        )
-        pipeline.append(
-            f"python scripts/sudoku_demo/train_cbm.py --seed {args.seed} --concept_missing_mech mnar"
+            f"python scripts/sudoku_demo/train_cs.py --seed {args.seed}"
         )
 
     if "dnn" in args.stages:
@@ -44,12 +36,6 @@ def main():
     if "intervene" in args.stages:
         pipeline.append(
             f"python scripts/sudoku_demo/intervene.py --seed {args.seed}"
-        )
-        pipeline.append(
-            f"python scripts/sudoku_demo/intervene.py --seed {args.seed} --concept_missing_mech mcar"
-        )
-        pipeline.append(
-            f"python scripts/sudoku_demo/intervene.py --seed {args.seed} --concept_missing_mech mnar"
         )
 
     # Run each command in the list
