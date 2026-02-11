@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import copy
+import warnings
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 from sklearn.linear_model import LogisticRegression
 from tqdm import tqdm
@@ -572,7 +573,7 @@ class ConceptDetector(object):
         self.model.cpu()
 
         if calibrate:
-            self.calibrate(valid_dataset, embed_params=embed_params)
+            self.calibrate(valid_dataset)
         else:
             self.calibration_params = None
 
@@ -887,12 +888,27 @@ class ConceptBasedModel(object):
 
         C_train = train_dataset.C  # independent training
         y_train = train_dataset.y
-
-        if train_dataset.concept_missing:
-            # drop samples with missing concepts for front-end training
-            mask = train_dataset.concept_missing_mask.any(axis=1)
-            C_train = C_train[~mask]
-            y_train = y_train[~mask]
+        missing_enabled = bool(getattr(train_dataset, "concept_missing", False))
+        missing_mask = getattr(train_dataset, "concept_missing_mask", None)
+        if missing_enabled:
+            if missing_mask is None:
+                fill_value = getattr(train_dataset, "concept_missing_fill_value", np.nan)
+                if isinstance(fill_value, float) and np.isnan(fill_value):
+                    missing_mask = np.isnan(C_train)
+                else:
+                    missing_mask = np.isclose(C_train, fill_value)
+            observed_rows = ~missing_mask.any(axis=1)
+            if not np.all(observed_rows):
+                dropped = int((~observed_rows).sum())
+                warnings.warn(
+                    f"Dropping {dropped} samples with missing concepts for front-end training.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            if not np.any(observed_rows):
+                raise ValueError("No fully-observed concept rows available for front-end training.")
+            C_train = C_train[observed_rows]
+            y_train = y_train[observed_rows]
 
         self.front_end_model.fit(C_train, y_train, fit_params=front_fit_params)
 

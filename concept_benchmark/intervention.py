@@ -267,6 +267,31 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
     def __init__(self) -> None:
         super().__init__(name="conceptual_safeguards")
 
+    @staticmethod
+    def _instance_uncertainty_scores(C_pred: np.ndarray) -> np.ndarray:
+        distances = np.abs(C_pred - 0.5)
+        uncertainties = 0.5 - distances
+        scores = np.nanmean(uncertainties, axis=1)
+        return np.where(np.isnan(scores), -np.inf, scores)
+
+    def _select_instances_by_uncertainty(
+        self,
+        candidate_ids: np.ndarray,
+        scores: np.ndarray,
+        *,
+        config: InterventionConfig,
+    ) -> np.ndarray:
+        if candidate_ids.size == 0:
+            return candidate_ids
+        if config.shuffle_candidates:
+            tie_breaker = config.rng.random(candidate_ids.size)
+            order = np.lexsort((tie_breaker, -scores))
+        else:
+            order = np.argsort(-scores)
+        ranked = candidate_ids[order]
+        limit = config.resolve_instance_budget(ranked.size)
+        return ranked[:limit]
+
     def propose(
         self,
         model: ConceptBasedModel,
@@ -286,10 +311,13 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
         selective_acc_before = (predicted[~abstain_mask] == batch.y_true[~abstain_mask]).mean()
 
         candidate_ids = np.nonzero(abstain_mask)[0]
-        selected = self._select_instances(
+        candidate_scores = self._instance_uncertainty_scores(
+            batch.C_pred[candidate_ids]
+        )
+        selected = self._select_instances_by_uncertainty(
             candidate_ids,
-            config,
-            rng=config.rng,
+            candidate_scores,
+            config=config,
         )
 
         order = (
@@ -303,7 +331,11 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
             mask=mask, 
             ordering_used=order, 
             selected_instances=selected,
-            details={"selective_acc_before": selective_acc_before}
+            details={
+                "selective_acc_before": selective_acc_before,
+                "candidate_uncertainty_scores": candidate_scores,
+                "candidate_ids": candidate_ids,
+            },
         )
 
 
