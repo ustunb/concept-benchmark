@@ -118,30 +118,8 @@ from concept_benchmark.synthetic.sudoku import (
     default_transform,     # flatten to 1D vector (N^2,)
     onehot_transform,      # one-hot encoding (N, N, N)
     histogram_transform,   # per-unit digit histograms (3N, N)
-    image_transform,       # rendered PNG images
+    image_transform,       # rendered PNG images (options: cell_px, font_size, handwriting)
 )
-```
-
-**Image transform options** (passed as `kwargs` to `create_sudoku_dataset`):
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `cell_px` | Pixel size per cell | `40` |
-| `font_size` | Digit font size | `10` |
-| `handwriting` | Apply sketch effect for handwritten style | `False` |
-| `radius`, `sigma`, `angle` | Handwriting Gaussian blur parameters | varies |
-
-#### CLI Usage
-
-```bash
-# 9x9 tabular, 10k samples
-python scripts/run_sudoku.py --n 3 --n-samples 10000 --data-type tabular --save-dir out/tabular
-
-# 9x9 image dataset
-python scripts/run_sudoku.py --data-type image --dataset_name demo --n-samples 2000 --cell-px 24
-
-# One-hot encoded, saved as PyTorch tensor
-python scripts/run_sudoku.py --transform onehot --save-dir out/onehot --save-format pt
 ```
 
 ### Training a Sudoku Model
@@ -306,63 +284,6 @@ text_data = create_robot_text_dataset(
 
 **Text concept detection** uses a transformer-based model (`TextConceptDetector`) that learns to predict robot concepts from text. The default backbone is `distilbert-base-uncased`, with optional alternatives (`bert-tiny`, `bert-mini`, `bert-small`). The detector is trained with per-concept binary classification heads and optimized thresholds via ROC analysis.
 
-**Running the full text pipeline** is handled by `scripts/run_robot_demos.py`, which orchestrates:
-
-1. Baseline DNN training (`scripts/robot_baseline.py`) -- trains a standard text classifier as a baseline
-2. Concept detection (`scripts/gen_text_samples.py`) -- trains a `TextConceptDetector` on text descriptions
-3. CBM evaluation -- builds a concept bottleneck model (text -> concepts -> label) and evaluates it
-4. Intervention testing -- runs K-Flip interventions at specified budgets (e.g., `[0, 1, 2, 5, 10]`)
-
-```bash
-python scripts/run_robot_demos.py \
-  --modality text \
-  --text_model distilbert-base-uncased \
-  --seed 1337 \
-  --difficulty hard \
-  --budgets 0,1,2,5,10 \
-  --run_tag my_experiment
-```
-
-### Running the Robot Pipeline
-
-The main robot pipeline is in `scripts/robot_image_training.py`. It runs the full CBM workflow:
-
-```python
-from scripts.robot_image_training import main, settings
-
-# Configure (see settings dict in the script for all options)
-settings["concepts"] = { ... }
-settings["model"] = "..."
-settings["seed"] = 42
-
-results = main(settings)
-```
-
-#### Pipeline Stages
-
-The `main()` function executes these stages in order:
-
-1. **Data Definition** -- generates the robot dataset, creates train/val/test splits with optional concept skewing, applies label noise and concept missingness
-2. **Concept Detector Training** -- trains a CNN or ViT model to predict concepts from images
-3. **Frontend Training** -- fits a logistic regression (or constrained CVXPY model) mapping concepts to labels
-4. **Intervention Testing** -- simulates human corrections to concept predictions using K-Flip strategy
-5. **Alignment Testing** -- re-trains the frontend with human-specified monotonicity and prediction constraints
-6. **Results Saving** -- saves meta JSON, metrics JSON, confusion matrices, and model checkpoints
-
-#### Advanced Settings
-
-| Setting | Description |
-|---------|-------------|
-| `skew_concept` | Force minimum representation of specific concept patterns in training |
-| `label_noise_rate` | Fraction of training labels to randomly flip |
-| `missingness` | Concept missingness mode: `"complete"`, `"mcar"`, `"mar"`, `"mnar"` |
-| `missing_rate` | Fraction of concepts to mask |
-| `subconcepts` | Expand coarse features into fine-grained subconcepts (e.g. `foot_shape` subtypes) |
-| `drop_concepts` | Remove specific subconcepts from the concept matrix |
-| `budget` | List of intervention budgets (number of concepts to correct per sample) |
-| `intervention_accuracy` | Simulated human accuracy when intervening |
-| `human_alignment` | Dict with `"signs"` (monotonicity) and `"features"` (prediction constraints) |
-
 ### Robot Model Architectures
 
 | Architecture | Class | Description |
@@ -378,54 +299,6 @@ The `main()` function executes these stages in order:
 ## Running Large-Scale Experiments
 
 The codebase includes dedicated pipelines for running large-scale experiments that sweep over concept noise, target accuracy, and concept missingness. These orchestrated pipelines produce the paper's result tables.
-
-### Big Demo Pipeline (`big-demo` branch)
-
-The `big-demo` branch contains a unified pipeline for both sudoku and robot experiments in `scripts/big_demo/`. The entry point is a shell script that runs three stages:
-
-```bash
-scripts/big_demo/run_pipeline_and_evals.sh
-```
-
-This executes:
-
-1. **Pipeline options** -- `pipeline_options.py` enumerates and runs all parameter combinations across dataset generation, DNN training, concept detector training, and frontend training
-2. **Conceptual safeguards evaluation** -- `eval_conceptual_safeguards.py` evaluates intervention strategies on sudoku
-3. **Score intervention evaluation** -- `eval_score_intervention.py` evaluates interventions on robot
-
-The pipeline sweeps over these axes (configured in `scripts/big_demo/utils.py`):
-
-| Axis | Values |
-|------|--------|
-| Concept noise | `0.0, 0.05, 0.10, ..., 0.30` |
-| Target accuracy | `easy` (1.0), `medium` (0.8), `hard` (0.6) |
-| Missingness mechanism | `none`, `mcar`, `mnar` |
-| Missingness rate | `0.05, 0.10, ..., 0.30` |
-
-You can also run stages selectively:
-
-```bash
-# Enumerate all commands (dry run)
-python scripts/big_demo/pipeline_options.py --dataset sudoku robot
-
-# Run only sudoku dataset setup + training
-python scripts/big_demo/pipeline_options.py --execute --dataset sudoku --stages setup_dataset train_concept_detector train_front_end
-
-# Run only robot
-python scripts/big_demo/pipeline_options.py --execute --dataset robot
-```
-
-Each stage is a standalone script that accepts CLI arguments:
-
-| Script | Purpose |
-|--------|---------|
-| `setup_sudoku_dataset.py` | Generate sudoku datasets with concept noise and target accuracy |
-| `setup_robot_dataset.py` | Generate robot datasets with concept noise and target accuracy |
-| `train_concept_detectors.py` | Train concept detectors (CNN for robot, CNN for sudoku) with missingness |
-| `train_dnn.py` | Train DNN baselines |
-| `train_front_end.py` | Train frontend models (concepts -> label) |
-| `eval_conceptual_safeguards.py` | Evaluate conceptual safeguards intervention strategy |
-| `eval_score_intervention.py` | Evaluate score-based intervention strategy |
 
 ### Sudoku Demo Pipeline (`scripts/sudoku_demo/`)
 
@@ -484,71 +357,6 @@ python scripts/robot_demo/pipeline.py --stages setup cbm dnn intervene --ignore-
 ```
 
 Default settings are centralized in `scripts/robot_demo/utils.py` (`DEFAULT_ROBOT_SETTINGS`), including concepts, label model, image size, and seed.
-
----
-
-## Common Architecture
-
-Both benchmarks share the same two-stage concept bottleneck architecture:
-
-```
-                    Stage 1                         Stage 2
-Input (X) ----> [Concept Detector] ----> C_hat ----> [Frontend Model] ----> y_hat
-                  (CNN / ViT)           (binary)      (Logistic Reg.)
-```
-
-### ConceptDetector
-
-The universal concept detection wrapper:
-
-```python
-from concept_benchmark.models import ConceptDetector
-
-cd = ConceptDetector(
-    embedding_model=backbone,       # optional feature extractor (ViT, CNN, etc.)
-    model=pre_built_model,          # or pass a pre-built joint model
-    trainer=custom_trainer,         # pluggable training loop
-    model_builder=custom_factory,   # or a factory function
-)
-
-cd.fit(train_data, valid_data,
-       embed_params={"device": device},
-       fit_params={"epochs": 10, "hidden_size": 360})
-
-predictions = cd.predict(test_data, embed_params={"device": device})
-```
-
-### ConceptBasedModel
-
-Combines a concept detector with a frontend for end-to-end inference:
-
-```python
-from concept_benchmark.models import ConceptBasedModel
-
-cbm = ConceptBasedModel(
-    concept_detector=cd,
-    front_end_model=fe,
-    propagate=False,    # Monte Carlo uncertainty propagation
-)
-```
-
-### Interventions (K-Flip)
-
-The K-Flip intervention strategy evaluates all subsets of concepts (up to size k) and selects the subset whose correction maximizes the probability of flipping the final prediction:
-
-```python
-from concept_benchmark.intervention import InterventionConfig, ConceptInterventionRunner
-from concept_benchmark.kflip import KFlipInterventionStrategy
-
-config = InterventionConfig(
-    concept_budget=5,       # max concepts to intervene on globally
-    max_concepts_per_instance=3,  # max per sample
-    tau=0.2,                # flip probability threshold
-)
-strategy = KFlipInterventionStrategy(config=config, cbm=cbm)
-runner = ConceptInterventionRunner(strategy=strategy)
-results = runner.run(intervention_batch)
-```
 
 ---
 
