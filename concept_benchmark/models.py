@@ -887,6 +887,13 @@ class ConceptBasedModel(object):
 
         C_train = train_dataset.C  # independent training
         y_train = train_dataset.y
+
+        if train_dataset.concept_missing:
+            # drop samples with missing concepts for front-end training
+            mask = train_dataset.concept_missing_mask.any(axis=1)
+            C_train = C_train[~mask]
+            y_train = y_train[~mask]
+
         self.front_end_model.fit(C_train, y_train, fit_params=front_fit_params)
 
         if self.propagate:

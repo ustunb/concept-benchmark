@@ -4,6 +4,7 @@ import itertools
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+from tqdm import tqdm
 
 from concept_benchmark.models import ConceptBasedModel
 from concept_benchmark.intervention import (
@@ -103,7 +104,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
         rows_per_eval = max(1, self.batch_size)
 
         # evaluate all subsets
-        for subset in all_subsets:
+        for subset in tqdm(all_subsets):
             subset = np.asarray(subset, dtype=int)
             subset_size = len(subset)
 

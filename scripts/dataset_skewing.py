@@ -8,7 +8,7 @@ def create_sample(size, indices, dataset):
 
 
 def create_skewed_splits(dataset, skew_specs, test_size=10000, train_skew_size=None,
-                         val_fraction=0.2, rng=None, drop_concepts=[]):
+                         val_fraction=0.2, rng=None, drop_concepts=[], **kwargs):
     """
     Skew training by ensuring minimum representation of specific concept patterns.
 
@@ -56,6 +56,56 @@ def create_skewed_splits(dataset, skew_specs, test_size=10000, train_skew_size=N
     dataset.test = create_sample(total_size, test_indices, dataset)
 
     return dataset.training, dataset.validation, dataset.test
+
+def create_skewed_splits_full(dataset, skew_specs, test_size=10000, train_skew_size=None,
+                         val_fraction=0.2, rng=None, drop_concepts=[], **kwargs):
+    """
+    Skew training by ensuring minimum representation of specific concept patterns.
+
+    Args:
+        skew_specs: List of dicts, each with 'concepts' (dict of concept:value) and 'min_fraction' (float)
+                   e.g., [{'concepts': {'body_shape': 0, 'foot_shape_3sided': 1}, 'min_fraction': 0.4},
+                          {'concepts': {'body_shape': 0, 'foot_shape_4sided': 1}, 'min_fraction': 0.4}]
+        train_fraction, val_fraction, test_fraction: Split proportions
+        rng: Random number generator
+        drop_concepts: List of concept names to drop from dataset after splitting
+        fractions_unique: If True, fractions regard the unique set of concepts, not total samples
+
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+
+    total_size = len(dataset.C)
+
+    all_indices = np.arange(total_size)
+    rng.shuffle(all_indices)
+    test_indices = all_indices[:test_size]
+    remaining_indices = all_indices[test_size:]
+
+    if train_skew_size is None:
+        train_skew_size = int(len(remaining_indices) * (1 - val_fraction))
+        val_size = len(remaining_indices) - train_skew_size
+    else:
+        val_size = int((len(remaining_indices) - train_skew_size) * val_fraction)
+
+    train_indices = create_skewed_training_set(
+        dataset, skew_specs, remaining_indices, train_skew_size, rng
+    )
+
+    used_for_training = set(train_indices)
+    val_candidates = [i for i in remaining_indices if i not in used_for_training]
+    rng.shuffle(val_candidates)
+    val_indices = np.array(val_candidates)[:val_size]
+
+    print(f"Final splits - Train: {len(train_indices)}, Val: {len(val_indices)}, Test: {len(test_indices)}")
+
+    # Create samples
+    dataset.drop_concepts(drop_concepts)
+    dataset.training = create_sample(total_size, train_indices, dataset)
+    dataset.validation = create_sample(total_size, val_indices, dataset)
+    dataset.test = create_sample(total_size, test_indices, dataset)
+
+    return dataset
 
 
 def create_skewed_training_set(dataset, skew_specs, available_indices, target_size, rng):

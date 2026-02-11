@@ -1177,7 +1177,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             warnings.warn(f"{e}; cannot open image, returning path", RuntimeWarning)
             image = img_path
 
-        c = torch.from_numpy(np.array(c, dtype=np.int64))
+        c = torch.from_numpy(np.array(c, dtype=np.float32))
         y = torch.from_numpy(np.array(y, dtype=np.int64))
 
         if self.concept_transform is not None:
