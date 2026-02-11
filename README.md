@@ -1,5 +1,9 @@
 # Concept Benchmark
 
+[![python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Paper](https://img.shields.io/badge/paper-under%20review-orange)](https://github.com/ustunb/concept-benchmark)
+
 A framework for generating synthetic concept-bottleneck benchmarks and evaluating concept-based models (CBMs). The package provides configurable dataset generators, model architectures, training pipelines, and evaluation tools for studying concept alignment, interventions, and interpretability.
 
 ## Installation
