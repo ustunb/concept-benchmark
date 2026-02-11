@@ -253,30 +253,75 @@ data = create_robot_image_dataset(
 
 #### Label Models
 
-**Deterministic**: A Python expression evaluated per robot row:
+The label model determines how the binary species label (glorp vs. drent) is assigned to each robot. There are two types, and the typical workflow is to **start with deterministic** and then use the resulting concept-label relationships to calibrate the **stochastic** model.
+
+**Deterministic**: A Python expression evaluated per robot row. Use this first to understand which concept patterns produce which labels:
 ```python
 model="'glorp' if (int(row['mouth_type']=='closed') + int(row['has_knees']=='true')) >= 2 else 'drent'"
+model_type="deterministic",
 ```
 
-**Stochastic**: Uses a logistic function to produce probabilistic labels:
+**Stochastic**: Uses a logistic function to produce probabilistic labels. The weights, scalar, and intercept are typically tuned based on the deterministic model's concept-label mapping so that the stochastic model targets a desired `P(glorp)` for each feature combination:
 ```python
 model_type="stochastic",
-logit_scalar=4.2,
-logit_intercept=-2,
+logit_scalar=4.2,       # controls sharpness of the decision boundary
+logit_intercept=-2,     # bias term
 logit_weights={"mouth_type": 5, "foot_shape": 8, "has_knees": -5},
 ```
 
+For example, you might first run the deterministic model to identify that `has_knees=true` and `foot_shape=pointy` predict glorp, then set `logit_weights` accordingly with positive values for glorp-predictive concepts and negative values for drent-predictive ones. The `logit_scalar` and `logit_intercept` are then adjusted to achieve the desired noise level around the decision boundary.
+
 #### Text Modality
 
-Robots can also be represented as text descriptions:
+Robots can also be represented as natural language descriptions instead of images. The text pipeline generates descriptive paragraphs for each robot configuration using template-based rendering with concept-specific placeholders.
+
+**Generating text data** from an existing image dataset:
 
 ```python
-from concept_benchmark.synthetic.robot import create_synthetic_dataset
+from concept_benchmark.synthetic.robot import create_robot_text_dataset
 
-data = create_synthetic_dataset(data_type="text", source=image_dataset, ...)
+text_data = create_robot_text_dataset(
+    source=image_dataset,         # ConceptDataset or DataFrame with robot catalog
+    variants_per_row=3,           # text variations per robot instance
+    include_color=True,           # include color descriptions
+    text_mode="unstructured",     # "unstructured", "structured", or "llm"
+    rng_seed=0,
+)
 ```
 
-See `scripts/run_robot_demos.py` for the full text pipeline.
+**Text generation modes**:
+
+| Mode | Description |
+|------|-------------|
+| `"unstructured"` | Template-based with natural language fillers and synonym variation (default) |
+| `"structured"` | Simple fixed templates with minimal variation |
+| `"llm"` | Uses an LLM API (Gemini, OpenAI, or Anthropic) to generate captions |
+
+**Template system**: Templates are stored as JSONL files in `concept_benchmark/synthetic/helper/static/text_templates/`. Each line contains a `"when"` condition (matching robot features) and a `"text"` field with placeholders like `{HEAD_NAT}`, `{BODY_NAT}`, `{FEET_NAT}`, etc. that are filled with natural language descriptors (e.g., `{HEAD_NAT}` becomes "boxy" or "dome-like"). Available template sets:
+
+- `HardCorpus.jsonl` -- main template set
+- `HardCorpus_NoAnt.jsonl` -- templates with antennae concept redacted
+- `HardCorpus_EarsGeneric.jsonl` -- generic (non-concept-bearing) ear descriptions
+- `HardCorpus_FootGeneric.jsonl` -- generic foot descriptions
+
+**Text concept detection** uses a transformer-based model (`TextConceptDetector`) that learns to predict robot concepts from text. The default backbone is `distilbert-base-uncased`, with optional alternatives (`bert-tiny`, `bert-mini`, `bert-small`). The detector is trained with per-concept binary classification heads and optimized thresholds via ROC analysis.
+
+**Running the full text pipeline** is handled by `scripts/run_robot_demos.py`, which orchestrates:
+
+1. Baseline DNN training (`scripts/robot_baseline.py`) -- trains a standard text classifier as a baseline
+2. Concept detection (`scripts/gen_text_samples.py`) -- trains a `TextConceptDetector` on text descriptions
+3. CBM evaluation -- builds a concept bottleneck model (text -> concepts -> label) and evaluates it
+4. Intervention testing -- runs K-Flip interventions at specified budgets (e.g., `[0, 1, 2, 5, 10]`)
+
+```bash
+python scripts/run_robot_demos.py \
+  --modality text \
+  --text_model distilbert-base-uncased \
+  --seed 1337 \
+  --difficulty hard \
+  --budgets 0,1,2,5,10 \
+  --run_tag my_experiment
+```
 
 ### Running the Robot Pipeline
 
@@ -330,118 +375,115 @@ The `main()` function executes these stages in order:
 
 ---
 
-## Full Pipeline Comparison: Sudoku vs. Robot
+## Running Large-Scale Experiments
 
-While both benchmarks share the same core concept-bottleneck architecture (concept detector + frontend), the end-to-end pipelines differ significantly in scope and structure.
+The codebase includes dedicated pipelines for running large-scale experiments that sweep over concept noise, target accuracy, and concept missingness. These orchestrated pipelines produce the paper's result tables.
 
-### Sudoku Pipeline
+### Big Demo Pipeline (`big-demo` branch)
 
-The sudoku pipeline is split into **two separate scripts** that are run independently:
-
-1. **Dataset generation** (`scripts/run_sudoku.py`) -- a CLI tool that creates the dataset and saves it to disk (images + CSV, or `.npz`/`.pt` arrays). No training happens here.
-
-2. **Training and evaluation** (`scripts/sudoku_train.py`) -- a standalone script that loads/creates a dataset, trains a ViT-based ConceptDetector, evaluates concept accuracy, and fits a FrontEndModel.
+The `big-demo` branch contains a unified pipeline for both sudoku and robot experiments in `scripts/big_demo/`. The entry point is a shell script that runs three stages:
 
 ```bash
-# Step 1: Generate dataset
-python scripts/run_sudoku.py --n 3 --n-samples 5000 --data-type image --dataset_name my_exp
-
-# Step 2: Train and evaluate (edit settings in sudoku_train.py or use as a template)
-python scripts/sudoku_train.py
+scripts/big_demo/run_pipeline_and_evals.sh
 ```
 
-The sudoku pipeline uses standard 5-fold cross-validation splits and does not include skewing, missingness, interventions, or alignment testing. It is designed as a straightforward benchmark for concept detection accuracy.
+This executes:
 
-### Robot Pipeline
+1. **Pipeline options** -- `pipeline_options.py` enumerates and runs all parameter combinations across dataset generation, DNN training, concept detector training, and frontend training
+2. **Conceptual safeguards evaluation** -- `eval_conceptual_safeguards.py` evaluates intervention strategies on sudoku
+3. **Score intervention evaluation** -- `eval_score_intervention.py` evaluates interventions on robot
 
-The robot pipeline is a **single monolithic script** (`scripts/robot_image_training.py`) with a `main(settings)` function that runs the entire workflow end-to-end:
+The pipeline sweeps over these axes (configured in `scripts/big_demo/utils.py`):
 
-```
-main(settings)
-├── 1. Data Definition
-│   ├── Generate robot dataset (create_synthetic_dataset)
-│   ├── Create skewed train/val/test splits
-│   ├── Apply label noise
-│   └── Apply concept missingness (MCAR/MAR/MNAR)
-├── 2. Concept Detector Training
-│   ├── Train RobotConceptClassifier (CNN)
-│   └── Test detector invariance
-├── 3. Frontend Training
-│   ├── Fit FrontEndModel or FrontEndModelCVXPY
-│   └── Compute concept + label accuracy
-├── 4. Intervention Testing
-│   ├── Run K-Flip interventions at each budget level
-│   └── Simulate human error rates
-├── 5. Alignment Testing
-│   ├── Re-train frontend with monotonicity constraints
-│   └── Compare aligned vs. unaligned accuracy
-└── 6. Results Saving
-    ├── meta.json (settings, artifacts, splits)
-    ├── metrics.json (accuracies, interventions, weights)
-    ├── confusion.csv, catalog.csv
-    └── detector + frontend checkpoints
+| Axis | Values |
+|------|--------|
+| Concept noise | `0.0, 0.05, 0.10, ..., 0.30` |
+| Target accuracy | `easy` (1.0), `medium` (0.8), `hard` (0.6) |
+| Missingness mechanism | `none`, `mcar`, `mnar` |
+| Missingness rate | `0.05, 0.10, ..., 0.30` |
+
+You can also run stages selectively:
+
+```bash
+# Enumerate all commands (dry run)
+python scripts/big_demo/pipeline_options.py --dataset sudoku robot
+
+# Run only sudoku dataset setup + training
+python scripts/big_demo/pipeline_options.py --execute --dataset sudoku --stages setup_dataset train_concept_detector train_front_end
+
+# Run only robot
+python scripts/big_demo/pipeline_options.py --execute --dataset robot
 ```
 
-#### Running a single experiment
+Each stage is a standalone script that accepts CLI arguments:
 
-```python
-from scripts.robot_image_training import main, settings
+| Script | Purpose |
+|--------|---------|
+| `setup_sudoku_dataset.py` | Generate sudoku datasets with concept noise and target accuracy |
+| `setup_robot_dataset.py` | Generate robot datasets with concept noise and target accuracy |
+| `train_concept_detectors.py` | Train concept detectors (CNN for robot, CNN for sudoku) with missingness |
+| `train_dnn.py` | Train DNN baselines |
+| `train_front_end.py` | Train frontend models (concepts -> label) |
+| `eval_conceptual_safeguards.py` | Evaluate conceptual safeguards intervention strategy |
+| `eval_score_intervention.py` | Evaluate score-based intervention strategy |
 
-settings["seed"] = 42
-settings["model_type"] = "stochastic"
-settings["run_name"] = "my_experiment"
-results = main(settings)
+### Sudoku Demo Pipeline (`scripts/sudoku_demo/`)
+
+A modular sudoku-specific pipeline for generating OCR-based sudoku datasets and running concept-based experiments:
+
+```bash
+python scripts/sudoku_demo/pipeline.py --stages setup cs dnn intervene --seed 171
 ```
 
-#### Running a grid search (big demo table)
+This runs individual scripts as subprocesses:
 
-The `scripts/robot_grid_search.py` script automates large-scale experimentation by systematically varying:
+1. **Setup** (`make_ocr_dataset.py`) -- generates OCR sudoku datasets with handwriting-style digit rendering
+2. **CS training** (`train_cs.py`) -- trains concept-based models on sudoku
+3. **DNN training** (`train_dnn.py`) -- trains DNN baselines
+4. **Intervention** (`intervene.py`) -- runs intervention experiments
 
-- **Subconcept subsets** -- which fine-grained subconcepts (e.g., specific foot shapes) to include
-- **Skew fractions** -- how to distribute subconcept prevalence in training (e.g., 49% pointy_4sided vs. 0.5% pointy_square)
-- **Dropped concepts** -- which subconcepts to exclude from the concept matrix
-- **Logit weights** -- stochastic label model parameters tuned to achieve target P(glorp) for each feature combination
+Additional flags:
 
-Each parameter combination calls `main(settings)` and saves results to a separate run directory. These results are then aggregated into a table for analysis.
+```bash
+# Run only dataset generation
+python scripts/sudoku_demo/pipeline.py --stages setup
 
-```python
-from scripts.robot_grid_search import run_experiments_varying_footshape_subconcepts
-
-# Loops over all valid subconcept combinations and runs main() for each
-run_experiments_varying_footshape_subconcepts()
+# Continue past failures
+python scripts/sudoku_demo/pipeline.py --stages setup cs dnn intervene --ignore-errors
 ```
 
-#### Running alignment studies
+Default settings are centralized in `scripts/sudoku_demo/utils.py` (board size `n=3`, 1000 samples, 20 training epochs, early stopping patience of 5).
 
-Alignment studies use the same `robot_image_training.py` `main()` function but focus on the `human_alignment` setting:
+### Robot Demo Pipeline (`scripts/robot_demo/`)
 
-```python
-settings["human_alignment"] = {
-    "signs": {"has_knees": 1},          # force positive weight for has_knees
-    "features": [                        # prediction constraints
-        (["foot_shape_flat_square"], ["True"], ">=", 0.95),
-    ]
-}
-results = main(settings)
-# results["alignment"] contains accuracy change, predictions changed, aligned weights
+A modular robot-specific pipeline in `scripts/robot_demo/`. The orchestrator is:
+
+```bash
+python scripts/robot_demo/pipeline.py --stages setup cbm dnn intervene --seed 1014
 ```
 
-The alignment stage re-trains the frontend with CVXPY-based constrained optimization, comparing the aligned model's accuracy against the unconstrained baseline.
+This runs individual scripts as subprocesses:
 
-### Key Differences Summary
+1. **Setup** (`setup_dataset_robot.py`) -- generates robot datasets (ideal + subconcept versions)
+2. **CBM training** (`train_cbm.py`) -- trains concept-based models with optional missingness (MCAR/MNAR)
+3. **DNN training** (`train_dnn.py`) -- trains DNN baselines
+4. **Intervention** (`intervene.py`) -- runs K-Flip interventions at thresholds `[0.2, 0.4]`
+5. **Metrics** (`calc_metrics.py`) -- consolidates results into `robot_demo_results.csv`
 
-| Aspect | Sudoku | Robot |
-|--------|--------|-------|
-| **Script structure** | Two separate scripts (generate + train) | Single `main(settings)` runs everything |
-| **Concept detector** | ViT backbone + MLP heads | CNN (RobotConceptClassifier) |
-| **Data splitting** | Standard 5-fold CV | Custom skewed splits with min-fraction constraints |
-| **Label model** | Structural validity (deterministic) | Configurable expression (deterministic or stochastic) |
-| **Concept missingness** | Not supported | MCAR, MAR, MNAR with configurable rates |
-| **Label noise** | Not supported | Configurable noise rate |
-| **Interventions** | Not built into pipeline | K-Flip with configurable budgets and human accuracy |
-| **Alignment testing** | Not built into pipeline | Monotonicity + prediction constraints via CVXPY |
-| **Grid search** | Manual | Automated via `robot_grid_search.py` |
-| **Output** | Model checkpoint + printed metrics | Full run directory with JSON metrics, confusion matrices, checkpoints |
+Additional flags:
+
+```bash
+# Run with robot image drawing enabled
+python scripts/robot_demo/pipeline.py --stages setup --draw
+
+# Run with concept missingness
+python scripts/robot_demo/pipeline.py --stages cbm intervene --missing
+
+# Continue past failures
+python scripts/robot_demo/pipeline.py --stages setup cbm dnn intervene --ignore-errors
+```
+
+Default settings are centralized in `scripts/robot_demo/utils.py` (`DEFAULT_ROBOT_SETTINGS`), including concepts, label model, image size, and seed.
 
 ---
 
@@ -540,7 +582,23 @@ concept-benchmark/
 │   ├── dataset_skewing.py          # Train/test splitting with concept skew
 │   ├── robot_alignment.py          # Human alignment testing
 │   ├── robot_interventions.py      # Intervention utilities
-│   └── robot_utils.py              # Shared robot utilities
+│   ├── robot_utils.py              # Shared robot utilities
+│   ├── robot_demo/                 # Modular robot experiment pipeline
+│   │   ├── pipeline.py             # Orchestrator (setup, cbm, dnn, intervene)
+│   │   ├── setup_dataset_robot.py  # Robot dataset generation
+│   │   ├── train_cbm.py            # CBM training with missingness
+│   │   ├── train_dnn.py            # DNN baseline training
+│   │   ├── intervene.py            # K-Flip intervention experiments
+│   │   ├── calc_metrics.py         # Results consolidation
+│   │   └── utils.py                # Default settings and helpers
+│   └── sudoku_demo/                # Modular sudoku experiment pipeline
+│       ├── pipeline.py             # Orchestrator (setup, cs, dnn, intervene)
+│       ├── make_ocr_dataset.py     # OCR sudoku dataset generation
+│       ├── train_cs.py             # Concept-based model training
+│       ├── train_dnn.py            # DNN baseline training
+│       ├── intervene.py            # Intervention experiments
+│       └── utils.py                # Default settings and helpers
+├── fonts/                          # Font files for handwriting rendering
 ├── tests/                          # Unit tests
 ├── pyproject.toml                  # Project config (uv)
 └── README.md
