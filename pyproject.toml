@@ -3,10 +3,11 @@ name = "concept-benchmark"
 version = "0.0.1"
 description = "Concept Benchmark"
 authors = [
-    { name = "Berk Ustun"},
-    { name =  "Ryan Hammonds" },
-    { name = "Harry Cheon"},
-    { name = "Shreyas Kadekodi"},
+    { name = "Julian Skirzynski" },
+    { name = "Harry Cheon" },
+    { name = "Shreyas Kadekodi" },
+    { name = "Meredith Stewart" },
+    { name = "Berk Ustun" },
 ]
 
 requires-python = ">=3.10"
