@@ -95,9 +95,6 @@ data = create_sudoku_dataset(
 | `max_corrupt` | Max corruption actions per invalid board | `3` |
 | `data_type` | `"image"` or `"tabular"` | `"image"` |
 | `transform` | Feature transform function (see below) | `None` (flatten) |
-| `add_cell_digit_concepts` | Add per-cell digit indicator concepts | `False` |
-| `positions_subset` | Subset of (row, col) positions for cell concepts | `None` (all) |
-| `digits_subset` | Subset of digits for cell concepts | `None` (all) |
 
 #### Concepts
 
@@ -137,8 +134,7 @@ For large-scale sweeps with OCR image datasets, see [Sudoku Demo Pipeline](#sudo
 | Architecture | Description | Use Case |
 |-------------|-------------|----------|
 | **ViT + MLP head** | ViT-Base-Patch16-224 backbone with per-concept MLP heads | Image data (224x224) |
-| **ConceptDetector (default)** | Auto-builds MLP head on top of any embedding model | General purpose |
-| **JointConceptModel** | Wraps any backbone + head into a single module | Custom architectures |
+| **GroupPoolingCNN** | CNN with group-pooling over sudoku units | Tabular data |
 
 ---
 
@@ -200,15 +196,15 @@ data = create_robot_image_dataset(
 
 #### Label Models
 
-The label model determines how the binary species label (glorp vs. drent) is assigned to each robot. There are two types, and the typical workflow is to **start with deterministic** and then use the resulting concept-label relationships to calibrate the **stochastic** model.
+The label model determines how the binary species label (glorp vs. drent) is assigned to each robot.
 
-**Deterministic**: A Python expression evaluated per robot row. Use this first to understand which concept patterns produce which labels:
+**Deterministic**: A Python expression evaluated per robot row:
 ```python
 model="'glorp' if (int(row['mouth_type']=='closed') + int(row['has_knees']=='true')) >= 2 else 'drent'"
 model_type="deterministic",
 ```
 
-**Stochastic**: Uses a logistic function to produce probabilistic labels. The weights, scalar, and intercept are typically tuned based on the deterministic model's concept-label mapping so that the stochastic model targets a desired `P(glorp)` for each feature combination:
+**Stochastic**: Uses a logistic function to produce probabilistic labels. Weights are typically calibrated from a deterministic model's concept-label mapping:
 ```python
 model_type="stochastic",
 logit_scalar=4.2,       # controls sharpness of the decision boundary
@@ -216,11 +212,9 @@ logit_intercept=-2,     # bias term
 logit_weights={"mouth_type": 5, "foot_shape": 8, "has_knees": -5},
 ```
 
-For example, you might first run the deterministic model to identify that `has_knees=true` and `foot_shape=pointy` predict glorp, then set `logit_weights` accordingly with positive values for glorp-predictive concepts and negative values for drent-predictive ones. The `logit_scalar` and `logit_intercept` are then adjusted to achieve the desired noise level around the decision boundary.
-
 #### Text Modality
 
-Robots can also be represented as natural language descriptions instead of images. The text pipeline generates descriptive paragraphs for each robot configuration using template-based rendering with concept-specific placeholders.
+Robots can also be represented as natural language descriptions instead of images.
 
 **Generating text data** from an existing image dataset:
 
@@ -244,7 +238,7 @@ text_data = create_robot_text_dataset(
 | `"structured"` | Simple fixed templates with minimal variation |
 | `"llm"` | Uses an LLM API (Gemini, OpenAI, or Anthropic) to generate captions |
 
-**Template system**: Templates are stored as JSONL files in `concept_benchmark/synthetic/helper/static/text_templates/`. Each line contains a `"when"` condition (matching robot features) and a `"text"` field with placeholders like `{HEAD_NAT}`, `{BODY_NAT}`, `{FEET_NAT}`, etc. that are filled with natural language descriptors (e.g., `{HEAD_NAT}` becomes "boxy" or "dome-like"). Available template sets:
+**Template system**: Templates are JSONL files in `concept_benchmark/synthetic/helper/static/text_templates/`. Each line has a `"when"` condition and a `"text"` field with placeholders (e.g., `{HEAD_NAT}`, `{BODY_NAT}`) that are filled with natural language descriptors. Available template sets:
 
 - `HardCorpus.jsonl` -- main template set
 - `HardCorpus_NoAnt.jsonl` -- templates with antennae concept redacted
@@ -283,7 +277,7 @@ For large-scale sweeps over noise, missingness, and target accuracy, see [Robot 
 
 ## Running Large-Scale Experiments
 
-The codebase includes dedicated pipelines for running large-scale experiments that sweep over concept noise, target accuracy, and concept missingness. These orchestrated pipelines produce the paper's result tables.
+The codebase includes dedicated pipelines for running large-scale experiments that sweep over concept noise, target accuracy, and concept missingness.
 
 ### Sudoku Demo Pipeline (`scripts/sudoku_demo/`)
 
