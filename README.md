@@ -122,46 +122,15 @@ from concept_benchmark.synthetic.sudoku import (
 )
 ```
 
-### Training a Sudoku Model
+### Running a Single Experiment
 
-```python
-from concept_benchmark.models import ConceptDetector, FrontEndModel
-from concept_benchmark.synthetic.sudoku import create_sudoku_dataset, image_transform
-from transformers import ViTModel
-import torch
+Run the full CBM pipeline (data generation + concept model training + DNN baseline + evaluation) in one command:
 
-# 1. Create dataset
-data = create_sudoku_dataset(n=3, n_samples=1000, data_type="image", transform=image_transform)
-data.generate_cvindices(seed=42)
-data.split("K05N01", fold_num_validation=4, fold_num_test=5)
-
-# 2. Set up ViT backbone
-class ViTWrapper(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.vit = ViTModel.from_pretrained("google/vit-base-patch16-224")
-    def forward(self, x):
-        return self.vit(pixel_values=x).last_hidden_state[:, 0, :]
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-embed_model = ViTWrapper().to(device)
-
-# 3. Train concept detector
-cd = ConceptDetector(embedding_model=embed_model)
-cd.fit(data.training, data.validation, freeze=True,
-       embed_params={"device": device},
-       fit_params={"epochs": 10, "device": "cpu", "hidden_size": 360})
-
-# 4. Evaluate concepts
-c_pred = cd.predict(data.test, embed_params={"device": device}) > 0.5
-print("Concept accuracy:", (c_pred == data.test.C).mean(axis=0))
-
-# 5. Train frontend (concepts -> label)
-fe = FrontEndModel()
-fe.fit(data.training.C, data.training.y)
-preds = fe.predict(c_pred.astype(float))
-print(f"Label accuracy: {(preds == data.test.y).mean():.4f}")
+```bash
+python scripts/sudoku_pipeline.py --n 3 --n-samples 1000 --seed 42 --epochs 20
 ```
+
+For large-scale sweeps with OCR image datasets, see [Sudoku Demo Pipeline](#sudoku-demo-pipeline-scriptssudoku_demo) below.
 
 ### Sudoku Model Architectures
 
@@ -283,6 +252,22 @@ text_data = create_robot_text_dataset(
 - `HardCorpus_FootGeneric.jsonl` -- generic foot descriptions
 
 **Text concept detection** uses a transformer-based model (`TextConceptDetector`) that learns to predict robot concepts from text. The default backbone is `distilbert-base-uncased`, with optional alternatives (`bert-tiny`, `bert-mini`, `bert-small`). The detector is trained with per-concept binary classification heads and optimized thresholds via ROC analysis.
+
+### Running a Single Experiment
+
+**Image pipeline** -- full CBM workflow (data generation, concept detector training, frontend training, intervention, alignment):
+
+```bash
+python scripts/robot_image_pipeline.py
+```
+
+**Text pipeline** -- text-modality CBM workflow (text generation, concept detection, evaluation, intervention):
+
+```bash
+python scripts/robot_text_pipeline.py
+```
+
+For large-scale sweeps over noise, missingness, and target accuracy, see [Robot Demo Pipeline](#robot-demo-pipeline-scriptsrobot_demo) below.
 
 ### Robot Model Architectures
 
