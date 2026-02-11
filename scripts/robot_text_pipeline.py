@@ -1,4 +1,4 @@
-# scripts/run_robot_demos.py
+# scripts/robot_text_pipeline.py
 import glob
 from pathlib import Path
 import sys, subprocess, shlex, os
@@ -11,8 +11,8 @@ from concept_benchmark.paths import repo_dir, results_dir, pkg_dir
 
 ROOT = repo_dir
 PY = sys.executable
-GEN = ROOT / "scripts" / "gen_text_samples.py"
-DNN = ROOT / "scripts" / "robot_baseline.py"
+GEN = ROOT / "scripts" / "utils" / "gen_text_samples.py"
+DNN = ROOT / "scripts" / "utils" / "robot_baseline.py"
 ENV = os.environ.copy()
 ENV["PYTHONPATH"] = str(ROOT) + (os.pathsep + ENV.get("PYTHONPATH", ""))
 

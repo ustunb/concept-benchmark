@@ -382,30 +382,16 @@ concept-benchmark/
 │           ├── robot_draw.py       # Robot image rendering
 │           └── textgen.py          # Text description generation
 ├── scripts/
-│   ├── run_sudoku.py               # Sudoku dataset CLI
-│   ├── sudoku_train.py             # Sudoku training script
-│   ├── robot_image_training.py     # Robot full pipeline (data + train + eval)
-│   ├── run_robot_demos.py          # Robot text/image demo runner
-│   ├── robot_grid_search.py        # Automated experiment sweeps
-│   ├── dataset_skewing.py          # Train/test splitting with concept skew
-│   ├── robot_alignment.py          # Human alignment testing
-│   ├── robot_interventions.py      # Intervention utilities
-│   ├── robot_utils.py              # Shared robot utilities
-│   ├── robot_demo/                 # Modular robot experiment pipeline
+│   ├── sudoku_pipeline.py          # Sudoku single-experiment pipeline
+│   ├── robot_image_pipeline.py     # Robot image single-experiment pipeline
+│   ├── robot_text_pipeline.py      # Robot text single-experiment pipeline
+│   ├── utils/                      # Shared utilities for pipelines
+│   ├── robot_demo/                 # Large-scale robot experiment pipeline
 │   │   ├── pipeline.py             # Orchestrator (setup, cbm, dnn, intervene)
-│   │   ├── setup_dataset_robot.py  # Robot dataset generation
-│   │   ├── train_cbm.py            # CBM training with missingness
-│   │   ├── train_dnn.py            # DNN baseline training
-│   │   ├── intervene.py            # K-Flip intervention experiments
-│   │   ├── calc_metrics.py         # Results consolidation
-│   │   └── utils.py                # Default settings and helpers
-│   └── sudoku_demo/                # Modular sudoku experiment pipeline
+│   │   └── ...
+│   └── sudoku_demo/                # Large-scale sudoku experiment pipeline
 │       ├── pipeline.py             # Orchestrator (setup, cs, dnn, intervene)
-│       ├── make_ocr_dataset.py     # OCR sudoku dataset generation
-│       ├── train_cs.py             # Concept-based model training
-│       ├── train_dnn.py            # DNN baseline training
-│       ├── intervene.py            # Intervention experiments
-│       └── utils.py                # Default settings and helpers
+│       └── ...
 ├── fonts/                          # Font files for handwriting rendering
 ├── tests/                          # Unit tests
 ├── pyproject.toml                  # Project config (uv)

@@ -15,7 +15,7 @@ from utils import (
 from concept_benchmark.ext.fileutils import load
 from concept_benchmark.paths import results_dir
 
-from scripts.robot_image_training import test_interventions
+from scripts.robot_image_pipeline import test_interventions
 
 THRESH = [0.2, 0.4]
 METRIC_COLS = [

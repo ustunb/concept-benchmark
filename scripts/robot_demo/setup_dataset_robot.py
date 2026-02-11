@@ -12,7 +12,7 @@ from utils import (
     SUBCONCEPT_DROP
 )
 
-from scripts.dataset_skewing import create_skewed_splits_full
+from scripts.utils.dataset_skewing import create_skewed_splits_full
 
 settings = DEFAULT_ROBOT_SETTINGS.copy()
 

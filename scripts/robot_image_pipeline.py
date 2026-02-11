@@ -25,11 +25,11 @@ from concept_benchmark.models import (
 )
 from concept_benchmark.paths import results_dir
 from concept_benchmark.synthetic.robot import create_synthetic_dataset
-from scripts.dataset_skewing import create_skewed_splits, filter_training_by_string
-from scripts.dnn_training import train_eval_image
-from scripts.robot_alignment import test_alignment
-from scripts.robot_invariance_test import test_concept_detector_invariance
-from scripts.robot_utils import (
+from scripts.utils.dataset_skewing import create_skewed_splits, filter_training_by_string
+from scripts.utils.dnn_training import train_eval_image
+from scripts.utils.robot_alignment import test_alignment
+from scripts.utils.robot_invariance_test import test_concept_detector_invariance
+from scripts.utils.robot_utils import (
     _apply_label_noise,
     _apply_missing,
     _get_accuracies_per_subconcept,

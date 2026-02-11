@@ -27,7 +27,7 @@ from concept_benchmark.intervention import ConceptInterventionRunner, Interventi
 from concept_benchmark.kflip import KFlipInterventionStrategy
 from types import SimpleNamespace
 import argparse, psutil
-from scripts.lfcbm_text import LabelFreeDetector
+from scripts.utils.lfcbm_text import LabelFreeDetector
 from itertools import product, combinations
 import builtins, functools
 
