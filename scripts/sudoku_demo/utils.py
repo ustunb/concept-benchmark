@@ -1,9 +1,26 @@
+import os
+import platform
 import numpy as np
 import torch
 import torch.nn as nn
 from pathlib import Path
 
 from concept_benchmark.paths import data_dir, results_dir
+
+# -- Force num_workers=0 on macOS to avoid MPS/fork hangs ----------------
+if platform.system() == "Darwin":
+    import torch.utils.data as _tud
+    import concept_benchmark.data as _cb_data
+    _OrigDataLoader = _tud.DataLoader
+
+    def _safe_dataloader(*args, **kwargs):
+        kwargs["num_workers"] = 0
+        kwargs["pin_memory"] = False
+        return _OrigDataLoader(*args, **kwargs)
+
+    _tud.DataLoader = _safe_dataloader
+    _cb_data.DataLoader = _safe_dataloader
+# -------------------------------------------------------------------------
 
 MISSING_TYPES = ["mcar", "mnar"]
 
@@ -69,7 +86,15 @@ def get_results_fule(
     
 
 def determine_device():
-    """Determine the device to be used for computations."""
+    """Determine the device to be used for computations.
+
+    Respects PYTORCH_DEVICE env var (e.g. ``PYTORCH_DEVICE=cpu``) to override
+    auto-detection.  MPS on macOS can hang with image workloads, so setting
+    ``PYTORCH_DEVICE=cpu`` is a safe fallback.
+    """
+    override = os.environ.get("PYTORCH_DEVICE")
+    if override:
+        return torch.device(override)
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif torch.backends.mps.is_available():

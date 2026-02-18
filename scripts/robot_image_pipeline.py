@@ -1,6 +1,8 @@
 import copy
 import json
+import os
 import pickle
+import platform
 import time
 from pathlib import Path
 from typing import List, Optional, Union
@@ -11,6 +13,21 @@ import torch
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import confusion_matrix
 from torchvision import transforms
+
+# -- Force num_workers=0 on macOS to avoid MPS/fork hangs ----------------
+if platform.system() == "Darwin":
+    import torch.utils.data as _tud
+    import concept_benchmark.data as _cb_data
+    _OrigDataLoader = _tud.DataLoader
+
+    def _safe_dataloader(*args, **kwargs):
+        kwargs["num_workers"] = 0
+        kwargs["pin_memory"] = False
+        return _OrigDataLoader(*args, **kwargs)
+
+    _tud.DataLoader = _safe_dataloader
+    _cb_data.DataLoader = _safe_dataloader
+# -------------------------------------------------------------------------
 
 from concept_benchmark.intervention import (
     ConceptInterventionRunner,
@@ -46,8 +63,8 @@ settings = {
     "image_size": "medium",
     "color_mode": "color",
     "train_dnn": 0,
-    "seed": 1002,
-    "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy'))>= 3 else 'drent'",
+    "seed": 1014,
+    "model": "'glorp' if (int(row['mouth_type']=='closed') + int(row['foot_shape']=='pointy') + int(row['has_knees']=='true'))>= 3 else 'drent'",
     'dataset_characterization': "",
     "test_size": 10000,
     "train_size": 3800,
@@ -86,19 +103,20 @@ settings = {
     "drop_concepts": ["foot_shape_flat_rounded",
                       "foot_shape_pointy_trapezoid",
                       'foot_shape_pointy_3sided', 'foot_shape_flat_lshaped',
-                      'foot_shape'],#'foot_shape_pointy_4sided', 'foot_shape_pointy_square', 'foot_shape_pointy_rounded', 'foot_shape_flat_5sided', 'foot_shape_flat_square','foot_shape_flat_trapezoid' ],
+                      'foot_shape'],
     "human_alignment": {
-        # "signs": {
-        #     "foot_shape_pointy_square": -1
-        # },
+        "signs": {
+            "has_knees": 1
+        },
         # "features": [
-        #     (["foot_shape_pointy_square", "mouth_type"], "<=", 0.05)
+        #     (["foot_shape_flat_square"], ["True"], ">=", 0.95),
+        #     (["foot_shape_flat_trapezoid"], ["True"], ">=", 0.95),
+        #     #(["foot_shape_flat_square", "mouth_type"], ["True", "closed"], ">=", 0.95),
+        #     #(["foot_shape_pointy_rounded", "mouth_type"], ["True", "open"], "<=", 0.05),
+        #     #(["foot_shape_pointy_square", "mouth_type"], ["True", "open"], "<=", 0.05)
         # ]
     },
     "model_type": "stochastic",
-    "logit_scalar": 4.2,
-    "logit_intercept": -2,
-    "logit_weights": {"mouth_type": 5, "foot_shape": 8, "has_knees": -5},
     "logit_scalar": 4.2,
     "logit_intercept": -2,
     "logit_weights": {"mouth_type": 5, "foot_shape": 8, "has_knees": -5},
@@ -114,14 +132,14 @@ settings = {
                      {'concepts': {'foot_shape_flat_trapezoid': 1}, 'min_fraction': 0.005},
                      {'concepts': {'foot_shape_flat_5sided': 1}, 'min_fraction': 0.49},
                      ],
-    "budget": [12],
+    "budget": [3],
     "intervention_accuracy": 1.0,
     "intervention_threshold": 0.2,
     "epochs": 1,
     "out_dir": str(results_dir / "robots"),
-    "run_name": "cbm_run_1002_subconcepts_newalignment",
-    "load_detector": str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts_newalignment" / "detector_dnn_robots_image_stochastic_complete__skewint-acc90_seed1002.pt")),
-    "load_frontend": ""#,str(Path(results_dir / "robots" / "cbm_run_1002_subconcepts" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc90_seed1002.pkl")),
+    "run_name": "lol scbm",
+    "load_detector": "",#str(Path(results_dir / "robots" / "aaa_Test2" / "detector_dnn_robots_image_stochastic_complete__skewint-acc100_seed1012.pt")),
+    "load_frontend": "",#str(Path(results_dir / "robots" / "aaa_Test2" / "frontend_logreg_robots_image_stochastic_complete__skewint-acc100_seed1012.pkl")),
 }
 
 
@@ -381,8 +399,17 @@ def train_concept_detector(settings, config, device, int_acc_tag, label_noise_ta
 
 
 def train_frontend(H_te, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag, miss_tag, model_type_tag, run_dir,
-                   seed_tag, skew_tag, test, train):
-    fe = FrontEndModel()
+                   seed_tag, skew_tag, test, train, monotonicity_constraints=None, prediction_constraints=None):
+    use_cvxpy = bool(monotonicity_constraints or prediction_constraints)
+    if use_cvxpy:
+        fe = FrontEndModelCVXPY(
+            concept_names=list(test.concepts),
+            monotonicity_constraints=monotonicity_constraints or {},
+            prediction_constraints=prediction_constraints or [],
+            concept_pos_value_map={c: test.concept_positive_values[c] for c in test.concepts} if hasattr(test, 'concept_positive_values') else None,
+        )
+    else:
+        fe = FrontEndModel()
     fe_name = f"frontend_logreg_robots_image_{model_type_tag}{miss_tag}{label_noise_tag}{skew_tag}{int_acc_tag}_{seed_tag}.pkl"
     if sttngs.get("load_frontend", False):
         with open(sttngs["load_frontend"], "rb") as f:
@@ -411,9 +438,8 @@ def train_frontend(H_te, h_train, prob_train, sttngs, int_acc_tag, label_noise_t
     acc_gt = float((y_pred_gt.argmax(1) == test.y.astype(int)).mean())
     concept_acc_mean = float((H_te == test.C).mean())
     acc_det_tr = float((fe.predict(h_train) == train.y.astype(int)).mean())
-    acc_det_tr = float((fe.predict(h_train) == train.y.astype(int)).mean())
 
-    if not cvxpy:
+    if not use_cvxpy:
         print("\n=== Learned Frontend Weights ===")
         for i, concept in enumerate(test.concepts):
             print(f"  {concept}: {fe.model.coef_[0, i]:.4f}")
@@ -530,7 +556,7 @@ def test_alignment(fe, h_test, h_train, prob_train, prob_test, sttngs, int_acc_t
     test_labels = test.y.astype(int)
     original_frontend = fe
     print(f"Aligning the model with the following constraints: {monotonicity_constraints} {prediction_constraints}")
-    acc_det, _, _, aligned_frontend, _, _ = train_frontend(h_test, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag,
+    acc_det, _, _, aligned_frontend, _, _, acc_det_tr = train_frontend(h_test, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag,
                                                      miss_tag, model_type_tag, run_dir, seed_tag, skew_tag, test, train,
                                                      monotonicity_constraints, prediction_constraints)
 
@@ -564,6 +590,7 @@ def test_alignment(fe, h_test, h_train, prob_train, prob_test, sttngs, int_acc_t
     _, _, intervention_results = test_interventions(prob_test, sttngs, acc_det, aligned_frontend, test)
 
     alignment_stats = {
+        'training_accuracy': float(acc_det_tr),
         'original_accuracy': float(original_acc),
         'aligned_accuracy': float(aligned_acc),
         'accuracy_change': float(aligned_acc - original_acc),
@@ -581,7 +608,7 @@ def test_alignment(fe, h_test, h_train, prob_train, prob_test, sttngs, int_acc_t
     test_labels = test.y.astype(int)
     original_frontend = fe
     print(f"Aligning the model with the following constraints: {monotonicity_constraints} {prediction_constraints}")
-    acc_det, _, _, aligned_frontend, _, _ = train_frontend(h_test, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag,
+    acc_det, _, _, aligned_frontend, _, _, acc_det_tr = train_frontend(h_test, h_train, prob_train, sttngs, int_acc_tag, label_noise_tag,
                                                      miss_tag, model_type_tag, run_dir, seed_tag, skew_tag, test, train,
                                                      monotonicity_constraints, prediction_constraints)
 
@@ -615,6 +642,7 @@ def test_alignment(fe, h_test, h_train, prob_train, prob_test, sttngs, int_acc_t
     _, _, intervention_results = test_interventions(prob_test, sttngs, acc_det, aligned_frontend, test)
 
     alignment_stats = {
+        'training_accuracy': float(acc_det_tr),
         'original_accuracy': float(original_acc),
         'aligned_accuracy': float(aligned_acc),
         'accuracy_change': float(aligned_acc - original_acc),
@@ -824,12 +852,13 @@ def main(sttngs):
     ###########################################################################
     ###########################    MODEL TRAINING    ##########################
     ###########################################################################
-    device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
+    device = os.environ.get("PYTORCH_DEVICE") or ("cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"))
+    _macos = platform.system() == "Darwin"
     config = {
         'device': device,
         'batch_size': 32,
-        'num_workers': 0 if device == 'mps' else 12,
-        'pin_memory': False if device == 'mps' else True,
+        'num_workers': 0 if _macos else 12,
+        'pin_memory': False if _macos else True,
     }
 
     cd, det_path = train_concept_detector(S, config, device, int_acc_tag, label_noise_tag, miss_tag, model_type_tag,
@@ -888,7 +917,7 @@ def main(sttngs):
 
     # align the model with new weights
     alignment_stats = {}
-    if S.get("human_alignment", {}) != None:
+    if S.get("human_alignment") and (S["human_alignment"].get("signs") or S["human_alignment"].get("features")):
         sign_alignment = S["human_alignment"].get("signs", {})
         prediction_alignment = S["human_alignment"].get("features", [])
         alignment_stats = test_alignment(fe, H_te, H_tr, P_tr, P_te, S, int_acc_tag, label_noise_tag, miss_tag, model_type_tag,

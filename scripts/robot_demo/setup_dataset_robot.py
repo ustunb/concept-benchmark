@@ -6,8 +6,8 @@ from torchvision import transforms
 
 from concept_benchmark.ext.fileutils import save
 from concept_benchmark.synthetic.robot import create_synthetic_dataset
-from utils import (
-    get_dataset_file, 
+from scripts.robot_demo.utils import (
+    get_dataset_file,
     DEFAULT_ROBOT_SETTINGS,
     SUBCONCEPT_DROP
 )
@@ -20,10 +20,13 @@ if Process(pid=os.getppid()).name() not in ("node"):
     p = ArgumentParser()
     p.add_argument('--data_type', type=str, choices=['image', 'text'], default=settings['data_type'])
     p.add_argument('--subconcept', action='store_true') 
-    p.add_argument('--draw', action='store_true')
+    p.add_argument('--no-draw', action='store_true', help='skip image generation')
     p.add_argument('--seed', type=int, default=settings['seed'])
     args, _ = p.parse_known_args()
     settings.update(vars(args))
+    if args.no_draw:
+        settings['draw'] = 0
+    settings.pop('no_draw', None)
 
     if args.subconcept:
         settings['drop_concepts'] = SUBCONCEPT_DROP

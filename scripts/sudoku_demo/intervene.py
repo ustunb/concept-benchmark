@@ -1,12 +1,13 @@
 # %%
 import os
+import platform
 import pandas as pd
 import numpy as np
 import torch
 from argparse import ArgumentParser
 
 from psutil import Process
-from utils import (
+from scripts.sudoku_demo.utils import (
     DEFAULT_SUDOKU_SETTINGS,
     determine_device,
     get_dataset_file,
@@ -47,10 +48,11 @@ if Process(pid=os.getppid()).name() not in ("node"):
     args, _ = p.parse_known_args()
     settings.update(vars(args))
 
+_macos = platform.system() == "Darwin"
 loader_config = {
     'batch_size': 32,
-    'num_workers': 12,
-    'pin_memory': True
+    'num_workers': 0 if _macos else 12,
+    'pin_memory': False if _macos else True,
 }
 
 # load training data (for validation set)

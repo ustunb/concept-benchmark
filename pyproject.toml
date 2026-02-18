@@ -26,19 +26,22 @@ dependencies = [
     "pyarrow>=21.0.0",
     "fastparquet>=2024.11.0",
     "datasets>=4.0.0",
-    "pillow>=11.3.0",
+    "pillow>=10.0.0",
     "skorch>=1.2.0",
     "torcheval>=0.0.7",
     "torchvision>=0.23.0",
     "albumentations",
     "colorir>=2.0.0",
     "pero>=0.18.0",
-    "Pillow>=9.5.0",
     "pycairo>=1.28.0",
     "transformers>=4.55.2",
     "wand>=0.6.13",
     "cvxpy>=1.4.0",
+    "pyyaml>=6.0",
 ]
+
+[project.scripts]
+cbm-benchmark = "concept_benchmark.cli:main"
 
 [dependency-groups]
 dev = [

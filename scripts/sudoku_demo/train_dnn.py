@@ -1,11 +1,13 @@
 import copy
 import os
+import platform
 from argparse import ArgumentParser
 
 import torch
 import torch.nn as nn
 from psutil import Process
 from tqdm import tqdm
+
 from scripts.sudoku_demo.utils import (
     DEFAULT_SUDOKU_SETTINGS,
     determine_device,
@@ -45,10 +47,11 @@ print(f"Using device: {device}")
 criterion = nn.BCELoss() # Binary Cross-Entropy Loss for binary classification
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
+_macos = platform.system() == "Darwin"
 loader_config = {
     'batch_size': 32,
-    'num_workers': 12,
-    'pin_memory': True
+    'num_workers': 0 if _macos else 12,
+    'pin_memory': False if _macos else True,
 }
 
 train_loader = data.training.loader(shuffle=True, **loader_config)

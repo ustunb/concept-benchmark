@@ -1,10 +1,11 @@
 import os
+import platform
 from argparse import ArgumentParser
 
 import numpy as np
 import torch
 from psutil import Process
-from utils import (
+from scripts.robot_demo.utils import (
     DEFAULT_ROBOT_SETTINGS,
     INPUT_MAP,
     determine_device,
@@ -19,15 +20,6 @@ from concept_benchmark.models import (
     RobotConceptClassifier,
 )
 
-import torch.utils.data
-_original = torch.utils.data.DataLoader
-
-def force_safe_dataloader(*args, **kwargs):
-    kwargs['num_workers'] = 0
-    kwargs['pin_memory'] = False
-    return _original(*args, **kwargs)
-
-torch.utils.data.DataLoader = force_safe_dataloader
 
 
 device = determine_device()
@@ -60,11 +52,12 @@ if settings['concept_missing_mech'] != 'none':
     data.training.concept_missing = True
     # data.validation.concept_missing = True
 
+_macos = platform.system() == "Darwin"
 config = {
     'device': device,
     'batch_size': 32,
-    'num_workers': 0 if str(device) == 'mps' else 12,
-    'pin_memory': False if str(device) == 'mps' else True,
+    'num_workers': 0 if _macos else 12,
+    'pin_memory': False if _macos else True,
 }
 torch.manual_seed(int(settings["seed"]))
 

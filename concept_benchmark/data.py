@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import platform
 import warnings
 from collections.abc import Callable, Mapping, Set
 from pathlib import Path
@@ -8,8 +9,19 @@ import numpy as np
 import pandas as pd
 import torch
 from PIL import Image
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader as _TorchDataLoader, Dataset
 from tqdm import tqdm
+
+# On macOS, forked workers + MPS can deadlock. Wrap DataLoader to force
+# single-process loading so every call site is safe without remembering
+# to pass num_workers=0.
+if platform.system() == "Darwin":
+    def DataLoader(*args, **kwargs):
+        kwargs["num_workers"] = 0
+        kwargs["pin_memory"] = False
+        return _TorchDataLoader(*args, **kwargs)
+else:
+    DataLoader = _TorchDataLoader
 
 from .cv import generate_cvindices, validate_cvindices
 from .helper.data_utils import (
@@ -1168,7 +1180,8 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         if self.base_dir is not None:
             img_path = self.base_dir / img_path
         try:
-            image = Image.open(img_path).convert("RGB")
+            import io
+            image = Image.open(io.BytesIO(Path(img_path).read_bytes())).convert("RGB")
             if self.preprocess is not None:
                 image = self.preprocess(image)
             if self.transform is not None:

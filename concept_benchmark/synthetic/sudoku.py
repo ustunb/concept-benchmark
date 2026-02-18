@@ -13,6 +13,14 @@ from datetime import datetime
 from tqdm.auto import tqdm
 from typing import Sequence, Tuple, Optional 
 
+def _get_default_font(size):
+    """Load a default font at the requested size, compatible with Pillow <10 and >=10."""
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
+
+
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.paths import data_dir
 from concept_benchmark.synthetic.helper.sudoku_helper import (
@@ -285,9 +293,9 @@ def image_transform(
     # Base font for non-handwritten/letters
     try:
         font = (ImageFont.truetype(font_path, font_size) if font_path
-                else ImageFont.load_default(size=font_size))
+                else _get_default_font(font_size))
     except Exception:
-        font = ImageFont.load_default(size=font_size)
+        font = _get_default_font(font_size)
 
     def cell_rect(r, c):
         x0 = margin_px + c * cell_px
@@ -459,11 +467,11 @@ def image_transform(
 
             if starters[r, c]:
                 # ALWAYS printed font for starters
-                tb = draw.textbbox((0, 0), text, font=ImageFont.load_default(size=font_size))
+                tb = draw.textbbox((0, 0), text, font=_get_default_font(font_size))
                 tw, th = tb[2] - tb[0], tb[3] - tb[1]
                 tx = x0 + (cell_px - tw) / 2
                 ty = y0 + (cell_px - th) / 2
-                draw.text((tx, ty), text, fill=given_color, font=ImageFont.load_default(size=font_size))
+                draw.text((tx, ty), text, fill=given_color, font=_get_default_font(font_size))
             else:
                 # Non-starters: handwritten if possible, otherwise printed
                 if text.isdigit() and (generator is not None):

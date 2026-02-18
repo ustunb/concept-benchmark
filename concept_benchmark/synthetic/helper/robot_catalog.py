@@ -172,14 +172,12 @@ def generate_robot_catalog(
     output_path = Path(output_directory)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # delete old image files if they exist
-    if draw:
-        for file in output_path.glob("robot_[0-9][0-9][0-9].*"):
-            file.unlink()
-
-        if verbose:
-            print(f"Generating {len(catalog_df)} robot images...")
     png_filenames = []
+    n_skipped = 0
+    n_generated = 0
+
+    if draw and verbose:
+        print(f"Drawing up to {len(catalog_df)} robot images (skipping existing)...")
 
     color_lefts, color_rights = [], []
     for k, features in tqdm(init_catalog_df.iterrows(), total=len(catalog_df)):
@@ -187,7 +185,7 @@ def generate_robot_catalog(
 
         png_file = output_path / png_filename
 
-        if draw:
+        if draw and not png_file.exists():
             # Generate robot images
             png_robot = draw_robot(
                 filetype="png",
@@ -220,6 +218,9 @@ def generate_robot_catalog(
 
             if color_mode in ["grayscale", "greyscale"]:
                 convert_to_grayscale(str(png_file))
+            n_generated += 1
+        elif draw:
+            n_skipped += 1
 
         png_filenames.append(png_filename)
         color_scheme_id = np.mod(
@@ -228,6 +229,9 @@ def generate_robot_catalog(
         color_left, color_right = COLOR_SCHEMES[color_scheme_id]
         color_lefts.append(color_left)
         color_rights.append(color_right)
+
+    if draw and verbose:
+        print(f"Images: {n_generated} generated, {n_skipped} skipped (already existed)")
 
     # Add filename columns
     catalog_df["png_filename"] = png_filenames

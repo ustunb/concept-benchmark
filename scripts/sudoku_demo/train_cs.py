@@ -1,4 +1,5 @@
 import os
+import platform
 from argparse import ArgumentParser
 
 import numpy as np
@@ -34,9 +35,7 @@ if Process(pid=os.getppid()).name() not in ("node"):
     args, _ = p.parse_known_args()
     settings.update(vars(args))
 
-# data = load(get_dataset_file(data_type="image", **settings) / "sudoku_dataset.pkl")
-sudoku_dir = data_dir / "sudoku"
-data = load(sudoku_dir / "demo_ocr_m_21_tabular" / "sudoku_dataset.pkl")
+data = load(get_dataset_file(data_type="tabular", **settings) / "sudoku_dataset.pkl")
 data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=settings['seed'])
 data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
 
@@ -51,11 +50,12 @@ if settings['concept_missing_mech'] != 'none':
     data.training.concept_missing = True
     data.validation.concept_missing = True
 
+_macos = platform.system() == "Darwin"
 config = {
     'device': device,
     'batch_size': 32,
-    'num_workers': 0 if device == 'mps' else 12,
-    'pin_memory': False if device == 'mps' else True,
+    'num_workers': 0 if _macos else 12,
+    'pin_memory': False if _macos else True,
 }
 torch.manual_seed(int(settings["seed"]))
 

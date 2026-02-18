@@ -3,7 +3,7 @@ import pandas as pd
 from argparse import ArgumentParser
 
 from psutil import Process
-from utils import (
+from scripts.robot_demo.utils import (
     DEFAULT_ROBOT_SETTINGS,
     INTERVENTION_SETTINGS,
     determine_device,

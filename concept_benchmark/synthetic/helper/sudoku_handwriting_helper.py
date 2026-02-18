@@ -1,5 +1,13 @@
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import numpy as np
+
+
+def _get_default_font(size):
+    """Load a default font at the requested size, compatible with Pillow <10 and >=10."""
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
 import random 
 import os
 import glob
@@ -334,7 +342,7 @@ def _render_inline_candidates(generator, opts, color, size, seed_base=0):
                 rng_seed=seed_base + 17 * j + int(d) * 101
             )
         else:
-            fmini = ImageFont.load_default(size=size)
+            fmini = _get_default_font(size)
             tb = ImageDraw.Draw(Image.new("RGB", (1,1))).textbbox((0,0), str(d), font=fmini)
             w, h = tb[2]-tb[0], tb[3]-tb[1]
             im = Image.new("RGBA", (w, h), (255,255,255,0))
