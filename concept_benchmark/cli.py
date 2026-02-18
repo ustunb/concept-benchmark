@@ -4,6 +4,7 @@ Usage:
     cbm-benchmark robot --seed 1014 --stages setup cbm dnn intervene
     cbm-benchmark robot --config my_config.yaml
     cbm-benchmark sudoku --seed 171 --stages setup ocr cs dnn intervene
+    cbm-benchmark robot-text --seed 1337 --stages setup cbm dnn intervene
 """
 from __future__ import annotations
 
@@ -38,6 +39,20 @@ def _sudoku_cmd(args: argparse.Namespace) -> None:
     run(config, stages=args.stages)
 
 
+def _robot_text_cmd(args: argparse.Namespace) -> None:
+    from concept_benchmark.benchmarks.robot_text import run
+    from concept_benchmark.config import RobotTextBenchmarkConfig
+
+    if args.config:
+        config = RobotTextBenchmarkConfig.from_yaml(args.config)
+    else:
+        config = RobotTextBenchmarkConfig(seed=args.seed)
+    if args.lfcbm:
+        config.lfcbm_enable = True
+
+    run(config, stages=args.stages)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="cbm-benchmark",
@@ -66,6 +81,16 @@ def main(argv: list[str] | None = None) -> None:
     )
     sudoku_p.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
     sudoku_p.set_defaults(func=_sudoku_cmd)
+
+    # Robot-text subcommand
+    robot_text_p = subparsers.add_parser("robot-text", help="Run the robot text classification benchmark.")
+    robot_text_p.add_argument("--seed", type=int, default=1337)
+    robot_text_p.add_argument(
+        "--stages", nargs="+", default=["setup", "cbm", "dnn", "intervene", "align", "collect"],
+    )
+    robot_text_p.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
+    robot_text_p.add_argument("--lfcbm", action="store_true", help="Also run LFCBM variant.")
+    robot_text_p.set_defaults(func=_robot_text_cmd)
 
     args = parser.parse_args(argv)
     args.func(args)

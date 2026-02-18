@@ -39,39 +39,32 @@ To reproduce the benchmark results from the paper (Skirzynski et al., "Measuring
 ### Robot Benchmark
 
 ```bash
-# 1. Run the full pipeline (generates data, trains all models, runs interventions + alignment)
+# Run the full pipeline (generates data, trains all models, runs interventions + alignment)
 cbm-benchmark robot --seed 1014
-
-# 2. Print the paper's tables from the results CSV
-python scripts/reproduce_robot_table.py
 ```
 
-Step 1 runs all stages: `setup`, `cbm`, `dnn`, `intervene`, `align`, `collect`. The `collect` stage aggregates all saved artifacts into `results/robot_demo_results.csv`:
-
-```bash
-python scripts/reproduce_robot_table.py --table main       # DNN + CBM k=0/1/3/max
-python scripts/reproduce_robot_table.py --table alignment   # aligned CBM comparison
-python scripts/reproduce_robot_table.py --table budget      # budget sweep across datasets
-python scripts/reproduce_robot_table.py --table full        # all rows including MCAR/MNAR
-```
+This runs all stages: `setup`, `cbm`, `dnn`, `intervene`, `align`, `collect`. The `collect` stage aggregates all saved artifacts into `results/robot_demo_results.csv`.
 
 ### Sudoku Benchmark
 
 ```bash
-# 1. Run the full pipeline (mc=9 by default)
+# Run the full pipeline (mc=9 by default)
 cbm-benchmark sudoku --seed 171
-
-# 2. Print the paper's tables from the results CSV
-python scripts/reproduce_sudoku_table.py
 ```
 
-Step 1 runs all stages: `setup`, `ocr`, `cs`, `dnn`, `intervene`, `selective`, `align`, `collect`. The `collect` stage aggregates results into `results/sudoku_demo_results.csv`:
+This runs all stages: `setup`, `ocr`, `cs`, `dnn`, `intervene`, `selective`, `align`, `collect`. The `collect` stage aggregates results into `results/sudoku_demo_results.csv`.
+
+### Robot Text Benchmark
 
 ```bash
-python scripts/reproduce_sudoku_table.py --table main       # DNN + CS k=0/1/3/max
-python scripts/reproduce_sudoku_table.py --table selective   # selective accuracy summary
-python scripts/reproduce_sudoku_table.py --table full        # all rows with intervention details
+# Run the full text-modality pipeline
+cbm-benchmark robot-text --seed 1337
+
+# Also run LFCBM variant
+cbm-benchmark robot-text --seed 1337 --lfcbm
 ```
+
+This runs stages: `setup`, `cbm`, `dnn`, `intervene`, `align`, `collect`. Results are saved to `results/robot_text_results.csv`.
 
 ### Re-collecting Without Re-training
 
@@ -79,10 +72,7 @@ python scripts/reproduce_sudoku_table.py --table full        # all rows with int
 # Just re-aggregate saved artifacts into the CSV
 cbm-benchmark robot --stages collect
 cbm-benchmark sudoku --stages collect
-
-# Or from the reproduce scripts
-python scripts/reproduce_robot_table.py --collect
-python scripts/reproduce_sudoku_table.py --collect
+cbm-benchmark robot-text --stages collect
 ```
 
 ## Quick Start
@@ -107,7 +97,10 @@ results = robot.run_interventions(cfg, cbm, data)
 # Or from the command line
 cbm-benchmark robot --seed 1014 --stages setup cbm dnn intervene
 cbm-benchmark sudoku --seed 171 --stages setup ocr cs dnn intervene selective
+cbm-benchmark robot-text --seed 1337 --stages setup cbm dnn intervene
 ```
+
+See `scripts/demo_robot.py`, `scripts/demo_sudoku.py`, and `scripts/demo_robot_text.py` for fully-commented examples showing explicit config parametrization, concept definitions, and result inspection.
 
 ## Built-in Benchmarks
 
@@ -166,6 +159,12 @@ cbm-benchmark sudoku --stages collect
 # Robot with subconcept variant and no missingness sweep
 cbm-benchmark robot --subconcept --no-missing --stages setup cbm intervene
 
+# Robot text: full pipeline
+cbm-benchmark robot-text --seed 1337
+
+# Robot text: with LFCBM variant
+cbm-benchmark robot-text --seed 1337 --lfcbm
+
 # Load settings from a YAML file
 cbm-benchmark robot --config my_config.yaml
 ```
@@ -175,8 +174,8 @@ cbm-benchmark robot --config my_config.yaml
 Each benchmark exposes a programmatic API via `concept_benchmark.benchmarks`:
 
 ```python
-from concept_benchmark.benchmarks import robot, sudoku
-from concept_benchmark.config import RobotBenchmarkConfig, SudokuBenchmarkConfig
+from concept_benchmark.benchmarks import robot, sudoku, robot_text
+from concept_benchmark.config import RobotBenchmarkConfig, SudokuBenchmarkConfig, RobotTextBenchmarkConfig
 
 # Run the full robot pipeline with default settings (seed=1014)
 robot.run()
@@ -226,6 +225,22 @@ align_stats = align(config)            # alignment test
 summary_df = collect_results()         # aggregate all into CSV
 ```
 
+```python
+from concept_benchmark.benchmarks.robot_text import (
+    setup_dataset, train_cbm, train_dnn,
+    run_interventions, align, collect_results,
+)
+from concept_benchmark.config import RobotTextBenchmarkConfig
+
+config = RobotTextBenchmarkConfig(seed=1337)
+data = setup_dataset(config)               # generate text + split by robot identity
+cbm = train_cbm(config, data)             # train text concept detector + frontend
+dnn_metrics = train_dnn(config, data)     # fine-tune DistilBERT baseline
+results_df = run_interventions(config, cbm, data)  # k-flip interventions
+align_stats = align(config, cbm, data)    # alignment test
+summary_df = collect_results([config])    # aggregate into CSV
+```
+
 ### Pipeline Stages
 
 **Robot** stages: `setup`, `cbm`, `dnn`, `intervene`, `align`, `collect`
@@ -251,6 +266,17 @@ summary_df = collect_results()         # aggregate all into CSV
 | `selective` | Compute selective accuracy/coverage at multiple target thresholds |
 | `align` | Test alignment by replacing frontend with human-aligned weights |
 | `collect` | Aggregate all results into `results/sudoku_demo_results.csv` |
+
+**Robot Text** stages: `setup`, `cbm`, `dnn`, `intervene`, `align`, `collect`
+
+| Stage | What it does |
+|-------|-------------|
+| `setup` | Generate text descriptions from JSONL corpus, split by robot identity |
+| `cbm` | Train TextConceptDetector + FrontEndModel |
+| `dnn` | Fine-tune DistilBERT baseline (text to label, no concepts) |
+| `intervene` | Run k-flip interventions at multiple budgets |
+| `align` | Retrain frontend with monotonicity constraints |
+| `collect` | Aggregate all results into `results/robot_text_results.csv` |
 
 ## Configuration
 
@@ -323,6 +349,37 @@ cfg = SudokuBenchmarkConfig.default()
 # Harder task (more corruption)
 cfg = SudokuBenchmarkConfig(max_corrupt=21, cs_epochs=200)
 sudoku.run(cfg, stages=["setup", "ocr", "cs", "dnn", "intervene", "selective", "align"])
+```
+
+### `RobotTextBenchmarkConfig`
+
+Key fields:
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `seed` | `1337` | Random seed |
+| `difficulty` | `"hard"` | Corpus difficulty: `"easy"`, `"medium"`, or `"hard"` |
+| `variants_per_row_minority` | `3` | Text variations per minority-class robot |
+| `variants_per_row_majority` | `1` | Text variations per majority-class robot |
+| `generic_enable` | `True` | Mix in concept-ambiguous descriptions for test set |
+| `generic_rate` | `0.7` | Fraction of test set using generic text |
+| `detector_epochs` | `6` | TextConceptDetector training epochs |
+| `concept_mode` | `"hard"` | Concept prediction mode: `"hard"` or `"soft"` |
+| `dnn_model_name` | `"distilbert-base-uncased"` | HuggingFace model for DNN baseline |
+| `intervention_budgets` | `[0, 1, 2, 5, 10]` | Number of concepts to intervene on |
+| `lfcbm_enable` | `False` | Also run label-free CBM variant |
+
+```python
+from concept_benchmark.config import RobotTextBenchmarkConfig
+from concept_benchmark.benchmarks import robot_text
+
+# Paper defaults
+cfg = RobotTextBenchmarkConfig(seed=1337)
+robot_text.run(cfg, stages=["setup", "cbm", "dnn", "intervene"])
+
+# With LFCBM variant
+cfg = RobotTextBenchmarkConfig(lfcbm_enable=True)
+robot_text.run(cfg, stages=["setup", "cbm", "dnn", "lfcbm", "intervene"])
 ```
 
 ### Saving and Loading Configs

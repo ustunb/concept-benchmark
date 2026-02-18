@@ -386,3 +386,101 @@ class SudokuBenchmarkConfig:
         with open(path) as f:
             d = yaml.safe_load(f)
         return cls(**d)
+
+
+# ── Robot Text Benchmark Config ──────────────────────────────────────
+
+TEXT_LABEL_EXPR = (
+    "'glorp' if (min(int(row[\"mouth_type\"]==\"open\"), "
+    "int(str(row[\"foot_shape\"]).startswith(\"pointy_\"))) >= 1) "
+    "else 'drent'"
+)
+
+
+@dataclass
+class RobotTextBenchmarkConfig:
+    """Configuration for the robot text classification benchmark."""
+
+    seed: int = 1337
+    label_expr: str = TEXT_LABEL_EXPR
+    difficulty: str = "hard"
+
+    # Data generation
+    variants_per_row_minority: int = 3
+    variants_per_row_majority: int = 1
+    generic_enable: bool = True
+    generic_rate: float = 0.7
+    generic_target: str = "foot"
+
+    # K-fold splitting
+    cv_k: int = 5
+    cv_fold: int = 0
+    dev_per_fold: int = 1000
+    deployment_size: int = 10000
+
+    # TextConceptDetector
+    detector_epochs: int = 6
+    detector_batch_size: int = 64
+    detector_lr: float = 2e-3
+    concept_mode: str = "hard"
+
+    # DNN baseline (DistilBERT)
+    dnn_model_name: str = "distilbert-base-uncased"
+    dnn_epochs: int = 3
+    dnn_batch_size: int = 16
+    dnn_lr: float = 5e-5
+
+    # Intervention
+    intervention_budgets: List[int] = field(default_factory=lambda: [0, 1, 2, 5, 10])
+    intervention_accuracy: float = 1.0
+    flip_threshold: float = 0.30
+
+    # LFCBM (optional)
+    lfcbm_enable: bool = False
+    lfcbm_encoder: str = "sentence-transformers/all-MiniLM-L6-v2"
+    lfcbm_concepts_csv: str = ""
+
+    # Alignment
+    alignment_constraints: Optional[Dict[str, int]] = None
+
+    def get_dataset_path(self) -> Path:
+        """Return the path where the dataset file is saved."""
+        return results_dir / f"robot_text_seed{self.seed}.data"
+
+    def get_model_path(self, model_class: str) -> Path:
+        """Return the path where a trained model is saved."""
+        return results_dir / f"robot_text_{model_class}_seed{self.seed}.model"
+
+    def get_results_path(self, model_class: str = "cbm") -> Path:
+        """Return the path where results CSV is saved."""
+        return results_dir / f"robot_text_{model_class}_seed{self.seed}_results.csv"
+
+    def get_alignment_results_path(self) -> Path:
+        """Return the path where alignment results JSON is saved."""
+        return results_dir / f"robot_text_alignment_seed{self.seed}.json"
+
+    def get_alignment_constraints(self) -> Dict[str, int]:
+        """Return monotonicity constraints for alignment.
+
+        Default: mouth_is_open +1 — open mouth correlates with glorp in
+        the default label rule.
+        """
+        if self.alignment_constraints is not None:
+            return self.alignment_constraints
+        return {"mouth_is_open": 1}
+
+    def to_yaml(self, path: str | Path) -> None:
+        """Serialize config to YAML."""
+        d = {
+            k: v for k, v in self.__dict__.items()
+            if not k.startswith("_")
+        }
+        with open(path, "w") as f:
+            yaml.dump(d, f, default_flow_style=False, sort_keys=False)
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> RobotTextBenchmarkConfig:
+        """Load config from YAML."""
+        with open(path) as f:
+            d = yaml.safe_load(f)
+        return cls(**d)
