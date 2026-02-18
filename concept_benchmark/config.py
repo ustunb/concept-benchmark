@@ -1,0 +1,339 @@
+"""Typed dataclass configurations for concept benchmark experiments.
+
+Each benchmark domain (robot, sudoku) gets a config class that produces
+the same settings dicts used by the original scripts.  Factory methods
+produce the exact defaults matching the paper results.
+"""
+from __future__ import annotations
+
+import copy
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import yaml
+
+from concept_benchmark.paths import data_dir, results_dir
+
+# ── Constants matching scripts/robot_demo/utils.py ────────────────────
+
+IDEAL_DROP = [
+    "foot_shape_flat_rounded",
+    "foot_shape_pointy_trapezoid",
+    "foot_shape_pointy_3sided",
+    "foot_shape_flat_lshaped",
+    "foot_shape_pointy_4sided",
+    "foot_shape_pointy_square",
+    "foot_shape_pointy_rounded",
+    "foot_shape_flat_5sided",
+    "foot_shape_flat_square",
+    "foot_shape_flat_trapezoid",
+]
+
+SUBCONCEPT_DROP = [
+    "foot_shape_flat_rounded",
+    "foot_shape_pointy_trapezoid",
+    "foot_shape_pointy_3sided",
+    "foot_shape_flat_lshaped",
+    "foot_shape",
+]
+
+ROBOT_CONCEPTS = {
+    "head_shape": ["square", "round"],
+    "body_shape": ["square", "round"],
+    "has_knees": ["false", "true"],
+    "has_elbows": ["false", "true"],
+    "has_antennae": ["false", "true"],
+    "ears_shape": ["square", "triangle"],
+    "mouth_type": ["closed", "open"],
+    "hand_shape": [
+        "round_circle",
+        "round_oval",
+        "round_oval2",
+        "edgy_triangle",
+        "edgy_square",
+        "edgy_trapezoid",
+    ],
+    "foot_shape": [
+        "flat_trapezoid",
+        "flat_rounded",
+        "flat_square",
+        "flat_5sided",
+        "flat_lshaped",
+        "pointy_trapezoid",
+        "pointy_rounded",
+        "pointy_square",
+        "pointy_3sided",
+        "pointy_4sided",
+    ],
+}
+
+ROBOT_MODEL_RULE = (
+    "'glorp' if (int(row['mouth_type']=='closed') "
+    "+ int(row['foot_shape']=='pointy') "
+    "+ int(row['has_knees']=='true'))>= 3 else 'drent'"
+)
+
+ROBOT_SKEW_SPECS = [
+    {"concepts": {"foot_shape_pointy_square": 1}, "min_fraction": 0.005},
+    {"concepts": {"foot_shape_pointy_rounded": 1}, "min_fraction": 0.005},
+    {"concepts": {"foot_shape_pointy_4sided": 1}, "min_fraction": 0.49},
+    {"concepts": {"foot_shape_flat_square": 1}, "min_fraction": 0.005},
+    {"concepts": {"foot_shape_flat_trapezoid": 1}, "min_fraction": 0.005},
+    {"concepts": {"foot_shape_flat_5sided": 1}, "min_fraction": 0.49},
+]
+
+INPUT_MAP = {
+    "large": 600,
+    "medium": 32,
+    "small": 8,
+}
+
+MISSING_PROP = 0.2
+
+
+# ── Robot Benchmark Config ────────────────────────────────────────────
+
+@dataclass
+class RobotBenchmarkConfig:
+    """Configuration for the robot classification benchmark."""
+
+    # Data generation
+    data_type: str = "image"
+    size: str = "medium"
+    samples_per_instance: int = 4
+    draw: int = 0
+    seed: int = 1014
+    concepts: Dict[str, list] = field(default_factory=lambda: copy.deepcopy(ROBOT_CONCEPTS))
+    model_rule: str = ROBOT_MODEL_RULE
+    model_type: str = "stochastic"
+    scalar: float = 4.2
+    intercept: float = -2.0
+    weights: Dict[str, float] = field(
+        default_factory=lambda: {"mouth_type": 5, "foot_shape": 8, "has_knees": -5}
+    )
+    test_size: int = 10000
+    train_skew_size: int = 3800
+    skew_specs: List[Dict] = field(default_factory=lambda: copy.deepcopy(ROBOT_SKEW_SPECS))
+    drop_concepts: List[str] = field(default_factory=lambda: list(IDEAL_DROP))
+    additional_features: List[str] = field(default_factory=lambda: ["foot_shape_subtype"])
+    spurious_features: List[str] = field(default_factory=lambda: ["has_elbows", "hand_shape"])
+    color_mode: str = "color"
+    knows_concepts: bool = False
+
+    # Training
+    epochs: int = 50
+    lr: float = 1e-3
+    patience: int = 10
+    batch_size: int = 32
+
+    # Intervention
+    intervention_budgets: List[int] = field(default_factory=lambda: [1, 3])
+    intervention_thresholds: List[float] = field(default_factory=lambda: [0.2, 0.4])
+    intervention_accuracy: float = 1.0
+
+    # Missingness
+    concept_missing: float = 0.0
+    concept_missing_mech: str = "none"
+
+    # Alignment
+    alignment_weights: Optional[Dict[str, float]] = None
+
+    # Variant
+    subconcept: bool = False
+
+    @classmethod
+    def default_ideal(cls) -> RobotBenchmarkConfig:
+        """Config matching the paper's ideal robot benchmark."""
+        return cls()
+
+    @classmethod
+    def default_subconcept(cls) -> RobotBenchmarkConfig:
+        """Config matching the paper's subconcept robot benchmark."""
+        return cls(
+            subconcept=True,
+            drop_concepts=list(SUBCONCEPT_DROP),
+        )
+
+    @property
+    def input_size(self) -> int:
+        return INPUT_MAP[self.size]
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to a dict compatible with DEFAULT_ROBOT_SETTINGS."""
+        return {
+            "data_type": self.data_type,
+            "samples_per_instance": self.samples_per_instance,
+            "draw": self.draw,
+            "output_directory": data_dir / "robot_images",
+            "size": self.size,
+            "color_mode": self.color_mode,
+            "train_dnn": 0,
+            "seed": self.seed,
+            "model": self.model_rule,
+            "test_size": self.test_size,
+            "train_skew_size": self.train_skew_size,
+            "knows_concepts": self.knows_concepts,
+            "concepts": copy.deepcopy(self.concepts),
+            "additional_features": list(self.additional_features),
+            "spurious_features": list(self.spurious_features),
+            "subconcept": self.subconcept,
+            "drop_concepts": list(self.drop_concepts),
+            "model_type": self.model_type,
+            "scalar": self.scalar,
+            "intercept": self.intercept,
+            "weights": dict(self.weights),
+            "skew_specs": copy.deepcopy(self.skew_specs),
+            "concept_missing": self.concept_missing,
+            "concept_missing_mech": self.concept_missing_mech,
+        }
+
+    def get_dataset_path(self) -> Path:
+        """Return the path where the dataset file is saved."""
+        filename = f"robot_{self.data_type}_{self.samples_per_instance}"
+        if self.subconcept:
+            filename += "_subconcept"
+        else:
+            filename += "_ideal"
+        return results_dir / f"{filename}.data"
+
+    def get_model_path(self, model_class: str) -> Path:
+        """Return the path where a trained model is saved."""
+        filename = f"robot_{self.data_type}_{self.model_type}_{self.samples_per_instance}"
+        if self.subconcept:
+            filename += "_subconcept"
+        else:
+            filename += "_ideal"
+        if self.concept_missing_mech != "none":
+            filename += f"_{self.concept_missing_mech}_{int(self.concept_missing * 100)}"
+        filename += f"_{model_class}.model"
+        return results_dir / filename
+
+    def get_results_path(self, model_class: str = "cbm") -> Path:
+        """Return the path where results CSV is saved."""
+        filename = f"robot_{self.data_type}_{self.model_type}"
+        if model_class == "cbm":
+            if self.subconcept:
+                filename += "_subconcept"
+            else:
+                filename += "_ideal"
+        if self.concept_missing_mech != "none":
+            filename += f"_{self.concept_missing_mech}_{int(self.concept_missing * 100)}"
+        filename += f"_{model_class}_results.csv"
+        return results_dir / filename
+
+    def to_yaml(self, path: str | Path) -> None:
+        """Serialize config to YAML."""
+        d = {
+            k: v for k, v in self.__dict__.items()
+            if not k.startswith("_")
+        }
+        with open(path, "w") as f:
+            yaml.dump(d, f, default_flow_style=False, sort_keys=False)
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> RobotBenchmarkConfig:
+        """Load config from YAML."""
+        with open(path) as f:
+            d = yaml.safe_load(f)
+        return cls(**d)
+
+
+# ── Sudoku Benchmark Config ──────────────────────────────────────────
+
+@dataclass
+class SudokuBenchmarkConfig:
+    """Configuration for the sudoku validation benchmark."""
+
+    n: int = 3
+    n_samples: int = 1000
+    valid_ratio: float = 0.5
+    max_corrupt: int = 9
+    seed: int = 171
+    data_type: str = "tabular"
+
+    # Training
+    epochs: int = 20
+    patience: int = 5
+    batch_size: int = 32
+    cs_epochs: int = 100
+    cs_patience: int = 20
+
+    # Missingness
+    concept_missing: float = 0.0
+    concept_missing_mech: str = "none"
+
+    # Intervention
+    intervention_thresholds: List[float] = field(
+        default_factory=lambda: [0.2, 0.4, 0.6, 0.8]
+    )
+    target_accuracy: float = 0.9
+    decision_threshold: float = 0.5
+
+    # OCR settings
+    cell_px: int = 50
+    margin_px: int = 2
+    line_px: int = 2
+    bold_px: int = 5
+    font_size: int = 25
+    handwriting: bool = True
+
+    @classmethod
+    def default(cls) -> SudokuBenchmarkConfig:
+        """Config matching the paper's sudoku benchmark."""
+        return cls()
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to a dict compatible with DEFAULT_SUDOKU_SETTINGS."""
+        return {
+            "data_name": "sudoku",
+            "n": self.n,
+            "n_samples": self.n_samples,
+            "valid_ratio": self.valid_ratio,
+            "max_corrupt": self.max_corrupt,
+            "seed": self.seed,
+            "temp_train_data_path": (
+                data_dir / "sudoku" / "multimodal_m_21" / "tabular" / "sudoku_dataset.pkl"
+            ),
+            "epochs": self.epochs,
+            "patience": self.patience,
+            "concept_missing_mech": self.concept_missing_mech,
+        }
+
+    def get_dataset_path(self, data_type: Optional[str] = None) -> Path:
+        """Return the directory path for the dataset."""
+        dt = data_type or self.data_type
+        filename = f"sudoku_{dt}_n{self.n}_ns{self.n_samples}_mc{self.max_corrupt}_seed{self.seed}"
+        return data_dir / "sudoku" / filename
+
+    def get_model_path(self, model_class: str, data_type: Optional[str] = None) -> Path:
+        """Return the path where a trained model is saved."""
+        dt = data_type or self.data_type
+        filename = f"sudoku_{model_class}_{dt}_n{self.n}_mc{self.max_corrupt}"
+        if self.concept_missing_mech != "none" and self.concept_missing > 0.0:
+            filename += f"_cm{self.concept_missing_mech}{self.concept_missing}"
+        return results_dir / f"{filename}.model"
+
+    def get_results_path(self, model_class: str = "cbm", data_type: Optional[str] = None) -> Path:
+        """Return the path where results are saved."""
+        dt = data_type or self.data_type
+        filename = f"sudoku_{model_class}_{dt}_n{self.n}_mc{self.max_corrupt}"
+        if self.concept_missing_mech != "none" and self.concept_missing > 0.0:
+            filename += f"_cm{self.concept_missing_mech}{self.concept_missing}"
+        return results_dir / f"{filename}.results"
+
+    def to_yaml(self, path: str | Path) -> None:
+        """Serialize config to YAML."""
+        d = {
+            k: v for k, v in self.__dict__.items()
+            if not k.startswith("_")
+        }
+        with open(path, "w") as f:
+            yaml.dump(d, f, default_flow_style=False, sort_keys=False)
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> SudokuBenchmarkConfig:
+        """Load config from YAML."""
+        with open(path) as f:
+            d = yaml.safe_load(f)
+        return cls(**d)

@@ -1,0 +1,567 @@
+"""Sudoku validation benchmark pipeline.
+
+Provides functions to run each stage of the sudoku benchmark programmatically.
+Extracted from scripts/sudoku_demo/*.py — same logic, no subprocess calls.
+"""
+from __future__ import annotations
+
+import copy
+import platform
+from typing import List, Optional
+
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+from tqdm import tqdm
+
+from concept_benchmark.benchmarks._common import (
+    compute_accuracy,
+    determine_device,
+    get_loader_config,
+    patch_macos_dataloader,
+)
+from concept_benchmark.config import SudokuBenchmarkConfig
+from concept_benchmark.ext.fileutils import load, save
+from concept_benchmark.models import (
+    ConceptBasedModel,
+    ConceptDetector,
+)
+from concept_benchmark.intervention import (
+    ConceptInterventionRunner,
+    ConceptualSafeguardsStrategy,
+    InterventionConfig,
+)
+
+
+# ── Stage: setup_dataset ──────────────────────────────────────────────
+
+def setup_dataset(config: SudokuBenchmarkConfig) -> None:
+    """Generate sudoku dataset (image + tabular + OCR sidecar).
+
+    Delegates to scripts/sudoku_demo/make_ocr_dataset.py main().
+    """
+    import subprocess
+    import sys
+
+    cmd = [
+        sys.executable,
+        "scripts/sudoku_demo/make_ocr_dataset.py",
+        "--n", str(config.n),
+        "--n-samples", str(config.n_samples),
+        "--valid-ratio", str(config.valid_ratio),
+        "--max-corrupt", str(config.max_corrupt),
+        "--seed", str(config.seed),
+    ]
+    subprocess.run(cmd, check=True)
+
+
+# ── Stage: train_ocr ──────────────────────────────────────────────────
+
+def train_ocr(config: SudokuBenchmarkConfig) -> None:
+    """Train OCR digit recognizer.
+
+    Delegates to scripts/sudoku_demo/train_ocr_fast.py main().
+    """
+    import subprocess
+    import sys
+
+    cmd = [
+        sys.executable,
+        "scripts/sudoku_demo/train_ocr_fast.py",
+        "--seed", str(config.seed),
+        "--max-corrupt", str(config.max_corrupt),
+    ]
+    subprocess.run(cmd, check=True)
+
+
+# ── Stage: train_cs ───────────────────────────────────────────────────
+
+def train_cs(
+    config: SudokuBenchmarkConfig,
+    data=None,
+) -> ConceptBasedModel:
+    """Train a concept supervision model (concept detector + frontend).
+
+    Returns the trained CBM.
+    """
+    patch_macos_dataloader()
+    device = determine_device()
+
+    if data is None:
+        tab_dir = config.get_dataset_path(data_type="tabular")
+        data = load(tab_dir / "sudoku_dataset.pkl")
+        data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=config.seed)
+        data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
+
+    if config.concept_missing_mech != "none":
+        if config.concept_missing <= 0.0:
+            raise ValueError(
+                "concept_missing must be > 0 when concept_missing_mech is not 'none'"
+            )
+        data.sample_concept_missingness(
+            p=config.concept_missing,
+            mechanism=config.concept_missing_mech,
+            rng=np.random.default_rng(config.seed),
+        )
+        data.training.concept_missing = True
+        data.validation.concept_missing = True
+
+    _macos = platform.system() == "Darwin"
+    loader_config = {
+        "device": device,
+        "batch_size": config.batch_size,
+        "num_workers": 0 if _macos else 12,
+        "pin_memory": not _macos,
+    }
+    torch.manual_seed(config.seed)
+
+    from scripts.sudoku_demo.sudoku_models import (
+        GroupPoolingConceptSudokuCNN as SudokuConceptModel,
+    )
+
+    model = SudokuConceptModel()
+    cd = ConceptDetector(model=model)
+    cbm = ConceptBasedModel(concept_detector=cd, propagate=True)
+    cbm.fit(
+        train_dataset=data.training,
+        valid_dataset=data.validation,
+        freeze=False,
+        concept_embed_params={"shuffle": False, **loader_config},
+        fit_params={
+            "epochs": config.cs_epochs,
+            "lr": 1e-3,
+            "patience": config.cs_patience,
+            **loader_config,
+        },
+    )
+
+    test_pred = cbm.predict(data.test)
+    print("Test Accuracy:", np.mean(test_pred == data.test.y))
+
+    save(cbm, config.get_model_path("cs", data_type="tabular"), overwrite=True)
+    return cbm
+
+
+# ── Stage: train_dnn ──────────────────────────────────────────────────
+
+def train_dnn(
+    config: SudokuBenchmarkConfig,
+    data=None,
+) -> dict:
+    """Train an end-to-end DNN baseline for sudoku.
+
+    Returns the best state_dict.
+    """
+    patch_macos_dataloader()
+    device = determine_device()
+
+    if data is None:
+        tab_dir = config.get_dataset_path(data_type="tabular")
+        data = load(tab_dir / "sudoku_dataset.pkl")
+        data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=config.seed)
+        data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
+
+    torch.manual_seed(config.seed)
+
+    from scripts.sudoku_demo.sudoku_models import SudokuValidatorCNN as DNNSudokuModel
+
+    model = DNNSudokuModel()
+    criterion = nn.BCELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+    loader_config = get_loader_config(device)
+    train_loader = data.training.loader(shuffle=True, **loader_config)
+    valid_loader = data.validation.loader(shuffle=False, **loader_config)
+    test_loader = data.test.loader(shuffle=False, **loader_config)
+
+    model.to(device)
+
+    best_val_loss = float("inf")
+    best_state_dict = None
+    epochs_no_improve = 0
+
+    for epoch in tqdm(range(config.epochs), desc="Epochs"):
+        model.train()
+        for X, _, y in train_loader:
+            optimizer.zero_grad()
+            X, y = X.to(device), y.to(device)
+            outputs = model(X)
+            loss = criterion(outputs.squeeze(), y.float())
+            loss.backward()
+            optimizer.step()
+
+        model.eval()
+        val_loss_sum = 0.0
+        val_batches = 0
+        with torch.no_grad():
+            for X, _, y in valid_loader:
+                X, y = X.to(device), y.to(device)
+                outputs = model(X)
+                batch_loss = criterion(outputs.squeeze(), y.float())
+                val_loss_sum += batch_loss.item()
+                val_batches += 1
+        avg_val_loss = val_loss_sum / max(val_batches, 1)
+
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            best_state_dict = copy.deepcopy(model.state_dict())
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+            if config.patience > 0 and epochs_no_improve >= config.patience:
+                print(
+                    f"Early stopping at epoch {epoch + 1} "
+                    f"with best val loss {best_val_loss:.6f}"
+                )
+                break
+
+    if best_state_dict is not None:
+        model.load_state_dict(best_state_dict)
+
+    train_acc = compute_accuracy(model, train_loader, device=device)
+    valid_acc = compute_accuracy(model, valid_loader, device=device)
+    test_acc = compute_accuracy(model, test_loader, device=device)
+    print(f"Training Accuracy: {train_acc * 100:.2f}%")
+    print(f"Validation Accuracy: {valid_acc * 100:.2f}%")
+    print(f"Test Accuracy: {test_acc * 100:.2f}%")
+
+    weights = best_state_dict if best_state_dict is not None else model.state_dict()
+    save(weights, config.get_model_path("dnn", data_type="tabular"), overwrite=True)
+    return weights
+
+
+# ── Stage: run_interventions ──────────────────────────────────────────
+
+def run_interventions(
+    config: SudokuBenchmarkConfig,
+    cs_model: Optional[ConceptBasedModel] = None,
+    data=None,
+) -> pd.DataFrame:
+    """Run conceptual safeguards interventions on the sudoku CS model.
+
+    Mirrors the logic in scripts/sudoku_demo/intervene.py.
+    Returns the intervention results DataFrame.
+    """
+    patch_macos_dataloader()
+    device = determine_device()
+
+    if data is None:
+        img_dir = config.get_dataset_path(data_type="image")
+        data = load(img_dir / "ocr_inferred_full_dataset.pkl")
+        data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=config.seed)
+        data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
+
+    if cs_model is None:
+        cs_model = load(config.get_model_path("cs", data_type="tabular"))
+        cs_model._random_state = config.seed
+
+    # Find selective accuracy threshold on validation set
+    cs_probs, cs_y = _cs_val_probs(cs_model, data.validation)
+    decision_threshold, cs_val_acc = _decision_threshold_sweep(cs_y, cs_probs)
+    cs_t, cs_cov = _selective_accuracy_threshold(
+        cs_y, cs_probs, config.target_accuracy, decision_threshold
+    )
+
+    if cs_t is None:
+        raise ValueError(
+            "Could not find a tau for conceptual safeguards at the target accuracy."
+        )
+
+    # Test set selective metrics
+    cs_test_probs, cs_test_y = _cs_val_probs(cs_model, data.test)
+    cs_sel_acc, cs_sel_cov = _selective_metrics(
+        cs_test_y, cs_test_probs, cs_t, decision_threshold
+    )
+
+    # Run interventions at different budgets
+    cs_runner = ConceptInterventionRunner(cs_model)
+    cs_strategy = ConceptualSafeguardsStrategy()
+
+    no_interv = {
+        "budget": 0,
+        "accuracy": cs_sel_acc,
+        "predictions_intervened_on": 0,
+        "total_concept_checks": 0,
+        "total_concept_edits_made": 0,
+        "selective_accuracy_after": cs_sel_acc,
+        "coverage_after": cs_sel_cov,
+    }
+
+    rows = [no_interv]
+    for budget in [1, 3, 27]:
+        interv_cfg = InterventionConfig(
+            tau=cs_t,
+            max_concepts_per_instance=budget,
+            random_state=config.seed,
+        )
+        result = cs_runner.run(cs_strategy, interv_cfg, data.test)
+        acc_intervened = float((result.y_pred_after == data.test.y).mean())
+        predictions_intervened_on = int(np.sum(np.any(result.mask, axis=1)))
+        total_concept_checks = int(np.sum(result.mask))
+        pred_binary = (result.C_pred >= 0.5).astype(int)
+        final_binary = (result.C_intervened >= 0.5).astype(int)
+        total_concept_edits_made = int(np.sum(pred_binary != final_binary))
+        selective_acc_after = result.strat_metrics.get("selective_acc_after", None)
+        coverage_after = result.strat_metrics.get("coverage_after", None)
+        rows.append({
+            "budget": budget,
+            "accuracy": acc_intervened,
+            "predictions_intervened_on": predictions_intervened_on,
+            "total_concept_checks": total_concept_checks,
+            "total_concept_edits_made": total_concept_edits_made,
+            "selective_accuracy_after": selective_acc_after,
+            "coverage_after": coverage_after,
+        })
+
+    cs_intervention_df = pd.DataFrame(rows)
+    return cs_intervention_df
+
+
+# ── Stage: run (orchestrator) ─────────────────────────────────────────
+
+def run(
+    config: Optional[SudokuBenchmarkConfig] = None,
+    stages: Optional[List[str]] = None,
+) -> None:
+    """Run the full sudoku benchmark pipeline.
+
+    Args:
+        config: Benchmark configuration. Defaults to default().
+        stages: List of stages to run. Default: all.
+    """
+    patch_macos_dataloader()
+
+    if config is None:
+        config = SudokuBenchmarkConfig.default()
+    if stages is None:
+        stages = ["setup", "ocr", "cs", "dnn", "intervene", "selective"]
+
+    if "setup" in stages:
+        setup_dataset(config)
+
+    if "ocr" in stages:
+        train_ocr(config)
+
+    if "cs" in stages:
+        train_cs(config)
+
+    if "dnn" in stages:
+        train_dnn(config)
+
+    if "intervene" in stages:
+        df = run_interventions(config)
+        print("\n=== Intervention Results ===")
+        print(df.to_string(index=False))
+
+    if "selective" in stages:
+        sel_df = compute_selective_results(config)
+        print("\n=== Selective Metrics ===")
+        print(sel_df.to_string(index=False))
+
+    print("\nPipeline complete!")
+
+
+# ── Helper functions (from scripts/sudoku_demo/intervene.py) ──────────
+
+def _selective_accuracy_threshold(
+    y_true: np.ndarray,
+    prob_pos: np.ndarray,
+    target_acc: float,
+    decision_threshold: float = 0.5,
+) -> tuple[float | None, float | None]:
+    y_true = np.asarray(y_true).astype(int)
+    prob_pos = np.asarray(prob_pos, dtype=float).reshape(-1)
+    min_prob = np.minimum(prob_pos, 1.0 - prob_pos)
+    candidates = np.unique(np.concatenate(([0.0], min_prob)))
+    candidates = candidates[(candidates >= 0.0) & (candidates <= 0.5)]
+    candidates.sort()
+    for t in candidates[::-1]:
+        mask = min_prob <= t
+        if not np.any(mask):
+            continue
+        preds = (prob_pos[mask] >= decision_threshold).astype(int)
+        acc = float((preds == y_true[mask]).mean())
+        if acc >= target_acc:
+            coverage = float(mask.mean())
+            return float(t), coverage
+    return None, None
+
+
+def _decision_threshold_sweep(
+    y_true: np.ndarray,
+    prob_pos: np.ndarray,
+    thresholds: np.ndarray | None = None,
+) -> tuple[float, float]:
+    y_true = np.asarray(y_true).astype(int)
+    prob_pos = np.asarray(prob_pos, dtype=float).reshape(-1)
+    if thresholds is None:
+        thresholds = np.linspace(0.0, 1.0, 101, dtype=float)
+    best_acc = -1.0
+    best_thresholds = []
+    for t in thresholds:
+        preds = (prob_pos >= t).astype(int)
+        acc = float((preds == y_true).mean())
+        if acc > best_acc:
+            best_acc = acc
+            best_thresholds = [float(t)]
+        elif acc == best_acc:
+            best_thresholds.append(float(t))
+    best_t = 0.5 * (min(best_thresholds) + max(best_thresholds)) if best_thresholds else 0.5
+    return best_t, best_acc
+
+
+def _selective_metrics(
+    y_true: np.ndarray,
+    prob_pos: np.ndarray,
+    t: float | None,
+    decision_threshold: float = 0.5,
+) -> tuple[float | None, float]:
+    if t is None:
+        return None, 0.0
+    y_true = np.asarray(y_true).astype(int)
+    prob_pos = np.asarray(prob_pos, dtype=float).reshape(-1)
+    min_prob = np.minimum(prob_pos, 1.0 - prob_pos)
+    mask = min_prob <= t
+    if not np.any(mask):
+        return None, 0.0
+    preds = (prob_pos[mask] >= decision_threshold).astype(int)
+    acc = float((preds == y_true[mask]).mean())
+    coverage = float(mask.mean())
+    return acc, coverage
+
+
+def _cs_val_probs(model, dataset):
+    probas = model.predict_proba(dataset)
+    if probas.ndim == 1:
+        prob_pos = probas
+    else:
+        prob_pos = probas[:, 1]
+    y_true = np.asarray(dataset.y)
+    return prob_pos, y_true
+
+
+def _dnn_val_probs(model, loader, device):
+    model.eval()
+    all_probs, all_y = [], []
+    with torch.no_grad():
+        for X, _, y in loader:
+            X = X.to(device)
+            probs = model(X).squeeze(-1).detach().cpu().numpy()
+            all_probs.append(probs)
+            all_y.append(y.cpu().numpy())
+    return np.concatenate(all_probs), np.concatenate(all_y)
+
+
+# ── Stage: compute and save selective metrics ─────────────────────────
+
+def compute_selective_results(
+    config: SudokuBenchmarkConfig,
+    cs_model: Optional[ConceptBasedModel] = None,
+    dnn_weights: Optional[dict] = None,
+    data=None,
+    target_accuracies: Optional[List[float]] = None,
+) -> pd.DataFrame:
+    """Compute selective accuracy and coverage at multiple target accuracy
+    thresholds for both DNN and CS models.  Saves results as CSV.
+
+    target_accuracy is the minimum selective accuracy we require on the
+    validation set.  Only predictions the model is confident enough about
+    are kept (selective classification).  For each target we report the
+    resulting selective accuracy and coverage on the test set.
+
+    Columns: model, target_accuracy, raw_test_acc, selective_acc, selective_cov
+    """
+    patch_macos_dataloader()
+    device = determine_device()
+
+    if target_accuracies is None:
+        target_accuracies = [0.55, 0.60, 0.65, 0.70, 0.75,
+                             0.80, 0.85, 0.90, 0.95, 0.99, 1.00]
+
+    # Load OCR-inferred data
+    if data is None:
+        img_dir = config.get_dataset_path(data_type="image")
+        data = load(img_dir / "ocr_inferred_full_dataset.pkl")
+        data.generate_cvindices(
+            strata=data.y, total_folds_for_cv=[5], seed=config.seed
+        )
+        data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
+
+    loader_cfg = get_loader_config(device)
+    val_loader = data.validation.loader(shuffle=False, **loader_cfg)
+    tst_loader = data.test.loader(shuffle=False, **loader_cfg)
+
+    rows: list[dict] = []
+
+    # ---- DNN selective metrics ----
+    if dnn_weights is None:
+        dnn_weights = load(config.get_model_path("dnn", data_type="tabular"))
+
+    from scripts.sudoku_demo.sudoku_models import SudokuValidatorCNN
+
+    dnn = SudokuValidatorCNN()
+    dnn.load_state_dict(dnn_weights)
+    dnn.to(device)
+
+    dnn_val_probs, dnn_val_y = _dnn_val_probs(dnn, val_loader, device)
+    dnn_dt, _ = _decision_threshold_sweep(dnn_val_y, dnn_val_probs)
+    dnn_test_probs, dnn_test_y = _dnn_val_probs(dnn, tst_loader, device)
+    dnn_raw_acc = float(
+        ((dnn_test_probs >= dnn_dt).astype(int) == dnn_test_y.astype(int)).mean()
+    )
+
+    for tau in target_accuracies:
+        confidence_t, _ = _selective_accuracy_threshold(
+            dnn_val_y, dnn_val_probs, tau, dnn_dt
+        )
+        sel_acc, sel_cov = _selective_metrics(
+            dnn_test_y, dnn_test_probs, confidence_t, dnn_dt
+        )
+        rows.append({
+            "model": "dnn",
+            "target_accuracy": tau,
+            "raw_test_acc": dnn_raw_acc,
+            "selective_acc": sel_acc,
+            "selective_cov": sel_cov,
+        })
+
+    # ---- CS selective metrics ----
+    if cs_model is None:
+        cs_model = load(config.get_model_path("cs", data_type="tabular"))
+        cs_model._random_state = config.seed
+
+    cs_val_probs, cs_val_y = _cs_val_probs(cs_model, data.validation)
+    cs_dt, _ = _decision_threshold_sweep(cs_val_y, cs_val_probs)
+    cs_test_probs, cs_test_y = _cs_val_probs(cs_model, data.test)
+    cs_raw_acc = float(
+        ((cs_test_probs >= cs_dt).astype(int) == cs_test_y.astype(int)).mean()
+    )
+
+    for tau in target_accuracies:
+        confidence_t, _ = _selective_accuracy_threshold(
+            cs_val_y, cs_val_probs, tau, cs_dt
+        )
+        sel_acc, sel_cov = _selective_metrics(
+            cs_test_y, cs_test_probs, confidence_t, cs_dt
+        )
+        rows.append({
+            "model": "cs",
+            "target_accuracy": tau,
+            "raw_test_acc": cs_raw_acc,
+            "selective_acc": sel_acc,
+            "selective_cov": sel_cov,
+        })
+
+    df = pd.DataFrame(rows)
+
+    # Save CSV
+    csv_path = (
+        config.get_results_path("selective", data_type="tabular")
+        .with_suffix(".csv")
+    )
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(csv_path, index=False)
+    print(f"Saved selective metrics to {csv_path}")
+
+    return df
