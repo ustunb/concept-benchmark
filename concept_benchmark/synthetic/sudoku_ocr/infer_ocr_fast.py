@@ -15,11 +15,11 @@ import torch
 from tqdm.auto import tqdm
 
 # repo path shim (safe if already installed)
-repo_root = Path(__file__).resolve().parents[2]
+repo_root = Path(__file__).resolve().parents[3]
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-from scripts.sudoku_demo.ocr_utils import (
+from concept_benchmark.synthetic.sudoku_ocr.ocr_utils import (
     DATA_SUDOKU,
     TinyResNet,
     crop_cell,

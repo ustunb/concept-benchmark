@@ -15,7 +15,7 @@ import yaml
 
 from concept_benchmark.paths import data_dir, results_dir
 
-# ── Constants matching scripts/robot_demo/utils.py ────────────────────
+# ── Robot benchmark constants ─────────────────────────────────────────
 
 IDEAL_DROP = [
     "foot_shape_flat_rounded",
@@ -136,8 +136,8 @@ class RobotBenchmarkConfig:
     concept_missing: float = 0.0
     concept_missing_mech: str = "none"
 
-    # Alignment
-    alignment_weights: Optional[Dict[str, float]] = None
+    # Alignment (sign constraints for constrained retraining)
+    alignment_constraints: Optional[Dict[str, int]] = None
 
     # Variant
     subconcept: bool = False
@@ -222,6 +222,28 @@ class RobotBenchmarkConfig:
         filename += f"_{model_class}_results.csv"
         return results_dir / filename
 
+    def get_alignment_constraints(self) -> Dict[str, int]:
+        """Return monotonicity constraints for alignment.
+
+        Default: ``{"has_knees": 1}`` — the single constraint used in the
+        paper.  Override via ``alignment_constraints`` to test other settings.
+        """
+        if self.alignment_constraints is not None:
+            return self.alignment_constraints
+        return {"has_knees": 1}
+
+    def get_alignment_results_path(self) -> Path:
+        """Return the path where alignment results JSON is saved."""
+        filename = f"robot_{self.data_type}_{self.model_type}"
+        if self.subconcept:
+            filename += "_subconcept"
+        else:
+            filename += "_ideal"
+        if self.concept_missing_mech != "none":
+            filename += f"_{self.concept_missing_mech}_{int(self.concept_missing * 100)}"
+        filename += "_alignment.json"
+        return results_dir / filename
+
     def to_yaml(self, path: str | Path) -> None:
         """Serialize config to YAML."""
         d = {
@@ -269,6 +291,9 @@ class SudokuBenchmarkConfig:
     )
     target_accuracy: float = 0.9
     decision_threshold: float = 0.5
+
+    # Alignment
+    alignment_weights: Optional[Dict[str, float]] = None
 
     # OCR settings
     cell_px: int = 50
@@ -321,6 +346,30 @@ class SudokuBenchmarkConfig:
         if self.concept_missing_mech != "none" and self.concept_missing > 0.0:
             filename += f"_cm{self.concept_missing_mech}{self.concept_missing}"
         return results_dir / f"{filename}.results"
+
+    def get_alignment_weights(self) -> Dict[str, float]:
+        """Return alignment weights, computing defaults if not explicitly set.
+
+        Default: all row/col/block concepts get weight 1.0 (AND semantics).
+        """
+        if self.alignment_weights is not None:
+            return self.alignment_weights
+        N = self.n * self.n  # 9 for standard sudoku
+        weights: Dict[str, float] = {}
+        for i in range(N):
+            weights[f"row_valid_{i + 1}"] = 1.0
+            weights[f"col_valid_{i + 1}"] = 1.0
+            weights[f"block_valid_{i + 1}"] = 1.0
+        weights["bias"] = -(3 * N - 0.5)
+        return weights
+
+    def get_alignment_results_path(self, data_type: Optional[str] = None) -> Path:
+        """Return the path where alignment results JSON is saved."""
+        dt = data_type or self.data_type
+        filename = f"sudoku_alignment_{dt}_n{self.n}_mc{self.max_corrupt}"
+        if self.concept_missing_mech != "none" and self.concept_missing > 0.0:
+            filename += f"_cm{self.concept_missing_mech}{self.concept_missing}"
+        return results_dir / f"{filename}.json"
 
     def to_yaml(self, path: str | Path) -> None:
         """Serialize config to YAML."""

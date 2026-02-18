@@ -20,7 +20,7 @@ from tqdm.auto import tqdm
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.ext.fileutils import load as load_object, save as save_object
 
-from scripts.sudoku_demo.ocr_utils import (
+from concept_benchmark.synthetic.sudoku_ocr.ocr_utils import (
     SudokuCellDataset,
     TinyResNet,
     cell_preprocess_28x28,
@@ -28,7 +28,7 @@ from scripts.sudoku_demo.ocr_utils import (
     crop_cell,
     load_sidecars,
 )
-from scripts.sudoku_demo.utils import DEFAULT_SUDOKU_SETTINGS, get_dataset_file
+from concept_benchmark.config import SudokuBenchmarkConfig
 
 
 def setup_logging(log_path: Path) -> logging.Logger:
@@ -216,12 +216,12 @@ def build_ocr_concept_dataset(
 
 
 def main():
-    settings = DEFAULT_SUDOKU_SETTINGS.copy()
+    defaults = SudokuBenchmarkConfig.default()
     ap = argparse.ArgumentParser(description="Train TinyResNet on Sudoku OCR sidecar (demo).")
-    ap.add_argument("--n", type=int, default=settings["n"])
-    ap.add_argument("--n-samples", type=int, default=settings["n_samples"])
-    ap.add_argument("--max-corrupt", type=int, default=settings["max_corrupt"])
-    ap.add_argument("--seed", type=int, default=settings["seed"])
+    ap.add_argument("--n", type=int, default=defaults.n)
+    ap.add_argument("--n-samples", type=int, default=defaults.n_samples)
+    ap.add_argument("--max-corrupt", type=int, default=defaults.max_corrupt)
+    ap.add_argument("--seed", type=int, default=defaults.seed)
     ap.add_argument("--epochs", type=int, default=2)
     ap.add_argument("--batch-size", type=int, default=256)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -234,10 +234,13 @@ def main():
     ap.add_argument("--skip-training", action="store_true", help="Skip training and use existing model.")
 
     args, _ = ap.parse_known_args()
-    settings.update(vars(args))
+    cfg = SudokuBenchmarkConfig(
+        n=args.n, n_samples=args.n_samples,
+        max_corrupt=args.max_corrupt, seed=args.seed,
+    )
 
-    dataset_dir = get_dataset_file(data_type="image", **settings)
-    tab_dataset_dir = get_dataset_file(data_type="tabular", **settings)
+    dataset_dir = cfg.get_dataset_path(data_type="image")
+    tab_dataset_dir = cfg.get_dataset_path(data_type="tabular")
     jsonl_path = dataset_dir / "ocr_preprocessing" / "ocr_preprocessing.jsonl"
     model_out = dataset_dir / "ocr_best_model.pt"
     meta_out = dataset_dir / "ocr_best_model.json"
@@ -251,14 +254,14 @@ def main():
     sudoku_ds = SudokuCellDataset(
         dataset_dir,
         jsonl_path,
-        cell_px=settings["cell_px"],
-        margin_px=settings["margin_px"],
-        dump_debug=not settings["no_debug_dumps"],
+        cell_px=args.cell_px,
+        margin_px=args.margin_px,
+        dump_debug=not args.no_debug_dumps,
     )
 
     # split
     n_total = len(sudoku_ds)
-    n_val = max(settings["min_val"], int(settings["val_fraction"] * n_total))
+    n_val = max(args.min_val, int(args.val_fraction * n_total))
     n_val = min(n_val, n_total // 2) if n_total > 1 else 0
     n_train = n_total - n_val
     train_ds, val_ds = random_split(sudoku_ds, [n_train, n_val])
@@ -266,23 +269,23 @@ def main():
 
     train_loader = DataLoader(
         train_ds,
-        batch_size=settings["batch_size"],
+        batch_size=args.batch_size,
         shuffle=True,
-        num_workers=settings["num_workers"],
+        num_workers=args.num_workers,
         pin_memory=True,
     )
     val_loader = DataLoader(
         val_ds,
         batch_size=256,
         shuffle=False,
-        num_workers=settings["num_workers"],
+        num_workers=args.num_workers,
     )
 
-    device = settings["device"]
+    device = args.device
     class_weights = compute_class_weights(train_ds, device=device)
     logger.info("[INFO] class weights: %s", class_weights.cpu().numpy().round(4).tolist())
 
-    if settings["skip_training"]:
+    if args.skip_training:
         if not model_out.exists():
             raise FileNotFoundError(f"model not found: {model_out}")
         logger.info("[INFO] skip training enabled; using existing model at %s", model_out)
@@ -295,7 +298,7 @@ def main():
             train_loader,
             val_loader,
             device=device,
-            epochs=settings["epochs"],
+            epochs=args.epochs,
             class_weights=class_weights,
             logger=logger,
         )
@@ -321,8 +324,8 @@ def main():
         dataset_dir=dataset_dir,
         jsonl_path=jsonl_path,
         tabular_dataset_path=tabular_dataset_path,
-        cell_px=settings["cell_px"],
-        margin_px=settings["margin_px"],
+        cell_px=args.cell_px,
+        margin_px=args.margin_px,
         device=device,
         out_path=ocr_dataset_out,
         logger=logger,

@@ -1,7 +1,6 @@
 """Robot classification benchmark pipeline.
 
 Provides functions to run each stage of the robot benchmark programmatically.
-Extracted from scripts/robot_demo/*.py — same logic, no subprocess calls.
 """
 from __future__ import annotations
 
@@ -23,6 +22,7 @@ from concept_benchmark.benchmarks._common import (
     determine_device,
     get_loader_config,
     patch_macos_dataloader,
+    run_alignment,
 )
 from concept_benchmark.config import (
     INPUT_MAP,
@@ -34,6 +34,7 @@ from concept_benchmark.ext.fileutils import load, save
 from concept_benchmark.models import (
     ConceptBasedModel,
     ConceptDetector,
+    RobotClassifierCNN,
     RobotConceptClassifier,
 )
 from concept_benchmark.paths import results_dir
@@ -54,10 +55,6 @@ def _ensure_intervention_imports():
         from concept_benchmark.kflip import KFlipInterventionStrategy as ScoreIntervention
 
         _intervention_imported = True
-
-
-# Re-export the CNN for backward compat
-from scripts.robot_demo.utils import RobotClassifierCNN  # noqa: E402
 
 
 # ── Stage: setup_dataset ──────────────────────────────────────────────
@@ -227,6 +224,100 @@ def train_dnn(
     return weights
 
 
+# ── Intervention helper ───────────────────────────────────────────────
+
+def _test_interventions(prob_test, sttngs, acc_det, fe, test):
+    """Run interventions for each budget and return results dict.
+
+    Moved from ``scripts/robot_image_pipeline.test_interventions`` —
+    duplicate lines removed, uses lazy-imported globals.
+    """
+    _ensure_intervention_imports()
+
+    intervention_results = {}
+    rng = np.random.default_rng(int(sttngs["seed"]))
+    budgets = sttngs.get("budget", [1])
+    human_acc = sttngs.get("intervention_accuracy", 0.9)
+    err_prob = 1.0 - human_acc
+
+    # Create a CBM wrapper for the intervention framework
+    cbm = ConceptBasedModel(concept_detector=None, front_end_model=fe)
+    runner = ConceptInterventionRunner(cbm)
+
+    for budget in budgets:
+        config = InterventionConfig(
+            max_concepts_per_instance=budget,
+            random_state=int(sttngs["seed"]),
+            score_threshold=sttngs.get("intervention_threshold", 1.0),
+            noise=1.0 - human_acc,
+        )
+
+        strategy = ScoreIntervention()
+
+        # Run intervention
+        result = runner.run(
+            strategy=strategy,
+            config=config,
+            dataset=test,
+            concept_proba=prob_test,
+            labels=test.y.astype(int),
+        )
+
+        mask = result.mask
+        C_gt = test.C.astype(np.float32)
+        C_after = result.C_intervened.copy()
+
+        mistake_draw = rng.random(C_after.shape) < err_prob
+        mistakes = mask & mistake_draw
+        C_after[mistakes] = 1.0 - C_gt[mistakes]
+        result.C_intervened = C_after
+
+        # Extract intervention statistics
+        n_intervened = np.sum(result.mask)
+        n_samples = prob_test.shape[0]
+
+        intervened_concepts = np.any(result.mask, axis=0)
+
+        C_pred_binary = (result.C_pred >= 0.5).astype(int)
+        C_final_binary = (result.C_intervened >= 0.5).astype(int)
+        actual_edits_mask = C_pred_binary != C_final_binary
+        result.y_prob_after = fe.predict_proba(C_final_binary)
+        result.y_pred_after = np.argmax(result.y_prob_after, axis=1)
+
+        y_pred_before = np.argmax(result.y_prob_before, axis=1)
+
+        num_preds_change = int(np.sum(result.y_pred_after != y_pred_before))
+        acc_intervened = float((result.y_pred_after == test.y.astype(int)).mean())
+
+        prediction_num_concepts_intervened_on = {
+            int(i): int(np.sum(actual_edits_mask[i])) for i in range(n_samples)
+        }
+        concept_intervention_counts = {
+            c: f"{int(np.sum(result.mask[:, i]))} ({int(np.sum(actual_edits_mask[:, i]))})"
+            for i, c in enumerate(test.concepts)
+            if intervened_concepts[i]
+        }
+
+        key = f"top_{budget}_human_acc_{int(human_acc * 100)}"
+        intervention_results[key] = {
+            "accuracy": acc_intervened,
+            "accuracy_gain": acc_intervened - acc_det,
+            "predictions_intervened_on": int(np.sum(np.any(result.mask, axis=1))),
+            "interventions_rate": float(np.sum(np.any(result.mask, axis=1)) / n_samples),
+            "predictions_changed": num_preds_change,
+            "avg_edits_per_intervention": float(
+                sum(prediction_num_concepts_intervened_on.values())
+            )
+            / n_samples,
+            "total_concept_confirmations": int(n_intervened),
+            "total_concept_edits_made": sum(prediction_num_concepts_intervened_on.values()),
+            "concept_interventions": concept_intervention_counts,
+            "human_accuracy": human_acc,
+        }
+
+    return budgets, human_acc, intervention_results
+
+
 # ── Stage: run_interventions ──────────────────────────────────────────
 
 def run_interventions(
@@ -236,7 +327,7 @@ def run_interventions(
 ) -> pd.DataFrame:
     """Run interventions on the trained CBM and return a results DataFrame.
 
-    Mirrors the logic in scripts/robot_demo/intervene.py.
+    Run interventions on the trained CBM and return a results DataFrame.
     """
     _ensure_intervention_imports()
     patch_macos_dataloader()
@@ -269,13 +360,10 @@ def run_interventions(
     ]
     COLS = ["budget", "threshold"] + METRIC_COLS
 
-    # Import test_interventions from the image pipeline for now
-    from scripts.robot_image_pipeline import test_interventions
-
     df_lst = []
     for t in thresholds:
         sttngs["intervention_threshold"] = t
-        b, a, r = test_interventions(
+        b, a, r = _test_interventions(
             prob_test=c_preds,
             sttngs=sttngs,
             acc_det=acc,
@@ -298,17 +386,59 @@ def run_interventions(
     return results_df
 
 
+# ── Stage: align ─────────────────────────────────────────────────────
+
+def align(
+    config: RobotBenchmarkConfig,
+    model: Optional[ConceptBasedModel] = None,
+    data=None,
+) -> dict:
+    """Run alignment test on the trained CBM.
+
+    Retrains the frontend with monotonicity (sign) constraints and
+    compares original vs constrained accuracy.
+
+    Returns dict with original_accuracy, aligned_accuracy, accuracy_change,
+    predictions_changed, aligned_weights.
+    """
+    if data is None:
+        data = load(config.get_dataset_path())
+    if model is None:
+        model = load(config.get_model_path("cbm"))
+
+    return run_alignment(
+        cbm=model,
+        train_dataset=data.training,
+        test_dataset=data.test,
+        monotonicity_constraints=config.get_alignment_constraints(),
+        save_path=config.get_alignment_results_path(),
+    )
+
+
 # ── Stage: collect_results ────────────────────────────────────────────
+
+def _dataset_label(cfg: RobotBenchmarkConfig) -> str:
+    """Return a human-readable dataset label for a config."""
+    base = "subconcept" if cfg.subconcept else "ideal"
+    if cfg.concept_missing_mech != "none":
+        return f"{base}_{cfg.concept_missing_mech}"
+    return base
+
 
 def collect_results(
     configs: Optional[List[RobotBenchmarkConfig]] = None,
 ) -> pd.DataFrame:
-    """Aggregate all robot results into a single DataFrame.
+    """Aggregate all robot results into a single flat CSV.
 
-    Mirrors scripts/robot_demo/calc_metrics.py.
+    Produces one row per (dataset, model, budget) combination with columns:
+      dataset, model, budget, threshold, accuracy, gain,
+      predictions_intervened_on, avg_concepts_per_sample, predictions_changed
+
+    Reads saved artifacts only — no model retraining.
     """
+    import json
+
     if configs is None:
-        # Default: all combinations from the paper
         configs = []
         for subconcept in [False, True]:
             for missing, missing_mech in [
@@ -330,63 +460,142 @@ def collect_results(
     device = determine_device()
     loader_config = get_loader_config(device)
 
-    acc_rows = []
+    rows = []
 
-    # DNN accuracy
+    # ── DNN accuracy (shared baseline) ───────────────────────────────
     dnn_weights = load(ideal_config.get_model_path("dnn"))
     dnn = RobotClassifierCNN(input_size=ideal_config.input_size).to(device)
     dnn.load_state_dict(dnn_weights)
     test_loader = data.test.loader(shuffle=False, **loader_config)
     dnn_accuracy = compute_accuracy(dnn, test_loader, device)
-    acc_rows.append(["ideal", 0.0, "none", "dnn", "accuracy", dnn_accuracy])
-    acc_rows.append(["subconcept", 0.0, "none", "dnn", "accuracy", dnn_accuracy])
 
-    COLS = [
-        "accuracy",
-        "predictions_intervened_on",
-        "predictions_changed",
-        "total_concept_confirmations",
-    ]
-
-    interv_lst = []
+    # Emit one DNN row per dataset
+    dataset_labels_seen = set()
     for cfg in configs:
-        data_name = "subconcept" if cfg.subconcept else "ideal"
-        cbm = load(cfg.get_model_path("cbm"))
-        cbm_acc = (cbm.predict(data.test) == data.test.y).mean().item()
-        acc_rows.append([
-            data_name, cfg.concept_missing, cfg.concept_missing_mech,
-            "cbm_no_int", "accuracy", cbm_acc,
-        ])
+        label = _dataset_label(cfg)
+        if label not in dataset_labels_seen:
+            dataset_labels_seen.add(label)
+            rows.append({
+                "dataset": label,
+                "model": "dnn",
+                "budget": "",
+                "threshold": "",
+                "accuracy": round(dnn_accuracy, 4),
+                "gain": 0.0,
+                "predictions_intervened_on": "",
+                "avg_concepts_per_sample": "",
+                "predictions_changed": "",
+            })
 
+    # ── Per-config: CBM, interventions, alignment ────────────────────
+    for cfg in configs:
+        label = _dataset_label(cfg)
+
+        # CBM no-intervention (k=0)
+        cbm = load(cfg.get_model_path("cbm"))
+        cbm_acc = float((cbm.predict(data.test) == data.test.y).mean())
+        rows.append({
+            "dataset": label,
+            "model": "cbm",
+            "budget": 0,
+            "threshold": "",
+            "accuracy": round(cbm_acc, 4),
+            "gain": round(cbm_acc - dnn_accuracy, 4),
+            "predictions_intervened_on": "",
+            "avg_concepts_per_sample": "",
+            "predictions_changed": "",
+        })
+
+        # CBM with interventions (k>0)
         results_path = cfg.get_results_path("cbm")
         if results_path.exists():
-            metrics = pd.read_csv(results_path)
-            metrics = metrics.melt(
-                id_vars=[
-                    "data_name", "concept_missing", "concept_missing_mech",
-                    "budget", "threshold",
-                ],
-                value_vars=COLS,
-                var_name="metric",
-                value_name="value",
-            )
-            metrics["model"] = "cbm_with_int_" + metrics["budget"].astype(str)
-            interv_lst.append(metrics)
+            interv_df = pd.read_csv(results_path)
+            # Use threshold=0.2 as the canonical threshold for the summary
+            t02 = interv_df[interv_df["threshold"] == 0.2]
+            for _, row in t02.iterrows():
+                budget = int(row["budget"])
+                acc = float(row["accuracy"])
+                pio = int(row["predictions_intervened_on"])
+                tcc = int(row["total_concept_confirmations"])
+                avg_cps = round(tcc / pio, 2) if pio > 0 else 0.0
+                rows.append({
+                    "dataset": label,
+                    "model": "cbm",
+                    "budget": budget,
+                    "threshold": 0.2,
+                    "accuracy": round(acc, 4),
+                    "gain": round(acc - dnn_accuracy, 4),
+                    "predictions_intervened_on": pio,
+                    "avg_concepts_per_sample": avg_cps,
+                    "predictions_changed": int(row["predictions_changed"]),
+                })
 
-    acc_df = pd.DataFrame(
-        acc_rows,
-        columns=[
-            "data_name", "concept_missing", "concept_missing_mech",
-            "model", "metric", "value",
-        ],
-    )
-    if interv_lst:
-        interv_df = pd.concat(interv_lst, ignore_index=True).reset_index(drop=True)
-        final_df = pd.concat([acc_df, interv_df], ignore_index=True).reset_index(drop=True)
-    else:
-        final_df = acc_df
+        # Aligned CBM (only for non-missingness configs)
+        if cfg.concept_missing_mech == "none":
+            align_path = cfg.get_alignment_results_path()
+            if align_path.exists():
+                with open(align_path) as f:
+                    align_data = json.load(f)
+                aligned_acc = float(align_data["aligned_accuracy"])
+                rows.append({
+                    "dataset": label,
+                    "model": "aligned_cbm",
+                    "budget": 0,
+                    "threshold": "",
+                    "accuracy": round(aligned_acc, 4),
+                    "gain": round(aligned_acc - dnn_accuracy, 4),
+                    "predictions_intervened_on": "",
+                    "avg_concepts_per_sample": "",
+                    "predictions_changed": "",
+                })
 
-    final_df.to_csv(results_dir / "robot_demo_results.csv", index=False)
+                # Aligned CBM with intervention at k=3
+                aligned_weights = align_data.get("aligned_weights")
+                if aligned_weights is not None:
+                    from concept_benchmark.alignment import align_frontend_weights
+                    import copy as _copy
+
+                    # Load the config's own dataset so concept shapes match
+                    cfg_data = load(cfg.get_dataset_path())
+                    aligned_fe = _copy.deepcopy(cbm.front_end_model)
+                    aligned_fe = align_frontend_weights(
+                        aligned_fe, list(cfg_data.test.concepts), aligned_weights,
+                    )
+                    c_preds = cbm.concept_detector.predict(cfg_data.test)
+                    sttngs = {
+                        "seed": cfg.seed,
+                        "budget": [3],
+                        "intervention_accuracy": cfg.intervention_accuracy,
+                        "intervention_threshold": 0.2,
+                    }
+                    _, _, int_results = _test_interventions(
+                        prob_test=c_preds,
+                        sttngs=sttngs,
+                        acc_det=aligned_acc,
+                        fe=aligned_fe,
+                        test=cfg_data.test,
+                    )
+                    for key, res in int_results.items():
+                        pio = int(res["predictions_intervened_on"])
+                        tcc = int(res["total_concept_confirmations"])
+                        avg_cps = round(tcc / pio, 2) if pio > 0 else 0.0
+                        rows.append({
+                            "dataset": label,
+                            "model": "aligned_cbm",
+                            "budget": 3,
+                            "threshold": 0.2,
+                            "accuracy": round(float(res["accuracy"]), 4),
+                            "gain": round(float(res["accuracy"]) - dnn_accuracy, 4),
+                            "predictions_intervened_on": pio,
+                            "avg_concepts_per_sample": avg_cps,
+                            "predictions_changed": int(res["predictions_changed"]),
+                        })
+
+    final_df = pd.DataFrame(rows)
+    out_path = results_dir / "robot_demo_results.csv"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    final_df.to_csv(out_path, index=False)
+    print(f"Saved {len(final_df)} rows to {out_path}")
     return final_df
 
 
@@ -409,7 +618,7 @@ def run(
     if config is None:
         config = RobotBenchmarkConfig.default_ideal()
     if stages is None:
-        stages = ["setup", "cbm", "dnn", "intervene"]
+        stages = ["setup", "cbm", "dnn", "intervene", "align", "collect"]
 
     # Setup
     if "setup" in stages:
@@ -474,3 +683,17 @@ def run(
                     cfg.concept_missing = MISSING_PROP
                     cfg.concept_missing_mech = mech
                     run_interventions(cfg)
+
+    # Alignment
+    if "align" in stages:
+        ideal_cfg = RobotBenchmarkConfig.default_ideal()
+        ideal_cfg.seed = config.seed
+        align(ideal_cfg)
+
+        sub_cfg = RobotBenchmarkConfig.default_subconcept()
+        sub_cfg.seed = config.seed
+        align(sub_cfg)
+
+    # Collect results
+    if "collect" in stages:
+        collect_results()

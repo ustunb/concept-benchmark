@@ -194,6 +194,76 @@ class JointConceptModel(nn.Module):
         return self.head(features)
 
 
+# ── Sudoku models ────────────────────────────────────────────────────
+
+
+class SudokuValidatorCNN(nn.Module):
+    """End-to-end DNN baseline for sudoku board validation."""
+
+    def __init__(self, embedding_dim=16, hidden_dim=128):
+        super(SudokuValidatorCNN, self).__init__()
+        self.embedding = nn.Embedding(num_embeddings=10, embedding_dim=embedding_dim)
+        self.conv1 = nn.Conv2d(embedding_dim, 64, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(128, 128, kernel_size=3, padding=1)
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.mlp = nn.Sequential(
+            nn.Linear(128, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(self, x):
+        x = x.long()
+        x = self.embedding(x)
+        x = x.permute(0, 2, 1).view(-1, x.size(2), 9, 9)
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        x = self.pool(x).view(x.size(0), -1)
+        x = self.mlp(x)
+        return torch.sigmoid(x)
+
+
+class GroupPoolingConceptSudokuCNN(nn.Module):
+    """Concept-based sudoku model using group pooling over rows/cols/blocks."""
+
+    def __init__(self, embedding_dim=16, hidden_dim=64):
+        super(GroupPoolingConceptSudokuCNN, self).__init__()
+        self.embedding = nn.Embedding(num_embeddings=10, embedding_dim=embedding_dim)
+        self.head = nn.Sequential(
+            nn.Linear(2 * embedding_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def _pool_groups(self, x, dim):
+        mean = x.mean(dim=dim)
+        maxv = x.amax(dim=dim)
+        return torch.cat([mean, maxv], dim=-1)
+
+    def forward(self, x):
+        x = x.long()
+        x = self.embedding(x)  # (N, 81, D)
+        x = x.view(x.size(0), 9, 9, -1)  # (N, 9, 9, D)
+
+        row_feats = self._pool_groups(x, dim=2)  # (N, 9, 2D)
+        col_feats = self._pool_groups(x, dim=1)  # (N, 9, 2D)
+
+        blocks = x.view(x.size(0), 3, 3, 3, 3, x.size(-1))
+        blocks = blocks.permute(0, 1, 3, 2, 4, 5).contiguous()
+        block_cells = blocks.view(x.size(0), 9, 9, x.size(-1))
+        block_feats = self._pool_groups(block_cells, dim=2)  # (N, 9, 2D)
+
+        row_logits = self.head(row_feats).squeeze(-1)
+        col_logits = self.head(col_feats).squeeze(-1)
+        block_logits = self.head(block_feats).squeeze(-1)
+
+        logits = torch.cat([row_logits, col_logits, block_logits], dim=1)
+        return logits
+
+
 class ConceptDetector(object):
     """Concept detector with optional calibration and pluggable trainer."""
 

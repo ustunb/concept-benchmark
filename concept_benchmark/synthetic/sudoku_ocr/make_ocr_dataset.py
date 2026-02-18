@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Generate an image Sudoku dataset plus OCR sidecar JSONL
-for the sudoku_demo TinyResNet pipeline. Also save a
+for the TinyResNet OCR pipeline. Also save a
 separate tabular ConceptDataset.
 """
 from __future__ import annotations
@@ -21,8 +21,8 @@ from concept_benchmark.synthetic.sudoku import (
     default_transform,
     image_transform,
 )
-from scripts.sudoku_demo.ocr_utils import DATA_SUDOKU
-from scripts.sudoku_demo.utils import DEFAULT_SUDOKU_SETTINGS, get_dataset_file
+from concept_benchmark.synthetic.sudoku_ocr.ocr_utils import DATA_SUDOKU
+from concept_benchmark.config import SudokuBenchmarkConfig
 
 
 DIGITS_DIR = DATA_SUDOKU / "digits"
@@ -304,13 +304,13 @@ def ensure_digits_dir(args):
 
 # ---------------- main ----------------
 def main():
-    settings = DEFAULT_SUDOKU_SETTINGS.copy()
+    defaults = SudokuBenchmarkConfig.default()
     ap = argparse.ArgumentParser(description="Generate a Sudoku OCR dataset (images + sidecar).")
-    ap.add_argument("--n", type=int, default=settings['n'])
-    ap.add_argument("--n-samples", type=int, default=settings['n_samples'])
-    ap.add_argument("--valid-ratio", type=float, default=settings['valid_ratio'])
-    ap.add_argument("--max-corrupt", type=int, default=settings['max_corrupt'])
-    ap.add_argument("--seed", type=int, default=settings['seed'])
+    ap.add_argument("--n", type=int, default=defaults.n)
+    ap.add_argument("--n-samples", type=int, default=defaults.n_samples)
+    ap.add_argument("--valid-ratio", type=float, default=defaults.valid_ratio)
+    ap.add_argument("--max-corrupt", type=int, default=defaults.max_corrupt)
+    ap.add_argument("--seed", type=int, default=defaults.seed)
 
     ap.add_argument("--progress", action="store_true", help="Show a progress bar during generation.")
 
@@ -333,13 +333,11 @@ def main():
 
     args = ap.parse_args()
 
-    dataset_dir = get_dataset_file(
-        data_type="image",
-        n=args.n,
-        n_samples=args.n_samples,
-        max_corrupt=args.max_corrupt,
-        seed=args.seed,
+    cfg = SudokuBenchmarkConfig(
+        n=args.n, n_samples=args.n_samples,
+        max_corrupt=args.max_corrupt, seed=args.seed,
     )
+    dataset_dir = cfg.get_dataset_path(data_type="image")
     dataset_name = dataset_dir.name
     image_dataset_path = dataset_dir / "sudoku_dataset.pkl"
     ocr_jsonl = dataset_dir / "ocr_preprocessing" / "ocr_preprocessing.jsonl"
@@ -423,13 +421,7 @@ def main():
         )
 
     # Tabular ConceptDataset aligned to the image dataset (always saved)
-    tab_dataset_dir = get_dataset_file(
-        data_type="tabular",
-        n=args.n,
-        n_samples=args.n_samples,
-        max_corrupt=args.max_corrupt,
-        seed=args.seed,
-    )
+    tab_dataset_dir = cfg.get_dataset_path(data_type="tabular")
     tab_ds_name = tab_dataset_dir.name
     if transform is not None:
         boards = np.asarray(getattr(transform, "boards", []))

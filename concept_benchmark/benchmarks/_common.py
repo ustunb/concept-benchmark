@@ -1,12 +1,11 @@
-"""Shared utilities used by all benchmark pipelines.
-
-Consolidates code that was duplicated across scripts/robot_demo/utils.py,
-scripts/sudoku_demo/utils.py, and scripts/utils/dataset_skewing.py.
-"""
+"""Shared utilities used by all benchmark pipelines."""
 from __future__ import annotations
 
+import json
 import os
 import platform
+from pathlib import Path
+from typing import Dict, Optional
 
 import numpy as np
 import torch
@@ -169,3 +168,65 @@ def _create_skewed_training_set(dataset, skew_specs, available_indices, target_s
         train_indices.extend(unused[:remaining_slots])
 
     return np.array(train_indices)
+
+
+# ── Alignment ────────────────────────────────────────────────────────
+
+def run_alignment(
+    cbm,
+    train_dataset,
+    test_dataset,
+    monotonicity_constraints: Dict[str, int],
+    save_path: Optional[Path] = None,
+) -> dict:
+    """Run alignment: retrain frontend with sign constraints, compare to original.
+
+    Args:
+        cbm: Trained ConceptBasedModel.
+        train_dataset: Training split (for retraining the frontend).
+        test_dataset: Test split (for evaluation).
+        monotonicity_constraints: ``{concept_name: sign}`` where sign is
+            +1 (positive weight) or -1 (negative weight).
+        save_path: Optional path to save results as JSON.
+
+    Returns:
+        Dict with original_accuracy, aligned_accuracy, accuracy_change,
+        predictions_changed, aligned_weights.
+    """
+    from concept_benchmark.alignment import retrain_aligned
+
+    # Threshold at 0.5 to match cbm.predict() which binarises concept
+    # predictions before passing them to the frontend.
+    h_train = (cbm.concept_detector.predict(train_dataset) > 0.5).astype(np.float32)
+    h_test = (cbm.concept_detector.predict(test_dataset) > 0.5).astype(np.float32)
+
+    stats = retrain_aligned(
+        h_train=h_train,
+        y_train=train_dataset.y.astype(int),
+        h_test=h_test,
+        y_test=test_dataset.y.astype(int),
+        concept_names=list(test_dataset.concepts),
+        original_frontend=cbm.front_end_model,
+        monotonicity_constraints=monotonicity_constraints,
+    )
+
+    print("\n=== Alignment Results ===")
+    print(f"  Original accuracy: {stats['original_accuracy']:.4f}")
+    print(f"  Aligned accuracy:  {stats['aligned_accuracy']:.4f}")
+    print(f"  Accuracy change:   {stats['accuracy_change']:+.4f}")
+    print(f"  Predictions changed: {stats['predictions_changed']}")
+
+    if save_path is not None:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        # Convert numpy types for JSON serialization
+        serializable = {
+            k: (v if not isinstance(v, dict) else
+                {kk: float(vv) for kk, vv in v.items()})
+            for k, v in stats.items()
+        }
+        with open(save_path, "w") as f:
+            json.dump(serializable, f, indent=2)
+        print(f"  Saved to {save_path}")
+
+    return stats

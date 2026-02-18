@@ -1,7 +1,6 @@
 """Sudoku validation benchmark pipeline.
 
 Provides functions to run each stage of the sudoku benchmark programmatically.
-Extracted from scripts/sudoku_demo/*.py — same logic, no subprocess calls.
 """
 from __future__ import annotations
 
@@ -33,20 +32,31 @@ from concept_benchmark.intervention import (
     InterventionConfig,
 )
 
+# Backward compatibility: allow unpickling models saved under old class paths.
+# Saved CS models reference scripts.sudoku_demo.sudoku_models at pickle time.
+import sys as _sys
+import types as _types
+if "scripts.sudoku_demo.sudoku_models" not in _sys.modules:
+    import concept_benchmark.models as _compat_models
+    if "scripts" not in _sys.modules:
+        _sys.modules["scripts"] = _types.ModuleType("scripts")
+    if "scripts.sudoku_demo" not in _sys.modules:
+        _sd = _types.ModuleType("scripts.sudoku_demo")
+        _sys.modules["scripts.sudoku_demo"] = _sd
+        _sys.modules["scripts"].sudoku_demo = _sd
+    _sys.modules["scripts.sudoku_demo.sudoku_models"] = _compat_models
+
 
 # ── Stage: setup_dataset ──────────────────────────────────────────────
 
 def setup_dataset(config: SudokuBenchmarkConfig) -> None:
-    """Generate sudoku dataset (image + tabular + OCR sidecar).
-
-    Delegates to scripts/sudoku_demo/make_ocr_dataset.py main().
-    """
+    """Generate sudoku dataset (image + tabular + OCR sidecar)."""
     import subprocess
     import sys
 
     cmd = [
         sys.executable,
-        "scripts/sudoku_demo/make_ocr_dataset.py",
+        "-m", "concept_benchmark.synthetic.sudoku_ocr.make_ocr_dataset",
         "--n", str(config.n),
         "--n-samples", str(config.n_samples),
         "--valid-ratio", str(config.valid_ratio),
@@ -59,16 +69,13 @@ def setup_dataset(config: SudokuBenchmarkConfig) -> None:
 # ── Stage: train_ocr ──────────────────────────────────────────────────
 
 def train_ocr(config: SudokuBenchmarkConfig) -> None:
-    """Train OCR digit recognizer.
-
-    Delegates to scripts/sudoku_demo/train_ocr_fast.py main().
-    """
+    """Train OCR digit recognizer."""
     import subprocess
     import sys
 
     cmd = [
         sys.executable,
-        "scripts/sudoku_demo/train_ocr_fast.py",
+        "-m", "concept_benchmark.synthetic.sudoku_ocr.train_ocr_fast",
         "--seed", str(config.seed),
         "--max-corrupt", str(config.max_corrupt),
     ]
@@ -116,7 +123,7 @@ def train_cs(
     }
     torch.manual_seed(config.seed)
 
-    from scripts.sudoku_demo.sudoku_models import (
+    from concept_benchmark.models import (
         GroupPoolingConceptSudokuCNN as SudokuConceptModel,
     )
 
@@ -164,7 +171,7 @@ def train_dnn(
 
     torch.manual_seed(config.seed)
 
-    from scripts.sudoku_demo.sudoku_models import SudokuValidatorCNN as DNNSudokuModel
+    from concept_benchmark.models import SudokuValidatorCNN as DNNSudokuModel
 
     model = DNNSudokuModel()
     criterion = nn.BCELoss()
@@ -240,7 +247,6 @@ def run_interventions(
 ) -> pd.DataFrame:
     """Run conceptual safeguards interventions on the sudoku CS model.
 
-    Mirrors the logic in scripts/sudoku_demo/intervene.py.
     Returns the intervention results DataFrame.
     """
     patch_macos_dataloader()
@@ -315,7 +321,197 @@ def run_interventions(
         })
 
     cs_intervention_df = pd.DataFrame(rows)
+
+    csv_path = (
+        config.get_results_path("interventions", data_type="tabular")
+        .with_suffix(".csv")
+    )
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    cs_intervention_df.to_csv(csv_path, index=False)
+    print(f"Saved intervention results to {csv_path}")
+
     return cs_intervention_df
+
+
+# ── Stage: align ─────────────────────────────────────────────────────
+
+def align(
+    config: SudokuBenchmarkConfig,
+    cs_model: Optional[ConceptBasedModel] = None,
+    data=None,
+) -> dict:
+    """Run alignment test on the trained CS model.
+
+    Replaces the frontend weights with human-aligned weights (all 27
+    constraints positive with equal weight, AND semantics) and compares
+    original vs aligned accuracy.
+
+    Returns dict with original_accuracy, aligned_accuracy, accuracy_change,
+    predictions_changed.
+    """
+    import json as _json
+
+    if data is None:
+        tab_dir = config.get_dataset_path(data_type="tabular")
+        data = load(tab_dir / "sudoku_dataset.pkl")
+        data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=config.seed)
+        data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
+
+    if cs_model is None:
+        cs_model = load(config.get_model_path("cs", data_type="tabular"))
+
+    from concept_benchmark.alignment import test_alignment
+
+    # Threshold at 0.5 to match cbm.predict() binarisation
+    h_test = (cs_model.concept_detector.predict(data.test) > 0.5).astype(np.float32)
+    stats = test_alignment(
+        h_test=h_test,
+        align_params=config.get_alignment_weights(),
+        fe=cs_model.front_end_model,
+        test=data.test,
+    )
+
+    print("\n=== Alignment Results ===")
+    print(f"  Original accuracy: {stats['original_accuracy']:.4f}")
+    print(f"  Aligned accuracy:  {stats['aligned_accuracy']:.4f}")
+    print(f"  Accuracy change:   {stats['accuracy_change']:+.4f}")
+    print(f"  Predictions changed: {stats['predictions_changed']}")
+
+    save_path = config.get_alignment_results_path()
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(save_path, "w") as f:
+        _json.dump(stats, f, indent=2)
+    print(f"  Saved to {save_path}")
+
+    return stats
+
+
+# ── Stage: collect_results ────────────────────────────────────────────
+
+def _dataset_label(cfg: SudokuBenchmarkConfig) -> str:
+    """Human-readable dataset label for the summary CSV."""
+    label = f"mc{cfg.max_corrupt}"
+    if cfg.concept_missing_mech != "none":
+        label += f"_{cfg.concept_missing_mech}"
+        if cfg.concept_missing > 0:
+            label += f"_{int(cfg.concept_missing * 100)}"
+    return label
+
+
+def collect_results(
+    configs: Optional[List[SudokuBenchmarkConfig]] = None,
+) -> pd.DataFrame:
+    """Aggregate all sudoku results into a single flat CSV.
+
+    Produces one row per (dataset, model, budget) combination with columns:
+      dataset, model, budget, target_accuracy, raw_test_acc,
+      selective_acc, selective_cov, predictions_intervened_on,
+      avg_concepts_per_sample, predictions_changed
+
+    Reads saved artifacts only — no model retraining.
+    """
+    import json
+
+    from concept_benchmark.paths import results_dir
+
+    if configs is None:
+        configs = [
+            SudokuBenchmarkConfig(max_corrupt=9),
+            SudokuBenchmarkConfig(max_corrupt=21),
+        ]
+
+    rows: list[dict] = []
+
+    for cfg in configs:
+        label = _dataset_label(cfg)
+        target = cfg.target_accuracy
+
+        # ── Selective CSV: DNN + CS at the default target_accuracy ────
+        sel_csv = (
+            cfg.get_results_path("selective", data_type="tabular")
+            .with_suffix(".csv")
+        )
+        if sel_csv.exists():
+            sel_df = pd.read_csv(sel_csv)
+            # Normalise column name (mc9 uses "tau", mc21 uses "target_accuracy")
+            if "tau" in sel_df.columns:
+                sel_df = sel_df.rename(columns={"tau": "target_accuracy"})
+
+            for model in ["dnn", "cs"]:
+                model_df = sel_df[
+                    (sel_df["model"] == model)
+                    & (sel_df["target_accuracy"] == target)
+                ]
+                if model_df.empty:
+                    continue
+                r = model_df.iloc[0]
+                sel_acc = r["selective_acc"]
+                rows.append({
+                    "dataset": label,
+                    "model": model,
+                    "budget": 0 if model == "cs" else "",
+                    "target_accuracy": target,
+                    "raw_test_acc": round(float(r["raw_test_acc"]), 4),
+                    "selective_acc": round(float(sel_acc), 4) if pd.notna(sel_acc) else "",
+                    "selective_cov": round(float(r["selective_cov"]), 4),
+                    "predictions_intervened_on": "",
+                    "avg_concepts_per_sample": "",
+                    "predictions_changed": "",
+                })
+
+        # ── Intervention CSV: CS at k > 0 ────────────────────────────
+        interv_csv = (
+            cfg.get_results_path("interventions", data_type="tabular")
+            .with_suffix(".csv")
+        )
+        if interv_csv.exists():
+            interv_df = pd.read_csv(interv_csv)
+            for _, r in interv_df.iterrows():
+                budget = int(r["budget"])
+                if budget == 0:
+                    continue  # already have k=0 from selective CSV
+                pio = int(r["predictions_intervened_on"])
+                tcc = int(r["total_concept_checks"])
+                avg_cps = round(tcc / pio, 2) if pio > 0 else 0.0
+                sel_acc = r.get("selective_accuracy_after")
+                cov = r.get("coverage_after")
+                rows.append({
+                    "dataset": label,
+                    "model": "cs",
+                    "budget": budget,
+                    "target_accuracy": target,
+                    "raw_test_acc": "",
+                    "selective_acc": round(float(sel_acc), 4) if pd.notna(sel_acc) else "",
+                    "selective_cov": round(float(cov), 4) if pd.notna(cov) else "",
+                    "predictions_intervened_on": pio,
+                    "avg_concepts_per_sample": avg_cps,
+                    "predictions_changed": int(r["total_concept_edits_made"]),
+                })
+
+        # ── Alignment JSON ───────────────────────────────────────────
+        align_path = cfg.get_alignment_results_path(data_type="tabular")
+        if align_path.exists():
+            with open(align_path) as f:
+                align_data = json.load(f)
+            rows.append({
+                "dataset": label,
+                "model": "aligned_cs",
+                "budget": 0,
+                "target_accuracy": "",
+                "raw_test_acc": round(float(align_data["aligned_accuracy"]), 4),
+                "selective_acc": "",
+                "selective_cov": "",
+                "predictions_intervened_on": "",
+                "avg_concepts_per_sample": "",
+                "predictions_changed": align_data.get("predictions_changed", ""),
+            })
+
+    final_df = pd.DataFrame(rows)
+    out_path = results_dir / "sudoku_demo_results.csv"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    final_df.to_csv(out_path, index=False)
+    print(f"Saved {len(final_df)} rows to {out_path}")
+    return final_df
 
 
 # ── Stage: run (orchestrator) ─────────────────────────────────────────
@@ -335,7 +531,7 @@ def run(
     if config is None:
         config = SudokuBenchmarkConfig.default()
     if stages is None:
-        stages = ["setup", "ocr", "cs", "dnn", "intervene", "selective"]
+        stages = ["setup", "ocr", "cs", "dnn", "intervene", "selective", "align", "collect"]
 
     if "setup" in stages:
         setup_dataset(config)
@@ -359,10 +555,16 @@ def run(
         print("\n=== Selective Metrics ===")
         print(sel_df.to_string(index=False))
 
+    if "align" in stages:
+        align(config)
+
+    if "collect" in stages:
+        collect_results()
+
     print("\nPipeline complete!")
 
 
-# ── Helper functions (from scripts/sudoku_demo/intervene.py) ──────────
+# ── Helper functions ──────────────────────────────────────────────────
 
 def _selective_accuracy_threshold(
     y_true: np.ndarray,
@@ -498,7 +700,7 @@ def compute_selective_results(
     if dnn_weights is None:
         dnn_weights = load(config.get_model_path("dnn", data_type="tabular"))
 
-    from scripts.sudoku_demo.sudoku_models import SudokuValidatorCNN
+    from concept_benchmark.models import SudokuValidatorCNN
 
     dnn = SudokuValidatorCNN()
     dnn.load_state_dict(dnn_weights)

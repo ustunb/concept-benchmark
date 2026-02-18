@@ -13,12 +13,13 @@ A framework for generating synthetic benchmarks for [concept bottleneck models](
 ## Table of Contents
 
 1. [Installation](#installation)
-2. [Quick Start](#quick-start)
-3. [Built-in Benchmarks](#built-in-benchmarks)
-4. [Running Experiments](#running-experiments)
-5. [Configuration](#configuration)
-6. [Creating Your Own Benchmark](#creating-your-own-benchmark)
-7. [Citation](#citation)
+2. [Reproducing the Paper](#reproducing-the-paper)
+3. [Quick Start](#quick-start)
+4. [Built-in Benchmarks](#built-in-benchmarks)
+5. [Running Experiments](#running-experiments)
+6. [Configuration](#configuration)
+7. [Creating Your Own Benchmark](#creating-your-own-benchmark)
+8. [Citation](#citation)
 
 ## Installation
 
@@ -30,6 +31,59 @@ source venv/bin/activate
 ```
 
 Or manually: `pip install -e .`
+
+## Reproducing the Paper
+
+To reproduce the benchmark results from the paper (Skirzynski et al., "Measuring What Matters"):
+
+### Robot Benchmark
+
+```bash
+# 1. Run the full pipeline (generates data, trains all models, runs interventions + alignment)
+cbm-benchmark robot --seed 1014
+
+# 2. Print the paper's tables from the results CSV
+python scripts/reproduce_robot_table.py
+```
+
+Step 1 runs all stages: `setup`, `cbm`, `dnn`, `intervene`, `align`, `collect`. The `collect` stage aggregates all saved artifacts into `results/robot_demo_results.csv`:
+
+```bash
+python scripts/reproduce_robot_table.py --table main       # DNN + CBM k=0/1/3/max
+python scripts/reproduce_robot_table.py --table alignment   # aligned CBM comparison
+python scripts/reproduce_robot_table.py --table budget      # budget sweep across datasets
+python scripts/reproduce_robot_table.py --table full        # all rows including MCAR/MNAR
+```
+
+### Sudoku Benchmark
+
+```bash
+# 1. Run the full pipeline (mc=9 by default)
+cbm-benchmark sudoku --seed 171
+
+# 2. Print the paper's tables from the results CSV
+python scripts/reproduce_sudoku_table.py
+```
+
+Step 1 runs all stages: `setup`, `ocr`, `cs`, `dnn`, `intervene`, `selective`, `align`, `collect`. The `collect` stage aggregates results into `results/sudoku_demo_results.csv`:
+
+```bash
+python scripts/reproduce_sudoku_table.py --table main       # DNN + CS k=0/1/3/max
+python scripts/reproduce_sudoku_table.py --table selective   # selective accuracy summary
+python scripts/reproduce_sudoku_table.py --table full        # all rows with intervention details
+```
+
+### Re-collecting Without Re-training
+
+```bash
+# Just re-aggregate saved artifacts into the CSV
+cbm-benchmark robot --stages collect
+cbm-benchmark sudoku --stages collect
+
+# Or from the reproduce scripts
+python scripts/reproduce_robot_table.py --collect
+python scripts/reproduce_sudoku_table.py --collect
+```
 
 ## Quick Start
 
@@ -94,11 +148,20 @@ Determine whether a Sudoku board is valid. Concepts are the 27 row/column/block 
 The `cbm-benchmark` command runs full pipelines end-to-end:
 
 ```bash
-# Robot: generate data, train CBM + DNN, run interventions
+# Robot: full pipeline (all stages including alignment and result collection)
+cbm-benchmark robot --seed 1014
+
+# Robot: specific stages only
 cbm-benchmark robot --seed 1014 --stages setup cbm dnn intervene
 
+# Robot: just re-collect results from saved artifacts into CSV
+cbm-benchmark robot --stages collect
+
 # Sudoku: generate data, train OCR + concept model + DNN, intervene, compute selective metrics
-cbm-benchmark sudoku --seed 171 --stages setup ocr cs dnn intervene selective
+cbm-benchmark sudoku --seed 171
+
+# Sudoku: just re-collect results
+cbm-benchmark sudoku --stages collect
 
 # Robot with subconcept variant and no missingness sweep
 cbm-benchmark robot --subconcept --no-missing --stages setup cbm intervene
@@ -129,7 +192,10 @@ sudoku.run(cfg, stages=["setup", "ocr", "cs", "dnn", "intervene", "selective"])
 Individual stages can also be called directly:
 
 ```python
-from concept_benchmark.benchmarks.robot import setup_dataset, train_cbm, train_dnn, run_interventions
+from concept_benchmark.benchmarks.robot import (
+    setup_dataset, train_cbm, train_dnn,
+    run_interventions, align, collect_results,
+)
 from concept_benchmark.config import RobotBenchmarkConfig
 
 config = RobotBenchmarkConfig.default_ideal()
@@ -137,12 +203,15 @@ data = setup_dataset(config)          # generate + skew + save
 cbm = train_cbm(config, data)         # train concept detector + frontend
 dnn_weights = train_dnn(config, data) # train end-to-end DNN baseline
 results_df = run_interventions(config, cbm, data)  # evaluate interventions
+align_stats = align(config, cbm, data)             # alignment test
+summary_df = collect_results()                      # aggregate all into CSV
 ```
 
 ```python
 from concept_benchmark.benchmarks.sudoku import (
     setup_dataset, train_ocr, train_cs, train_dnn,
     run_interventions, compute_selective_results,
+    align, collect_results,
 )
 from concept_benchmark.config import SudokuBenchmarkConfig
 
@@ -153,11 +222,13 @@ cs_model = train_cs(config)            # train concept supervision model
 dnn_weights = train_dnn(config)        # train DNN baseline
 interv_df = run_interventions(config)  # run conceptual safeguards
 sel_df = compute_selective_results(config)  # selective accuracy at multiple thresholds
+align_stats = align(config)            # alignment test
+summary_df = collect_results()         # aggregate all into CSV
 ```
 
 ### Pipeline Stages
 
-**Robot** stages: `setup`, `cbm`, `dnn`, `intervene`
+**Robot** stages: `setup`, `cbm`, `dnn`, `intervene`, `align`, `collect`
 
 | Stage | What it does |
 |-------|-------------|
@@ -165,8 +236,10 @@ sel_df = compute_selective_results(config)  # selective accuracy at multiple thr
 | `cbm` | Train concept detector + frontend (+ MCAR/MNAR variants) |
 | `dnn` | Train end-to-end DNN baseline |
 | `intervene` | Run k-flip interventions at multiple budgets and thresholds |
+| `align` | Retrain frontend with monotonicity constraints (alignment test) |
+| `collect` | Aggregate all results into `results/robot_demo_results.csv` |
 
-**Sudoku** stages: `setup`, `ocr`, `cs`, `dnn`, `intervene`, `selective`
+**Sudoku** stages: `setup`, `ocr`, `cs`, `dnn`, `intervene`, `selective`, `align`, `collect`
 
 | Stage | What it does |
 |-------|-------------|
@@ -176,6 +249,8 @@ sel_df = compute_selective_results(config)  # selective accuracy at multiple thr
 | `dnn` | Train end-to-end DNN baseline |
 | `intervene` | Run conceptual safeguards interventions |
 | `selective` | Compute selective accuracy/coverage at multiple target thresholds |
+| `align` | Test alignment by replacing frontend with human-aligned weights |
+| `collect` | Aggregate all results into `results/sudoku_demo_results.csv` |
 
 ## Configuration
 
@@ -247,7 +322,7 @@ cfg = SudokuBenchmarkConfig.default()
 
 # Harder task (more corruption)
 cfg = SudokuBenchmarkConfig(max_corrupt=21, cs_epochs=200)
-sudoku.run(cfg, stages=["setup", "ocr", "cs", "dnn", "intervene", "selective"])
+sudoku.run(cfg, stages=["setup", "ocr", "cs", "dnn", "intervene", "selective", "align"])
 ```
 
 ### Saving and Loading Configs

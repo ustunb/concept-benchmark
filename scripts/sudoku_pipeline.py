@@ -31,7 +31,7 @@ if str(repo_root) not in sys.path:
 
 from concept_benchmark.synthetic.sudoku import create_sudoku_dataset, default_transform
 from concept_benchmark.models import ConceptBasedModel, ConceptDetector
-from scripts.sudoku_demo.sudoku_models import (
+from concept_benchmark.models import (
     GroupPoolingConceptSudokuCNN as SudokuConceptModel,
     SudokuValidatorCNN as DNNSudokuModel,
 )

@@ -8,24 +8,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from concept_benchmark.benchmarks._common import compute_accuracy, determine_device
+from concept_benchmark.config import RobotBenchmarkConfig
 from concept_benchmark.ext.fileutils import load
+from concept_benchmark.models import RobotClassifierCNN
 from concept_benchmark.paths import results_dir
-from scripts.robot_demo.utils import (
-    DEFAULT_ROBOT_SETTINGS,
-    INPUT_MAP,
-    RobotClassifierCNN,
-    compute_accuracy,
-    determine_device,
-    get_dataset_file,
-    get_model_file,
-    get_results_file,
-)
 
 
 # Skip entire module if artifacts are not present
-_settings = DEFAULT_ROBOT_SETTINGS.copy()
-_dataset_path = get_dataset_file(**_settings)
-_has_artifacts = _dataset_path.exists()
+_ideal_cfg = RobotBenchmarkConfig.default_ideal()
+_has_artifacts = _ideal_cfg.get_dataset_path().exists()
 
 pytestmark = pytest.mark.skipif(
     not _has_artifacts,
@@ -34,13 +26,13 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture(scope="module")
-def settings():
-    return DEFAULT_ROBOT_SETTINGS.copy()
+def ideal_config():
+    return RobotBenchmarkConfig.default_ideal()
 
 
 @pytest.fixture(scope="module")
-def dataset(settings):
-    return load(get_dataset_file(**settings))
+def dataset(ideal_config):
+    return load(ideal_config.get_dataset_path())
 
 
 @pytest.fixture(scope="module")
@@ -67,9 +59,9 @@ class TestDatasetShape:
 # ── CBM accuracy ──────────────────────────────────────────────────────
 
 class TestCBMAccuracy:
-    def test_ideal_cbm_accuracy(self, settings):
-        cbm = load(get_model_file(model_class="cbm", **settings))
-        data = load(get_dataset_file(**settings))
+    def test_ideal_cbm_accuracy(self, ideal_config):
+        cbm = load(ideal_config.get_model_path("cbm"))
+        data = load(ideal_config.get_dataset_path())
         acc = (cbm.predict(data.test) == data.test.y).mean().item()
         assert abs(acc - 0.8673) < 0.001, f"Expected ~0.8673, got {acc}"
 
@@ -77,9 +69,9 @@ class TestCBMAccuracy:
 # ── DNN accuracy ──────────────────────────────────────────────────────
 
 class TestDNNAccuracy:
-    def test_ideal_dnn_accuracy(self, settings, dataset, device):
-        dnn_weights = load(get_model_file(model_class="dnn", **settings))
-        dnn = RobotClassifierCNN(input_size=INPUT_MAP[settings["size"]]).to(device)
+    def test_ideal_dnn_accuracy(self, ideal_config, dataset, device):
+        dnn_weights = load(ideal_config.get_model_path("dnn"))
+        dnn = RobotClassifierCNN(input_size=ideal_config.input_size).to(device)
         dnn.load_state_dict(dnn_weights)
         loader_config = {"batch_size": 32, "num_workers": 0, "pin_memory": False}
         test_loader = dataset.test.loader(shuffle=False, **loader_config)
@@ -100,61 +92,81 @@ class TestResultsCSV:
     def test_dnn_accuracy_in_csv(self, results_df):
         row = results_df[
             (results_df["model"] == "dnn")
-            & (results_df["data_name"] == "ideal")
-            & (results_df["metric"] == "accuracy")
+            & (results_df["dataset"] == "ideal")
         ]
         assert len(row) == 1
-        assert abs(row.iloc[0]["value"] - 0.8746) < 0.001
+        assert abs(row.iloc[0]["accuracy"] - 0.8746) < 0.001
 
     def test_cbm_no_int_accuracy_ideal(self, results_df):
         row = results_df[
-            (results_df["model"] == "cbm_no_int")
-            & (results_df["data_name"] == "ideal")
-            & (results_df["concept_missing"] == 0.0)
-            & (results_df["metric"] == "accuracy")
+            (results_df["model"] == "cbm")
+            & (results_df["dataset"] == "ideal")
+            & (results_df["budget"] == 0)
         ]
         assert len(row) == 1
-        assert abs(row.iloc[0]["value"] - 0.8673) < 0.001
+        assert abs(row.iloc[0]["accuracy"] - 0.8673) < 0.001
 
     def test_cbm_no_int_accuracy_subconcept(self, results_df):
         row = results_df[
-            (results_df["model"] == "cbm_no_int")
-            & (results_df["data_name"] == "subconcept")
-            & (results_df["concept_missing"] == 0.0)
-            & (results_df["metric"] == "accuracy")
+            (results_df["model"] == "cbm")
+            & (results_df["dataset"] == "subconcept")
+            & (results_df["budget"] == 0)
         ]
         assert len(row) == 1
-        assert abs(row.iloc[0]["value"] - 0.7812) < 0.001
+        assert abs(row.iloc[0]["accuracy"] - 0.7812) < 0.001
 
     def test_cbm_with_int_1_ideal_t02(self, results_df):
         row = results_df[
-            (results_df["model"] == "cbm_with_int_1")
-            & (results_df["data_name"] == "ideal")
-            & (results_df["concept_missing"] == 0.0)
+            (results_df["model"] == "cbm")
+            & (results_df["dataset"] == "ideal")
+            & (results_df["budget"] == 1)
             & (results_df["threshold"] == 0.2)
-            & (results_df["metric"] == "accuracy")
         ]
         assert len(row) == 1
-        assert abs(row.iloc[0]["value"] - 0.9736) < 0.001
+        assert abs(row.iloc[0]["accuracy"] - 0.9736) < 0.001
 
     def test_cbm_with_int_1_ideal_t02_changed(self, results_df):
         row = results_df[
-            (results_df["model"] == "cbm_with_int_1")
-            & (results_df["data_name"] == "ideal")
-            & (results_df["concept_missing"] == 0.0)
+            (results_df["model"] == "cbm")
+            & (results_df["dataset"] == "ideal")
+            & (results_df["budget"] == 1)
             & (results_df["threshold"] == 0.2)
-            & (results_df["metric"] == "predictions_changed")
         ]
         assert len(row) == 1
-        assert row.iloc[0]["value"] == 1417.0
+        assert row.iloc[0]["predictions_changed"] == 1417
+
+    def test_aligned_cbm_ideal(self, results_df):
+        row = results_df[
+            (results_df["model"] == "aligned_cbm")
+            & (results_df["dataset"] == "ideal")
+            & (results_df["budget"] == 0)
+        ]
+        assert len(row) == 1
+        assert abs(row.iloc[0]["accuracy"] - 0.8657) < 0.001
+
+    def test_gain_computed(self, results_df):
+        """Gain column = accuracy - dnn_accuracy for all rows."""
+        dnn_row = results_df[
+            (results_df["model"] == "dnn") & (results_df["dataset"] == "ideal")
+        ]
+        dnn_acc = dnn_row.iloc[0]["accuracy"]
+        cbm_row = results_df[
+            (results_df["model"] == "cbm")
+            & (results_df["dataset"] == "ideal")
+            & (results_df["budget"] == 1)
+            & (results_df["threshold"] == 0.2)
+        ]
+        expected_gain = cbm_row.iloc[0]["accuracy"] - dnn_acc
+        assert abs(cbm_row.iloc[0]["gain"] - expected_gain) < 0.001
 
 
 # ── Intervention results CSV (per-variant) ────────────────────────────
 
 class TestInterventionCSV:
     @pytest.fixture(scope="class")
-    def ideal_interv_df(self, settings):
-        csv_path = get_results_file(model_class="cbm", **settings)
+    def ideal_interv_df(self):
+        cfg = RobotBenchmarkConfig.default_ideal()
+        csv_path = cfg.get_results_path("cbm")
         if not csv_path.exists():
             pytest.skip("Ideal CBM results CSV not found")
         return pd.read_csv(csv_path)
@@ -185,3 +197,37 @@ class TestInterventionCSV:
         ]
         assert len(row) == 1
         assert abs(row.iloc[0]["accuracy"] - 0.9769) < 0.001
+
+
+# ── Alignment regression tests ─────────────────────────────────────
+
+class TestAlignment:
+    @pytest.fixture(scope="class")
+    def ideal_alignment(self):
+        import json
+        path = results_dir / "robot_image_stochastic_ideal_alignment.json"
+        if not path.exists():
+            pytest.skip("Ideal alignment results not found")
+        with open(path) as f:
+            return json.load(f)
+
+    @pytest.fixture(scope="class")
+    def subconcept_alignment(self):
+        import json
+        path = results_dir / "robot_image_stochastic_subconcept_alignment.json"
+        if not path.exists():
+            pytest.skip("Subconcept alignment results not found")
+        with open(path) as f:
+            return json.load(f)
+
+    def test_ideal_original_accuracy(self, ideal_alignment):
+        assert abs(ideal_alignment["original_accuracy"] - 0.8673) < 0.001
+
+    def test_ideal_aligned_accuracy(self, ideal_alignment):
+        assert abs(ideal_alignment["aligned_accuracy"] - 0.8657) < 0.001
+
+    def test_subconcept_original_accuracy(self, subconcept_alignment):
+        assert abs(subconcept_alignment["original_accuracy"] - 0.7812) < 0.001
+
+    def test_subconcept_aligned_accuracy(self, subconcept_alignment):
+        assert abs(subconcept_alignment["aligned_accuracy"] - 0.7656) < 0.001

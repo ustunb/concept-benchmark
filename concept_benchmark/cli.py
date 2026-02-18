@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> None:
     robot_p = subparsers.add_parser("robot", help="Run the robot classification benchmark.")
     robot_p.add_argument("--seed", type=int, default=1014)
     robot_p.add_argument(
-        "--stages", nargs="+", default=["setup", "cbm", "dnn", "intervene"],
+        "--stages", nargs="+", default=["setup", "cbm", "dnn", "intervene", "align", "collect"],
     )
     robot_p.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
     robot_p.add_argument("--subconcept", action="store_true")
@@ -62,7 +62,7 @@ def main(argv: list[str] | None = None) -> None:
     sudoku_p = subparsers.add_parser("sudoku", help="Run the sudoku validation benchmark.")
     sudoku_p.add_argument("--seed", type=int, default=171)
     sudoku_p.add_argument(
-        "--stages", nargs="+", default=["setup", "ocr", "cs", "dnn", "intervene"],
+        "--stages", nargs="+", default=["setup", "ocr", "cs", "dnn", "intervene", "selective", "align", "collect"],
     )
     sudoku_p.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
     sudoku_p.set_defaults(func=_sudoku_cmd)
