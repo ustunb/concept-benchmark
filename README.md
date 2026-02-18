@@ -2,408 +2,171 @@
 
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Paper](https://img.shields.io/badge/paper-under%20review-orange)](https://github.com/ustunb/concept-benchmark)
-
-A framework for generating synthetic benchmarks for [concept bottleneck models](https://arxiv.org/abs/2007.04612) (CBMs). Define concepts, generate data, train models, and evaluate interventions — all with ground-truth concept labels.
 
 <p align="center">
   <img src="docs/assets/robot_banner.png" width="700" alt="Example robots from the robot benchmark">
 </p>
 
+**Concept Benchmark** is a Python package for benchmarking [concept bottleneck models](https://arxiv.org/abs/2007.04612) (CBMs). It provides synthetic datasets with ground-truth concept labels, letting researchers evaluate CBM pipelines end-to-end: from concept detection accuracy, to the effect of human interventions on model predictions, to whether learned concept-label relationships align with domain knowledge.
+
+Evaluating CBMs on real-world data is difficult because ground-truth concept annotations are expensive, noisy, and often incomplete. Concept Benchmark addresses this by generating fully-labeled synthetic data where every concept value is known exactly. This makes it possible to measure intervention effectiveness, test robustness to missing or noisy concepts, and compare concept sets of different granularity -- all under controlled conditions where the ground truth is available.
+
+The package ships with two benchmark domains (robot classification and sudoku validation) across three modalities (image, text, tabular). Each benchmark is configurable via a typed dataclass and can be run from the command line or the Python API. For more details, see [our paper](https://arxiv.org/abs/TODO).
+
 ## Table of Contents
 
 1. [Installation](#installation)
-2. [Reproducing the Paper](#reproducing-the-paper)
-3. [Quick Start](#quick-start)
-4. [Built-in Benchmarks](#built-in-benchmarks)
-5. [Running Experiments](#running-experiments)
-6. [Configuration](#configuration)
-7. [Creating Your Own Benchmark](#creating-your-own-benchmark)
-8. [Citation](#citation)
+2. [Quick Start](#quick-start)
+3. [Benchmarks](#benchmarks)
+4. [Configuration](#configuration)
+5. [Creating Your Own Benchmark](#creating-your-own-benchmark)
+6. [Citation](#citation)
 
 ## Installation
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/ustunb/concept-benchmark.git
 cd concept-benchmark
 ./install.sh
 source venv/bin/activate
 ```
 
-Or manually: `pip install -e .`
-
-## Reproducing the Paper
-
-To reproduce the benchmark results from the paper (Skirzynski et al., "Measuring What Matters"):
-
-### Robot Benchmark
+You can also install directly via pip:
 
 ```bash
-# Run the full pipeline (generates data, trains all models, runs interventions + alignment)
-cbm-benchmark robot --seed 1014
-```
-
-This runs all stages: `setup`, `cbm`, `dnn`, `intervene`, `align`, `collect`. The `collect` stage aggregates all saved artifacts into `results/robot_demo_results.csv`.
-
-### Sudoku Benchmark
-
-```bash
-# Run the full pipeline (mc=9 by default)
-cbm-benchmark sudoku --seed 171
-```
-
-This runs all stages: `setup`, `ocr`, `cs`, `dnn`, `intervene`, `selective`, `align`, `collect`. The `collect` stage aggregates results into `results/sudoku_demo_results.csv`.
-
-### Robot Text Benchmark
-
-```bash
-# Run the full text-modality pipeline
-cbm-benchmark robot-text --seed 1337
-
-# Also run LFCBM variant
-cbm-benchmark robot-text --seed 1337 --lfcbm
-```
-
-This runs stages: `setup`, `cbm`, `dnn`, `intervene`, `align`, `collect`. Results are saved to `results/robot_text_results.csv`.
-
-### Re-collecting Without Re-training
-
-```bash
-# Just re-aggregate saved artifacts into the CSV
-cbm-benchmark robot --stages collect
-cbm-benchmark sudoku --stages collect
-cbm-benchmark robot-text --stages collect
+pip install -e .
 ```
 
 ## Quick Start
 
-Run a full benchmark (generate data, train models, evaluate interventions) in a few lines:
+The following example generates the robot classification dataset, trains a concept bottleneck model, and evaluates how human interventions on predicted concepts affect model accuracy:
 
 ```python
 from concept_benchmark.benchmarks import robot
 from concept_benchmark.config import RobotBenchmarkConfig
 
-# Run the full robot pipeline with paper defaults
-robot.run()
-
-# Or customize and run specific stages
-cfg = RobotBenchmarkConfig(seed=42, epochs=20)
+# Generate 30,720 robot images with ground-truth concept labels
+cfg = RobotBenchmarkConfig(seed=1014)
 data = robot.setup_dataset(cfg)
+
+# Train a CBM: concept detector (image -> concepts) + frontend (concepts -> label)
 cbm = robot.train_cbm(cfg, data)
+
+# Evaluate k-flip interventions: correct the k most impactful concepts per sample
 results = robot.run_interventions(cfg, cbm, data)
+print(results[["budget", "accuracy"]].to_string(index=False))
 ```
+
+Each benchmark is also available from the command line:
 
 ```bash
-# Or from the command line
-cbm-benchmark robot --seed 1014 --stages setup cbm dnn intervene
-cbm-benchmark sudoku --seed 171 --stages setup ocr cs dnn intervene selective
-cbm-benchmark robot-text --seed 1337 --stages setup cbm dnn intervene
+# Run the full robot pipeline (data generation, training, interventions, alignment)
+cbm-benchmark robot --seed 1014
+
+# Run the sudoku pipeline
+cbm-benchmark sudoku --seed 171
+
+# Run the robot text pipeline
+cbm-benchmark robot-text --seed 1337
 ```
 
-See `scripts/demo_robot.py`, `scripts/demo_sudoku.py`, and `scripts/demo_robot_text.py` for fully-commented examples showing explicit config parametrization, concept definitions, and result inspection.
+For fully-commented examples that walk through every configuration option, see [`scripts/demo_robot.py`](scripts/demo_robot.py), [`scripts/demo_sudoku.py`](scripts/demo_sudoku.py), and [`scripts/demo_robot_text.py`](scripts/demo_robot_text.py).
 
-## Built-in Benchmarks
+## Benchmarks
 
 ### Robot Classification
 
-Classify synthetic robots into two species (**glorp** vs. **drent**) based on visual concepts like head shape, foot shape, and body proportions. Supports image and text modalities.
+Classify synthetic robots into two species (**glorp** vs. **drent**) based on visual concepts. The label depends on three concepts (mouth type, foot shape, and knee presence), while other concepts like elbow shape and hand shape are spurious -- correlated with the label but not causally related.
 
 <p align="center">
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
 </p>
 
-Each robot is defined by **9 configurable visual concepts**. The foot shape concept supports 10 subtypes (5 pointy, 5 flat) to test concept granularity:
+Each robot is defined by 9 visual concepts. The foot shape concept has 10 subtypes (5 pointy, 5 flat), which can be provided to the model at different levels of granularity to test how concept resolution affects performance:
 
 <p align="center">
   <img src="docs/assets/robot_foot_shapes.png" width="600" alt="Robot foot shape variations">
 </p>
 
-- **Deterministic or stochastic** label models
-- **Image** (32px or 600px) and **text** (template-based or LLM-generated) modalities
-- Up to 921,600 unique robot instances with color variation
+The robot benchmark supports three modalities. In **image** mode, robots are rendered as pixel images (32x32 or 600x600) using pycairo, with configurable color variations. In **text** mode, robots are described in natural language generated from a template corpus with deterministic synonym selection. Both modalities share the same concept structure and label rules.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `seed` | `1014` | Random seed for reproducibility |
+| `size` | `"medium"` | Image resolution: `"small"` (8px), `"medium"` (32px), `"large"` (600px) |
+| `model_type` | `"stochastic"` | Label model: `"deterministic"` or `"stochastic"` |
+| `subconcept` | `False` | Use fine-grained foot shape subtypes instead of binary pointy/flat |
+| `concept_missing` | `0.0` | Fraction of concept labels to mask during training |
+| `concept_missing_mech` | `"none"` | Missingness mechanism: `"none"`, `"mcar"`, or `"mnar"` |
+| `intervention_budgets` | `[1, 3]` | Number of concepts to intervene on per sample |
+
+The full list of parameters is documented in `RobotBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
 
 ### Sudoku Validation
 
-Determine whether a Sudoku board is valid. Concepts are the 27 row/column/block validity constraints. Boards can be rendered with handwritten digits, candidate annotations, and highlighted constraint regions:
+Determine whether a 9x9 sudoku board is valid. The 27 concepts correspond to the validity of each row, column, and 3x3 block -- a board is valid if and only if all 27 concepts are true. This creates a naturally conjunctive relationship between concepts and the label, in contrast to the disjunctive structure of the robot benchmark.
 
 <p align="center">
   <img src="docs/assets/sudoku_handwritten.png" width="400" alt="Sudoku board with handwritten digits and concept annotations">
 </p>
 
-- **27 ground-truth concepts** (9 rows + 9 columns + 9 blocks)
-- **Tabular or image** representations (with optional handwriting rendering)
-- Configurable board size, corruption level, and valid/invalid ratio
+Boards can be represented as tabular data (81-cell integer vectors) or rendered as images with handwritten digits. The image pipeline includes an OCR stage that learns to read digits from rendered boards before passing them to the concept model.
 
-## Running Experiments
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `seed` | `171` | Random seed for reproducibility |
+| `n_samples` | `1000` | Number of boards to generate |
+| `max_corrupt` | `9` | Maximum cells corrupted in invalid boards (higher = harder) |
+| `valid_ratio` | `0.5` | Fraction of valid boards |
+| `handwriting` | `True` | Render digits in handwritten style |
+| `target_accuracy` | `0.9` | Target accuracy for selective classification |
 
-### CLI
+The full list of parameters is documented in `SudokuBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
 
-The `cbm-benchmark` command runs full pipelines end-to-end:
+### Robot Text Classification
 
-```bash
-# Robot: full pipeline (all stages including alignment and result collection)
-cbm-benchmark robot --seed 1014
+The same robot classification task, but from natural language descriptions instead of images. Text is generated from a JSONL template corpus with SHA-256 deterministic synonym selection, ensuring reproducibility. The test set can optionally mix in "generic" descriptions that are ambiguous about specific concepts, testing detector robustness on out-of-distribution text.
 
-# Robot: specific stages only
-cbm-benchmark robot --seed 1014 --stages setup cbm dnn intervene
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `seed` | `1337` | Random seed for reproducibility |
+| `difficulty` | `"hard"` | Corpus difficulty: controls template complexity |
+| `generic_rate` | `0.7` | Fraction of test set using concept-ambiguous text |
+| `concept_mode` | `"hard"` | Concept predictions: `"hard"` (binary) or `"soft"` (probabilities) |
+| `dnn_model_name` | `"distilbert-base-uncased"` | HuggingFace model for the DNN baseline |
+| `lfcbm_enable` | `False` | Also train a label-free CBM variant |
 
-# Robot: just re-collect results from saved artifacts into CSV
-cbm-benchmark robot --stages collect
-
-# Sudoku: generate data, train OCR + concept model + DNN, intervene, compute selective metrics
-cbm-benchmark sudoku --seed 171
-
-# Sudoku: just re-collect results
-cbm-benchmark sudoku --stages collect
-
-# Robot with subconcept variant and no missingness sweep
-cbm-benchmark robot --subconcept --no-missing --stages setup cbm intervene
-
-# Robot text: full pipeline
-cbm-benchmark robot-text --seed 1337
-
-# Robot text: with LFCBM variant
-cbm-benchmark robot-text --seed 1337 --lfcbm
-
-# Load settings from a YAML file
-cbm-benchmark robot --config my_config.yaml
-```
-
-### Python API
-
-Each benchmark exposes a programmatic API via `concept_benchmark.benchmarks`:
-
-```python
-from concept_benchmark.benchmarks import robot, sudoku, robot_text
-from concept_benchmark.config import RobotBenchmarkConfig, SudokuBenchmarkConfig, RobotTextBenchmarkConfig
-
-# Run the full robot pipeline with default settings (seed=1014)
-robot.run()
-
-# Run specific stages
-robot.run(stages=["setup", "cbm"])
-
-# Run sudoku with custom config
-cfg = SudokuBenchmarkConfig(seed=42, max_corrupt=21, epochs=30)
-sudoku.run(cfg, stages=["setup", "ocr", "cs", "dnn", "intervene", "selective"])
-```
-
-Individual stages can also be called directly:
-
-```python
-from concept_benchmark.benchmarks.robot import (
-    setup_dataset, train_cbm, train_dnn,
-    run_interventions, align, collect_results,
-)
-from concept_benchmark.config import RobotBenchmarkConfig
-
-config = RobotBenchmarkConfig.default_ideal()
-data = setup_dataset(config)          # generate + skew + save
-cbm = train_cbm(config, data)         # train concept detector + frontend
-dnn_weights = train_dnn(config, data) # train end-to-end DNN baseline
-results_df = run_interventions(config, cbm, data)  # evaluate interventions
-align_stats = align(config, cbm, data)             # alignment test
-summary_df = collect_results()                      # aggregate all into CSV
-```
-
-```python
-from concept_benchmark.benchmarks.sudoku import (
-    setup_dataset, train_ocr, train_cs, train_dnn,
-    run_interventions, compute_selective_results,
-    align, collect_results,
-)
-from concept_benchmark.config import SudokuBenchmarkConfig
-
-config = SudokuBenchmarkConfig(max_corrupt=21)
-setup_dataset(config)                  # generate boards + images
-train_ocr(config)                      # train digit recognizer
-cs_model = train_cs(config)            # train concept supervision model
-dnn_weights = train_dnn(config)        # train DNN baseline
-interv_df = run_interventions(config)  # run conceptual safeguards
-sel_df = compute_selective_results(config)  # selective accuracy at multiple thresholds
-align_stats = align(config)            # alignment test
-summary_df = collect_results()         # aggregate all into CSV
-```
-
-```python
-from concept_benchmark.benchmarks.robot_text import (
-    setup_dataset, train_cbm, train_dnn,
-    run_interventions, align, collect_results,
-)
-from concept_benchmark.config import RobotTextBenchmarkConfig
-
-config = RobotTextBenchmarkConfig(seed=1337)
-data = setup_dataset(config)               # generate text + split by robot identity
-cbm = train_cbm(config, data)             # train text concept detector + frontend
-dnn_metrics = train_dnn(config, data)     # fine-tune DistilBERT baseline
-results_df = run_interventions(config, cbm, data)  # k-flip interventions
-align_stats = align(config, cbm, data)    # alignment test
-summary_df = collect_results([config])    # aggregate into CSV
-```
-
-### Pipeline Stages
-
-**Robot** stages: `setup`, `cbm`, `dnn`, `intervene`, `align`, `collect`
-
-| Stage | What it does |
-|-------|-------------|
-| `setup` | Generate robot images, apply skewed train/val/test splits |
-| `cbm` | Train concept detector + frontend (+ MCAR/MNAR variants) |
-| `dnn` | Train end-to-end DNN baseline |
-| `intervene` | Run k-flip interventions at multiple budgets and thresholds |
-| `align` | Retrain frontend with monotonicity constraints (alignment test) |
-| `collect` | Aggregate all results into `results/robot_demo_results.csv` |
-
-**Sudoku** stages: `setup`, `ocr`, `cs`, `dnn`, `intervene`, `selective`, `align`, `collect`
-
-| Stage | What it does |
-|-------|-------------|
-| `setup` | Generate sudoku boards (tabular + image) |
-| `ocr` | Train OCR digit recognizer on board images |
-| `cs` | Train concept supervision model (concept detector + frontend) |
-| `dnn` | Train end-to-end DNN baseline |
-| `intervene` | Run conceptual safeguards interventions |
-| `selective` | Compute selective accuracy/coverage at multiple target thresholds |
-| `align` | Test alignment by replacing frontend with human-aligned weights |
-| `collect` | Aggregate all results into `results/sudoku_demo_results.csv` |
-
-**Robot Text** stages: `setup`, `cbm`, `dnn`, `intervene`, `align`, `collect`
-
-| Stage | What it does |
-|-------|-------------|
-| `setup` | Generate text descriptions from JSONL corpus, split by robot identity |
-| `cbm` | Train TextConceptDetector + FrontEndModel |
-| `dnn` | Fine-tune DistilBERT baseline (text to label, no concepts) |
-| `intervene` | Run k-flip interventions at multiple budgets |
-| `align` | Retrain frontend with monotonicity constraints |
-| `collect` | Aggregate all results into `results/robot_text_results.csv` |
+The full list of parameters is documented in `RobotTextBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
 
 ## Configuration
 
-Benchmark settings are managed via typed dataclasses in `concept_benchmark.config`. Each config controls data generation, training hyperparameters, intervention settings, and file paths.
-
-### `RobotBenchmarkConfig`
-
-Key fields:
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `seed` | `1014` | Random seed for reproducibility |
-| `size` | `"medium"` | Image resolution: `"small"` (8px), `"medium"` (32px), `"large"` (600px) |
-| `samples_per_instance` | `4` | Color variations per robot design |
-| `model_type` | `"stochastic"` | Label model: `"deterministic"` or `"stochastic"` |
-| `concepts` | 9 visual concepts | Dict mapping concept names to their possible values |
-| `drop_concepts` | 10 foot subtypes | Concepts to merge (ideal = drop subtypes, subconcept = keep some) |
-| `subconcept` | `False` | Use finer-grained foot shape concepts |
-| `epochs` | `50` | Training epochs for CBM and DNN |
-| `lr` | `1e-3` | Learning rate |
-| `patience` | `10` | Early stopping patience |
-| `intervention_budgets` | `[1, 3]` | Number of concepts to intervene on |
-| `intervention_thresholds` | `[0.2, 0.4]` | Uncertainty thresholds for intervention |
-| `concept_missing` | `0.0` | Fraction of concepts to mask (0 = none) |
-| `concept_missing_mech` | `"none"` | Missingness mechanism: `"none"`, `"mcar"`, or `"mnar"` |
+All experiment settings are managed through typed dataclasses in [`concept_benchmark/config.py`](concept_benchmark/config.py). Configs can be customized in Python, serialized to YAML for reproducibility, or passed via the CLI:
 
 ```python
 from concept_benchmark.config import RobotBenchmarkConfig
 from concept_benchmark.benchmarks import robot
 
-# Paper defaults
-cfg = RobotBenchmarkConfig.default_ideal()       # ideal concept set
-cfg = RobotBenchmarkConfig.default_subconcept()   # finer-grained foot concepts
+# Customize any parameter
+cfg = RobotBenchmarkConfig(seed=42, epochs=100, concept_missing=0.2, concept_missing_mech="mcar")
+robot.run(cfg)
 
-# Custom experiment
-cfg = RobotBenchmarkConfig(seed=42, epochs=100, lr=5e-4, size="large")
-robot.run(cfg, stages=["setup", "cbm", "dnn", "intervene"])
-
-# Missingness experiment
-cfg = RobotBenchmarkConfig(concept_missing=0.2, concept_missing_mech="mcar")
-robot.train_cbm(cfg)
-```
-
-### `SudokuBenchmarkConfig`
-
-Key fields:
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `seed` | `171` | Random seed |
-| `n` | `3` | Board size (3 = standard 9x9 sudoku) |
-| `n_samples` | `1000` | Number of sudoku boards to generate |
-| `max_corrupt` | `9` | Max cells corrupted in invalid boards |
-| `valid_ratio` | `0.5` | Fraction of valid boards |
-| `data_type` | `"tabular"` | Data modality: `"tabular"` or `"image"` |
-| `epochs` | `20` | DNN training epochs |
-| `cs_epochs` | `100` | Concept supervision model training epochs |
-| `cs_patience` | `20` | CS early stopping patience |
-| `target_accuracy` | `0.9` | Target accuracy for selective classification |
-| `concept_missing` | `0.0` | Fraction of concepts to mask |
-| `concept_missing_mech` | `"none"` | Missingness mechanism |
-
-```python
-from concept_benchmark.config import SudokuBenchmarkConfig
-from concept_benchmark.benchmarks import sudoku
-
-# Paper defaults
-cfg = SudokuBenchmarkConfig.default()
-
-# Harder task (more corruption)
-cfg = SudokuBenchmarkConfig(max_corrupt=21, cs_epochs=200)
-sudoku.run(cfg, stages=["setup", "ocr", "cs", "dnn", "intervene", "selective", "align"])
-```
-
-### `RobotTextBenchmarkConfig`
-
-Key fields:
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `seed` | `1337` | Random seed |
-| `difficulty` | `"hard"` | Corpus difficulty: `"easy"`, `"medium"`, or `"hard"` |
-| `variants_per_row_minority` | `3` | Text variations per minority-class robot |
-| `variants_per_row_majority` | `1` | Text variations per majority-class robot |
-| `generic_enable` | `True` | Mix in concept-ambiguous descriptions for test set |
-| `generic_rate` | `0.7` | Fraction of test set using generic text |
-| `detector_epochs` | `6` | TextConceptDetector training epochs |
-| `concept_mode` | `"hard"` | Concept prediction mode: `"hard"` or `"soft"` |
-| `dnn_model_name` | `"distilbert-base-uncased"` | HuggingFace model for DNN baseline |
-| `intervention_budgets` | `[0, 1, 2, 5, 10]` | Number of concepts to intervene on |
-| `lfcbm_enable` | `False` | Also run label-free CBM variant |
-
-```python
-from concept_benchmark.config import RobotTextBenchmarkConfig
-from concept_benchmark.benchmarks import robot_text
-
-# Paper defaults
-cfg = RobotTextBenchmarkConfig(seed=1337)
-robot_text.run(cfg, stages=["setup", "cbm", "dnn", "intervene"])
-
-# With LFCBM variant
-cfg = RobotTextBenchmarkConfig(lfcbm_enable=True)
-robot_text.run(cfg, stages=["setup", "cbm", "dnn", "lfcbm", "intervene"])
-```
-
-### Saving and Loading Configs
-
-Configs can be serialized to YAML for reproducibility:
-
-```python
-cfg = RobotBenchmarkConfig(seed=42, epochs=100)
+# Save and reload configs for reproducibility
 cfg.to_yaml("my_experiment.yaml")
-
-# Later, or on another machine
 loaded = RobotBenchmarkConfig.from_yaml("my_experiment.yaml")
-robot.run(loaded)
 ```
 
-Or passed via CLI: `cbm-benchmark robot --config my_experiment.yaml`
+```bash
+# Or pass a config file from the command line
+cbm-benchmark robot --config my_experiment.yaml
+```
 
 ## Creating Your Own Benchmark
 
-To add a new domain beyond robot and sudoku, you need three things:
+To add a new benchmark domain, you need three components:
 
-1. **A data generator** that returns a `ConceptDataset(X, C, y, meta)` — features, binary concepts, labels, and metadata.
-2. **A config dataclass** (like `RobotBenchmarkConfig`) to hold your experiment settings.
-3. **A benchmark module** (like `concept_benchmark/benchmarks/robot.py`) with `setup_dataset()`, `train_cbm()`, `train_dnn()`, `run_interventions()`, and `run()` functions.
+1. **A data generator** that produces a `ConceptDataset(X, C, y, meta)` -- features, binary concept labels, target labels, and metadata.
+2. **A config dataclass** (like `RobotBenchmarkConfig`) to hold experiment settings.
+3. **A benchmark module** (like `concept_benchmark/benchmarks/robot.py`) with stage functions.
 
 The core data object is `ConceptDataset`:
 
@@ -413,7 +176,7 @@ import numpy as np
 
 X = np.random.randn(1000, 10).astype(np.float32)       # features
 C = (np.random.rand(1000, 3) > 0.5).astype(np.int8)    # binary concepts
-y = (C[:, 0] & C[:, 1]).astype(np.int32)                # labels
+y = (C[:, 0] & C[:, 1]).astype(np.int32)                # labels from concepts
 
 data = ConceptDataset(X, C, y, meta={
     "concepts": ["has_feature_a", "has_feature_b", "has_feature_c"],
@@ -425,7 +188,7 @@ data.generate_cvindices(seed=0)
 data.split("K05N01", fold_num_validation=4, fold_num_test=5)
 ```
 
-Once your data is in a `ConceptDataset`, the existing training and intervention infrastructure (`ConceptDetector`, `FrontEndModel`, `ConceptInterventionRunner`) works out of the box. See `concept_benchmark/benchmarks/robot.py` and `concept_benchmark/benchmarks/sudoku.py` as templates for wiring everything together into a pipeline.
+Once your data is in a `ConceptDataset`, the existing training and intervention infrastructure (`ConceptDetector`, `FrontEndModel`, `ConceptInterventionRunner`) works out of the box. See the built-in benchmarks in `concept_benchmark/benchmarks/` as templates.
 
 ## Citation
 
