@@ -37,10 +37,12 @@ class KFlipInterventionStrategy(InterventionStrategy):
         *,
         batch_size: int = 8192,
         limit_subsets: Optional[int] = None,
+        exact_k: bool = False,
     ) -> None:
         super().__init__(name="kflip")
         self.batch_size = int(batch_size)
         self.limit_subsets = limit_subsets
+        self.exact_k = exact_k
 
     def propose(
         self,
@@ -67,11 +69,13 @@ class KFlipInterventionStrategy(InterventionStrategy):
         base_lbl = base_probs.argmax(axis=1)
         n_classes = int(base_probs.shape[1])
 
-        # enumerate candidate subsets for all sizes up to k
-        all_subsets = []
-        for j in range(1, k+1):
-            all_subsets_j = list(itertools.combinations(range(n_concepts), j))
-            all_subsets.extend(all_subsets_j)
+        # enumerate candidate subsets
+        if self.exact_k:
+            all_subsets = list(itertools.combinations(range(n_concepts), k))
+        else:
+            all_subsets = []
+            for j in range(1, k+1):
+                all_subsets.extend(itertools.combinations(range(n_concepts), j))
         if self.limit_subsets is not None and self.limit_subsets < len(all_subsets):
             # simple heuristic: closeness to 0.5 weighted by |coef|
             try:

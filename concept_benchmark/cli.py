@@ -24,6 +24,15 @@ def _robot_cmd(args: argparse.Namespace) -> None:
             config = RobotBenchmarkConfig.default_subconcept()
             config.seed = args.seed
 
+    if args.regimes:
+        config.intervention_regimes = args.regimes
+    if args.strategy:
+        config.intervention_strategy = args.strategy
+    if getattr(args, "llm_api_key", None):
+        config.llm_api_key = args.llm_api_key
+    if getattr(args, "force_retrain", False):
+        config.force_retrain = True
+
     run(config, stages=args.stages, missing=args.missing)
 
 
@@ -49,6 +58,10 @@ def _robot_text_cmd(args: argparse.Namespace) -> None:
         config = RobotTextBenchmarkConfig(seed=args.seed)
     if args.lfcbm:
         config.lfcbm_enable = True
+    if args.regimes:
+        config.intervention_regimes = args.regimes
+    if args.strategy:
+        config.intervention_strategy = args.strategy
 
     run(config, stages=args.stages)
 
@@ -71,6 +84,15 @@ def main(argv: list[str] | None = None) -> None:
     robot_p.add_argument("--missing", action="store_true", default=True,
                          help="Run MCAR/MNAR missingness variants.")
     robot_p.add_argument("--no-missing", dest="missing", action="store_false")
+    robot_p.add_argument("--regimes", nargs="+", default=None,
+                         help="Intervention regimes (e.g. baseline expert subjective machine).")
+    robot_p.add_argument("--strategy", type=str, default=None,
+                         choices=["kflip", "exact_k"],
+                         help="Intervention strategy: kflip (up-to-k) or exact_k.")
+    robot_p.add_argument("--llm-api-key", type=str, default=None,
+                         help="API key for LLM provider (alternative to env var).")
+    robot_p.add_argument("--force-retrain", action="store_true",
+                         help="Force retrain LFCBM/subjective models even if cached.")
     robot_p.set_defaults(func=_robot_cmd)
 
     # Sudoku subcommand
@@ -90,6 +112,11 @@ def main(argv: list[str] | None = None) -> None:
     )
     robot_text_p.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
     robot_text_p.add_argument("--lfcbm", action="store_true", help="Also run LFCBM variant.")
+    robot_text_p.add_argument("--regimes", nargs="+", default=None,
+                              help="Intervention regimes (e.g. baseline expert subjective machine).")
+    robot_text_p.add_argument("--strategy", type=str, default=None,
+                              choices=["kflip", "exact_k"],
+                              help="Intervention strategy: kflip (up-to-k) or exact_k.")
     robot_text_p.set_defaults(func=_robot_text_cmd)
 
     args = parser.parse_args(argv)

@@ -169,7 +169,11 @@ class TestInterventionCSV:
         csv_path = cfg.get_results_path("cbm")
         if not csv_path.exists():
             pytest.skip("Ideal CBM results CSV not found")
-        return pd.read_csv(csv_path)
+        df = pd.read_csv(csv_path)
+        # Filter to baseline regime if column present
+        if "regime" in df.columns:
+            df = df[df["regime"] == "baseline"]
+        return df
 
     def test_ideal_interv_shape(self, ideal_interv_df):
         # 3 budgets x 2 thresholds = 6 rows

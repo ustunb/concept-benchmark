@@ -7,20 +7,17 @@
   <img src="docs/assets/robot_banner.png" width="700" alt="Example robots from the robot benchmark">
 </p>
 
-**Concept Benchmark** is a Python package for benchmarking [concept bottleneck models](https://arxiv.org/abs/2007.04612) (CBMs). It provides synthetic datasets with ground-truth concept labels, letting researchers evaluate CBM pipelines end-to-end: from concept detection accuracy, to the effect of human interventions on model predictions, to whether learned concept-label relationships align with domain knowledge.
-
-Evaluating CBMs on real-world data is difficult because ground-truth concept annotations are expensive, noisy, and often incomplete. Concept Benchmark addresses this by generating fully-labeled synthetic data where every concept value is known exactly. This makes it possible to measure intervention effectiveness, test robustness to missing or noisy concepts, and compare concept sets of different granularity -- all under controlled conditions where the ground truth is available.
-
-The package ships with two benchmark domains (robot classification and sudoku validation) across three modalities (image, text, tabular). Each benchmark is configurable via a typed dataclass and can be run from the command line or the Python API. For more details, see [our paper](https://arxiv.org/abs/TODO).
+**Concept Benchmark** is a Python package for benchmarking [concept bottleneck models](https://arxiv.org/abs/2007.04612) (CBMs). It provides synthetic datasets with fully-specified ground-truth concept labels, enabling controlled evaluation of CBM pipelines: concept detection accuracy, intervention effectiveness, robustness to noisy or missing annotations, and alignment between learned and expected concept-label relationships. For more details, see [our paper](https://arxiv.org/abs/TODO).
 
 ## Table of Contents
 
 1. [Installation](#installation)
 2. [Quick Start](#quick-start)
 3. [Benchmarks](#benchmarks)
-4. [Configuration](#configuration)
-5. [Creating Your Own Benchmark](#creating-your-own-benchmark)
-6. [Citation](#citation)
+4. [Intervention Regimes](#intervention-regimes)
+5. [Configuration](#configuration)
+6. [Creating Your Own Benchmark](#creating-your-own-benchmark)
+7. [Citation](#citation)
 
 ## Installation
 
@@ -37,16 +34,25 @@ You can also install directly via pip:
 pip install -e .
 ```
 
+For intervention regimes that use CLIP-based concept discovery or LLM-based interventions, install optional extras:
+
+```bash
+pip install -e ".[lfcbm]"     # CLIP-based concept discovery (machine/llm/clip regimes)
+pip install -e ".[llm]"       # LLM-based interventions (llm/clip regimes)
+pip install -e ".[lfcbm,llm]" # both
+```
+
 ## Quick Start
 
-The following example generates the robot classification dataset, trains a concept bottleneck model, and evaluates how human interventions on predicted concepts affect model accuracy:
+### Python API
 
 ```python
 from concept_benchmark.benchmarks import robot
 from concept_benchmark.config import RobotBenchmarkConfig
 
-# Generate 30,720 robot images with ground-truth concept labels
-cfg = RobotBenchmarkConfig(seed=1014)
+# Generate robot images with ground-truth concept labels (subconcept variant)
+cfg = RobotBenchmarkConfig.default_subconcept()
+cfg.seed = 1014
 data = robot.setup_dataset(cfg)
 
 # Train a CBM: concept detector (image -> concepts) + frontend (concepts -> label)
@@ -57,11 +63,11 @@ results = robot.run_interventions(cfg, cbm, data)
 print(results[["budget", "accuracy"]].to_string(index=False))
 ```
 
-Each benchmark is also available from the command line:
+### CLI
 
 ```bash
-# Run the full robot pipeline (data generation, training, interventions, alignment)
-cbm-benchmark robot --seed 1014
+# Run the full robot pipeline (subconcept variant, matching paper defaults)
+cbm-benchmark robot --seed 1014 --subconcept
 
 # Run the sudoku pipeline
 cbm-benchmark sudoku --seed 171
@@ -70,7 +76,7 @@ cbm-benchmark sudoku --seed 171
 cbm-benchmark robot-text --seed 1337
 ```
 
-For fully-commented examples that walk through every configuration option, see [`scripts/demo_robot.py`](scripts/demo_robot.py), [`scripts/demo_sudoku.py`](scripts/demo_sudoku.py), and [`scripts/demo_robot_text.py`](scripts/demo_robot_text.py).
+For fully-commented examples, see [`scripts/demo_robot.py`](scripts/demo_robot.py) and [`scripts/demo_sudoku.py`](scripts/demo_sudoku.py).
 
 ## Benchmarks
 
@@ -138,17 +144,57 @@ The same robot classification task, but from natural language descriptions inste
 
 The full list of parameters is documented in `RobotTextBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
 
-## Configuration
+## Intervention Regimes
 
-All experiment settings are managed through typed dataclasses in [`concept_benchmark/config.py`](concept_benchmark/config.py). Configs can be customized in Python, serialized to YAML for reproducibility, or passed via the CLI:
+Intervention regimes control **where concepts come from** and **who corrects them**, simulating different real-world annotation scenarios. The robot and robot-text benchmarks support 6 regimes:
+
+| Regime | Concept Source | Intervention Source | What It Tests |
+|--------|---------------|---------------------|---------------|
+| `baseline` | Ground truth | Ground truth | Upper bound: perfect concepts + perfect corrections |
+| `expert` | Ground truth | Noisy human (80% acc) | Expert corrections with realistic error rates |
+| `subjective` | Noisy CBM (20% label noise) | Noisy human (80% acc) | Subjective concept definitions + noisy corrections |
+| `machine` | LFCBM on GT descriptions | Noisy human (80% acc) | Machine-discovered concepts (CLIP-based) |
+| `llm` | LFCBM on LLM descriptions | LLM (Gemini) | LLM-generated concept definitions + LLM corrections |
+| `clip` | LFCBM on CLIP keywords | LLM (Gemini) | CLIP keyword concepts + LLM corrections |
+
+### Running Regimes
+
+```bash
+# Run specific regimes (subconcept variant required for machine/llm/clip)
+cbm-benchmark robot --seed 1014 --subconcept --regimes baseline expert subjective machine
+
+# Paper-matching exact-k intervention strategy
+cbm-benchmark robot --seed 1014 --subconcept --strategy exact_k --regimes baseline expert
+
+# LLM/CLIP regimes require a Gemini API key
+export GEMINI_API_KEY=your_key_here
+cbm-benchmark robot --seed 1014 --subconcept --regimes llm clip
+```
 
 ```python
 from concept_benchmark.config import RobotBenchmarkConfig
-from concept_benchmark.benchmarks import robot
+
+cfg = RobotBenchmarkConfig.default_subconcept()
+cfg.seed = 1014
+cfg.intervention_regimes = ["baseline", "expert", "subjective"]
+cfg.intervention_strategy = "exact_k"  # paper-matching strategy
+```
+
+### Requirements
+
+- **`machine`, `llm`, `clip`** regimes require `pip install -e ".[lfcbm]"` (CLIP encoder)
+- **`llm`, `clip`** regimes additionally require `pip install -e ".[llm]"` and `GEMINI_API_KEY`
+- **`machine`, `llm`, `clip`** regimes only work with `--subconcept` (12 concepts must match LFCBM dimensions)
+
+## Configuration
+
+All experiment settings are managed through typed dataclasses in [`concept_benchmark/config.py`](concept_benchmark/config.py). Configs can be serialized to YAML for reproducibility:
+
+```python
+from concept_benchmark.config import RobotBenchmarkConfig
 
 # Customize any parameter
 cfg = RobotBenchmarkConfig(seed=42, epochs=100, concept_missing=0.2, concept_missing_mech="mcar")
-robot.run(cfg)
 
 # Save and reload configs for reproducibility
 cfg.to_yaml("my_experiment.yaml")
@@ -158,6 +204,21 @@ loaded = RobotBenchmarkConfig.from_yaml("my_experiment.yaml")
 ```bash
 # Or pass a config file from the command line
 cbm-benchmark robot --config my_experiment.yaml
+```
+
+### Pipeline Stages
+
+Each benchmark runs a sequence of stages. You can select specific stages with `--stages`:
+
+| Benchmark | Default Stages |
+|-----------|---------------|
+| Robot | `setup cbm dnn intervene align collect` |
+| Sudoku | `setup ocr cs dnn intervene selective align collect` |
+| Robot Text | `setup cbm dnn intervene align collect` |
+
+```bash
+# Run only data generation and CBM training
+cbm-benchmark robot --seed 1014 --subconcept --stages setup cbm
 ```
 
 ## Creating Your Own Benchmark

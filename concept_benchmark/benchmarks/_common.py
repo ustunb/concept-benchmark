@@ -57,7 +57,11 @@ def get_loader_config(device: torch.device | None = None) -> dict:
 
 
 def patch_macos_dataloader() -> None:
-    """Force num_workers=0 on macOS to avoid MPS/fork hangs."""
+    """Force num_workers=0 on macOS to avoid MPS/fork hangs.
+
+    Uses a real subclass so that third-party libraries (e.g. timm) can
+    subclass ``torch.utils.data.DataLoader`` after the patch.
+    """
     if platform.system() != "Darwin":
         return
 
@@ -66,13 +70,20 @@ def patch_macos_dataloader() -> None:
 
     _OrigDataLoader = _tud.DataLoader
 
-    def _safe_dataloader(*args, **kwargs):
-        kwargs["num_workers"] = 0
-        kwargs["pin_memory"] = False
-        return _OrigDataLoader(*args, **kwargs)
+    # Already patched
+    if getattr(_OrigDataLoader, "_macos_patched", False):
+        return
 
-    _tud.DataLoader = _safe_dataloader
-    _cb_data.DataLoader = _safe_dataloader
+    class _SafeDataLoader(_OrigDataLoader):
+        _macos_patched = True
+
+        def __init__(self, *args, **kwargs):
+            kwargs["num_workers"] = 0
+            kwargs["pin_memory"] = False
+            super().__init__(*args, **kwargs)
+
+    _tud.DataLoader = _SafeDataLoader
+    _cb_data.DataLoader = _SafeDataLoader
 
 
 # ── Dataset skewing ──────────────────────────────────────────────────

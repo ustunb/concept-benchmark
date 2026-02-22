@@ -34,11 +34,42 @@ from concept_benchmark.ext.fileutils import load, save
 from concept_benchmark.models import (
     ConceptBasedModel,
     ConceptDetector,
+    FrontEndModel,
     RobotClassifierCNN,
     RobotConceptClassifier,
 )
 from concept_benchmark.paths import results_dir
 from concept_benchmark.synthetic.robot import create_synthetic_dataset
+
+class FEOnProbs(FrontEndModel):
+    """Wrap an LFCBM sklearn classifier so it works as a FrontEndModel.
+
+    Applies logit transform before predict_proba, matching how the
+    LFCBM classifier was trained (on z-scored, then logit-transformed features).
+    """
+    def __init__(self, clf):
+        super().__init__()
+        self.model = clf
+
+    def predict_proba(self, P: np.ndarray) -> np.ndarray:
+        P = np.clip(P, 1e-6, 1 - 1e-6)
+        Z = np.log(P / (1.0 - P))
+        return self.model.predict_proba(Z)
+
+
+def _set_deterministic_seed(seed: int):
+    """Full reproducibility: numpy, torch, random, PYTHONHASHSEED."""
+    import os
+    import random
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 
 # Lazy import to avoid circular deps — intervention modules
 _intervention_imported = False
@@ -81,11 +112,16 @@ def setup_dataset(config: RobotBenchmarkConfig):
 def train_cbm(
     config: RobotBenchmarkConfig,
     data=None,
+    save_key: Optional[str] = "cbm",
 ) -> ConceptBasedModel:
     """Train a ConceptBasedModel (concept detector + frontend).
 
+    Args:
+        save_key: Model save key. Use None to skip saving.
+
     Returns the trained CBM.
     """
+    _set_deterministic_seed(config.seed)
     patch_macos_dataloader()
     device = determine_device()
 
@@ -137,8 +173,181 @@ def train_cbm(
     test_pred = cbm.predict(data.test)
     print("Test Accuracy:", np.mean(test_pred == data.test.y))
 
-    save(cbm, config.get_model_path("cbm"), overwrite=True)
+    if save_key is not None:
+        save(cbm, config.get_model_path(save_key), overwrite=True)
     return cbm
+
+
+def _build_concept_groups(concept_names, concept_spec):
+    """Build groups of concept column indices from the concept spec.
+
+    For each key in ``concept_spec``, find all columns in ``concept_names``
+    whose name equals or starts with ``key_``.  Any ungrouped columns get
+    their own singleton group.
+
+    Returns dict mapping group name → list of column indices.
+    """
+    groups = {}
+    used = set()
+    for base in list(concept_spec.keys()):
+        idxs = [i for i, c in enumerate(concept_names)
+                if c == base or c.startswith(f"{base}_")]
+        if idxs:
+            groups[base] = idxs
+            used.update(idxs)
+    for i, c in enumerate(concept_names):
+        if i not in used:
+            groups[c] = [i]
+    return groups
+
+
+def _flip_onehot_row(row, idxs, rng):
+    """Flip one active bit in a one-hot group to a random other option."""
+    vals = row[idxs]
+    if len(idxs) == 1:
+        row[idxs[0]] = 1.0 - row[idxs[0]]
+        return
+    s = int(vals.sum())
+    if s != 1:
+        return
+    active = int(np.argmax(vals))
+    choices = [j for j in range(len(idxs)) if j != active]
+    if not choices:
+        return
+    new_j = int(rng.choice(choices))
+    row[idxs] = 0.0
+    row[idxs[new_j]] = 1.0
+
+
+def _apply_concept_noise_grouped(C, concept_names, concept_spec, rate, rng):
+    """Apply group-level one-hot flip noise (original paper method).
+
+    For each sample and each concept group, with probability ``rate``,
+    randomly switch the active category to a different one within the group.
+    """
+    C_out = C.astype(np.float32).copy()
+    groups = _build_concept_groups(concept_names, concept_spec)
+    for r in range(C_out.shape[0]):
+        for _, idxs in groups.items():
+            if rng.random() < float(rate):
+                _flip_onehot_row(C_out[r], idxs, rng)
+    return C_out
+
+
+def _clone_sample_with_C(sample, C_new):
+    """Clone a dataset sample with replaced concept matrix."""
+    return sample.__class__(
+        parent=sample.parent,
+        X=sample.X,
+        C=C_new.astype(np.float32),
+        y=sample.y,
+        meta=sample.meta,
+        transform=sample.transform,
+        concept_transform=sample.concept_transform,
+        target_transform=sample.target_transform,
+        base_dir=getattr(sample, "base_dir", None),
+    )
+
+
+def train_cbm_subjective(
+    config: RobotBenchmarkConfig,
+    data=None,
+) -> ConceptBasedModel:
+    """Train a CBM on noisy (subjective) concept labels.
+
+    Uses group-level one-hot flip noise (matching the original paper):
+    for each sample and each concept group, with probability
+    ``config.subjective_noise_rate``, randomly switch the active
+    category to a different one within the group.
+
+    The noisy CBM is saved to ``config.get_model_path("cbm_subjective")``.
+    """
+    if data is None:
+        data = load(config.get_dataset_path())
+    noisy_data = copy.deepcopy(data)
+
+    rng = np.random.default_rng(config.seed + 555)
+    concept_names = list(noisy_data.training.concepts)
+    concept_spec = config.concepts
+
+    # Apply group-level noise to training and validation splits
+    noisy_data.training = _clone_sample_with_C(
+        noisy_data.training,
+        _apply_concept_noise_grouped(
+            noisy_data.training.C, concept_names, concept_spec,
+            config.subjective_noise_rate, rng,
+        ),
+    )
+    if hasattr(noisy_data, "validation") and noisy_data.validation is not None:
+        noisy_data.validation = _clone_sample_with_C(
+            noisy_data.validation,
+            _apply_concept_noise_grouped(
+                noisy_data.validation.C, concept_names, concept_spec,
+                config.subjective_noise_rate, rng,
+            ),
+        )
+
+    cbm = train_cbm(config, data=noisy_data, save_key=None)
+    save(cbm, config.get_model_path("cbm_subjective"), overwrite=True)
+    return cbm
+
+
+def train_lfcbm(
+    config: RobotBenchmarkConfig,
+    data=None,
+) -> dict:
+    """Train a Label-Free CBM using CLIP embeddings.
+
+    Requires ``open-clip-torch`` and a concepts JSONL file.
+    Saves to ``config.get_model_path("lfcbm")``.
+    """
+    from concept_benchmark.lfcbm import LabelFreeCBM, LFConceptSet, LFTrainingConfig
+
+    _set_deterministic_seed(config.seed)
+
+    if data is None:
+        data = load(config.get_dataset_path())
+
+    concepts_file = config.lfcbm_concepts_file
+    if not concepts_file:
+        from concept_benchmark.paths import data_dir
+        suffix = "_subconcept" if config.subconcept else ""
+        default = data_dir / "robot_images" / f"gt_concepts{suffix}.jsonl"
+        if default.exists():
+            concepts_file = str(default)
+        else:
+            raise FileNotFoundError(
+                f"No LFCBM concepts file: set config.lfcbm_concepts_file or create {default}"
+            )
+
+    concept_set = LFConceptSet.from_file(concepts_file)
+    device_str = "cuda" if torch.cuda.is_available() else "cpu"
+
+    cfg = LFTrainingConfig(
+        device=device_str,
+        seed=config.seed,
+        cache_dir=config.get_model_path("lfcbm").parent / "lfcbm_cache",
+    )
+    lfcbm = LabelFreeCBM(cfg)
+
+    # Extract image paths from dataset
+    train_paths = [str(p) for p in data.training.X]
+    valid_paths = [str(p) for p in data.validation.X]
+
+    stats = lfcbm.fit(
+        train_X=train_paths,
+        train_y=data.training.y.astype(int),
+        valid_X=valid_paths,
+        valid_y=data.validation.y.astype(int),
+        concept_set=concept_set,
+    )
+    print(f"LFCBM stats: {stats.get('kept_concepts')}/{stats.get('total_concepts')} concepts kept")
+
+    out_dir = str(config.get_model_path("lfcbm")) + "_bundle"
+    lfcbm.save(out_dir)
+    bundle = {"lfcbm": lfcbm, "frontend": FEOnProbs(lfcbm.classifier)}
+    save(bundle, config.get_model_path("lfcbm"), overwrite=True)
+    return stats
 
 
 # ── Stage: train_dnn ──────────────────────────────────────────────────
@@ -151,6 +360,7 @@ def train_dnn(
 
     Returns the best state_dict.
     """
+    _set_deterministic_seed(config.seed)
     patch_macos_dataloader()
     device = determine_device()
 
@@ -226,25 +436,71 @@ def train_dnn(
 
 # ── Intervention helper ───────────────────────────────────────────────
 
-def _test_interventions(prob_test, sttngs, acc_det, fe, test):
+def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None):
     """Run interventions for each budget and return results dict.
 
-    Moved from ``scripts/robot_image_pipeline.test_interventions`` —
-    duplicate lines removed, uses lazy-imported globals.
+    Matches the original ``test_interventions`` from ``robot_concept_regimes.py``,
+    including the inline LLM path (compute-once at K=max, batched multi-image calls,
+    JSONL cache, flip-effect ranking, per-budget mask derivation).
     """
+    import hashlib
+    import json
+    import time
+    from pathlib import Path
+    from types import SimpleNamespace
+
     _ensure_intervention_imports()
 
     intervention_results = {}
     rng = np.random.default_rng(int(sttngs["seed"]))
     budgets = sttngs.get("budget", [1])
+    if not isinstance(budgets, (list, tuple, np.ndarray)):
+        budgets = [budgets]
     human_acc = sttngs.get("intervention_accuracy", 0.9)
     err_prob = 1.0 - human_acc
+
+    if concept_names is None:
+        concept_names = list(getattr(test, "concepts", []))
+    else:
+        concept_names = list(concept_names)
+
+    # Coerce concept_proba to match dataset concept ground truth shape
+    if hasattr(test, "C"):
+        n_gt = int(test.C.shape[1])
+        n_pred = int(prob_test.shape[1])
+        if n_pred != n_gt:
+            if n_pred > n_gt:
+                prob_test = prob_test[:, :n_gt]
+            else:
+                pad = np.zeros((prob_test.shape[0], n_gt - n_pred), dtype=prob_test.dtype)
+                prob_test = np.concatenate([prob_test, pad], axis=1)
+        if len(concept_names) != prob_test.shape[1]:
+            concept_names = concept_names[: prob_test.shape[1]]
 
     # Create a CBM wrapper for the intervention framework
     cbm = ConceptBasedModel(concept_detector=None, front_end_model=fe)
     runner = ConceptInterventionRunner(cbm)
+    llm_cache = None
+    _intervention_cache = None
 
     for budget in budgets:
+        if int(budget) <= 0:
+            key = f"top_{budget}_human_acc_{int(human_acc * 100)}"
+            n_samples = prob_test.shape[0]
+            intervention_results[key] = {
+                "accuracy": float(acc_det),
+                "accuracy_gain": 0.0,
+                "predictions_intervened_on": 0,
+                "interventions_rate": 0.0,
+                "intervention_rate": 0.0,
+                "avg_edits_per_intervention": 0.0,
+                "total_concept_checks": 0,
+                "total_concept_edits_made": 0,
+                "concepts_intervened": {},
+                "concepts_edits": {},
+            }
+            continue
+
         config = InterventionConfig(
             max_concepts_per_instance=budget,
             random_state=int(sttngs["seed"]),
@@ -252,50 +508,444 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test):
             noise=1.0 - human_acc,
         )
 
-        strategy = ScoreIntervention()
-
-        # Run intervention
-        result = runner.run(
-            strategy=strategy,
-            config=config,
-            dataset=test,
-            concept_proba=prob_test,
-            labels=test.y.astype(int),
+        strategy = ScoreIntervention(
+            exact_k=(sttngs.get("intervention_strategy") == "exact_k"),
         )
 
-        mask = result.mask
-        C_gt = test.C.astype(np.float32)
-        C_after = result.C_intervened.copy()
+        if str(sttngs.get("intervention_expert", "")).lower() == "llm":
+            # ── Inline LLM path (matching original robot_concept_regimes.py) ──
+            try:
+                from google.api_core.exceptions import ResourceExhausted
+            except ImportError:
+                ResourceExhausted = None
 
-        mistake_draw = rng.random(C_after.shape) < err_prob
-        mistakes = mask & mistake_draw
-        C_after[mistakes] = 1.0 - C_gt[mistakes]
-        result.C_intervened = C_after
+            from concept_benchmark.llm_client import make_llm_client
+
+            llm_cfg = sttngs.get("intervention_llm", {}) or {}
+            provider = str(llm_cfg.get("provider", "gemini"))
+            model_name = str(llm_cfg.get("model", "gemini-2.5-flash-lite"))
+            api_key_env = str(llm_cfg.get("api_key_env", "GEMINI_API_KEY"))
+
+            import os
+            api_key = str(llm_cfg.get("api_key", "")) or os.environ.get(api_key_env, "")
+            if not api_key:
+                raise SystemExit(
+                    f"missing API key: set llm_api_key in config or {api_key_env} in env"
+                )
+
+            client = make_llm_client(provider, model_name, api_key)
+
+            def _resolve_img_path(i: int) -> str:
+                p = Path(str(test.X[i]))
+                base = getattr(test, "base_dir", Path("."))
+                q = p if p.is_absolute() else (base / p)
+                return str(q.resolve())
+
+            def _llm_judge(image_path: str, names: list) -> dict:
+                prompt = (
+                    "You will be shown one robot image. "
+                    "For each concept below, output 0 or 1 indicating ABSENT(0) or PRESENT(1). "
+                    "Return ONLY one JSON object with string keys and 0/1 integer values.\n\n"
+                    "concepts:\n- " + "\n- ".join(names) + "\n\n"
+                    "Respond like: {\"conceptA\":1,\"conceptB\":0}"
+                )
+                attempts = 0
+                print(f"[LLM] fallback judge start image={image_path}, concepts={len(names)}", flush=True)
+                while True:
+                    try:
+                        print(f"[LLM]  single-image call attempt {attempts + 1} ...", flush=True)
+                        raw = (client.generate(prompt, [image_path]) or "").strip()
+                        print("[LLM]  single-image call ok", flush=True)
+                        break
+                    except Exception as e:
+                        if ResourceExhausted is not None and isinstance(e, ResourceExhausted):
+                            attempts += 1
+                            print(
+                                f"[LLM]  ResourceExhausted on single-image attempt {attempts}: {e}. "
+                                "Backing off 30s before retry.",
+                                flush=True,
+                            )
+                            if attempts >= 5:
+                                print("[LLM]  giving up after 5 ResourceExhausted errors in fallback.", flush=True)
+                                raise
+                            time.sleep(30.0)
+                        else:
+                            raise
+                parsed: dict = {}
+                try:
+                    obj = json.loads(raw)
+                    if isinstance(obj, dict):
+                        for k, v in obj.items():
+                            if isinstance(v, bool):
+                                parsed[str(k)] = 1 if v else 0
+                            elif isinstance(v, (int, float, str)):
+                                s = str(v).strip().lower()
+                                parsed[str(k)] = 1 if s in {"1", "true", "yes", "present"} else 0
+                except Exception:
+                    pass
+                return parsed
+
+            def _llm_judge_batch(image_paths: list, per_image_names: list) -> list:
+                N = len(image_paths)
+                lines = []
+                for i, names in enumerate(per_image_names):
+                    lines.append(f"Image {i}: " + ", ".join(names))
+
+                prompt = (
+                    f"You will be shown {N} robot image(s) in order. "
+                    f"For each image i (0..{N - 1}), output ONLY a JSON array of length {N} "
+                    "where array[i] is a JSON object mapping the listed concepts to 0/1 integers "
+                    "(ABSENT=0, PRESENT=1). No Markdown code fences, no extra keys, "
+                    "and no text outside the JSON.\n\n"
+                    "Per-image concepts:\n- " + "\n- ".join(lines)
+                )
+
+                raw = (client.generate(prompt, image_paths) or "").strip()
+
+                # Strip Markdown ``` fences if the model ignores instructions
+                if raw.startswith("```"):
+                    fence_lines = raw.splitlines()
+                    fence_lines = fence_lines[1:]
+                    if fence_lines and fence_lines[-1].strip().startswith("```"):
+                        fence_lines = fence_lines[:-1]
+                    raw_clean = "\n".join(fence_lines).strip()
+                else:
+                    raw_clean = raw
+
+                def _to01(v):
+                    if isinstance(v, bool):
+                        return 1 if v else 0
+                    s = str(v).strip().lower()
+                    return 1 if s in {"1", "true", "yes", "present"} else 0
+
+                out: list = [dict() for _ in range(N)]
+
+                try:
+                    obj = json.loads(raw_clean)
+                except Exception as e:
+                    print("[LLM-DEBUG] json.loads failed in _llm_judge_batch:", repr(e), flush=True)
+                    print(
+                        "[LLM-DEBUG] raw_clean (first 400 chars):",
+                        raw_clean[:400].replace("\n", "\\n"),
+                        flush=True,
+                    )
+                    return out
+
+                if isinstance(obj, list):
+                    if len(obj) == 1 and isinstance(obj[0], list):
+                        arr = obj[0]
+                    else:
+                        arr = obj
+
+                    for i in range(min(N, len(arr))):
+                        d = arr[i]
+                        if not isinstance(d, dict):
+                            continue
+                        allow = set(per_image_names[i])
+                        for k, v in d.items():
+                            if k in allow:
+                                out[i][str(k)] = _to01(v)
+
+                elif isinstance(obj, dict):
+                    for i_str, d in obj.items():
+                        try:
+                            i = int(i_str)
+                        except Exception:
+                            continue
+                        if not (0 <= i < N and isinstance(d, dict)):
+                            continue
+                        allow = set(per_image_names[i])
+                        for k, v in d.items():
+                            if k in allow:
+                                out[i][str(k)] = _to01(v)
+
+                return out
+
+            # compute-once at K=max(budgets), batch LLM once, reuse for smaller budgets
+            if llm_cache is None:
+                batch = runner._build_batch(
+                    dataset=test,
+                    concept_proba=prob_test,
+                    concept_true=test.C.astype(np.float32),
+                    labels=test.y.astype(int),
+                    instance_ids=None,
+                )
+                max_budget = max(int(b) for b in budgets)
+                maxK = int(min(max_budget, batch.C_pred.shape[1]))
+                config_max = InterventionConfig(
+                    max_concepts_per_instance=maxK,
+                    random_state=int(sttngs["seed"]),
+                    score_threshold=sttngs.get("intervention_threshold", 1.0),
+                    noise=1.0 - human_acc,
+                )
+                proposal_max = strategy.propose(cbm, batch, config_max)
+                mask_max = proposal_max.mask
+
+                C_before = batch.C_pred
+                y_prob_before = fe.predict_proba((C_before >= 0.5).astype(int))
+
+                C_true_llm = np.full_like(C_before, np.nan, dtype=float)
+
+                # JSONL on-disk cache
+                run_root = Path(str(sttngs.get("run_dir", sttngs.get("out_dir", "."))))
+                cache_dir = run_root / "cache"
+                cache_dir.mkdir(parents=True, exist_ok=True)
+
+                def _concepts_sig():
+                    h = hashlib.sha1()
+                    for name in map(str, concept_names):
+                        h.update(name.encode("utf-8"))
+                        h.update(b"\x00")
+                    return h.hexdigest()
+
+                def _dataset_sig():
+                    h = hashlib.sha1()
+                    for pth in map(str, test.X):
+                        h.update(pth.encode("utf-8"))
+                        h.update(b"\x00")
+                    return h.hexdigest()
+
+                cache_path = cache_dir / f"llm_interventions_{_concepts_sig()}_{_dataset_sig()}.jsonl"
+
+                def _load_cache():
+                    d = {}
+                    if cache_path.exists():
+                        with open(cache_path, "r", encoding="utf-8") as f:
+                            for line in f:
+                                try:
+                                    rec = json.loads(line)
+                                    i0 = int(rec["i"])
+                                    votes_idx = {int(k): int(v) for k, v in rec.get("votes_idx", {}).items()}
+                                    d[i0] = votes_idx
+                                except Exception:
+                                    continue
+                    return d
+
+                def _flush_cache(d):
+                    with open(cache_path, "w", encoding="utf-8") as f:
+                        for i0, votes_idx in d.items():
+                            f.write(json.dumps({"i": int(i0), "votes_idx": {str(k): int(v) for k, v in votes_idx.items()}}) + "\n")
+
+                if _intervention_cache is None:
+                    _intervention_cache = _load_cache()
+
+                tasks = []
+                total_pairs = 0
+                missing_pairs = 0
+                for i in range(C_before.shape[0]):
+                    idxs = np.where(mask_max[i])[0]
+                    if idxs.size == 0:
+                        continue
+                    total_pairs += int(idxs.size)
+                    known = _intervention_cache.get(i, {})
+                    for j in idxs:
+                        if j in known:
+                            C_true_llm[i, j] = float(known[j])
+                    missing = [j for j in idxs if j not in known]
+                    missing_pairs += len(missing)
+                    if not missing:
+                        continue
+                    image_path = _resolve_img_path(i)
+                    names = [str(concept_names[j]) for j in missing]
+                    tasks.append((i, image_path, names, missing))
+
+                cached_pairs = total_pairs - missing_pairs
+                print(
+                    f"[LLM] intervention selection: total={total_pairs}, "
+                    f"from_cache={cached_pairs}, to_query={missing_pairs}, "
+                    f"images_needing_llm={len(tasks)}",
+                    flush=True,
+                )
+
+                bs = int((llm_cfg.get("batch_size") or sttngs.get("llm_batch_size") or 32))
+                if bs < 1:
+                    bs = 1
+                n_batches = (len(tasks) + bs - 1) // bs
+                if n_batches > 0:
+                    print(
+                        f"[LLM] starting batched calls: {len(tasks)} images, "
+                        f"batch_size={bs}, n_batches={n_batches}",
+                        flush=True,
+                    )
+
+                for batch_idx, s in enumerate(range(0, len(tasks), bs), start=1):
+                    chunk = tasks[s:s + bs]
+                    image_paths = [p for (_i, p, _n, _j) in chunk]
+                    per_image_names = [names for (_i, _p, names, _idxs) in chunk]
+
+                    attempts = 0
+                    while True:
+                        try:
+                            print(
+                                f"[LLM] batch {batch_idx}/{n_batches}: "
+                                f"{len(chunk)} images, attempt {attempts + 1} ...",
+                                flush=True,
+                            )
+                            votes_list = _llm_judge_batch(image_paths, per_image_names)
+                            sleep_time = float(
+                                llm_cfg.get("batch_sleep")
+                                or sttngs.get("llm_batch_sleep")
+                                or 5.0
+                            )
+                            print(
+                                f"[LLM] batch {batch_idx}/{n_batches} ok; "
+                                f"sleeping {sleep_time} seconds to respect rate limits",
+                                flush=True,
+                            )
+                            time.sleep(sleep_time)
+                            break
+                        except Exception as e:
+                            if ResourceExhausted is not None and isinstance(e, ResourceExhausted):
+                                attempts += 1
+                                print(
+                                    f"[LLM] ResourceExhausted on batch {batch_idx}/{n_batches}, "
+                                    f"attempt {attempts}: {e}. Backing off 30s.",
+                                    flush=True,
+                                )
+                                retry_backoff = float(
+                                    llm_cfg.get("retry_backoff")
+                                    or sttngs.get("llm_retry_backoff")
+                                    or 30.0
+                                )
+                                max_retries = int(
+                                    llm_cfg.get("max_retries")
+                                    or sttngs.get("llm_max_retries")
+                                    or 5
+                                )
+                                if attempts >= max_retries:
+                                    print(
+                                        f"[LLM] giving up on batch {batch_idx}/{n_batches} "
+                                        f"after {attempts} ResourceExhausted errors.",
+                                        flush=True,
+                                    )
+                                    raise
+                                print(
+                                    f"[LLM] backing off {retry_backoff}s ...",
+                                    flush=True,
+                                )
+                                time.sleep(retry_backoff)
+                            else:
+                                raise
+
+                    for (i_idx, _pth, names, idxs), votes in zip(chunk, votes_list):
+                        if i_idx not in _intervention_cache:
+                            _intervention_cache[i_idx] = {}
+
+                        for j, name in zip(idxs, names):
+                            if name in votes:
+                                v = 1 if votes[name] else 0
+                                C_true_llm[i_idx, j] = float(v)
+                                _intervention_cache[i_idx][j] = v
+
+                    _flush_cache(_intervention_cache)
+                    print(
+                        f"[LLM] batch {batch_idx}/{n_batches} complete; cache flushed.",
+                        flush=True,
+                    )
+
+                if n_batches > 0:
+                    print(f"[LLM] all {n_batches} batches complete.", flush=True)
+
+                # rank concepts per instance by single-bit flip effect (reuse for budgets < K)
+                order = [np.array([], dtype=int)] * C_before.shape[0]
+                for i in range(C_before.shape[0]):
+                    sel = np.where(mask_max[i])[0]
+                    if sel.size == 0:
+                        order[i] = np.array([], dtype=int)
+                        continue
+                    base_vec = (C_before[i] >= 0.5).astype(int)
+                    base_prob = fe.predict_proba(base_vec[None, :])[0]
+                    pairs = []
+                    for j in sel:
+                        flipped = base_vec.copy()
+                        flipped[j] = 1 - flipped[j]
+                        p_after = fe.predict_proba(flipped[None, :])[0]
+                        score = float(np.max(np.abs(p_after - base_prob)))
+                        pairs.append((j, score))
+                    order[i] = np.asarray(
+                        [j for (j, _) in sorted(pairs, key=lambda t: t[1], reverse=True)], dtype=int
+                    )
+
+                llm_cache = {
+                    "mask_max": mask_max,
+                    "C_true_llm": C_true_llm,
+                    "C_before": C_before,
+                    "y_prob_before": y_prob_before,
+                    "order": order,
+                }
+
+            # derive current-budget mask from cached K=max selection
+            mask_max = llm_cache["mask_max"]
+            C_true_llm = llm_cache["C_true_llm"]
+            C_before = llm_cache["C_before"]
+            y_prob_before = llm_cache["y_prob_before"]
+            order = llm_cache["order"]
+
+            mask = np.zeros_like(mask_max, dtype=bool)
+            for i in range(mask.shape[0]):
+                if order[i].size:
+                    k_take = int(min(budget, order[i].size))
+                    if k_take > 0:
+                        mask[i, order[i][:k_take]] = True
+
+            overwrite_mask = mask & ~np.isnan(C_true_llm)
+            C_after = np.where(overwrite_mask, C_true_llm, C_before)
+            C_final_binary = (C_after >= 0.5).astype(int)
+            y_prob_after = fe.predict_proba(C_final_binary)
+            y_pred_after = np.argmax(y_prob_after, axis=1)
+
+            result = SimpleNamespace(
+                C_pred=C_before,
+                C_intervened=C_after,
+                mask=overwrite_mask,
+                y_prob_before=y_prob_before,
+                y_prob_after=y_prob_after,
+                y_pred_after=y_pred_after,
+            )
+
+        else:
+            # ── Standard (non-LLM) path ──
+            result = runner.run(
+                strategy=strategy,
+                config=config,
+                dataset=test,
+                concept_proba=prob_test,
+                labels=test.y.astype(int),
+            )
+
+            mask = result.mask
+            C_gt = test.C.astype(np.float32)
+            C_after = result.C_intervened.copy()
+
+            mistake_draw = rng.random(C_after.shape) < err_prob
+            mistakes = mask & mistake_draw
+            C_after[mistakes] = 1.0 - C_gt[mistakes]
+            result.C_intervened = C_after
+
+            # Recompute downstream prediction after error injection
+            C_final_binary = (result.C_intervened >= 0.5).astype(int)
+            result.y_prob_after = fe.predict_proba(C_final_binary)
+            result.y_pred_after = np.argmax(result.y_prob_after, axis=1)
 
         # Extract intervention statistics
-        n_intervened = np.sum(result.mask)
+        acc_intervened = float((result.y_pred_after == test.y.astype(int)).mean())
+
+        n_intervened = int(np.sum(result.mask))
         n_samples = prob_test.shape[0]
 
         intervened_concepts = np.any(result.mask, axis=0)
-
         C_pred_binary = (result.C_pred >= 0.5).astype(int)
         C_final_binary = (result.C_intervened >= 0.5).astype(int)
         actual_edits_mask = C_pred_binary != C_final_binary
-        result.y_prob_after = fe.predict_proba(C_final_binary)
-        result.y_pred_after = np.argmax(result.y_prob_after, axis=1)
+        prediction_num_concepts_intervened_on = {int(i): int(np.sum(actual_edits_mask[i])) for i in range(n_samples)}
 
         y_pred_before = np.argmax(result.y_prob_before, axis=1)
-
         num_preds_change = int(np.sum(result.y_pred_after != y_pred_before))
-        acc_intervened = float((result.y_pred_after == test.y.astype(int)).mean())
 
-        prediction_num_concepts_intervened_on = {
-            int(i): int(np.sum(actual_edits_mask[i])) for i in range(n_samples)
-        }
         concept_intervention_counts = {
             c: f"{int(np.sum(result.mask[:, i]))} ({int(np.sum(actual_edits_mask[:, i]))})"
-            for i, c in enumerate(test.concepts)
-            if intervened_concepts[i]
+            for i, c in enumerate(concept_names)
+            if i < intervened_concepts.shape[0] and intervened_concepts[i]
         }
 
         key = f"top_{budget}_human_acc_{int(human_acc * 100)}"
@@ -310,12 +960,240 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test):
             )
             / n_samples,
             "total_concept_confirmations": int(n_intervened),
-            "total_concept_edits_made": sum(prediction_num_concepts_intervened_on.values()),
+            "total_concept_edits_made": int(sum(prediction_num_concepts_intervened_on.values())),
             "concept_interventions": concept_intervention_counts,
             "human_accuracy": human_acc,
         }
 
     return budgets, human_acc, intervention_results
+
+
+# ── LLM/CLIP regime helper ────────────────────────────────────────────
+
+def _run_llm_regime(config, regime, model, data, budgets, thresholds):
+    """Run LLM or CLIP intervention regime.
+
+    Trains LFCBM on the regime's concept descriptions, then calls
+    ``_test_interventions`` with ``intervention_expert="llm"`` and
+    ``FEOnProbs(lf.classifier)`` as the frontend. Matches the original
+    ``automated_detection`` regime from ``robot_concept_regimes.py``.
+    """
+    import os
+    from pathlib import Path
+
+    _ensure_intervention_imports()
+    from concept_benchmark.lfcbm import LabelFreeCBM, LFConceptSet, LFTrainingConfig
+
+    # Load concept descriptions for this regime
+    from concept_benchmark.paths import data_dir
+    if regime == "llm":
+        concepts_file = config.llm_concepts_file
+        if not concepts_file:
+            concepts_file = str(data_dir / "robot_images" / "llm.jsonl")
+    else:  # clip
+        concepts_file = config.clip_concepts_file
+        if not concepts_file:
+            concepts_file = str(data_dir / "robot_images" / "clip.jsonl")
+
+    p_cf = Path(concepts_file)
+    if not p_cf.is_absolute():
+        p_cf = (Path.cwd() / p_cf).resolve()
+    if not p_cf.exists():
+        raise FileNotFoundError(f"concepts file not found: {p_cf}")
+
+    concept_set = LFConceptSet.from_file(str(p_cf))
+    if not getattr(concept_set, "texts", None):
+        raise ValueError(f"concepts file parsed empty: {p_cf}")
+
+    # Train LFCBM on this regime's concepts (or load cached)
+    device_str = "cuda" if torch.cuda.is_available() else "cpu"
+    lfcbm_key = f"lfcbm_{regime}"
+    lfcbm_path = config.get_model_path(lfcbm_key)
+
+    if lfcbm_path.exists() and not config.force_retrain:
+        print(f"Loading existing LFCBM for {regime}: {lfcbm_path}")
+        lf = load(lfcbm_path)
+    else:
+        cfg = LFTrainingConfig(
+            device=device_str,
+            seed=config.seed,
+            cache_dir=config.get_model_path("lfcbm").parent / f"lfcbm_{regime}_cache",
+        )
+        lf = LabelFreeCBM(cfg)
+
+        base_dir = getattr(data.training, "base_dir", Path("."))
+        train_paths = [str((base_dir / Path(p)).resolve()) for p in data.training.X]
+        valid_paths = [str((base_dir / Path(p)).resolve()) for p in data.validation.X]
+
+        stats = lf.fit(
+            train_X=train_paths,
+            train_y=data.training.y.astype(int),
+            valid_X=valid_paths,
+            valid_y=data.validation.y.astype(int),
+            concept_set=concept_set,
+            cache_dir=cfg.cache_dir,
+        )
+        print(f"LFCBM ({regime}) stats: {stats.get('kept_concepts')}/{stats.get('total_concepts')} concepts kept")
+        save(lf, lfcbm_path, overwrite=True)
+
+    # Get concept probabilities from LFCBM
+    base_dir = getattr(data.test, "base_dir", Path("."))
+    test_paths = [str((base_dir / Path(p)).resolve()) for p in data.test.X]
+    P_te = lf.concept_proba(test_paths)
+
+    # Create FEOnProbs frontend (matching original)
+    fe = FEOnProbs(lf.classifier)
+
+    # Compute acc_det using continuous probs (matching original)
+    y_pred_det = fe.predict_proba(P_te)
+    acc_det = float((y_pred_det.argmax(1) == data.test.y.astype(int)).mean())
+
+    # Matching original: human_annotation_accuracy = 0.8
+    ia_val = config.expert_intervention_accuracy
+
+    METRIC_COLS = [
+        "accuracy",
+        "predictions_intervened_on",
+        "predictions_changed",
+        "total_concept_confirmations",
+        "total_concept_edits_made",
+    ]
+
+    COLS = ["budget", "threshold"] + METRIC_COLS
+    all_dfs = []
+
+    for t in thresholds:
+        sttngs = {
+            "seed": config.seed,
+            "budget": budgets,
+            "intervention_accuracy": ia_val,
+            "intervention_threshold": t,
+            "intervention_strategy": config.intervention_strategy,
+            "intervention_expert": "llm",
+            "intervention_llm": {
+                "provider": config.llm_provider,
+                "model": config.llm_model,
+                "api_key": config.llm_api_key,
+                "api_key_env": config.llm_api_key_env,
+                "batch_size": 300,
+            },
+            "run_dir": str(results_dir),
+        }
+
+        _, _, r = _test_interventions(
+            prob_test=P_te,
+            sttngs=sttngs,
+            acc_det=acc_det,
+            fe=fe,
+            test=data.test,
+            concept_names=list(concept_set.keys),
+        )
+        df = (
+            pd.DataFrame(r)
+            .T.assign(budget=budgets)
+            .assign(threshold=t)
+            .reset_index(drop=True)[COLS]
+        )
+        all_dfs.append(df)
+
+    regime_df = pd.concat(all_dfs, axis=0).reset_index(drop=True)
+    regime_df["regime"] = regime
+    return regime_df
+
+
+# ── Regime dispatch ───────────────────────────────────────────────────
+
+def _run_regime(config, regime, model, data, budgets, thresholds):
+    """Run one intervention regime. Returns list of result row dicts.
+
+    ``model`` is always the *baseline* CBM (loaded once by the caller).
+    For regimes that use a different CBM (e.g. "subjective"), this
+    function loads the regime-specific model internally.
+    """
+    _ensure_intervention_imports()
+
+    METRIC_COLS = [
+        "accuracy",
+        "predictions_intervened_on",
+        "predictions_changed",
+        "total_concept_confirmations",
+        "total_concept_edits_made",
+    ]
+
+    # Select model, concept predictions, and human accuracy per regime
+    c_preds = None  # set below; None means use regime_model.concept_detector
+    if regime == "baseline":
+        regime_model = model
+        human_acc = config.intervention_accuracy
+    elif regime == "expert":
+        regime_model = model
+        human_acc = config.expert_intervention_accuracy
+    elif regime == "subjective":
+        regime_model = load(config.get_model_path("cbm_subjective"))
+        human_acc = config.subjective_intervention_accuracy
+    elif regime == "machine":
+        lfcbm_bundle = load(config.get_model_path("lfcbm"))
+        lfcbm_obj = lfcbm_bundle["lfcbm"]
+        fe_machine = lfcbm_bundle["frontend"]
+        import os
+        base = getattr(data.test, "base_dir", None)
+        test_paths = [
+            os.path.join(str(base), str(p)) if base else str(p)
+            for p in data.test.X
+        ]
+        c_preds = lfcbm_obj.concept_proba(test_paths)
+        regime_model = ConceptBasedModel(concept_detector=None, front_end_model=fe_machine)
+        human_acc = config.expert_intervention_accuracy
+    elif regime in ("llm", "clip"):
+        # LLM/CLIP regimes use separate concept files for corrections
+        return _run_llm_regime(config, regime, model, data, budgets, thresholds)
+    else:
+        raise ValueError(f"Unknown regime: {regime!r}")
+
+    if c_preds is None:
+        c_preds = regime_model.concept_detector.predict(data.test)
+    # For machine regime (FEOnProbs), pass continuous probs directly;
+    # for other regimes, binarize first (matching original code).
+    if regime == "machine":
+        acc_det = float(
+            (np.argmax(regime_model.front_end_model.predict_proba(c_preds),
+                        axis=1) == data.test.y.astype(int)).mean()
+        )
+    else:
+        acc_det = float(
+            (np.argmax(regime_model.front_end_model.predict_proba(
+                (c_preds >= 0.5).astype(int)), axis=1) == data.test.y.astype(int)).mean()
+        )
+
+    sttngs = {
+        "seed": config.seed,
+        "budget": budgets,
+        "intervention_accuracy": human_acc,
+        "intervention_threshold": thresholds[0] if thresholds else 0.2,
+        "intervention_strategy": config.intervention_strategy,
+    }
+
+    COLS = ["budget", "threshold"] + METRIC_COLS
+    df_lst = []
+    for t in thresholds:
+        sttngs["intervention_threshold"] = t
+        _, _, r = _test_interventions(
+            prob_test=c_preds,
+            sttngs=sttngs,
+            acc_det=acc_det,
+            fe=regime_model.front_end_model,
+            test=data.test,
+        )
+        df_lst.append(
+            pd.DataFrame(r)
+            .T.assign(budget=budgets)
+            .assign(threshold=t)
+            .reset_index(drop=True)[COLS]
+        )
+
+    regime_df = pd.concat(df_lst, axis=0).reset_index(drop=True)
+    regime_df["regime"] = regime
+    return regime_df
 
 
 # ── Stage: run_interventions ──────────────────────────────────────────
@@ -327,11 +1205,12 @@ def run_interventions(
 ) -> pd.DataFrame:
     """Run interventions on the trained CBM and return a results DataFrame.
 
-    Run interventions on the trained CBM and return a results DataFrame.
+    Loops over ``config.intervention_regimes`` (default: ``["baseline"]``).
     """
+    _set_deterministic_seed(config.seed)
     _ensure_intervention_imports()
     patch_macos_dataloader()
-    device = determine_device()
+    determine_device()
 
     if data is None:
         data = load(config.get_dataset_path())
@@ -341,43 +1220,23 @@ def run_interventions(
     budgets = list(config.intervention_budgets) + [data.n_concepts]
     thresholds = config.intervention_thresholds
 
-    sttngs = {
-        "seed": config.seed,
-        "budget": budgets,
-        "intervention_accuracy": config.intervention_accuracy,
-        "intervention_threshold": thresholds[0] if thresholds else 0.2,
-    }
+    all_dfs = []
+    for regime in config.intervention_regimes:
+        # LLM/CLIP regimes only make sense for subconcept (12 GT concepts = 12 LFCBM concepts)
+        if regime in ("llm", "clip") and not config.subconcept:
+            print(f"Skipping regime {regime!r}: only supported for subconcept variant")
+            continue
+        try:
+            regime_df = _run_regime(config, regime, model, data, budgets, thresholds)
+            all_dfs.append(regime_df)
+        except (FileNotFoundError, NotImplementedError) as e:
+            print(f"Skipping regime {regime!r}: {e}")
 
-    c_preds = model.concept_detector.predict(data.test)
-    acc = (model.predict(data.test) == data.test.y).mean().item()
+    if not all_dfs:
+        print("No regimes produced results.")
+        return pd.DataFrame()
 
-    METRIC_COLS = [
-        "accuracy",
-        "predictions_intervened_on",
-        "predictions_changed",
-        "total_concept_confirmations",
-        "total_concept_edits_made",
-    ]
-    COLS = ["budget", "threshold"] + METRIC_COLS
-
-    df_lst = []
-    for t in thresholds:
-        sttngs["intervention_threshold"] = t
-        b, a, r = _test_interventions(
-            prob_test=c_preds,
-            sttngs=sttngs,
-            acc_det=acc,
-            fe=model.front_end_model,
-            test=data.test,
-        )
-        df_lst.append(
-            pd.DataFrame(r)
-            .T.assign(budget=budgets)
-            .assign(threshold=t)
-            .reset_index(drop=True)[COLS]
-        )
-
-    results_df = pd.concat(df_lst, axis=0).reset_index(drop=True)
+    results_df = pd.concat(all_dfs, axis=0).reset_index(drop=True)
     results_df["data_name"] = "subconcept" if config.subconcept else "ideal"
     results_df["n"] = data.test.n
     results_df["concept_missing"] = config.concept_missing
@@ -510,6 +1369,9 @@ def collect_results(
         results_path = cfg.get_results_path("cbm")
         if results_path.exists():
             interv_df = pd.read_csv(results_path)
+            # Filter to baseline regime if column present
+            if "regime" in interv_df.columns:
+                interv_df = interv_df[interv_df["regime"] == "baseline"]
             # Use threshold=0.2 as the canonical threshold for the summary
             t02 = interv_df[interv_df["threshold"] == 0.2]
             for _, row in t02.iterrows():
@@ -632,15 +1494,31 @@ def run(
         sub_cfg.seed = config.seed
         setup_dataset(sub_cfg)
 
+    def _copy_regime_fields(src, dst):
+        """Copy regime-related config fields from src to dst."""
+        dst.intervention_regimes = list(src.intervention_regimes)
+        dst.intervention_strategy = src.intervention_strategy
+        dst.expert_intervention_accuracy = src.expert_intervention_accuracy
+        dst.subjective_noise_rate = src.subjective_noise_rate
+        dst.subjective_intervention_accuracy = src.subjective_intervention_accuracy
+        dst.lfcbm_concepts_file = src.lfcbm_concepts_file
+        dst.llm_concepts_file = src.llm_concepts_file
+        dst.clip_concepts_file = src.clip_concepts_file
+        dst.llm_provider = src.llm_provider
+        dst.llm_model = src.llm_model
+        dst.llm_api_key = src.llm_api_key
+        dst.llm_api_key_env = src.llm_api_key_env
+        dst.force_retrain = src.force_retrain
+
     # CBM training
     if "cbm" in stages:
-        ideal_cfg = RobotBenchmarkConfig.default_ideal()
-        ideal_cfg.seed = config.seed
-        train_cbm(ideal_cfg)
-
-        sub_cfg = RobotBenchmarkConfig.default_subconcept()
-        sub_cfg.seed = config.seed
-        train_cbm(sub_cfg)
+        for make_cfg in [RobotBenchmarkConfig.default_ideal, RobotBenchmarkConfig.default_subconcept]:
+            cfg = make_cfg()
+            cfg.seed = config.seed
+            if cfg.get_model_path("cbm").exists():
+                print(f"Using existing CBM: {cfg.get_model_path('cbm')}")
+            else:
+                train_cbm(cfg)
 
         if missing:
             for mech in ["mcar", "mnar"]:
@@ -653,23 +1531,82 @@ def run(
                     cfg.seed = config.seed
                     cfg.concept_missing = MISSING_PROP
                     cfg.concept_missing_mech = mech
-                    train_cbm(cfg)
+                    if cfg.get_model_path("cbm").exists():
+                        print(f"Using existing CBM: {cfg.get_model_path('cbm')}")
+                    else:
+                        train_cbm(cfg)
+
+        # Train regime-specific models if needed
+        if "subjective" in config.intervention_regimes:
+            for make_cfg in [RobotBenchmarkConfig.default_ideal, RobotBenchmarkConfig.default_subconcept]:
+                cfg = make_cfg()
+                cfg.seed = config.seed
+                _copy_regime_fields(config, cfg)
+                if cfg.get_model_path("cbm_subjective").exists():
+                    print(f"Using existing subjective CBM: {cfg.get_model_path('cbm_subjective')}")
+                else:
+                    train_cbm_subjective(cfg)
+
+            if missing:
+                for mech in ["mcar", "mnar"]:
+                    for subconcept in [False, True]:
+                        cfg = (
+                            RobotBenchmarkConfig.default_subconcept()
+                            if subconcept
+                            else RobotBenchmarkConfig.default_ideal()
+                        )
+                        cfg.seed = config.seed
+                        cfg.concept_missing = MISSING_PROP
+                        cfg.concept_missing_mech = mech
+                        _copy_regime_fields(config, cfg)
+                        if cfg.get_model_path("cbm_subjective").exists():
+                            print(f"Using existing subjective CBM: {cfg.get_model_path('cbm_subjective')}")
+                        else:
+                            train_cbm_subjective(cfg)
+
+        if "machine" in config.intervention_regimes:
+            for make_cfg in [RobotBenchmarkConfig.default_ideal, RobotBenchmarkConfig.default_subconcept]:
+                cfg = make_cfg()
+                cfg.seed = config.seed
+                _copy_regime_fields(config, cfg)
+                if cfg.get_model_path("lfcbm").exists():
+                    print(f"Using existing LFCBM: {cfg.get_model_path('lfcbm')}")
+                else:
+                    train_lfcbm(cfg)
+
+            if missing:
+                for mech in ["mcar", "mnar"]:
+                    for subconcept in [False, True]:
+                        cfg = (
+                            RobotBenchmarkConfig.default_subconcept()
+                            if subconcept
+                            else RobotBenchmarkConfig.default_ideal()
+                        )
+                        cfg.seed = config.seed
+                        cfg.concept_missing = MISSING_PROP
+                        cfg.concept_missing_mech = mech
+                        _copy_regime_fields(config, cfg)
+                        if cfg.get_model_path("lfcbm").exists():
+                            print(f"Using existing LFCBM: {cfg.get_model_path('lfcbm')}")
+                        else:
+                            train_lfcbm(cfg)
 
     # DNN training
     if "dnn" in stages:
         ideal_cfg = RobotBenchmarkConfig.default_ideal()
         ideal_cfg.seed = config.seed
-        train_dnn(ideal_cfg)
+        if ideal_cfg.get_model_path("dnn").exists():
+            print(f"Using existing DNN: {ideal_cfg.get_model_path('dnn')}")
+        else:
+            train_dnn(ideal_cfg)
 
     # Interventions
     if "intervene" in stages:
-        ideal_cfg = RobotBenchmarkConfig.default_ideal()
-        ideal_cfg.seed = config.seed
-        run_interventions(ideal_cfg)
-
-        sub_cfg = RobotBenchmarkConfig.default_subconcept()
-        sub_cfg.seed = config.seed
-        run_interventions(sub_cfg)
+        for make_cfg in [RobotBenchmarkConfig.default_ideal, RobotBenchmarkConfig.default_subconcept]:
+            cfg = make_cfg()
+            cfg.seed = config.seed
+            _copy_regime_fields(config, cfg)
+            run_interventions(cfg)
 
         if missing:
             for mech in ["mcar", "mnar"]:
@@ -682,6 +1619,7 @@ def run(
                     cfg.seed = config.seed
                     cfg.concept_missing = MISSING_PROP
                     cfg.concept_missing_mech = mech
+                    _copy_regime_fields(config, cfg)
                     run_interventions(cfg)
 
     # Alignment

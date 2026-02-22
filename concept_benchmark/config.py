@@ -131,6 +131,21 @@ class RobotBenchmarkConfig:
     intervention_budgets: List[int] = field(default_factory=lambda: [1, 3])
     intervention_thresholds: List[float] = field(default_factory=lambda: [0.2, 0.4])
     intervention_accuracy: float = 1.0
+    intervention_strategy: str = "kflip"  # "kflip" (up-to-k) or "exact_k"
+
+    # Intervention regimes
+    intervention_regimes: List[str] = field(default_factory=lambda: ["baseline"])
+    expert_intervention_accuracy: float = 0.80
+    subjective_noise_rate: float = 0.20
+    subjective_intervention_accuracy: float = 0.80
+    lfcbm_concepts_file: str = ""
+    llm_concepts_file: str = ""
+    clip_concepts_file: str = ""
+    llm_provider: str = "gemini"
+    llm_model: str = "gemini-3-flash-preview"
+    llm_api_key: str = ""
+    llm_api_key_env: str = "GEMINI_API_KEY"
+    force_retrain: bool = False  # force retrain LFCBM/subjective models
 
     # Missingness
     concept_missing: float = 0.0
@@ -434,6 +449,18 @@ class RobotTextBenchmarkConfig:
     intervention_budgets: List[int] = field(default_factory=lambda: [0, 1, 2, 5, 10])
     intervention_accuracy: float = 1.0
     flip_threshold: float = 0.30
+    intervention_strategy: str = "kflip"  # "kflip" (up-to-k) or "exact_k"
+
+    # Intervention regimes
+    intervention_regimes: List[str] = field(default_factory=lambda: ["baseline"])
+    expert_intervention_accuracy: float = 0.80
+    subjective_noise_rate: float = 0.20
+    subjective_intervention_accuracy: float = 0.80
+    llm_provider: str = "gemini"
+    llm_model: str = "gemini-3-flash-preview"
+    llm_api_key: str = ""
+    llm_api_key_env: str = "GEMINI_API_KEY"
+    force_retrain: bool = False  # force retrain LFCBM/subjective models
 
     # LFCBM (optional)
     lfcbm_enable: bool = False

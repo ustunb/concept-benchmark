@@ -198,6 +198,57 @@ def train_cbm(
     return cbm
 
 
+def train_cbm_subjective(
+    config: RobotTextBenchmarkConfig,
+    data: Optional[ConceptDatasetSample] = None,
+) -> ConceptBasedModel:
+    """Train a CBM on noisy (subjective) concept labels.
+
+    Saves to ``config.get_model_path("cbm_subjective")``.
+    """
+    import copy as _copy
+
+    if data is None:
+        data = load(config.get_dataset_path())
+    noisy_data = _copy.deepcopy(data)
+    noisy_data.sample_concept_noise(
+        p=config.subjective_noise_rate,
+        rng=np.random.default_rng(config.seed + 555),
+        enable=True,
+    )
+
+    _set_seed(config.seed)
+    detector = TextConceptDetector(
+        embed_dim=128,
+        hidden_dim=192,
+        epochs=config.detector_epochs,
+        batch_size=config.detector_batch_size,
+        lr=config.detector_lr,
+        use_bigrams=True,
+        dropout=0.1,
+        pos_weight="auto",
+        output_mode=config.concept_mode,
+        threshold_mode="auto",
+        pooling="attn",
+        group_unknown_threshold=0.50,
+        validate=True,
+    )
+    detector.fit(noisy_data.training, noisy_data.validation)
+    cbm = ConceptBasedModel(
+        concept_detector=detector,
+        front_end_model=FrontEndModel(),
+        propagate=(config.concept_mode == "soft"),
+    )
+    cbm.front_end_model.fit(noisy_data.training.C, noisy_data.training.y)
+
+    test_pred = cbm.predict(data.test)
+    acc = float(np.mean(test_pred == data.test.y))
+    print(f"Subjective CBM Test Accuracy: {acc:.4f}")
+
+    save(cbm, config.get_model_path("cbm_subjective"), overwrite=True)
+    return cbm
+
+
 # ── Stage: train_dnn ─────────────────────────────────────────────────
 
 class _TextDS(Dataset):
@@ -400,38 +451,39 @@ def train_lfcbm(
     return cbm
 
 
-# ── Stage: run_interventions ─────────────────────────────────────────
+# ── Regime dispatch (text) ────────────────────────────────────────────
 
-def run_interventions(
-    config: RobotTextBenchmarkConfig,
-    model: Optional[ConceptBasedModel] = None,
-    data: Optional[ConceptDatasetSample] = None,
-) -> pd.DataFrame:
-    """Run k-flip interventions on the trained CBM.
+def _run_text_regime(config, regime, model, data, budgets, threshold):
+    """Run one intervention regime for the text benchmark.
 
-    Returns a DataFrame with results for each budget.
+    Returns a DataFrame with rows for each budget.
     """
     _ensure_intervention_imports()
-    device = determine_device()
 
-    if data is None:
-        data = load(config.get_dataset_path())
-    if model is None:
-        model = load(config.get_model_path("cbm"))
+    # Select model and human accuracy per regime
+    if regime == "baseline":
+        regime_model = model
+        human_acc = config.intervention_accuracy
+    elif regime == "expert":
+        regime_model = model
+        human_acc = config.expert_intervention_accuracy
+    elif regime == "subjective":
+        regime_model = load(config.get_model_path("cbm_subjective"))
+        human_acc = config.subjective_intervention_accuracy
+    elif regime == "machine":
+        # Use existing LabelFreeDetector from robot_text/lfcbm.py
+        regime_model = load(config.get_model_path("lfcbm"))
+        human_acc = config.intervention_accuracy
+    else:
+        raise ValueError(f"Unknown regime: {regime!r}")
 
-    budgets = [b for b in config.intervention_budgets if b > 0]
-    human_acc = config.intervention_accuracy
-    threshold = config.flip_threshold
-
-    c_preds = model.concept_detector.predict(data.test)
-    base_pred = model.predict(data.test)
+    c_preds = regime_model.concept_detector.predict(data.test)
+    base_pred = regime_model.predict(data.test)
     base_acc = float(np.mean(base_pred == data.test.y))
 
-    # Build base CBM wrapper for runner
-    runner = ConceptInterventionRunner(model)
+    runner = ConceptInterventionRunner(regime_model)
 
     rows = []
-
     # k=0 baseline
     rows.append({
         "budget": 0,
@@ -453,7 +505,9 @@ def run_interventions(
             score_threshold=threshold,
             noise=err_prob,
         )
-        strategy = KFlipInterventionStrategy()
+        strategy = KFlipInterventionStrategy(
+            exact_k=(config.intervention_strategy == "exact_k"),
+        )
 
         result = runner.run(
             strategy=strategy,
@@ -467,7 +521,6 @@ def run_interventions(
         C_gt = data.test.C.astype(np.float32)
         C_after = result.C_intervened.copy()
 
-        # Apply human error
         mistake_draw = rng.random(C_after.shape) < err_prob
         mistakes = mask & mistake_draw
         C_after[mistakes] = 1.0 - C_gt[mistakes]
@@ -476,7 +529,7 @@ def run_interventions(
         C_pred_binary = (result.C_pred >= 0.5).astype(int)
         C_final_binary = (result.C_intervened >= 0.5).astype(int)
         actual_edits_mask = C_pred_binary != C_final_binary
-        result.y_prob_after = model.front_end_model.predict_proba(C_final_binary)
+        result.y_prob_after = regime_model.front_end_model.predict_proba(C_final_binary)
         result.y_pred_after = np.argmax(result.y_prob_after, axis=1)
 
         y_pred_before = np.argmax(result.y_prob_before, axis=1)
@@ -494,9 +547,48 @@ def run_interventions(
             "total_concept_edits_made": int(np.sum(actual_edits_mask)),
         })
 
-    results_df = pd.DataFrame(rows)
+    regime_df = pd.DataFrame(rows)
+    regime_df["regime"] = regime
+    return regime_df
+
+
+# ── Stage: run_interventions ─────────────────────────────────────────
+
+def run_interventions(
+    config: RobotTextBenchmarkConfig,
+    model: Optional[ConceptBasedModel] = None,
+    data: Optional[ConceptDatasetSample] = None,
+) -> pd.DataFrame:
+    """Run k-flip interventions on the trained CBM.
+
+    Loops over ``config.intervention_regimes`` (default: ``["baseline"]``).
+    """
+    _ensure_intervention_imports()
+    determine_device()
+
+    if data is None:
+        data = load(config.get_dataset_path())
+    if model is None:
+        model = load(config.get_model_path("cbm"))
+
+    budgets = [b for b in config.intervention_budgets if b > 0]
+    threshold = config.flip_threshold
+
+    all_dfs = []
+    for regime in config.intervention_regimes:
+        try:
+            regime_df = _run_text_regime(config, regime, model, data, budgets, threshold)
+            all_dfs.append(regime_df)
+        except (FileNotFoundError, NotImplementedError) as e:
+            print(f"Skipping regime {regime!r}: {e}")
+
+    if not all_dfs:
+        print("No regimes produced results.")
+        return pd.DataFrame()
+
+    results_df = pd.concat(all_dfs, axis=0).reset_index(drop=True)
     results_df["seed"] = config.seed
-    results_df["human_accuracy"] = human_acc
+    results_df["human_accuracy"] = config.intervention_accuracy
     results_df.to_csv(config.get_results_path("cbm"), index=False)
     print(f"Saved intervention results to {config.get_results_path('cbm')}")
     return results_df
