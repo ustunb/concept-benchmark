@@ -14,8 +14,7 @@
 1. [Installation](#installation)
 2. [Quick Start](#quick-start)
 3. [Benchmarks](#benchmarks)
-4. [Creating Your Own Benchmark](#creating-your-own-benchmark)
-5. [Citation](#citation)
+4. [Citation](#citation)
 
 ## Installation
 
@@ -125,50 +124,63 @@ Default sequences:
 
 ## Benchmarks
 
+Each benchmark is a configurable generator, not a fixed dataset. By varying the configuration, a single benchmark domain produces many distinct evaluation scenarios -- different concept granularities, label rules, annotation quality, and intervention regimes. The two domains below are designed to complement each other: the robot benchmark models a **decision-support** setting (a human corrects concept predictions), while the sudoku benchmark models an **automation** setting (the system abstains when uncertain).
+
 ### Robot Classification
 
-Classify synthetic robots into two species (**glorp** vs. **drent**) based on visual concepts. The label depends on three concepts (mouth type, foot shape, and knee presence), while other concepts like elbow shape and hand shape are spurious -- present in the data but not part of the ground-truth label rule.
+Classify synthetic robots into two species (**glorp** vs. **drent**) based on visual concepts. By default, the label depends on three concepts (mouth type, foot shape, and knee presence), while other concepts like elbow shape and hand shape are spurious -- present in the data but not part of the label rule.
 
 <p align="center">
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
 </p>
 
-**Concept granularity.** Each robot has 9 visual features, several of which have multiple subtypes (foot shape has 10, hand shape has 6). The `drop_concepts` parameter controls which concepts the model sees. The package provides two pre-defined setups:
+**Everything is configurable.** The default setup is just one point in a large configuration space. Each robot has 9 visual features, several with multiple subtypes (foot shape has 10, hand shape has 6). You can control:
 
-- **Ideal** (default, `IDEAL_DROP`): Drops all foot shape subtypes, keeping only the binary `foot_shape` (pointy vs. flat). This gives 7 concepts.
-- **Subconcept** (`SUBCONCEPT_DROP`): Drops the parent `foot_shape` and 5 subtypes, keeping 5 foot subtype indicators. This gives 12 concepts.
-
-These are not the only options -- you can define any concept granularity by customizing `drop_concepts`. For example, you could keep all 10 foot subtypes, or apply the same subtype expansion to hand shapes instead of feet, or drop concepts entirely to test with fewer ground-truth features:
+- **Which concepts the model sees** via `drop_concepts`. The package provides two pre-defined presets -- `IDEAL_DROP` (7 coarse concepts) and `SUBCONCEPT_DROP` (12 fine-grained foot subtypes) -- but you can define any subset: keep all subtypes, expand hand shapes instead of feet, or use only the 3 causal features.
+- **The label rule** via `model_rule` and `weights`. The default rule is `glorp if (mouth_closed + foot_pointy + has_knees) >= 3`, but you can change which concepts matter and how much they contribute.
+- **Annotation quality** via `concept_missing` and `concept_missing_mech` (MCAR or MNAR missingness), and through intervention regimes that simulate noisy experts, subjective annotators, or machine-discovered concepts.
+- **Input modality**: image (`cbm-benchmark robot`) or text (`cbm-benchmark robot-text`). Both share the same concept structure and label rules.
 
 ```python
-# Custom: keep all foot subtypes (no foot-related drops)
-cfg.drop_concepts = []
+from concept_benchmark.config import RobotBenchmarkConfig, IDEAL_DROP, SUBCONCEPT_DROP
 
-# Custom: expand hand shapes instead of feet
-cfg.drop_concepts = ["hand_shape_round_circle", "hand_shape_round_oval", "hand_shape_edgy_square"]
+# Pre-defined: 7 coarse concepts (default)
+cfg = RobotBenchmarkConfig()
 
-# Custom: minimal concept set (only the 3 causal features)
-cfg.drop_concepts = ["head_shape", "body_shape", "has_antennae", "ears_shape",
-                     "has_elbows", "hand_shape"] + list(IDEAL_DROP)
+# Pre-defined: 12 fine-grained foot subtypes
+cfg = RobotBenchmarkConfig.default_subconcept()
+
+# Custom: keep all foot subtypes (no drops)
+cfg = RobotBenchmarkConfig(drop_concepts=[])
+
+# Custom: only the 3 causal features
+cfg = RobotBenchmarkConfig(
+    drop_concepts=["head_shape", "body_shape", "has_antennae", "ears_shape",
+                   "has_elbows", "hand_shape"] + list(IDEAL_DROP),
+)
+
+# Custom label rule: only mouth and knees matter
+cfg = RobotBenchmarkConfig(
+    weights={"mouth_type": 5, "has_knees": -5, "foot_shape": 0},
+)
 ```
 
 <p align="center">
   <img src="docs/assets/robot_foot_shapes.png" width="600" alt="Robot foot shape variations">
 </p>
 
-**Modalities.** The robot benchmark supports two input modalities. In **image** mode (`cbm-benchmark robot`), robots are rendered as pixel images (32x32 or 600x600) using pycairo, with configurable color variations. In **text** mode (`cbm-benchmark robot-text`), robots are described in natural language generated from a template corpus with SHA-256 deterministic synonym selection, ensuring reproducibility. Both modalities share the same concept structure and label rules.
-
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `seed` | `1014` / `1337` | Random seed (image / text) |
 | `size` | `"medium"` | Image resolution: `"small"` (8px), `"medium"` (32px), `"large"` (600px). Image only. |
 | `model_type` | `"stochastic"` | Label model: `"deterministic"` or `"stochastic"` |
-| `drop_concepts` | `IDEAL_DROP` | List of concept names to exclude from the model. Controls concept granularity. |
-| `subconcept` | `False` | Use pre-defined `SUBCONCEPT_DROP` and add `_subconcept` suffix to file paths |
+| `model_rule` | see `config.py` | Python expression defining the label rule over concepts |
+| `weights` | `{"mouth_type": 5, ...}` | Concept weights for the stochastic label model |
+| `drop_concepts` | `IDEAL_DROP` | Concept names to exclude. Controls concept granularity. |
 | `concept_missing` | `0.0` | Fraction of concept labels to mask during training |
 | `concept_missing_mech` | `"none"` | Missingness mechanism: `"none"`, `"mcar"`, or `"mnar"` |
 | `intervention_budgets` | `[1, 3]` | Number of concepts to intervene on per sample |
-| `intervention_thresholds` | `[0.2, 0.4]` | Concept confidence thresholds -- concepts with predicted probability within this distance of 0.5 are candidates for intervention |
+| `intervention_thresholds` | `[0.2, 0.4]` | Concept confidence thresholds for intervention candidates |
 | `intervention_strategy` | `"kflip"` | `"kflip"` (up-to-k) or `"exact_k"` (exactly k). See [Intervention Strategies](#intervention-strategies). |
 | `difficulty` | `"hard"` | Corpus difficulty (text only) |
 | `generic_rate` | `0.7` | Fraction of test set using concept-ambiguous text (text only) |
@@ -226,60 +238,33 @@ cfg.alignment_constraints = {"has_knees": 1}
 
 ### Sudoku Validation
 
-Determine whether a 9x9 sudoku board is valid. The 27 concepts correspond to the validity of each row, column, and 3x3 block -- a board is valid if and only if all 27 concepts are true. This creates a naturally conjunctive relationship between concepts and the label, in contrast to the disjunctive structure of the robot benchmark.
+Determine whether a 9x9 sudoku board is valid. The 27 concepts correspond to the validity of each row, column, and 3x3 block -- a board is valid if and only if all 27 concepts are true. This creates a naturally conjunctive (AND) relationship between concepts and the label, in contrast to the disjunctive structure of the robot benchmark.
 
 <p align="center">
   <img src="docs/assets/sudoku_handwritten.png" width="400" alt="Sudoku board with handwritten digits and concept annotations">
 </p>
 
-Boards can be represented as tabular data (81-cell integer vectors) or rendered as images with handwritten digits. The image pipeline includes an OCR stage that learns to read digits from rendered boards before passing them to the concept model.
+**Automation and selective abstention.** The sudoku benchmark models an automation setting where the system handles routine cases and defers uncertain ones to a human. The model abstains when it is not confident enough, and a confidence threshold is chosen so that kept predictions achieve at least `target_accuracy`. Like the robot benchmark, the sudoku benchmark supports concept interventions -- when the model abstains on a board, a human can verify specific concepts (e.g., "is row 5 valid?") to resolve the uncertainty, potentially allowing the model to make a prediction it would otherwise defer. The key metrics are:
 
-**Selective abstention.** Unlike the robot benchmark (which uses k-flip interventions to correct concept predictions), the sudoku benchmark evaluates **selective abstention**: the model makes predictions only when it is confident enough, and abstains (defers to a human or fallback) otherwise. A confidence threshold is chosen on the validation set so that kept predictions achieve at least `target_accuracy`. The two key metrics are:
+- **Selective accuracy**: Accuracy on predictions the model chose to keep.
+- **Coverage**: Fraction of samples the model chose to keep (higher = less human workload).
+- **Net work automated**: Coverage minus the cost of concept verifications, measuring whether interventions save more work than they cost.
 
-- **Selective accuracy**: Accuracy on predictions the model chose to keep (high = reliable when it acts).
-- **Coverage**: Fraction of samples the model chose to keep (high = less human workload).
+The AND structure creates a distinctive intervention dynamic: a single incorrect concept fails the entire board, so each additional concept verification adds cost but only marginal coverage gain. This contrasts with the robot benchmark, where correcting even one concept can flip the label prediction.
+
+**Configurability.** Task difficulty is controlled by `max_corrupt` (how many cells are changed in invalid boards -- higher means subtler errors and harder detection). Boards can be represented as tabular data (81-cell integer vectors) or rendered as images with handwritten digits; the image pipeline adds an OCR stage that must learn to read digits before reasoning about validity. The `target_accuracy` parameter trades off reliability against coverage: demanding 99% accuracy means more abstention but fewer mistakes.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `seed` | `171` | Random seed for reproducibility |
 | `n_samples` | `1000` | Number of boards to generate |
-| `max_corrupt` | `9` | Maximum cells corrupted in invalid boards (higher = harder) |
+| `max_corrupt` | `9` | Maximum cells corrupted in invalid boards (higher = harder to detect) |
 | `valid_ratio` | `0.5` | Fraction of valid boards |
-| `handwriting` | `True` | Render digits in handwritten style |
+| `handwriting` | `True` | Render digits in handwritten style (enables OCR pipeline) |
 | `target_accuracy` | `0.9` | Minimum accuracy demanded on kept predictions; higher values mean more abstention but higher reliability |
 | `intervention_thresholds` | `[0.2, 0.4, 0.6, 0.8]` | Concept confidence thresholds for intervention candidates |
 
 The full list of parameters is documented in `SudokuBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
-
-## Creating Your Own Benchmark
-
-To add a new benchmark domain, you need three components:
-
-1. **A data generator** that produces a `ConceptDataset(X, C, y, meta)` -- features, binary concept labels, target labels, and metadata.
-2. **A config dataclass** (like `RobotBenchmarkConfig`) to hold experiment settings.
-3. **A benchmark module** (like `concept_benchmark/benchmarks/robot.py`) with stage functions.
-
-The core data object is `ConceptDataset`:
-
-```python
-from concept_benchmark.data import ConceptDataset
-import numpy as np
-
-X = np.random.randn(1000, 10).astype(np.float32)       # features
-C = (np.random.rand(1000, 3) > 0.5).astype(np.int8)    # binary concepts
-y = (C[:, 0] & C[:, 1]).astype(np.int32)                # labels from concepts
-
-data = ConceptDataset(X, C, y, meta={
-    "concepts": ["has_feature_a", "has_feature_b", "has_feature_c"],
-    "classes": ["negative", "positive"],
-    "data_type": "tabular",
-})
-
-data.generate_cvindices(seed=0)
-data.split("K05N01", fold_num_validation=4, fold_num_test=5)
-```
-
-Once your data is in a `ConceptDataset`, the existing training and intervention infrastructure (`ConceptDetector`, `FrontEndModel`, `ConceptInterventionRunner`) works out of the box. See the built-in benchmarks in `concept_benchmark/benchmarks/` as templates.
 
 ## Citation
 
