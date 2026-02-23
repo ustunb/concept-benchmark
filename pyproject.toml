@@ -38,14 +38,12 @@ dependencies = [
     "wand>=0.6.13",
     "cvxpy>=1.4.0",
     "pyyaml>=6.0",
+    "open-clip-torch>=2.20.0",
+    "google-generativeai>=0.3.0",
 ]
 
 [project.scripts]
 cbm-benchmark = "concept_benchmark.cli:main"
-
-[project.optional-dependencies]
-lfcbm = ["open-clip-torch>=2.20.0"]
-llm = ["google-generativeai>=0.3.0"]
 
 [dependency-groups]
 dev = [

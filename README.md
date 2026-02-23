@@ -14,10 +14,9 @@
 1. [Installation](#installation)
 2. [Quick Start](#quick-start)
 3. [Benchmarks](#benchmarks)
-4. [Intervention Regimes](#intervention-regimes)
-5. [Configuration](#configuration)
-6. [Creating Your Own Benchmark](#creating-your-own-benchmark)
-7. [Citation](#citation)
+4. [Configuration](#configuration)
+5. [Creating Your Own Benchmark](#creating-your-own-benchmark)
+6. [Citation](#citation)
 
 ## Installation
 
@@ -32,14 +31,6 @@ You can also install directly via pip:
 
 ```bash
 pip install -e .
-```
-
-For intervention regimes that use CLIP-based concept discovery or LLM-based interventions, install optional extras:
-
-```bash
-pip install -e ".[lfcbm]"     # CLIP-based concept discovery (machine/llm/clip regimes)
-pip install -e ".[llm]"       # LLM-based interventions (llm/clip regimes)
-pip install -e ".[lfcbm,llm]" # both
 ```
 
 ## Quick Start
@@ -69,11 +60,20 @@ print(results[["budget", "accuracy"]].to_string(index=False))
 # Run the full robot pipeline (subconcept variant, matching paper defaults)
 cbm-benchmark robot --seed 1014 --subconcept
 
-# Run the sudoku pipeline
+# Run with intervention regimes
+cbm-benchmark robot --seed 1014 --subconcept --regimes baseline expert
+
+# Paper-matching exact-k intervention strategy
+cbm-benchmark robot --seed 1014 --subconcept --strategy exact_k --regimes baseline expert
+
+# Robot text modality
+cbm-benchmark robot-text --seed 1337
+
+# Sudoku pipeline
 cbm-benchmark sudoku --seed 171
 
-# Run the robot text pipeline
-cbm-benchmark robot-text --seed 1337
+# Run specific pipeline stages only
+cbm-benchmark robot --seed 1014 --subconcept --stages setup cbm dnn
 ```
 
 For fully-commented examples, see [`scripts/demo_robot.py`](scripts/demo_robot.py) and [`scripts/demo_sudoku.py`](scripts/demo_sudoku.py).
@@ -94,19 +94,55 @@ Each robot is defined by 9 visual concepts. The foot shape concept has 10 subtyp
   <img src="docs/assets/robot_foot_shapes.png" width="600" alt="Robot foot shape variations">
 </p>
 
-The robot benchmark supports three modalities. In **image** mode, robots are rendered as pixel images (32x32 or 600x600) using pycairo, with configurable color variations. In **text** mode, robots are described in natural language generated from a template corpus with deterministic synonym selection. Both modalities share the same concept structure and label rules.
+**Modalities.** The robot benchmark supports two input modalities. In **image** mode (`cbm-benchmark robot`), robots are rendered as pixel images (32x32 or 600x600) using pycairo, with configurable color variations. In **text** mode (`cbm-benchmark robot-text`), robots are described in natural language generated from a template corpus with SHA-256 deterministic synonym selection, ensuring reproducibility. Both modalities share the same concept structure and label rules.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `seed` | `1014` | Random seed for reproducibility |
-| `size` | `"medium"` | Image resolution: `"small"` (8px), `"medium"` (32px), `"large"` (600px) |
+| `seed` | `1014` / `1337` | Random seed (image / text) |
+| `size` | `"medium"` | Image resolution: `"small"` (8px), `"medium"` (32px), `"large"` (600px). Image only. |
 | `model_type` | `"stochastic"` | Label model: `"deterministic"` or `"stochastic"` |
 | `subconcept` | `False` | Use fine-grained foot shape subtypes instead of binary pointy/flat |
 | `concept_missing` | `0.0` | Fraction of concept labels to mask during training |
 | `concept_missing_mech` | `"none"` | Missingness mechanism: `"none"`, `"mcar"`, or `"mnar"` |
 | `intervention_budgets` | `[1, 3]` | Number of concepts to intervene on per sample |
+| `difficulty` | `"hard"` | Corpus difficulty (text only) |
+| `generic_rate` | `0.7` | Fraction of test set using concept-ambiguous text (text only) |
 
-The full list of parameters is documented in `RobotBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
+The full list of parameters is documented in `RobotBenchmarkConfig` and `RobotTextBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
+
+#### Intervention Regimes
+
+Intervention regimes control **where concepts come from** and **who corrects them**, simulating different real-world annotation scenarios:
+
+| Regime | Concept Source | Intervention Source | What It Tests |
+|--------|---------------|---------------------|---------------|
+| `baseline` | Ground truth | Ground truth | Upper bound: perfect concepts + perfect corrections |
+| `expert` | Ground truth | Noisy human (80% acc) | Expert corrections with realistic error rates |
+| `subjective` | Noisy CBM (20% label noise) | Noisy human (80% acc) | Subjective concept definitions + noisy corrections |
+| `machine` | LFCBM on GT descriptions | Noisy human (80% acc) | Machine-discovered concepts (CLIP-based) |
+| `llm` | LFCBM on LLM descriptions | LLM (Gemini) | LLM-generated concept definitions + LLM corrections |
+| `clip` | LFCBM on CLIP keywords | LLM (Gemini) | CLIP keyword concepts + LLM corrections |
+
+```bash
+cbm-benchmark robot --seed 1014 --subconcept --regimes baseline expert subjective machine
+
+# LLM/CLIP regimes require a Gemini API key
+export GEMINI_API_KEY=your_key_here
+cbm-benchmark robot --seed 1014 --subconcept --regimes llm clip
+```
+
+```python
+from concept_benchmark.config import RobotBenchmarkConfig
+
+cfg = RobotBenchmarkConfig.default_subconcept()
+cfg.seed = 1014
+cfg.intervention_regimes = ["baseline", "expert", "subjective"]
+cfg.intervention_strategy = "exact_k"  # paper-matching strategy
+```
+
+**Notes:**
+- `machine`, `llm`, and `clip` regimes only work with `--subconcept` (12 concepts must match LFCBM dimensions)
+- `llm` and `clip` regimes require `GEMINI_API_KEY`
 
 ### Sudoku Validation
 
@@ -128,63 +164,6 @@ Boards can be represented as tabular data (81-cell integer vectors) or rendered 
 | `target_accuracy` | `0.9` | Target accuracy for selective classification |
 
 The full list of parameters is documented in `SudokuBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
-
-### Robot Text Classification
-
-The same robot classification task, but from natural language descriptions instead of images. Text is generated from a JSONL template corpus with SHA-256 deterministic synonym selection, ensuring reproducibility. The test set can optionally mix in "generic" descriptions that are ambiguous about specific concepts, testing detector robustness on out-of-distribution text.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `seed` | `1337` | Random seed for reproducibility |
-| `difficulty` | `"hard"` | Corpus difficulty: controls template complexity |
-| `generic_rate` | `0.7` | Fraction of test set using concept-ambiguous text |
-| `concept_mode` | `"hard"` | Concept predictions: `"hard"` (binary) or `"soft"` (probabilities) |
-| `dnn_model_name` | `"distilbert-base-uncased"` | HuggingFace model for the DNN baseline |
-| `lfcbm_enable` | `False` | Also train a label-free CBM variant |
-
-The full list of parameters is documented in `RobotTextBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
-
-## Intervention Regimes
-
-Intervention regimes control **where concepts come from** and **who corrects them**, simulating different real-world annotation scenarios. The robot and robot-text benchmarks support 6 regimes:
-
-| Regime | Concept Source | Intervention Source | What It Tests |
-|--------|---------------|---------------------|---------------|
-| `baseline` | Ground truth | Ground truth | Upper bound: perfect concepts + perfect corrections |
-| `expert` | Ground truth | Noisy human (80% acc) | Expert corrections with realistic error rates |
-| `subjective` | Noisy CBM (20% label noise) | Noisy human (80% acc) | Subjective concept definitions + noisy corrections |
-| `machine` | LFCBM on GT descriptions | Noisy human (80% acc) | Machine-discovered concepts (CLIP-based) |
-| `llm` | LFCBM on LLM descriptions | LLM (Gemini) | LLM-generated concept definitions + LLM corrections |
-| `clip` | LFCBM on CLIP keywords | LLM (Gemini) | CLIP keyword concepts + LLM corrections |
-
-### Running Regimes
-
-```bash
-# Run specific regimes (subconcept variant required for machine/llm/clip)
-cbm-benchmark robot --seed 1014 --subconcept --regimes baseline expert subjective machine
-
-# Paper-matching exact-k intervention strategy
-cbm-benchmark robot --seed 1014 --subconcept --strategy exact_k --regimes baseline expert
-
-# LLM/CLIP regimes require a Gemini API key
-export GEMINI_API_KEY=your_key_here
-cbm-benchmark robot --seed 1014 --subconcept --regimes llm clip
-```
-
-```python
-from concept_benchmark.config import RobotBenchmarkConfig
-
-cfg = RobotBenchmarkConfig.default_subconcept()
-cfg.seed = 1014
-cfg.intervention_regimes = ["baseline", "expert", "subjective"]
-cfg.intervention_strategy = "exact_k"  # paper-matching strategy
-```
-
-### Requirements
-
-- **`machine`, `llm`, `clip`** regimes require `pip install -e ".[lfcbm]"` (CLIP encoder)
-- **`llm`, `clip`** regimes additionally require `pip install -e ".[llm]"` and `GEMINI_API_KEY`
-- **`machine`, `llm`, `clip`** regimes only work with `--subconcept` (12 concepts must match LFCBM dimensions)
 
 ## Configuration
 
