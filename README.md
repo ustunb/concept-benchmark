@@ -158,6 +158,8 @@ The full list of parameters is documented in `RobotBenchmarkConfig` and `RobotTe
 > export GEMINI_API_KEY=your_key_here
 > ```
 
+The example below uses the paper's default seed and switches to the 12 fine-grained subconcepts. It also masks 20% of concept labels at random (MCAR) to test whether interventions can recover accuracy lost to missing annotations.
+
 ```python
 from concept_benchmark.benchmarks import robot
 from concept_benchmark.config import RobotBenchmarkConfig, SUBCONCEPT_DROP
@@ -173,10 +175,6 @@ cfg = RobotBenchmarkConfig(
 data = robot.setup_dataset(cfg)
 cbm = robot.train_cbm(cfg, data)
 results = robot.run_interventions(cfg, cbm, data)
-```
-
-```bash
-cbm-benchmark robot --seed 1014 --subconcept
 ```
 
 ### Sudoku Validation
@@ -208,6 +206,8 @@ Determine whether a 9x9 sudoku board is valid. The 27 concepts correspond to the
 
 The full list of parameters is documented in `SudokuBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
 
+The example below generates 1000 boards with handwritten digits, corrupting up to 9 cells in invalid boards. It demands 95% selective accuracy, so the model abstains on uncertain predictions and interventions ask a human to verify specific row/column/block concepts.
+
 ```python
 from concept_benchmark.benchmarks import sudoku
 from concept_benchmark.config import SudokuBenchmarkConfig
@@ -225,18 +225,14 @@ cs_model = sudoku.train_cs(cfg)
 results = sudoku.run_interventions(cfg, cs_model)
 ```
 
-```bash
-cbm-benchmark sudoku --seed 171
-```
-
 ## Citation
 
 If you use this package in your research, please cite:
 
 ```bibtex
-@article{skirzynski2025concept,
+@article{skirzynski2026concept,
   title={Measuring What Matters: Synthetic Benchmarks for Concept Bottleneck Models},
   author={Skirzy\'{n}ski, Julian and Cheon, Harry and Kadekodi, Shreyas and Stewart, Meredith and Ustun, Berk},
-  year={2025},
+  year={2026},
 }
 ```
