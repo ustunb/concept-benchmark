@@ -14,9 +14,8 @@
 1. [Installation](#installation)
 2. [Quick Start](#quick-start)
 3. [Benchmarks](#benchmarks)
-4. [Configuration](#configuration)
-5. [Creating Your Own Benchmark](#creating-your-own-benchmark)
-6. [Citation](#citation)
+4. [Creating Your Own Benchmark](#creating-your-own-benchmark)
+5. [Citation](#citation)
 
 ## Installation
 
@@ -77,6 +76,32 @@ cbm-benchmark robot --seed 1014 --subconcept --stages setup cbm dnn
 ```
 
 For fully-commented examples, see [`scripts/demo_robot.py`](scripts/demo_robot.py) and [`scripts/demo_sudoku.py`](scripts/demo_sudoku.py).
+
+### Configuration
+
+All experiment settings are managed through typed dataclasses in [`concept_benchmark/config.py`](concept_benchmark/config.py). Configs can be serialized to YAML for reproducibility:
+
+```python
+from concept_benchmark.config import RobotBenchmarkConfig
+
+cfg = RobotBenchmarkConfig(seed=42, epochs=100, concept_missing=0.2, concept_missing_mech="mcar")
+cfg.to_yaml("my_experiment.yaml")
+loaded = RobotBenchmarkConfig.from_yaml("my_experiment.yaml")
+```
+
+```bash
+cbm-benchmark robot --config my_experiment.yaml
+```
+
+### Pipeline Stages
+
+Each benchmark runs a sequence of stages. You can select specific stages with `--stages`:
+
+| Benchmark | Default Stages |
+|-----------|---------------|
+| Robot | `setup cbm dnn intervene align collect` |
+| Sudoku | `setup ocr cs dnn intervene selective align collect` |
+| Robot Text | `setup cbm dnn intervene align collect` |
 
 ## Benchmarks
 
@@ -140,9 +165,7 @@ cfg.intervention_regimes = ["baseline", "expert", "subjective"]
 cfg.intervention_strategy = "exact_k"  # paper-matching strategy
 ```
 
-**Notes:**
-- `machine`, `llm`, and `clip` regimes only work with `--subconcept` (12 concepts must match LFCBM dimensions)
-- `llm` and `clip` regimes require `GEMINI_API_KEY`
+The `llm` and `clip` regimes require `--subconcept` and `GEMINI_API_KEY` (the pipeline makes live Gemini calls to judge concept presence in images at intervention time).
 
 ### Sudoku Validation
 
@@ -164,41 +187,6 @@ Boards can be represented as tabular data (81-cell integer vectors) or rendered 
 | `target_accuracy` | `0.9` | Target accuracy for selective classification |
 
 The full list of parameters is documented in `SudokuBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
-
-## Configuration
-
-All experiment settings are managed through typed dataclasses in [`concept_benchmark/config.py`](concept_benchmark/config.py). Configs can be serialized to YAML for reproducibility:
-
-```python
-from concept_benchmark.config import RobotBenchmarkConfig
-
-# Customize any parameter
-cfg = RobotBenchmarkConfig(seed=42, epochs=100, concept_missing=0.2, concept_missing_mech="mcar")
-
-# Save and reload configs for reproducibility
-cfg.to_yaml("my_experiment.yaml")
-loaded = RobotBenchmarkConfig.from_yaml("my_experiment.yaml")
-```
-
-```bash
-# Or pass a config file from the command line
-cbm-benchmark robot --config my_experiment.yaml
-```
-
-### Pipeline Stages
-
-Each benchmark runs a sequence of stages. You can select specific stages with `--stages`:
-
-| Benchmark | Default Stages |
-|-----------|---------------|
-| Robot | `setup cbm dnn intervene align collect` |
-| Sudoku | `setup ocr cs dnn intervene selective align collect` |
-| Robot Text | `setup cbm dnn intervene align collect` |
-
-```bash
-# Run only data generation and CBM training
-cbm-benchmark robot --seed 1014 --subconcept --stages setup cbm
-```
 
 ## Creating Your Own Benchmark
 
