@@ -238,21 +238,20 @@ cfg.alignment_constraints = {"has_knees": 1}
 
 ### Sudoku Validation
 
-Determine whether a 9x9 sudoku board is valid. The 27 concepts correspond to the validity of each row, column, and 3x3 block -- a board is valid if and only if all 27 concepts are true. This creates a naturally conjunctive (AND) relationship between concepts and the label, in contrast to the disjunctive structure of the robot benchmark.
+Determine whether a 9x9 sudoku board is valid. The 27 concepts correspond to the validity of each row, column, and 3x3 block -- a board is valid if and only if all 27 concepts are true. This AND structure contrasts with the robot benchmark's disjunctive label rule.
 
 <p align="center">
   <img src="docs/assets/sudoku_handwritten.png" width="400" alt="Sudoku board with handwritten digits and concept annotations">
 </p>
 
-**Automation and selective abstention.** The sudoku benchmark models an automation setting where the system handles routine cases and defers uncertain ones to a human. The model abstains when it is not confident enough, and a confidence threshold is chosen so that kept predictions achieve at least `target_accuracy`. Like the robot benchmark, the sudoku benchmark supports concept interventions -- when the model abstains on a board, a human can verify specific concepts (e.g., "is row 5 valid?") to resolve the uncertainty, potentially allowing the model to make a prediction it would otherwise defer. The key metrics are:
+**Automation use case.** The sudoku benchmark models an automation setting: the system handles routine cases and defers uncertain ones to a human. When the model abstains, interventions ask a human to verify specific concepts (e.g., "is row 5 valid?") to resolve the uncertainty. The key metrics are selective accuracy (on kept predictions), coverage (fraction kept), and net work automated (coverage minus the cost of concept verifications). The AND structure means each additional verification adds cost but only marginal coverage gain, since a single incorrect concept fails the entire board.
 
-- **Selective accuracy**: Accuracy on predictions the model chose to keep.
-- **Coverage**: Fraction of samples the model chose to keep (higher = less human workload).
-- **Net work automated**: Coverage minus the cost of concept verifications, measuring whether interventions save more work than they cost.
+**Configurability.** You can control:
 
-The AND structure creates a distinctive intervention dynamic: a single incorrect concept fails the entire board, so each additional concept verification adds cost but only marginal coverage gain. This contrasts with the robot benchmark, where correcting even one concept can flip the label prediction.
-
-**Configurability.** Task difficulty is controlled by `max_corrupt` (how many cells are changed in invalid boards -- higher means subtler errors and harder detection). Boards can be represented as tabular data (81-cell integer vectors) or rendered as images with handwritten digits; the image pipeline adds an OCR stage that must learn to read digits before reasoning about validity. The `target_accuracy` parameter trades off reliability against coverage: demanding 99% accuracy means more abstention but fewer mistakes.
+- **Task difficulty** via `max_corrupt` (number of cells changed in invalid boards -- higher means subtler errors) and `n_samples`.
+- **Input modality**: tabular (81-cell integer vectors) or handwritten digit images (adds an OCR stage).
+- **Reliability/coverage tradeoff** via `target_accuracy` -- demanding 99% accuracy means more abstention but fewer mistakes.
+- **Intervention budgets and thresholds**, as in the robot benchmark.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -261,7 +260,7 @@ The AND structure creates a distinctive intervention dynamic: a single incorrect
 | `max_corrupt` | `9` | Maximum cells corrupted in invalid boards (higher = harder to detect) |
 | `valid_ratio` | `0.5` | Fraction of valid boards |
 | `handwriting` | `True` | Render digits in handwritten style (enables OCR pipeline) |
-| `target_accuracy` | `0.9` | Minimum accuracy demanded on kept predictions; higher values mean more abstention but higher reliability |
+| `target_accuracy` | `0.9` | Minimum accuracy demanded on kept predictions |
 | `intervention_thresholds` | `[0.2, 0.4, 0.6, 0.8]` | Concept confidence thresholds for intervention candidates |
 
 The full list of parameters is documented in `SudokuBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
