@@ -34,45 +34,48 @@ pip install -e .
 
 ## Quick Start
 
-### Python API
+The full robot pipeline -- generate data, train models, evaluate interventions -- in one script:
 
 ```python
 from concept_benchmark.benchmarks import robot
-from concept_benchmark.config import RobotBenchmarkConfig
+from concept_benchmark.config import RobotBenchmarkConfig, SUBCONCEPT_DROP
 
-# Generate robot images with ground-truth concept labels (subconcept variant)
-cfg = RobotBenchmarkConfig.default_subconcept()
-cfg.seed = 1014
+cfg = RobotBenchmarkConfig(
+    seed=1014,
+    size="medium",                             # 32x32 pixel images
+    model_type="stochastic",                   # stochastic label rule
+    subconcept=True,                           # use 12 subconcepts (vs 7 ideal)
+    drop_concepts=list(SUBCONCEPT_DROP),        # which concepts to exclude
+    spurious_features=["has_elbows", "hand_shape"],
+    concept_missing=0.2,                       # mask 20% of concept labels
+    concept_missing_mech="mcar",               # missing completely at random
+    intervention_budgets=[1, 3],               # intervene on k=1, k=3 concepts
+    intervention_thresholds=[0.2],
+    alignment_constraints={"has_knees": 1},    # monotonicity: more knees -> more glorp
+)
+
+# 1. Generate dataset: 30,720 robot images with skewed train/val/test splits
 data = robot.setup_dataset(cfg)
+# data.X: image paths, data.C: (N, 12) binary concepts, data.y: labels
 
-# Train a CBM: concept detector (image -> concepts) + frontend (concepts -> label)
+# 2. Train concept bottleneck model: concept detector + frontend
 cbm = robot.train_cbm(cfg, data)
 
-# Evaluate k-flip interventions: correct the k most impactful concepts per sample
+# 3. Train end-to-end DNN baseline (no concepts)
+dnn = robot.train_dnn(cfg, data)
+
+# 4. Run k-flip interventions: correct the k most impactful concepts per sample
 results = robot.run_interventions(cfg, cbm, data)
 print(results[["budget", "accuracy"]].to_string(index=False))
+
+# 5. Test alignment: retrain with monotonicity constraints
+align_stats = robot.align(cfg, cbm, data)
 ```
 
-### CLI
+Or run everything from the CLI:
 
 ```bash
-# Run the full robot pipeline (subconcept variant, matching paper defaults)
 cbm-benchmark robot --seed 1014 --subconcept
-
-# Run with intervention regimes
-cbm-benchmark robot --seed 1014 --subconcept --regimes baseline expert
-
-# With specific intervention regimes
-cbm-benchmark robot --seed 1014 --subconcept --regimes baseline expert subjective
-
-# Robot text modality
-cbm-benchmark robot-text --seed 1337
-
-# Sudoku pipeline
-cbm-benchmark sudoku --seed 171
-
-# Run specific pipeline stages only
-cbm-benchmark robot --seed 1014 --subconcept --stages setup cbm dnn
 ```
 
 For fully-commented examples, see [`scripts/demo_robot.py`](scripts/demo_robot.py) and [`scripts/demo_sudoku.py`](scripts/demo_sudoku.py).
@@ -127,10 +130,24 @@ Classify synthetic robots into two species (**glorp** vs. **drent**) based on vi
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
 </p>
 
-**Concept granularity.** Each robot is defined by 9 visual concepts. The foot shape concept has 10 subtypes (5 pointy, 5 flat), which can be provided to the model at two levels of granularity:
+**Concept granularity.** Each robot has 9 visual features, several of which have multiple subtypes (foot shape has 10, hand shape has 6). The `drop_concepts` parameter controls which concepts the model sees. The package provides two pre-defined setups:
 
-- **Ideal** (default, 7 concepts): Parent-level features including a single binary `foot_shape` (pointy vs. flat). This is the simplest setup.
-- **Subconcept** (`--subconcept`, 12 concepts): Replaces the parent `foot_shape` with individual subtype indicators, testing whether finer-grained concepts help or hurt.
+- **Ideal** (default, `IDEAL_DROP`): Drops all foot shape subtypes, keeping only the binary `foot_shape` (pointy vs. flat). This gives 7 concepts.
+- **Subconcept** (`SUBCONCEPT_DROP`): Drops the parent `foot_shape` and 5 subtypes, keeping 5 foot subtype indicators. This gives 12 concepts.
+
+These are not the only options -- you can define any concept granularity by customizing `drop_concepts`. For example, you could keep all 10 foot subtypes, or apply the same subtype expansion to hand shapes instead of feet, or drop concepts entirely to test with fewer ground-truth features:
+
+```python
+# Custom: keep all foot subtypes (no foot-related drops)
+cfg.drop_concepts = []
+
+# Custom: expand hand shapes instead of feet
+cfg.drop_concepts = ["hand_shape_round_circle", "hand_shape_round_oval", "hand_shape_edgy_square"]
+
+# Custom: minimal concept set (only the 3 causal features)
+cfg.drop_concepts = ["head_shape", "body_shape", "has_antennae", "ears_shape",
+                     "has_elbows", "hand_shape"] + list(IDEAL_DROP)
+```
 
 <p align="center">
   <img src="docs/assets/robot_foot_shapes.png" width="600" alt="Robot foot shape variations">
@@ -143,12 +160,13 @@ Classify synthetic robots into two species (**glorp** vs. **drent**) based on vi
 | `seed` | `1014` / `1337` | Random seed (image / text) |
 | `size` | `"medium"` | Image resolution: `"small"` (8px), `"medium"` (32px), `"large"` (600px). Image only. |
 | `model_type` | `"stochastic"` | Label model: `"deterministic"` or `"stochastic"` |
-| `subconcept` | `False` | Use 12 fine-grained foot shape subtypes instead of 7 ideal concepts |
+| `drop_concepts` | `IDEAL_DROP` | List of concept names to exclude from the model. Controls concept granularity. |
+| `subconcept` | `False` | Use pre-defined `SUBCONCEPT_DROP` and add `_subconcept` suffix to file paths |
 | `concept_missing` | `0.0` | Fraction of concept labels to mask during training |
 | `concept_missing_mech` | `"none"` | Missingness mechanism: `"none"`, `"mcar"`, or `"mnar"` |
 | `intervention_budgets` | `[1, 3]` | Number of concepts to intervene on per sample |
-| `intervention_thresholds` | `[0.2, 0.4]` | Concept confidence thresholds — concepts with predicted probability within this distance of 0.5 are candidates for intervention |
-| `intervention_strategy` | `"kflip"` | `"kflip"` (up-to-k) or `"exact_k"` (exactly k). See [Intervention Strategies](#intervention-strategies) below. |
+| `intervention_thresholds` | `[0.2, 0.4]` | Concept confidence thresholds -- concepts with predicted probability within this distance of 0.5 are candidates for intervention |
+| `intervention_strategy` | `"kflip"` | `"kflip"` (up-to-k) or `"exact_k"` (exactly k). See [Intervention Strategies](#intervention-strategies). |
 | `difficulty` | `"hard"` | Corpus difficulty (text only) |
 | `generic_rate` | `0.7` | Fraction of test set using concept-ambiguous text (text only) |
 
@@ -158,11 +176,11 @@ The full list of parameters is documented in `RobotBenchmarkConfig` and `RobotTe
 
 At each budget *k*, the intervention framework tries correcting concept predictions and picks the correction that most changes the model's output. Two strategies control how candidate corrections are enumerated:
 
-- **`kflip`** (default): For each sample, enumerate all concept subsets of size 1 through *k*. The subset whose correction most changes the predicted label is applied. This is the standard "up-to-k" strategy — a budget of *k*=3 will also consider correcting 1 or 2 concepts if that helps more.
+- **`kflip`** (default): For each sample, enumerate all concept subsets of size 1 through *k*. The subset whose correction most changes the predicted label is applied. This is the standard "up-to-k" strategy -- a budget of *k*=3 will also consider correcting 1 or 2 concepts if that helps more.
 - **`exact_k`**: Enumerate only subsets of exactly size *k*. At budget *k*=3, only 3-concept subsets are considered. Useful for ablation studies that need to isolate the effect of a specific budget.
 
 ```bash
-# Default kflip (up-to-k) — recommended
+# Default kflip (up-to-k) -- recommended
 cbm-benchmark robot --seed 1014 --subconcept --regimes baseline expert
 
 # Exact-k for ablation
@@ -182,7 +200,7 @@ Intervention regimes control **where concepts come from** and **who corrects the
 | `llm` | LFCBM on LLM descriptions | LLM (Gemini) | LLM-generated concept definitions + LLM corrections |
 | `clip` | LFCBM on CLIP keywords | LLM (Gemini) | CLIP keyword concepts + LLM corrections |
 
-The `machine`, `llm`, and `clip` regimes use a **Label-Free CBM** (LFCBM) to discover concepts from CLIP embeddings rather than ground-truth annotations. Each regime trains its own LFCBM from a concept description file and uses the resulting 12-concept space for both prediction and intervention — independent of the ground-truth concept count.
+The `machine`, `llm`, and `clip` regimes use a **Label-Free CBM** (LFCBM) to discover concepts from CLIP embeddings rather than ground-truth annotations. Each regime trains its own LFCBM from a concept description file and uses the resulting 12-concept space for both prediction and intervention -- independent of the ground-truth concept count. The `llm` and `clip` regimes require `GEMINI_API_KEY` (the pipeline makes live Gemini calls to judge concept presence in images at intervention time).
 
 ```bash
 cbm-benchmark robot --seed 1014 --subconcept --regimes baseline expert subjective machine
@@ -192,30 +210,7 @@ export GEMINI_API_KEY=your_key_here
 cbm-benchmark robot --seed 1014 --subconcept --regimes llm clip
 ```
 
-```python
-from concept_benchmark.config import RobotBenchmarkConfig
-
-cfg = RobotBenchmarkConfig.default_subconcept()
-cfg.seed = 1014
-cfg.intervention_regimes = ["baseline", "expert", "subjective"]
-cfg.intervention_strategy = "kflip"  # default: up-to-k interventions
-```
-
-**Regime-specific parameters:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `expert_intervention_accuracy` | `0.80` | Probability that an expert correction is correct |
-| `subjective_noise_rate` | `0.20` | Fraction of concept labels flipped when training the subjective CBM |
-| `subjective_intervention_accuracy` | `0.80` | Correction accuracy for the subjective regime |
-| `lfcbm_concepts_file` | auto | Path to concept descriptions for `machine` regime (default: `data/robot_images/gt_concepts_subconcept.jsonl`) |
-| `llm_concepts_file` | auto | Concept descriptions for `llm` regime (default: `data/robot_images/llm.jsonl`) |
-| `clip_concepts_file` | auto | Concept descriptions for `clip` regime (default: `data/robot_images/clip.jsonl`) |
-| `llm_provider` | `"gemini"` | LLM provider for `llm`/`clip` regimes |
-| `llm_model` | `"gemini-3-flash-preview"` | Model name for LLM-based interventions |
-| `force_retrain` | `False` | Force retraining LFCBM/subjective models even if cached |
-
-The `llm` and `clip` regimes require `GEMINI_API_KEY` (the pipeline makes live Gemini calls to judge concept presence in images at intervention time).
+All regime-specific parameters (noise rates, accuracy, concept file paths, LLM provider/model) are documented in `RobotBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
 
 #### Alignment Testing
 
