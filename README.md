@@ -133,34 +133,6 @@ Classify synthetic robots into two species (**glorp** vs. **drent**) based on vi
 - **Annotation quality** via `concept_missing` and `concept_missing_mech` (MCAR or MNAR missingness), and through intervention regimes that simulate noisy experts, subjective annotators, or machine-discovered concepts.
 - **Input modality**: image (`cbm-benchmark robot`) or text (`cbm-benchmark robot-text`). Both share the same concept structure and label rules.
 
-```python
-from concept_benchmark.config import RobotBenchmarkConfig, IDEAL_DROP, SUBCONCEPT_DROP
-
-# Pre-defined: 7 coarse concepts (default)
-cfg = RobotBenchmarkConfig()
-
-# Pre-defined: 12 fine-grained foot subtypes
-cfg = RobotBenchmarkConfig.default_subconcept()
-
-# Custom: keep all foot subtypes (no drops)
-cfg = RobotBenchmarkConfig(drop_concepts=[])
-
-# Custom: only the 3 causal features
-cfg = RobotBenchmarkConfig(
-    drop_concepts=["head_shape", "body_shape", "has_antennae", "ears_shape",
-                   "has_elbows", "hand_shape"] + list(IDEAL_DROP),
-)
-
-# Custom label rule: only mouth and knees matter
-cfg = RobotBenchmarkConfig(
-    weights={"mouth_type": 5, "has_knees": -5, "foot_shape": 0},
-)
-```
-
-<p align="center">
-  <img src="docs/assets/robot_foot_shapes.png" width="600" alt="Robot foot shape variations">
-</p>
-
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `seed` | `1014` / `1337` | Random seed (image / text) |
@@ -185,6 +157,27 @@ The full list of parameters is documented in `RobotBenchmarkConfig` and `RobotTe
 > ```bash
 > export GEMINI_API_KEY=your_key_here
 > ```
+
+```python
+from concept_benchmark.benchmarks import robot
+from concept_benchmark.config import RobotBenchmarkConfig, SUBCONCEPT_DROP
+
+cfg = RobotBenchmarkConfig(
+    seed=1014,
+    subconcept=True,
+    drop_concepts=list(SUBCONCEPT_DROP),
+    concept_missing=0.2,
+    concept_missing_mech="mcar",
+)
+
+data = robot.setup_dataset(cfg)
+cbm = robot.train_cbm(cfg, data)
+results = robot.run_interventions(cfg, cbm, data)
+```
+
+```bash
+cbm-benchmark robot --seed 1014 --subconcept
+```
 
 ### Sudoku Validation
 
@@ -214,6 +207,27 @@ Determine whether a 9x9 sudoku board is valid. The 27 concepts correspond to the
 | `intervention_thresholds` | `[0.2, 0.4, 0.6, 0.8]` | Concept confidence thresholds for intervention candidates |
 
 The full list of parameters is documented in `SudokuBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
+
+```python
+from concept_benchmark.benchmarks import sudoku
+from concept_benchmark.config import SudokuBenchmarkConfig
+
+cfg = SudokuBenchmarkConfig(
+    seed=171,
+    max_corrupt=9,
+    handwriting=True,
+    target_accuracy=0.95,
+)
+
+sudoku.setup_dataset(cfg)
+sudoku.train_ocr(cfg)
+cs_model = sudoku.train_cs(cfg)
+results = sudoku.run_interventions(cfg, cs_model)
+```
+
+```bash
+cbm-benchmark sudoku --seed 171
+```
 
 ## Citation
 
