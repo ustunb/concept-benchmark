@@ -114,17 +114,9 @@ Each benchmark runs a sequence of stages. You can select specific stages with `-
 | `align` | all | Retrain frontend with monotonicity constraints and compare to unconstrained |
 | `collect` | all | Aggregate per-stage results into a single CSV |
 
-Default sequences:
-
-| Benchmark | Default Stages |
-|-----------|---------------|
-| Robot | `setup cbm dnn intervene align collect` |
-| Sudoku | `setup ocr cs dnn intervene selective align collect` |
-| Robot Text | `setup cbm dnn intervene align collect` |
-
 ## Benchmarks
 
-Each benchmark is a configurable generator, not a fixed dataset. By varying the configuration, a single benchmark domain produces many distinct evaluation scenarios -- different concept granularities, label rules, annotation quality, and intervention regimes. The two domains below are designed to complement each other: the robot benchmark models a **decision-support** setting (a human corrects concept predictions), while the sudoku benchmark models an **automation** setting (the system abstains when uncertain).
+Two benchmarks, two use cases. **Robot classification** is a decision-support task: a human corrects the model's concept predictions. **Sudoku validation** is an automation task: the model handles easy cases and defers the rest. Both are configurable -- concept granularity, label rules, annotation noise, and intervention regimes are all parameters, not fixed choices.
 
 ### Robot Classification
 
@@ -181,60 +173,18 @@ cfg = RobotBenchmarkConfig(
 | `concept_missing_mech` | `"none"` | Missingness mechanism: `"none"`, `"mcar"`, or `"mnar"` |
 | `intervention_budgets` | `[1, 3]` | Number of concepts to intervene on per sample |
 | `intervention_thresholds` | `[0.2, 0.4]` | Concept confidence thresholds for intervention candidates |
-| `intervention_strategy` | `"kflip"` | `"kflip"` (up-to-k) or `"exact_k"` (exactly k). See [Intervention Strategies](#intervention-strategies). |
+| `intervention_strategy` | `"kflip"` | `"kflip"` (up-to-k, tries sizes 1 through *k*) or `"exact_k"` (exactly *k* concepts) |
+| `regimes` | `["baseline"]` | Intervention regimes: `baseline` (perfect), `expert` (noisy human), `subjective` (noisy concepts), `machine`/`llm`/`clip` (LFCBM-discovered). `llm`/`clip` require `GEMINI_API_KEY`. See paper. |
+| `alignment_constraints` | `{}` | Sign constraints on concept weights (e.g., `{"has_knees": 1}`). Retrains frontend and re-evaluates interventions. |
 | `difficulty` | `"hard"` | Corpus difficulty (text only) |
 | `generic_rate` | `0.7` | Fraction of test set using concept-ambiguous text (text only) |
 
 The full list of parameters is documented in `RobotBenchmarkConfig` and `RobotTextBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
 
-#### Intervention Strategies
-
-At each budget *k*, the intervention framework tries correcting concept predictions and picks the correction that most changes the model's output. Two strategies control how candidate corrections are enumerated:
-
-- **`kflip`** (default): For each sample, enumerate all concept subsets of size 1 through *k*. The subset whose correction most changes the predicted label is applied. This is the standard "up-to-k" strategy -- a budget of *k*=3 will also consider correcting 1 or 2 concepts if that helps more.
-- **`exact_k`**: Enumerate only subsets of exactly size *k*. At budget *k*=3, only 3-concept subsets are considered. Useful for ablation studies that need to isolate the effect of a specific budget.
-
-```bash
-# Default kflip (up-to-k) -- recommended
-cbm-benchmark robot --seed 1014 --subconcept --regimes baseline expert
-
-# Exact-k for ablation
-cbm-benchmark robot --seed 1014 --subconcept --strategy exact_k --regimes baseline expert
-```
-
-#### Intervention Regimes
-
-Intervention regimes control **where concepts come from** and **who corrects them**, simulating different real-world annotation scenarios:
-
-| Regime | Concept Source | Intervention Source | What It Tests |
-|--------|---------------|---------------------|---------------|
-| `baseline` | Ground truth | Ground truth | Upper bound: perfect concepts + perfect corrections |
-| `expert` | Ground truth | Noisy human (80% acc) | Expert corrections with realistic error rates |
-| `subjective` | Noisy CBM (20% label noise) | Noisy human (80% acc) | Subjective concept definitions + noisy corrections |
-| `machine` | LFCBM on GT descriptions | Noisy human (80% acc) | Machine-discovered concepts (CLIP-based) |
-| `llm` | LFCBM on LLM descriptions | LLM (Gemini) | LLM-generated concept definitions + LLM corrections |
-| `clip` | LFCBM on CLIP keywords | LLM (Gemini) | CLIP keyword concepts + LLM corrections |
-
-The `machine`, `llm`, and `clip` regimes use a **Label-Free CBM** (LFCBM) to discover concepts from CLIP embeddings rather than ground-truth annotations. Each regime trains its own LFCBM from a concept description file and uses the resulting 12-concept space for both prediction and intervention -- independent of the ground-truth concept count. The `llm` and `clip` regimes require `GEMINI_API_KEY` (the pipeline makes live Gemini calls to judge concept presence in images at intervention time).
-
-```bash
-cbm-benchmark robot --seed 1014 --subconcept --regimes baseline expert subjective machine
-
-# LLM/CLIP regimes require a Gemini API key
-export GEMINI_API_KEY=your_key_here
-cbm-benchmark robot --seed 1014 --subconcept --regimes llm clip
-```
-
-All regime-specific parameters (noise rates, accuracy, concept file paths, LLM provider/model) are documented in `RobotBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
-
-#### Alignment Testing
-
-A learned CBM may assign a concept the wrong sign -- e.g., the model learns "more knees → less likely glorp" when domain knowledge says the opposite. The `align` stage retrains the frontend with monotonicity constraints that enforce expected signs, then re-evaluates interventions to measure whether the constraint helps or hurts.
-
-```python
-# Constrain has_knees to have positive weight (more knees -> more glorp)
-cfg.alignment_constraints = {"has_knees": 1}
-```
+> **Note:** The `llm` and `clip` regimes make live Gemini API calls at intervention time. Set your key before running:
+> ```bash
+> export GEMINI_API_KEY=your_key_here
+> ```
 
 ### Sudoku Validation
 
