@@ -459,13 +459,17 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
     human_acc = sttngs.get("intervention_accuracy", 0.9)
     err_prob = 1.0 - human_acc
 
+    _coerce_to_gt = concept_names is None
     if concept_names is None:
         concept_names = list(getattr(test, "concepts", []))
     else:
         concept_names = list(concept_names)
 
-    # Coerce concept_proba to match dataset concept ground truth shape
-    if hasattr(test, "C"):
+    # Coerce concept_proba to match dataset concept ground truth shape,
+    # but only when the caller didn't supply its own concept space
+    # (LLM/CLIP regimes operate in the LFCBM concept space which may
+    # differ from GT dimensions).
+    if _coerce_to_gt and hasattr(test, "C"):
         n_gt = int(test.C.shape[1])
         n_pred = int(prob_test.shape[1])
         if n_pred != n_gt:
@@ -666,7 +670,7 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
                 batch = runner._build_batch(
                     dataset=test,
                     concept_proba=prob_test,
-                    concept_true=test.C.astype(np.float32),
+                    concept_true=np.full_like(prob_test, np.nan, dtype=np.float32),
                     labels=test.y.astype(int),
                     instance_ids=None,
                 )
@@ -1222,10 +1226,6 @@ def run_interventions(
 
     all_dfs = []
     for regime in config.intervention_regimes:
-        # LLM/CLIP regimes only make sense for subconcept (12 GT concepts = 12 LFCBM concepts)
-        if regime in ("llm", "clip") and not config.subconcept:
-            print(f"Skipping regime {regime!r}: only supported for subconcept variant")
-            continue
         try:
             regime_df = _run_regime(config, regime, model, data, budgets, thresholds)
             all_dfs.append(regime_df)

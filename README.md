@@ -165,7 +165,7 @@ cfg.intervention_regimes = ["baseline", "expert", "subjective"]
 cfg.intervention_strategy = "exact_k"  # paper-matching strategy
 ```
 
-The `llm` and `clip` regimes require `--subconcept` and `GEMINI_API_KEY` (the pipeline makes live Gemini calls to judge concept presence in images at intervention time).
+The `llm` and `clip` regimes require `GEMINI_API_KEY` (the pipeline makes live Gemini calls to judge concept presence in images at intervention time).
 
 ### Sudoku Validation
 
