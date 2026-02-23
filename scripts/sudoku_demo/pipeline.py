@@ -12,7 +12,7 @@ def main():
     p.add_argument(
         "--stages",
         nargs="+",
-        default=["setup", "cs", "dnn", "intervene"],
+        default=["setup", "ocr", "cs", "dnn", "intervene"],
     )
     p.add_argument("--seed", type=int, default=DEFAULT_SUDOKU_SETTINGS['seed'])
     p.add_argument("--ignore-errors", action="store_true", help="continue on errors")
@@ -22,6 +22,11 @@ def main():
     pipeline = []
     if "setup" in args.stages:
         pipeline.append("python scripts/sudoku_demo/make_ocr_dataset.py")
+
+    if "ocr" in args.stages:
+        pipeline.append(
+            f"python scripts/sudoku_demo/train_ocr_fast.py --seed {args.seed}"
+        )
 
     if "cs" in args.stages:
         pipeline.append(
