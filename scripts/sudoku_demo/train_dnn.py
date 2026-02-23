@@ -30,13 +30,23 @@ if Process(pid=os.getppid()).name() not in ("node"):
     args, _ = p.parse_known_args()
     settings.update(vars(args))
 
-torch.manual_seed(int(settings["seed"]))
+training_seed = int(settings["seed"])
+dataset_seed = int(DEFAULT_SUDOKU_SETTINGS["seed"])
+dataset_settings = settings.copy()
+dataset_settings["seed"] = dataset_seed
+
+torch.manual_seed(training_seed)
+torch.cuda.manual_seed_all(training_seed)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
 model = DNNSudokuModel()
 
 settings['data_type'] = 'tabular'
-tab_ds_dir = get_dataset_file(**settings)
+dataset_settings['data_type'] = 'tabular'
+tab_ds_dir = get_dataset_file(**dataset_settings)
 data = load(tab_ds_dir / "sudoku_dataset.pkl")
-data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=settings['seed'])
+data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=dataset_seed)
 data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
 
 # --- Training Run ---
@@ -45,10 +55,19 @@ print(f"Using device: {device}")
 criterion = nn.BCELoss() # Binary Cross-Entropy Loss for binary classification
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
+def seed_worker(worker_id):
+    import numpy as np
+    import random
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
 loader_config = {
     'batch_size': 32,
     'num_workers': 12,
-    'pin_memory': True
+    'pin_memory': True,
+    'worker_init_fn': seed_worker,
+    'generator': torch.Generator().manual_seed(training_seed)
 }
 
 train_loader = data.training.loader(shuffle=True, **loader_config)
