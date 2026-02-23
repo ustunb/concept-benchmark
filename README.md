@@ -26,7 +26,7 @@ cd concept-benchmark
 source venv/bin/activate
 ```
 
-You can also install directly via pip:
+You can also install directly via pip (note: `./install.sh` also installs dev tools like `pytest` and `ruff`):
 
 ```bash
 pip install -e .
@@ -62,8 +62,8 @@ cbm-benchmark robot --seed 1014 --subconcept
 # Run with intervention regimes
 cbm-benchmark robot --seed 1014 --subconcept --regimes baseline expert
 
-# Paper-matching exact-k intervention strategy
-cbm-benchmark robot --seed 1014 --subconcept --strategy exact_k --regimes baseline expert
+# With specific intervention regimes
+cbm-benchmark robot --seed 1014 --subconcept --regimes baseline expert subjective
 
 # Robot text modality
 cbm-benchmark robot-text --seed 1337
@@ -97,6 +97,20 @@ cbm-benchmark robot --config my_experiment.yaml
 
 Each benchmark runs a sequence of stages. You can select specific stages with `--stages`:
 
+| Stage | Benchmarks | What It Does |
+|-------|-----------|--------------|
+| `setup` | all | Generate synthetic dataset (images, text, or boards) |
+| `ocr` | sudoku | Train a digit recognizer on rendered board images |
+| `cbm` | robot, robot-text | Train concept detector (input → concepts) + frontend (concepts → label) |
+| `cs` | sudoku | Train concept-supervised model (concepts predicted from board features) |
+| `dnn` | all | Train end-to-end neural network baseline (input → label, no concepts) |
+| `intervene` | all | Evaluate concept interventions (k-flip for robot, conceptual safeguards for sudoku) |
+| `selective` | sudoku | Compute selective accuracy and coverage at each confidence threshold |
+| `align` | all | Retrain frontend with monotonicity constraints and compare to unconstrained |
+| `collect` | all | Aggregate per-stage results into a single CSV |
+
+Default sequences:
+
 | Benchmark | Default Stages |
 |-----------|---------------|
 | Robot | `setup cbm dnn intervene align collect` |
@@ -107,13 +121,16 @@ Each benchmark runs a sequence of stages. You can select specific stages with `-
 
 ### Robot Classification
 
-Classify synthetic robots into two species (**glorp** vs. **drent**) based on visual concepts. The label depends on three concepts (mouth type, foot shape, and knee presence), while other concepts like elbow shape and hand shape are spurious -- correlated with the label but not causally related.
+Classify synthetic robots into two species (**glorp** vs. **drent**) based on visual concepts. The label depends on three concepts (mouth type, foot shape, and knee presence), while other concepts like elbow shape and hand shape are spurious -- present in the data but not part of the ground-truth label rule.
 
 <p align="center">
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
 </p>
 
-Each robot is defined by 9 visual concepts. The foot shape concept has 10 subtypes (5 pointy, 5 flat), which can be provided to the model at different levels of granularity to test how concept resolution affects performance:
+**Concept granularity.** Each robot is defined by 9 visual concepts. The foot shape concept has 10 subtypes (5 pointy, 5 flat), which can be provided to the model at two levels of granularity:
+
+- **Ideal** (default, 7 concepts): Parent-level features including a single binary `foot_shape` (pointy vs. flat). This is the simplest setup.
+- **Subconcept** (`--subconcept`, 12 concepts): Replaces the parent `foot_shape` with individual subtype indicators, testing whether finer-grained concepts help or hurt.
 
 <p align="center">
   <img src="docs/assets/robot_foot_shapes.png" width="600" alt="Robot foot shape variations">
@@ -126,14 +143,31 @@ Each robot is defined by 9 visual concepts. The foot shape concept has 10 subtyp
 | `seed` | `1014` / `1337` | Random seed (image / text) |
 | `size` | `"medium"` | Image resolution: `"small"` (8px), `"medium"` (32px), `"large"` (600px). Image only. |
 | `model_type` | `"stochastic"` | Label model: `"deterministic"` or `"stochastic"` |
-| `subconcept` | `False` | Use fine-grained foot shape subtypes instead of binary pointy/flat |
+| `subconcept` | `False` | Use 12 fine-grained foot shape subtypes instead of 7 ideal concepts |
 | `concept_missing` | `0.0` | Fraction of concept labels to mask during training |
 | `concept_missing_mech` | `"none"` | Missingness mechanism: `"none"`, `"mcar"`, or `"mnar"` |
 | `intervention_budgets` | `[1, 3]` | Number of concepts to intervene on per sample |
+| `intervention_thresholds` | `[0.2, 0.4]` | Concept confidence thresholds — concepts with predicted probability within this distance of 0.5 are candidates for intervention |
+| `intervention_strategy` | `"kflip"` | `"kflip"` (up-to-k) or `"exact_k"` (exactly k). See [Intervention Strategies](#intervention-strategies) below. |
 | `difficulty` | `"hard"` | Corpus difficulty (text only) |
 | `generic_rate` | `0.7` | Fraction of test set using concept-ambiguous text (text only) |
 
 The full list of parameters is documented in `RobotBenchmarkConfig` and `RobotTextBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
+
+#### Intervention Strategies
+
+At each budget *k*, the intervention framework tries correcting concept predictions and picks the correction that most changes the model's output. Two strategies control how candidate corrections are enumerated:
+
+- **`kflip`** (default): For each sample, enumerate all concept subsets of size 1 through *k*. The subset whose correction most changes the predicted label is applied. This is the standard "up-to-k" strategy — a budget of *k*=3 will also consider correcting 1 or 2 concepts if that helps more.
+- **`exact_k`**: Enumerate only subsets of exactly size *k*. At budget *k*=3, only 3-concept subsets are considered. Useful for ablation studies that need to isolate the effect of a specific budget.
+
+```bash
+# Default kflip (up-to-k) — recommended
+cbm-benchmark robot --seed 1014 --subconcept --regimes baseline expert
+
+# Exact-k for ablation
+cbm-benchmark robot --seed 1014 --subconcept --strategy exact_k --regimes baseline expert
+```
 
 #### Intervention Regimes
 
@@ -147,6 +181,8 @@ Intervention regimes control **where concepts come from** and **who corrects the
 | `machine` | LFCBM on GT descriptions | Noisy human (80% acc) | Machine-discovered concepts (CLIP-based) |
 | `llm` | LFCBM on LLM descriptions | LLM (Gemini) | LLM-generated concept definitions + LLM corrections |
 | `clip` | LFCBM on CLIP keywords | LLM (Gemini) | CLIP keyword concepts + LLM corrections |
+
+The `machine`, `llm`, and `clip` regimes use a **Label-Free CBM** (LFCBM) to discover concepts from CLIP embeddings rather than ground-truth annotations. Each regime trains its own LFCBM from a concept description file and uses the resulting 12-concept space for both prediction and intervention — independent of the ground-truth concept count.
 
 ```bash
 cbm-benchmark robot --seed 1014 --subconcept --regimes baseline expert subjective machine
@@ -162,10 +198,34 @@ from concept_benchmark.config import RobotBenchmarkConfig
 cfg = RobotBenchmarkConfig.default_subconcept()
 cfg.seed = 1014
 cfg.intervention_regimes = ["baseline", "expert", "subjective"]
-cfg.intervention_strategy = "exact_k"  # paper-matching strategy
+cfg.intervention_strategy = "kflip"  # default: up-to-k interventions
 ```
 
+**Regime-specific parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `expert_intervention_accuracy` | `0.80` | Probability that an expert correction is correct |
+| `subjective_noise_rate` | `0.20` | Fraction of concept labels flipped when training the subjective CBM |
+| `subjective_intervention_accuracy` | `0.80` | Correction accuracy for the subjective regime |
+| `lfcbm_concepts_file` | auto | Path to concept descriptions for `machine` regime (default: `data/robot_images/gt_concepts_subconcept.jsonl`) |
+| `llm_concepts_file` | auto | Concept descriptions for `llm` regime (default: `data/robot_images/llm.jsonl`) |
+| `clip_concepts_file` | auto | Concept descriptions for `clip` regime (default: `data/robot_images/clip.jsonl`) |
+| `llm_provider` | `"gemini"` | LLM provider for `llm`/`clip` regimes |
+| `llm_model` | `"gemini-3-flash-preview"` | Model name for LLM-based interventions |
+| `force_retrain` | `False` | Force retraining LFCBM/subjective models even if cached |
+
 The `llm` and `clip` regimes require `GEMINI_API_KEY` (the pipeline makes live Gemini calls to judge concept presence in images at intervention time).
+
+#### Alignment Testing
+
+The `align` stage tests whether encoding domain knowledge as monotonicity constraints preserves or destroys intervention benefit. It retrains the frontend model with sign constraints on specified concepts (e.g., `has_knees: +1` means "more knees → more likely glorp") and compares intervention accuracy before and after.
+
+```python
+cfg.alignment_constraints = {"has_knees": 1}  # force positive weight on has_knees
+```
+
+The paper finding: alignment constraints that preserve baseline accuracy can **destroy** intervention gains (e.g., +10.2% → -0.4% for ideal concepts).
 
 ### Sudoku Validation
 
@@ -177,6 +237,11 @@ Determine whether a 9x9 sudoku board is valid. The 27 concepts correspond to the
 
 Boards can be represented as tabular data (81-cell integer vectors) or rendered as images with handwritten digits. The image pipeline includes an OCR stage that learns to read digits from rendered boards before passing them to the concept model.
 
+**Selective abstention.** Unlike the robot benchmark (which uses k-flip interventions to correct concept predictions), the sudoku benchmark evaluates **selective abstention**: the model makes predictions only when it is confident enough, and abstains (defers to a human or fallback) otherwise. A confidence threshold is chosen on the validation set so that kept predictions achieve at least `target_accuracy`. The two key metrics are:
+
+- **Selective accuracy**: Accuracy on predictions the model chose to keep (high = reliable when it acts).
+- **Coverage**: Fraction of samples the model chose to keep (high = less human workload).
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `seed` | `171` | Random seed for reproducibility |
@@ -184,7 +249,8 @@ Boards can be represented as tabular data (81-cell integer vectors) or rendered 
 | `max_corrupt` | `9` | Maximum cells corrupted in invalid boards (higher = harder) |
 | `valid_ratio` | `0.5` | Fraction of valid boards |
 | `handwriting` | `True` | Render digits in handwritten style |
-| `target_accuracy` | `0.9` | Target accuracy for selective classification |
+| `target_accuracy` | `0.9` | Minimum accuracy demanded on kept predictions; higher values mean more abstention but higher reliability |
+| `intervention_thresholds` | `[0.2, 0.4, 0.6, 0.8]` | Concept confidence thresholds for intervention candidates |
 
 The full list of parameters is documented in `SudokuBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
 
