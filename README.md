@@ -34,7 +34,9 @@ pip install -e .
 
 ## Quick Start
 
-The full robot pipeline -- generate data, train models, evaluate interventions -- in one script:
+A CBM pipeline has three steps: (1) generate a dataset with ground-truth concept annotations, (2) train a concept bottleneck model that predicts concepts from inputs and labels from concepts, and (3) evaluate whether correcting ("intervening on") the model's concept predictions at test time improves label accuracy.
+
+The example below runs this pipeline on the robot benchmark. It uses the **subconcept** variant (12 fine-grained foot shape features instead of the default 7 coarse concepts), masks 20% of concept labels during training (MCAR), and tests whether interventions help recover the lost accuracy.
 
 ```python
 from concept_benchmark.benchmarks import robot
@@ -51,28 +53,29 @@ cfg = RobotBenchmarkConfig(
     concept_missing_mech="mcar",               # missing completely at random
     intervention_budgets=[1, 3],               # intervene on k=1, k=3 concepts
     intervention_thresholds=[0.2],
-    alignment_constraints={"has_knees": 1},    # monotonicity: more knees -> more glorp
+    alignment_constraints={"has_knees": 1},    # test sign constraint on has_knees
 )
 
-# 1. Generate dataset: 30,720 robot images with skewed train/val/test splits
+# 1. Generate dataset: robot images with concept annotations and train/val/test splits
 data = robot.setup_dataset(cfg)
-# data.X: image paths, data.C: (N, 12) binary concepts, data.y: labels
 
-# 2. Train concept bottleneck model: concept detector + frontend
+# 2. Train CBM: concept detector (image -> concept probabilities) + frontend (concepts -> label)
 cbm = robot.train_cbm(cfg, data)
 
-# 3. Train end-to-end DNN baseline (no concepts)
+# 3. Train DNN baseline: end-to-end model that bypasses concepts entirely
 dnn = robot.train_dnn(cfg, data)
 
-# 4. Run k-flip interventions: correct the k most impactful concepts per sample
+# 4. Intervene: for each test sample, correct up to k concept predictions and measure
+#    whether the label prediction improves
 results = robot.run_interventions(cfg, cbm, data)
 print(results[["budget", "accuracy"]].to_string(index=False))
 
-# 5. Test alignment: retrain with monotonicity constraints
+# 5. Alignment: retrain the frontend with a monotonicity constraint (has_knees must have
+#    positive weight) and check whether interventions still help under the constraint
 align_stats = robot.align(cfg, cbm, data)
 ```
 
-Or run everything from the CLI:
+The same pipeline runs from the CLI in one command:
 
 ```bash
 cbm-benchmark robot --seed 1014 --subconcept
@@ -214,13 +217,12 @@ All regime-specific parameters (noise rates, accuracy, concept file paths, LLM p
 
 #### Alignment Testing
 
-The `align` stage tests whether encoding domain knowledge as monotonicity constraints preserves or destroys intervention benefit. It retrains the frontend model with sign constraints on specified concepts (e.g., `has_knees: +1` means "more knees → more likely glorp") and compares intervention accuracy before and after.
+A learned CBM may assign a concept the wrong sign -- e.g., the model learns "more knees → less likely glorp" when domain knowledge says the opposite. The `align` stage retrains the frontend with monotonicity constraints that enforce expected signs, then re-evaluates interventions to measure whether the constraint helps or hurts.
 
 ```python
-cfg.alignment_constraints = {"has_knees": 1}  # force positive weight on has_knees
+# Constrain has_knees to have positive weight (more knees -> more glorp)
+cfg.alignment_constraints = {"has_knees": 1}
 ```
-
-The paper finding: alignment constraints that preserve baseline accuracy can **destroy** intervention gains (e.g., +10.2% → -0.4% for ideal concepts).
 
 ### Sudoku Validation
 
