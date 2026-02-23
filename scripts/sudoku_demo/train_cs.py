@@ -34,9 +34,9 @@ if Process(pid=os.getppid()).name() not in ("node"):
     args, _ = p.parse_known_args()
     settings.update(vars(args))
 
-# data = load(get_dataset_file(data_type="image", **settings) / "sudoku_dataset.pkl")
-sudoku_dir = data_dir / "sudoku"
-data = load(sudoku_dir / "demo_ocr_m_21_tabular" / "sudoku_dataset.pkl")
+data = load(get_dataset_file(data_type="tabular", **settings) / "sudoku_dataset.pkl")
+# sudoku_dir = data_dir / "sudoku"
+# data = load(sudoku_dir / "demo_ocr_m_21_tabular" / "sudoku_dataset.pkl")
 data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=settings['seed'])
 data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
 
