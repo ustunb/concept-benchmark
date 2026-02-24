@@ -157,6 +157,26 @@ class RobotBenchmarkConfig:
     # Variant
     subconcept: bool = False
 
+    _VALID_REGIMES = frozenset({"baseline", "expert", "subjective", "machine", "llm", "clip"})
+    _VALID_STRATEGIES = frozenset({"kflip", "exact_k"})
+
+    def __post_init__(self):
+        if self.seed < 0:
+            raise ValueError(f"seed must be non-negative, got {self.seed}")
+        if any(b < 0 for b in self.intervention_budgets):
+            raise ValueError(f"intervention_budgets must be non-negative, got {self.intervention_budgets}")
+        if self.intervention_strategy not in self._VALID_STRATEGIES:
+            raise ValueError(
+                f"intervention_strategy must be one of {sorted(self._VALID_STRATEGIES)}, "
+                f"got {self.intervention_strategy!r}"
+            )
+        unknown = set(self.intervention_regimes) - self._VALID_REGIMES
+        if unknown:
+            raise ValueError(
+                f"unknown intervention regimes: {sorted(unknown)}. "
+                f"Valid: {sorted(self._VALID_REGIMES)}"
+            )
+
     @classmethod
     def default_ideal(cls) -> RobotBenchmarkConfig:
         """Config matching the paper's ideal robot benchmark."""
@@ -318,6 +338,12 @@ class SudokuBenchmarkConfig:
     font_size: int = 25
     handwriting: bool = True
 
+    def __post_init__(self):
+        if self.seed < 0:
+            raise ValueError(f"seed must be non-negative, got {self.seed}")
+        if self.n_samples < 1:
+            raise ValueError(f"n_samples must be positive, got {self.n_samples}")
+
     @classmethod
     def default(cls) -> SudokuBenchmarkConfig:
         """Config matching the paper's sudoku benchmark."""
@@ -469,6 +495,24 @@ class RobotTextBenchmarkConfig:
 
     # Alignment
     alignment_constraints: Optional[Dict[str, int]] = None
+
+    _VALID_REGIMES = frozenset({"baseline", "expert", "subjective", "machine"})
+    _VALID_STRATEGIES = frozenset({"kflip", "exact_k"})
+
+    def __post_init__(self):
+        if self.seed < 0:
+            raise ValueError(f"seed must be non-negative, got {self.seed}")
+        if self.intervention_strategy not in self._VALID_STRATEGIES:
+            raise ValueError(
+                f"intervention_strategy must be one of {sorted(self._VALID_STRATEGIES)}, "
+                f"got {self.intervention_strategy!r}"
+            )
+        unknown = set(self.intervention_regimes) - self._VALID_REGIMES
+        if unknown:
+            raise ValueError(
+                f"unknown intervention regimes: {sorted(unknown)}. "
+                f"Valid: {sorted(self._VALID_REGIMES)}"
+            )
 
     def get_dataset_path(self) -> Path:
         """Return the path where the dataset file is saved."""
