@@ -51,3 +51,19 @@ def test_cli_sudoku_subcommand_help(capsys):
     assert exc_info.value.code == 0
     out = capsys.readouterr().out
     assert "--seed" in out
+
+
+def test_cli_dry_run_robot(capsys):
+    """--dry-run prints config without executing."""
+    main(["--dry-run", "robot", "--seed", "42"])
+    out = capsys.readouterr().out
+    assert "benchmark: robot" in out
+    assert "seed:      42" in out
+    assert "stages:" in out
+
+
+def test_cli_dry_run_sudoku(capsys):
+    """--dry-run works for sudoku subcommand."""
+    main(["--dry-run", "sudoku"])
+    out = capsys.readouterr().out
+    assert "benchmark: sudoku" in out

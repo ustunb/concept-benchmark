@@ -131,6 +131,12 @@ def main(argv: list[str] | None = None) -> None:
                               help="Intervention strategy: kflip (up-to-k) or exact_k.")
     robot_text_p.set_defaults(func=_robot_text_cmd)
 
+    # Global --dry-run flag
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Print configuration and stages without executing.",
+    )
+
     args = parser.parse_args(argv)
 
     # Configure logging based on verbosity flags
@@ -142,7 +148,29 @@ def main(argv: list[str] | None = None) -> None:
     else:
         setup_logging(level=logging.INFO)
 
-    args.func(args)
+    if args.dry_run:
+        print(f"benchmark: {args.benchmark}")
+        print(f"seed:      {getattr(args, 'seed', 'N/A')}")
+        print(f"stages:    {getattr(args, 'stages', 'N/A')}")
+        if hasattr(args, "subconcept"):
+            print(f"subconcept: {args.subconcept}")
+        if hasattr(args, "regimes") and args.regimes:
+            print(f"regimes:   {args.regimes}")
+        if hasattr(args, "strategy") and args.strategy:
+            print(f"strategy:  {args.strategy}")
+        return
+
+    try:
+        args.func(args)
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        sys.exit(130)
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

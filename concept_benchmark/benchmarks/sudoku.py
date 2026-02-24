@@ -536,30 +536,44 @@ def run(
     if stages is None:
         stages = ["setup", "ocr", "cs", "dnn", "intervene", "selective", "align", "collect"]
 
+    device = determine_device()
+    logger.info(
+        "=== Sudoku Benchmark === seed=%d, stages=%s, device=%s",
+        config.seed, stages, device,
+    )
+
     if "setup" in stages:
+        logger.info("=== Stage: setup ===")
         setup_dataset(config)
 
     if "ocr" in stages:
+        logger.info("=== Stage: ocr ===")
         train_ocr(config)
 
     if "cs" in stages:
+        logger.info("=== Stage: cs ===")
         train_cs(config)
 
     if "dnn" in stages:
+        logger.info("=== Stage: dnn ===")
         train_dnn(config)
 
     if "intervene" in stages:
+        logger.info("=== Stage: intervene ===")
         df = run_interventions(config)
         logger.info("=== Intervention Results ===\n%s", df.to_string(index=False))
 
     if "selective" in stages:
+        logger.info("=== Stage: selective ===")
         sel_df = compute_selective_results(config)
         logger.info("=== Selective Metrics ===\n%s", sel_df.to_string(index=False))
 
     if "align" in stages:
+        logger.info("=== Stage: align ===")
         align(config)
 
     if "collect" in stages:
+        logger.info("=== Stage: collect ===")
         collect_results()
 
     logger.info("Pipeline complete!")

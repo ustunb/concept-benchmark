@@ -31,7 +31,6 @@ from concept_benchmark.synthetic.robot_text.catalog import (
     compute_label,
     enumerate_robot_concepts,
 )
-from concept_benchmark.synthetic.robot_text.corpus import load_jsonl
 from concept_benchmark.synthetic.robot_text.dataset import (
     build_text_dataset,
     kfold_by_robot_identity,
@@ -216,6 +215,7 @@ def train_cbm_subjective(
     noisy_data = _copy.deepcopy(data)
     noisy_data.sample_concept_noise(
         p=config.subjective_noise_rate,
+        # Offset seed so noise RNG is independent of data-generation RNG.
         rng=np.random.default_rng(config.seed + 555),
         enable=True,
     )
@@ -706,25 +706,38 @@ def run(
     if stages is None:
         stages = ["setup", "cbm", "dnn", "intervene", "align", "collect"]
 
+    device = determine_device()
+    logger.info(
+        "=== Robot Text Benchmark === seed=%d, stages=%s, device=%s",
+        config.seed, stages, device,
+    )
+
     if "setup" in stages:
+        logger.info("=== Stage: setup ===")
         setup_dataset(config)
 
     if "cbm" in stages:
+        logger.info("=== Stage: cbm ===")
         train_cbm(config)
 
     if "dnn" in stages:
+        logger.info("=== Stage: dnn ===")
         train_dnn(config)
 
     if "lfcbm" in stages and config.lfcbm_enable:
+        logger.info("=== Stage: lfcbm ===")
         train_lfcbm(config)
 
     if "intervene" in stages:
+        logger.info("=== Stage: intervene ===")
         run_interventions(config)
 
     if "align" in stages:
+        logger.info("=== Stage: align ===")
         align(config)
 
     if "collect" in stages:
+        logger.info("=== Stage: collect ===")
         collect_results([config])
 
     logger.info("Robot text pipeline complete!")

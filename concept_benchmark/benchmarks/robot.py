@@ -7,7 +7,6 @@ from __future__ import annotations
 import copy
 import logging
 import platform
-from itertools import product
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
@@ -28,7 +27,6 @@ from concept_benchmark.benchmarks._common import (
     run_alignment,
 )
 from concept_benchmark.config import (
-    INPUT_MAP,
     MISSING_PROP,
     SUBCONCEPT_DROP,
     RobotBenchmarkConfig,
@@ -269,6 +267,7 @@ def train_cbm_subjective(
         data = load(config.get_dataset_path())
     noisy_data = copy.deepcopy(data)
 
+    # Offset seed so noise RNG is independent of data-generation RNG.
     rng = np.random.default_rng(config.seed + 555)
     concept_names = list(noisy_data.training.concepts)
     concept_spec = config.concepts
@@ -971,7 +970,6 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
     ``FEOnProbs(lf.classifier)`` as the frontend. Matches the original
     ``automated_detection`` regime from ``robot_concept_regimes.py``.
     """
-    import os
     from pathlib import Path
 
     _ensure_intervention_imports()
@@ -1471,8 +1469,16 @@ def run(
     if stages is None:
         stages = ["setup", "cbm", "dnn", "intervene", "align", "collect"]
 
+    device = determine_device()
+    variant = "subconcept" if config.subconcept else "ideal"
+    logger.info(
+        "=== Robot Benchmark === seed=%d, variant=%s, stages=%s, device=%s",
+        config.seed, variant, stages, device,
+    )
+
     # Setup
     if "setup" in stages:
+        logger.info("=== Stage: setup ===")
         # Ideal
         ideal_cfg = RobotBenchmarkConfig.default_ideal()
         ideal_cfg.seed = config.seed
@@ -1501,6 +1507,7 @@ def run(
 
     # CBM training
     if "cbm" in stages:
+        logger.info("=== Stage: cbm ===")
         for make_cfg in [RobotBenchmarkConfig.default_ideal, RobotBenchmarkConfig.default_subconcept]:
             cfg = make_cfg()
             cfg.seed = config.seed
@@ -1582,6 +1589,7 @@ def run(
 
     # DNN training
     if "dnn" in stages:
+        logger.info("=== Stage: dnn ===")
         ideal_cfg = RobotBenchmarkConfig.default_ideal()
         ideal_cfg.seed = config.seed
         if ideal_cfg.get_model_path("dnn").exists():
@@ -1591,6 +1599,7 @@ def run(
 
     # Interventions
     if "intervene" in stages:
+        logger.info("=== Stage: intervene ===")
         for make_cfg in [RobotBenchmarkConfig.default_ideal, RobotBenchmarkConfig.default_subconcept]:
             cfg = make_cfg()
             cfg.seed = config.seed
@@ -1613,6 +1622,7 @@ def run(
 
     # Alignment
     if "align" in stages:
+        logger.info("=== Stage: align ===")
         ideal_cfg = RobotBenchmarkConfig.default_ideal()
         ideal_cfg.seed = config.seed
         align(ideal_cfg)
@@ -1623,4 +1633,5 @@ def run(
 
     # Collect results
     if "collect" in stages:
+        logger.info("=== Stage: collect ===")
         collect_results()
