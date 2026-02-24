@@ -7,9 +7,9 @@
   <img src="docs/assets/logo.svg" width="400" alt="Concept Benchmark logo">
 </p>
 
-[Concept bottleneck models](https://arxiv.org/abs/2007.04612) (CBMs) first predict human-interpretable concepts from raw inputs, then use those concepts to predict a label. This architecture lets users inspect and correct the model's reasoning at test time. However, CBM research relies on a small number of concept-annotated datasets that were not designed for this purpose, making it difficult to systematically evaluate new methods.
+**Concept Benchmark** is a Python package for benchmarking [concept bottleneck models](https://arxiv.org/abs/2007.04612) (CBMs). It provides synthetic datasets with ground-truth concept labels, allowing users to vary concept granularity, annotation quality, and the labeling rule, and measure how each factor affects model performance and the value of interventions. The package includes two benchmarks -- robot classification (decision support) and Sudoku validation (automation) -- across image, text, and tabular modalities.
 
-**Concept Benchmark** provides synthetic datasets where concepts and labels are fully specified during construction. Because we control the ground truth, we can vary concept granularity, annotation quality, and the labeling rule, and measure exactly how each factor affects CBM performance and the value of interventions.
+For more details, see [our paper](https://arxiv.org/abs/TODO).
 
 ## Table of Contents
 
@@ -41,9 +41,7 @@ pip install -e .
 
 ## Quick Start
 
-A CBM has two learned components: a set of *concept detectors* that predict concepts from inputs (e.g., "has pointy feet"), and a *label predictor* that maps predicted concepts to the final label. At test time, a user can replace a predicted concept value with its true value -- this is called an *intervention*. The central question our benchmarks address is whether correcting *k* concepts actually improves the label prediction, and how that depends on factors like concept quality and annotation noise.
-
-The following example runs the robot benchmark with default settings:
+A CBM predicts concepts from inputs (e.g., "has pointy feet"), then predicts the label from those concepts. At test time, a user can correct mispredicted concepts -- this is called an *intervention*. The package lets you measure whether correcting *k* concepts improves the label prediction, and how that depends on concept quality and annotation noise.
 
 ```python
 from concept_benchmark.benchmarks import robot
@@ -67,7 +65,7 @@ See [`scripts/demo_robot.py`](scripts/demo_robot.py) and [`scripts/demo_sudoku.p
 
 ### Configuration
 
-All experiment settings are managed through typed dataclasses in [`concept_benchmark/config.py`](concept_benchmark/config.py). Configs can be serialized to YAML for reproducibility:
+Experiment settings are managed through typed dataclasses in [`concept_benchmark/config.py`](concept_benchmark/config.py). Configs can be serialized to YAML for reproducibility:
 
 ```python
 from concept_benchmark.config import RobotBenchmarkConfig
@@ -99,23 +97,21 @@ Each benchmark runs a sequence of stages. You can select specific stages with `-
 
 ## Benchmarks
 
-We provide two benchmarks that represent two use cases where CBMs provide unique value. **Robot classification** models decision support: a human expert corrects the model's concept predictions to improve accuracy. **Sudoku validation** models automation: the system handles routine cases and defers uncertain ones to a human. In both cases, we control the ground truth, so we can measure exactly when and why interventions help or fail.
+The package includes two benchmarks. **Robot classification** is a decision-support task where a human corrects the model's concept predictions to improve accuracy. **Sudoku validation** is an automation task where the system handles routine cases and defers uncertain ones to a human.
 
 ### Robot Classification
 
-We consider a task to classify fictional robots as one of two species -- **Glorp** or **Drent** -- based on visual body features. The task is inspired by [Williams et al. (2010)](https://doi.org/10.1016/j.cogpsych.2010.01.002), who used these robots to study how humans discover new concepts. Each robot has 9 binary body features that serve as concepts. The label depends on three of them (mouth type, foot shape, and knee presence); the rest (e.g., elbow shape, hand shape) are present in the data but do not determine robot type.
+This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot -- **Glorp** or **Drent** -- from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The ground-truth labeling rule, which features matter, and which are spurious are all configurable, modeling settings where the true relationship between features and labels is unknown. Available as image (`cbm-benchmark robot`) and text (`cbm-benchmark robot-text`) modalities.
 
 <p align="center">
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
 </p>
 
-Because we control the data generation, we can vary several aspects of the benchmark. We can change which concepts the model observes, the labeling rule, annotation quality (noise and missingness), and how interventions are performed (by an oracle, a noisy human expert, or a machine). We also support both image and text modalities (`cbm-benchmark robot` and `cbm-benchmark robot-text`).
-
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `drop_concepts` | `IDEAL_DROP` | Which concepts to exclude. Two presets are provided (`IDEAL_DROP` for 7 coarse concepts, `SUBCONCEPT_DROP` for 12 fine-grained foot subtypes), or define your own. |
 | `subconcept` | `False` | Shortcut that switches `drop_concepts` to `SUBCONCEPT_DROP`. |
-| `model_rule` | see `config.py` | Python expression that defines the labeling rule over concepts |
+| `model_rule` | see `config.py` | Python expression defining the labeling rule over concepts |
 | `weights` | `{"mouth_type": 5, ...}` | Concept weights for the stochastic labeling function |
 | `concept_missing` | `0.0` | Fraction of concept labels masked during training |
 | `regimes` | `["baseline"]` | How interventions are performed: `baseline` (oracle), `expert` (noisy human), `subjective` (noisy concept labels + noisy human), `machine`/`llm`/`clip` (concepts discovered via [Label-Free CBM](https://arxiv.org/abs/2304.06129)). `llm`/`clip` require `GEMINI_API_KEY`. |
@@ -179,15 +175,11 @@ align_stats = robot.align(cfg, cbm, data)
 
 ### Sudoku Validation
 
-We consider the task of determining whether a 9x9 Sudoku board is valid -- i.e., contains the digits 1-9 exactly once in each row, column, and block. The 27 concepts correspond to the validity of each row, column, and 3x3 block. A board is valid if and only if all 27 concepts are true. This AND structure means that a single violated concept is enough to invalidate the board, which contrasts with the robot benchmark's weighted labeling rule.
+This benchmark targets automation settings where the system handles routine cases and defers uncertain ones to a human. The task is to determine whether a 9x9 Sudoku board is valid, i.e., contains the digits 1-9 exactly once in each row, column, and block. The 27 concepts correspond to the validity of each row, column, and 3x3 block. A board is valid if and only if all 27 concepts are true (AND structure), so a single violated concept is enough to invalidate the board. When the model abstains, a human can verify specific concepts (e.g., "is row 5 valid?") to resolve the uncertainty.
 
 <p align="center">
   <img src="docs/assets/sudoku_handwritten.png" width="400" alt="Sudoku board with handwritten digits and concept annotations">
 </p>
-
-This benchmark models an automation setting: the system handles routine cases and defers uncertain ones to a human reviewer. When the model abstains, a human can verify specific concepts (e.g., "is row 5 valid?") to resolve the uncertainty. We measure selective accuracy (accuracy on kept predictions), coverage (fraction of predictions kept), and the cost of concept verifications. Because of the AND structure, each additional verification adds cost but yields only marginal coverage gains -- one incorrect concept is enough to fail the board.
-
-We can vary the difficulty of the task (by controlling how many cells are corrupted in invalid boards), the input modality (tabular or handwritten digit images), and the reliability/coverage tradeoff (by setting a minimum accuracy threshold for kept predictions).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
