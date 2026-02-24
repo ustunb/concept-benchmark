@@ -12,6 +12,23 @@ from PIL import Image
 from concept_benchmark.data import ConceptDataset
 
 
+def pytest_addoption(parser):
+    parser.addoption("--run-slow", action="store_true", default=False, help="Run slow tests")
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "slow: mark test as slow (requires --run-slow)")
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--run-slow"):
+        return
+    skip_slow = pytest.mark.skip(reason="need --run-slow option to run")
+    for item in items:
+        if "slow" in item.keywords:
+            item.add_marker(skip_slow)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def rng_seed() -> int:
     """Global RNG seed for deterministic tests."""
