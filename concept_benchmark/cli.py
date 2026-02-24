@@ -13,17 +13,17 @@ import logging
 import sys
 
 
-_ROBOT_STAGES = {"setup", "cbm", "dnn", "intervene", "align", "collect"}
-_SUDOKU_STAGES = {"setup", "ocr", "cs", "dnn", "intervene", "selective", "align", "collect"}
-_ROBOT_TEXT_STAGES = {"setup", "cbm", "dnn", "lfcbm", "intervene", "align", "collect"}
+ROBOT_STAGES = ("setup", "cbm", "dnn", "intervene", "align", "collect")
+SUDOKU_STAGES = ("setup", "ocr", "cs", "dnn", "intervene", "selective", "align", "collect")
+ROBOT_TEXT_STAGES = ("setup", "cbm", "dnn", "lfcbm", "intervene", "align", "collect")
 
 
-def _validate_stages(stages: list[str], valid: set[str], benchmark: str) -> None:
-    unknown = set(stages) - valid
+def _validate_stages(stages: list[str], valid: tuple[str, ...], benchmark: str) -> None:
+    unknown = set(stages) - set(valid)
     if unknown:
         raise ValueError(
             f"unknown stages for {benchmark}: {sorted(unknown)}. "
-            f"Valid: {sorted(valid)}"
+            f"Valid: {list(valid)}"
         )
 
 
@@ -31,7 +31,7 @@ def _robot_cmd(args: argparse.Namespace) -> None:
     from concept_benchmark.benchmarks.robot import run
     from concept_benchmark.config import RobotBenchmarkConfig
 
-    _validate_stages(args.stages, _ROBOT_STAGES, "robot")
+    _validate_stages(args.stages, ROBOT_STAGES, "robot")
 
     if args.config:
         config = RobotBenchmarkConfig.from_yaml(args.config)
@@ -63,7 +63,7 @@ def _sudoku_cmd(args: argparse.Namespace) -> None:
     from concept_benchmark.benchmarks.sudoku import run
     from concept_benchmark.config import SudokuBenchmarkConfig
 
-    _validate_stages(args.stages, _SUDOKU_STAGES, "sudoku")
+    _validate_stages(args.stages, SUDOKU_STAGES, "sudoku")
     if args.config:
         config = SudokuBenchmarkConfig.from_yaml(args.config)
     else:
@@ -76,7 +76,7 @@ def _robot_text_cmd(args: argparse.Namespace) -> None:
     from concept_benchmark.benchmarks.robot_text import run
     from concept_benchmark.config import RobotTextBenchmarkConfig
 
-    _validate_stages(args.stages, _ROBOT_TEXT_STAGES, "robot-text")
+    _validate_stages(args.stages, ROBOT_TEXT_STAGES, "robot-text")
     if args.config:
         config = RobotTextBenchmarkConfig.from_yaml(args.config)
     else:
@@ -115,7 +115,8 @@ def main(argv: list[str] | None = None) -> None:
     robot_p = subparsers.add_parser("robot", help="Run the robot classification benchmark.")
     robot_p.add_argument("--seed", type=int, default=1014)
     robot_p.add_argument(
-        "--stages", nargs="+", default=["setup", "cbm", "dnn", "intervene", "align", "collect"],
+        "--stages", nargs="+", default=list(ROBOT_STAGES),
+        help=f"Pipeline stages to run (default: all). Valid: {' -> '.join(ROBOT_STAGES)}",
     )
     robot_p.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
     robot_p.add_argument("--subconcept", action="store_true")
@@ -139,7 +140,8 @@ def main(argv: list[str] | None = None) -> None:
     sudoku_p = subparsers.add_parser("sudoku", help="Run the sudoku validation benchmark.")
     sudoku_p.add_argument("--seed", type=int, default=171)
     sudoku_p.add_argument(
-        "--stages", nargs="+", default=["setup", "ocr", "cs", "dnn", "intervene", "selective", "align", "collect"],
+        "--stages", nargs="+", default=list(SUDOKU_STAGES),
+        help=f"Pipeline stages to run (default: all). Valid: {' -> '.join(SUDOKU_STAGES)}",
     )
     sudoku_p.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
     sudoku_p.set_defaults(func=_sudoku_cmd)
@@ -148,7 +150,8 @@ def main(argv: list[str] | None = None) -> None:
     robot_text_p = subparsers.add_parser("robot-text", help="Run the robot text classification benchmark.")
     robot_text_p.add_argument("--seed", type=int, default=1337)
     robot_text_p.add_argument(
-        "--stages", nargs="+", default=["setup", "cbm", "dnn", "intervene", "align", "collect"],
+        "--stages", nargs="+", default=list(ROBOT_TEXT_STAGES),
+        help=f"Pipeline stages to run (default: all). Valid: {' -> '.join(ROBOT_TEXT_STAGES)}",
     )
     robot_text_p.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
     robot_text_p.add_argument("--lfcbm", action="store_true", help="Also run LFCBM variant.")
