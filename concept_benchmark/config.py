@@ -169,6 +169,10 @@ class RobotBenchmarkConfig:
     def __post_init__(self):
         if self.seed < 0:
             raise ValueError(f"seed must be non-negative, got {self.seed}")
+        if self.size not in INPUT_MAP:
+            raise ValueError(
+                f"size must be one of {sorted(INPUT_MAP)}, got {self.size!r}"
+            )
         if any(b < 0 for b in self.intervention_budgets):
             raise ValueError(f"intervention_budgets must be non-negative, got {self.intervention_budgets}")
         if self.intervention_strategy not in self._VALID_STRATEGIES:

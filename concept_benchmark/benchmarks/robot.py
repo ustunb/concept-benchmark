@@ -323,7 +323,7 @@ def train_lfcbm(
             )
 
     concept_set = LFConceptSet.from_file(concepts_file)
-    device_str = "cuda" if torch.cuda.is_available() else "cpu"
+    device_str = str(determine_device())
 
     cfg = LFTrainingConfig(
         device=device_str,
@@ -432,6 +432,8 @@ def train_dnn(
     logger.info("Test Accuracy: %.2f%%", test_acc * 100)
 
     weights = best_state_dict if best_state_dict is not None else model.state_dict()
+    # Move tensors to CPU before saving for cross-device portability
+    weights = {k: v.cpu() for k, v in weights.items()}
     save(weights, config.get_model_path("dnn"), overwrite=True)
     return weights
 
@@ -997,7 +999,7 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
         raise ValueError(f"concepts file parsed empty: {p_cf}")
 
     # Train LFCBM on this regime's concepts (or load cached)
-    device_str = "cuda" if torch.cuda.is_available() else "cpu"
+    device_str = str(determine_device())
     lfcbm_key = f"lfcbm_{regime}"
     lfcbm_path = config.get_model_path(lfcbm_key)
 

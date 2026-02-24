@@ -13,17 +13,33 @@ import logging
 import sys
 
 
+_ROBOT_STAGES = {"setup", "cbm", "dnn", "intervene", "align", "collect"}
+_SUDOKU_STAGES = {"setup", "ocr", "cs", "dnn", "intervene", "selective", "align", "collect"}
+_ROBOT_TEXT_STAGES = {"setup", "cbm", "dnn", "lfcbm", "intervene", "align", "collect"}
+
+
+def _validate_stages(stages: list[str], valid: set[str], benchmark: str) -> None:
+    unknown = set(stages) - valid
+    if unknown:
+        raise ValueError(
+            f"unknown stages for {benchmark}: {sorted(unknown)}. "
+            f"Valid: {sorted(valid)}"
+        )
+
+
 def _robot_cmd(args: argparse.Namespace) -> None:
     from concept_benchmark.benchmarks.robot import run
     from concept_benchmark.config import RobotBenchmarkConfig
 
+    _validate_stages(args.stages, _ROBOT_STAGES, "robot")
+
     if args.config:
         config = RobotBenchmarkConfig.from_yaml(args.config)
+    elif args.subconcept:
+        config = RobotBenchmarkConfig.default_subconcept()
+        config.seed = args.seed
     else:
         config = RobotBenchmarkConfig(seed=args.seed)
-        if args.subconcept:
-            config = RobotBenchmarkConfig.default_subconcept()
-            config.seed = args.seed
 
     if args.regimes:
         config.intervention_regimes = args.regimes
@@ -41,6 +57,7 @@ def _sudoku_cmd(args: argparse.Namespace) -> None:
     from concept_benchmark.benchmarks.sudoku import run
     from concept_benchmark.config import SudokuBenchmarkConfig
 
+    _validate_stages(args.stages, _SUDOKU_STAGES, "sudoku")
     if args.config:
         config = SudokuBenchmarkConfig.from_yaml(args.config)
     else:
@@ -53,6 +70,7 @@ def _robot_text_cmd(args: argparse.Namespace) -> None:
     from concept_benchmark.benchmarks.robot_text import run
     from concept_benchmark.config import RobotTextBenchmarkConfig
 
+    _validate_stages(args.stages, _ROBOT_TEXT_STAGES, "robot-text")
     if args.config:
         config = RobotTextBenchmarkConfig.from_yaml(args.config)
     else:

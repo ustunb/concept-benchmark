@@ -5,7 +5,7 @@ import copy
 
 import numpy as np
 import pandas as pd
-from scipy.special import expit
+from scipy.special import expit  # noqa: F401 — used by eval() in stochastic labeling
 
 from concept_benchmark.data import ConceptDataset
 

@@ -281,9 +281,9 @@ class TextConceptDetector(ConceptDetector):
             denom_total = 0.0
             with torch.set_grad_enabled(train_flag):
                 for enc, y, m in dloader:
-                    enc = {k: v.to(self.device, non_blocking=True) for k, v in enc.items()}
-                    y = y.to(self.device, non_blocking=True)
-                    m = m.to(self.device, non_blocking=True)
+                    enc = {k: v.to(self.device, non_blocking=False) for k, v in enc.items()}
+                    y = y.to(self.device, non_blocking=False)
+                    m = m.to(self.device, non_blocking=False)
                     logits = self._forward(model, enc)
                     loss_mat = crit(logits, y) * m
                     denom = m.sum().clamp(min=1.0)
@@ -395,7 +395,7 @@ class TextConceptDetector(ConceptDetector):
         )
         outs: List[np.ndarray] = []
         for enc, _, _ in dl:
-            enc = {k: v.to(self.device, non_blocking=True) for k, v in enc.items()}
+            enc = {k: v.to(self.device, non_blocking=False) for k, v in enc.items()}
             logits = self._forward(self.model, enc)
             prob = torch.sigmoid(logits).cpu().numpy()
             outs.append(prob)
