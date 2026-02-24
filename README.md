@@ -106,12 +106,7 @@ Classify synthetic robots into two species (**glorp** vs. **drent**) based on vi
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
 </p>
 
-**Everything is configurable.** The default setup is just one point in a large configuration space. Each robot has 9 visual features, several with multiple subtypes (foot shape has 10, hand shape has 6). You can control:
-
-- **Which concepts the model sees** via `drop_concepts`. The package provides two pre-defined presets -- `IDEAL_DROP` (7 coarse concepts) and `SUBCONCEPT_DROP` (12 fine-grained foot subtypes) -- but you can define any subset: keep all subtypes, expand hand shapes instead of feet, or use only the 3 causal features.
-- **The label rule** via `model_rule` and `weights`. The default rule is `glorp if (mouth_closed + foot_pointy + has_knees) >= 3`, but you can change which concepts matter and how much they contribute.
-- **Annotation quality** via `concept_missing` and `concept_missing_mech` (MCAR or MNAR missingness), and through intervention regimes that simulate noisy experts, subjective annotators, or machine-discovered concepts.
-- **Input modality**: image (`cbm-benchmark robot`) or text (`cbm-benchmark robot-text`). Both share the same concept structure and label rules.
+**Everything is configurable.** The default setup is just one point in a large configuration space. Each robot has 9 visual features, several with multiple subtypes (foot shape has 10, hand shape has 6). Concept granularity, the label rule, annotation quality, and input modality (image or text) are all parameters.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -196,12 +191,7 @@ Determine whether a 9x9 sudoku board is valid. The 27 concepts correspond to the
 
 **Automation use case.** The sudoku benchmark models an automation setting: the system handles routine cases and defers uncertain ones to a human. When the model abstains, interventions ask a human to verify specific concepts (e.g., "is row 5 valid?") to resolve the uncertainty. The key metrics are selective accuracy (on kept predictions), coverage (fraction kept), and net work automated (coverage minus the cost of concept verifications). The AND structure means each additional verification adds cost but only marginal coverage gain, since a single incorrect concept fails the entire board.
 
-**Configurability.** You can control:
-
-- **Task difficulty** via `max_corrupt` (number of cells changed in invalid boards -- higher means subtler errors) and `n_samples`.
-- **Input modality**: tabular (81-cell integer vectors) or handwritten digit images (adds an OCR stage).
-- **Reliability/coverage tradeoff** via `target_accuracy` -- demanding 99% accuracy means more abstention but fewer mistakes.
-- **Intervention budgets and thresholds**, as in the robot benchmark.
+**Configurability.** Task difficulty, input modality (tabular or handwritten images), and the reliability/coverage tradeoff are all parameters.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
