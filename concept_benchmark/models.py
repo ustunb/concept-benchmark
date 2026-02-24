@@ -986,7 +986,7 @@ class ConceptBasedModel(object):
             # Only prepare exact propagation tables if we'll use exact mode
             try:
                 n_concepts = self.concept_detector.n_concepts
-            except Exception:
+            except AttributeError:
                 n_concepts = None
             if n_concepts is not None and self._should_use_exact(n_concepts):
                 self._prep_propagation()
@@ -1137,8 +1137,8 @@ class ConceptBasedModel(object):
                 uniq, inv = np.unique(Z_flat, axis=0, return_inverse=True)
                 y_uniq = self.front_end_model.predict_proba(uniq)
                 Y_flat = y_uniq[inv]
-            except Exception:
-                # Fallback without deduplication
+            except (TypeError, ValueError):
+                # Fallback without deduplication (e.g. non-sortable dtypes)
                 Y_flat = self.front_end_model.predict_proba(Z_flat)
 
             # Reshape back to (A, s, K)

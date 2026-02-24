@@ -76,10 +76,6 @@ def collapse_robot_subtypes(
                                 new_features[new_feature_name] = [False, True]
                             df.loc[df[name] == t, new_feature_name] = (sf.loc[:, 1] == sv) & (sf.loc[:, 0] == t) # this call ensures that you only get True if the type matches
                             df[new_feature_name] = df[new_feature_name].astype(str)
-            try:
-                sf.loc[:, 0].empty or sf.loc[:, 1].empty is False
-            except:
-                Exception()
     return df, new_features
 
 

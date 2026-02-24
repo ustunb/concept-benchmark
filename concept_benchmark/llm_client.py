@@ -58,8 +58,8 @@ def _encode_images_b64(image_paths: Sequence[str | Path]) -> List[tuple]:
             else:
                 mime = "image/png"
             out.append((b64, mime))
-        except Exception:
-            continue
+        except (OSError, ValueError):
+            continue  # skip unreadable image files
     return out
 
 
@@ -80,8 +80,8 @@ class _GeminiClient(_LLMBase):
         for p in image_paths:
             try:
                 imgs.append(Image.open(p).convert("RGB"))
-            except Exception:
-                pass
+            except (OSError, ValueError):
+                pass  # skip unreadable image files
         parts = [prompt] + imgs if imgs else [prompt]
         resp = model.generate_content(
             parts,

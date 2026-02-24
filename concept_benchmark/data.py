@@ -55,7 +55,7 @@ def _deep_equal(a, b) -> bool:
     if isinstance(a, Set) and isinstance(b, Set):
         try:
             return a == b
-        except Exception:
+        except TypeError:
             return sorted(map(repr, a)) == sorted(map(repr, b))
 
     if isinstance(a, np.ndarray) and isinstance(b, np.ndarray):
@@ -74,7 +74,7 @@ def _deep_equal(a, b) -> bool:
     if isinstance(a, Path) and isinstance(b, Path):
         try:
             return a.resolve() == b.resolve()
-        except Exception:
+        except OSError:
             return str(a) == str(b)
 
     if callable(a) or callable(b):
@@ -82,7 +82,7 @@ def _deep_equal(a, b) -> bool:
 
     try:
         eq = a == b
-    except Exception:
+    except (TypeError, ValueError):
         return repr(a) == repr(b)
     else:
         if isinstance(eq, (bool, np.bool_)):
@@ -90,7 +90,7 @@ def _deep_equal(a, b) -> bool:
         if hasattr(eq, "all"):
             try:
                 return bool(eq.all())
-            except Exception:
+            except (TypeError, ValueError):
                 pass
         return repr(a) == repr(b)
 
@@ -1097,8 +1097,8 @@ class ConceptDatasetSample(Dataset):
                 ]
                 try:
                     x_batch = torch.stack(x_batch, dim=0)
-                except Exception:
-                    pass
+                except (RuntimeError, TypeError):
+                    pass  # heterogeneous shapes/types — keep as list
             if isinstance(x_batch, torch.Tensor):
                 x_batch = x_batch.to(device)
             with torch.no_grad():

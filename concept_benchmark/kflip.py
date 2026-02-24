@@ -87,7 +87,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
                     if w.ndim == 1:
                         w = w[None, :]
                     w = np.max(w, axis=0, keepdims=True)
-            except Exception:
+            except (AttributeError, IndexError, ValueError):
                 w = np.ones((1, n_concepts), dtype=np.float32)
             feat_score = np.mean((0.5 - np.abs(P - 0.5)) * w, axis=0)
 

@@ -50,8 +50,8 @@ def _prepare_inputs(x: Any, device: torch.device) -> Any:
         prepared = [_prepare_inputs(v, device) for v in x]
         try:
             return torch.stack(prepared, dim=0)
-        except Exception:
-            return prepared
+        except (RuntimeError, TypeError):
+            return prepared  # heterogeneous shapes/types — keep as list
     return torch.as_tensor(x, device=device)
 
 
