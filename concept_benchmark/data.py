@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+__all__ = [
+    "ConceptDataset",
+    "ConceptDatasetSample",
+    "ConceptImageDatasetSample",
+    "DataLoader",
+]
+
 import platform
 import warnings
 from collections.abc import Callable, Mapping, Set
@@ -95,7 +102,7 @@ def _deep_equal(a, b) -> bool:
         return repr(a) == repr(b)
 
 
-class ConceptDataset(object):
+class ConceptDataset:
     SAMPLE_TYPES = ("training", "validation", "test")
 
     def __init__(

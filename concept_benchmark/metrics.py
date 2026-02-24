@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+__all__ = ["calc_metric"]
+
 import numpy as np
 
 

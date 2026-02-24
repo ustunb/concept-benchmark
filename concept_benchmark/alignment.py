@@ -12,6 +12,13 @@ Provides two alignment approaches:
 """
 from __future__ import annotations
 
+__all__ = [
+    "ConstrainedFrontEndModel",
+    "retrain_aligned",
+    "align_frontend_weights",
+    "test_alignment",
+]
+
 import copy
 from typing import Dict, List, Optional, Tuple, Union
 

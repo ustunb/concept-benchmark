@@ -1,3 +1,17 @@
+from __future__ import annotations
+
+__all__ = [
+    "RobotClassifierCNN",
+    "RobotConceptClassifier",
+    "RobotViTConceptClassifier",
+    "JointConceptModel",
+    "SudokuValidatorCNN",
+    "GroupPoolingConceptSudokuCNN",
+    "ConceptDetector",
+    "FrontEndModel",
+    "ConceptBasedModel",
+]
+
 import itertools
 import numpy as np
 import torch
@@ -264,7 +278,7 @@ class GroupPoolingConceptSudokuCNN(nn.Module):
         return logits
 
 
-class ConceptDetector(object):
+class ConceptDetector:
     """Concept detector with optional calibration and pluggable trainer."""
 
     def __init__(
@@ -777,7 +791,7 @@ class ConceptDetector(object):
         return 1.0 / (1.0 + np.exp(-logits))
 
 
-class FrontEndModel(object):
+class FrontEndModel:
     def __init__(self, **kwargs) -> None:
         """
         Initialize the front-end model.
@@ -831,7 +845,7 @@ class FrontEndModel(object):
 
 # Consider inheriting BaseEstimator and ClassifierMixin?
 # TODO: add monte carlo sampling propagation
-class ConceptBasedModel(object):
+class ConceptBasedModel:
     """
     A model that uses concept-based predictions.
     """

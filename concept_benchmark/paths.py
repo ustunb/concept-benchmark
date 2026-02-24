@@ -3,6 +3,17 @@ This file defines paths for key directories and files. Contents include:
 1. Directory Names: Path objects that specify the directories where we store code, data, results, etc.
 2. File Name Generators: functions used to programatically name processed datasets, results, graphs etc.
 """
+from __future__ import annotations
+
+__all__ = [
+    "repo_dir",
+    "pkg_dir",
+    "data_dir",
+    "results_dir",
+    "get_dataset_dir",
+    "sudoku_data",
+    "model_file",
+]
 
 from pathlib import Path
 

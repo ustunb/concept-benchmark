@@ -5,6 +5,8 @@ intervention regimes to get machine judgments about concept presence in images.
 """
 from __future__ import annotations
 
+__all__ = ["make_llm_client", "judge_concept", "judge_concepts_batch"]
+
 import base64
 import json
 import os

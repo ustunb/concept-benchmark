@@ -6,6 +6,12 @@ produce the exact defaults matching the paper results.
 """
 from __future__ import annotations
 
+__all__ = [
+    "RobotBenchmarkConfig",
+    "SudokuBenchmarkConfig",
+    "RobotTextBenchmarkConfig",
+]
+
 import copy
 from dataclasses import dataclass, field
 from pathlib import Path

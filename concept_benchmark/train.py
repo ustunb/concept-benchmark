@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+__all__ = [
+    "TrainerResult",
+    "ConceptTrainer",
+    "DefaultConceptTrainer",
+    "train_concept_heads",
+]
+
 from dataclasses import dataclass
 import math
 from typing import Any, Dict, Optional, Protocol, Tuple, Union
