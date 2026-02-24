@@ -54,8 +54,8 @@ if settings['concept_missing_mech'] != 'none':
 config = {
     'device': device,
     'batch_size': 32,
-    'num_workers': 0 if device == 'mps' else 12,
-    'pin_memory': False if device == 'mps' else True,
+    'num_workers': 0 if device.type == 'mps' else 12,
+    'pin_memory': False if device.type == 'mps' else True,
 }
 torch.manual_seed(int(settings["seed"]))
 

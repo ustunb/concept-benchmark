@@ -64,8 +64,8 @@ def seed_worker(worker_id):
 
 loader_config = {
     'batch_size': 32,
-    'num_workers': 12,
-    'pin_memory': True,
+    'num_workers': 0 if device.type == 'mps' else 12,
+    'pin_memory': False if device.type == 'mps' else True,
     'worker_init_fn': seed_worker,
     'generator': torch.Generator().manual_seed(training_seed)
 }

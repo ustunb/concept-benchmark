@@ -49,8 +49,8 @@ if Process(pid=os.getppid()).name() not in ("node"):
 
 loader_config = {
     'batch_size': 32,
-    'num_workers': 12,
-    'pin_memory': True
+    'num_workers': 0 if device.type == 'mps' else 12,
+    'pin_memory': False if device.type == 'mps' else True
 }
 
 # load training data (for validation set)
@@ -272,3 +272,13 @@ cs_intervention_df = pd.DataFrame(
 tot = 27 * settings['n_samples']
 
 cs_intervention_df['work_reduced'] = 1 - ((tot * (1 - cs_intervention_df['coverage_after']) + cs_intervention_df['total_concept_checks'])) / (tot)
+
+# --- Print & save results ---
+print(f"\nDNN test accuracy: {test_accuracy:.4f}")
+print(f"DNN selective accuracy: {dnn_sel_acc}, coverage: {dnn_sel_cov:.4f}")
+print(f"CS  selective accuracy: {cs_sel_acc:.4f}, coverage: {cs_sel_cov:.4f}")
+print(f"\n{cs_intervention_df.to_string(index=False)}")
+
+out_path = results_dir / "sudoku_intervention_results.csv"
+cs_intervention_df.to_csv(out_path, index=False)
+print(f"\nSaved to {out_path}")
