@@ -106,12 +106,14 @@ Classify synthetic robots into two species (**glorp** vs. **drent**) based on vi
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
 </p>
 
-**Everything is configurable.** The default setup is just one point in a large configuration space. Each robot has 9 visual features, several with multiple subtypes (foot shape has 10, hand shape has 6). Concept granularity, the label rule, annotation quality, and input modality (image or text) are all parameters.
+**Everything is configurable.** The default setup is just one point in a large configuration space. Each robot has 9 visual features, several with multiple subtypes (foot shape has 10, hand shape has 6). Concept granularity, the label rule, annotation quality, and intervention regimes are all parameters. Both image (`cbm-benchmark robot`) and text (`cbm-benchmark robot-text`) modalities are supported.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `subconcept` | `False` | Use 12 fine-grained foot subtypes instead of 7 coarse concepts |
 | `drop_concepts` | `IDEAL_DROP` | Concept names to exclude. Controls concept granularity. |
+| `model_rule` | see `config.py` | Python expression defining the label rule over concepts |
+| `weights` | `{"mouth_type": 5, ...}` | Concept weights for the stochastic label model |
 | `concept_missing` | `0.0` | Fraction of concept labels to mask during training |
 | `regimes` | `["baseline"]` | Intervention regimes: `baseline` (perfect), `expert` (noisy human), `subjective` (noisy concepts), `machine`/`llm`/`clip` (LFCBM-discovered). `llm`/`clip` require `GEMINI_API_KEY`. |
 
@@ -123,8 +125,6 @@ Classify synthetic robots into two species (**glorp** vs. **drent**) based on vi
 | `seed` | `1014` / `1337` | Random seed (image / text) |
 | `size` | `"medium"` | Image resolution: `"small"` (8px), `"medium"` (32px), `"large"` (600px). Image only. |
 | `model_type` | `"stochastic"` | Label model: `"deterministic"` or `"stochastic"` |
-| `model_rule` | see `config.py` | Python expression defining the label rule over concepts |
-| `weights` | `{"mouth_type": 5, ...}` | Concept weights for the stochastic label model |
 | `concept_missing_mech` | `"none"` | Missingness mechanism: `"none"`, `"mcar"`, or `"mnar"` |
 | `intervention_budgets` | `[1, 3]` | Number of concepts to intervene on per sample |
 | `intervention_thresholds` | `[0.2, 0.4]` | Concept confidence thresholds for intervention candidates |
@@ -196,6 +196,7 @@ Determine whether a 9x9 sudoku board is valid. The 27 concepts correspond to the
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `max_corrupt` | `9` | Maximum cells corrupted in invalid boards (higher = harder to detect) |
+| `handwriting` | `True` | Render digits in handwritten style (enables OCR pipeline) |
 | `target_accuracy` | `0.9` | Minimum accuracy demanded on kept predictions |
 
 <details>
@@ -206,7 +207,6 @@ Determine whether a 9x9 sudoku board is valid. The 27 concepts correspond to the
 | `seed` | `171` | Random seed for reproducibility |
 | `n_samples` | `1000` | Number of boards to generate |
 | `valid_ratio` | `0.5` | Fraction of valid boards |
-| `handwriting` | `True` | Render digits in handwritten style (enables OCR pipeline) |
 | `intervention_thresholds` | `[0.2, 0.4, 0.6, 0.8]` | Concept confidence thresholds for intervention candidates |
 
 </details>
