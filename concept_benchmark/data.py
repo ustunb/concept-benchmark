@@ -161,13 +161,13 @@ class ConceptDataset:
                 X = np.asarray(X)
             except Exception as e:
                 raise ValueError(f"cannot convert X to np.ndarray: {e}")
-        
+
         if not isinstance(C, np.ndarray):
             try:
                 C = np.asarray(C)
             except Exception as e:
                 raise ValueError(f"cannot convert C to np.ndarray: {e}")
-    
+
         if not isinstance(y, np.ndarray):
             try:
                 y = np.asarray(y)

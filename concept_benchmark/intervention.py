@@ -501,7 +501,7 @@ class ScoreIntervention(InterventionStrategy):
         m = config.max_concepts_per_instance
         threshold = config.score_threshold
 
-        if (m > n_concepts) or (m is None) or (m <= 0):
+        if (m is None) or (m > n_concepts) or (m <= 0):
             warnings.warn(
                 "max_concepts_per_instance is None, <= 0, or larger than the number of concepts; defaulting to all concepts.",
                 RuntimeWarning,

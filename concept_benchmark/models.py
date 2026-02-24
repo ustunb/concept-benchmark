@@ -216,9 +216,11 @@ class JointConceptModel(nn.Module):
 class SudokuValidatorCNN(nn.Module):
     """End-to-end DNN baseline for sudoku board validation."""
 
+    _NUM_DIGITS = 10
+
     def __init__(self, embedding_dim=16, hidden_dim=128):
         super(SudokuValidatorCNN, self).__init__()
-        self.embedding = nn.Embedding(num_embeddings=10, embedding_dim=embedding_dim)
+        self.embedding = nn.Linear(self._NUM_DIGITS, embedding_dim, bias=False)
         self.conv1 = nn.Conv2d(embedding_dim, 64, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
         self.conv3 = nn.Conv2d(128, 128, kernel_size=3, padding=1)
@@ -231,7 +233,7 @@ class SudokuValidatorCNN(nn.Module):
         )
 
     def forward(self, x):
-        x = x.long()
+        x = F.one_hot(x.long(), self._NUM_DIGITS).float()
         x = self.embedding(x)
         x = x.permute(0, 2, 1).view(-1, x.size(2), 9, 9)
         x = F.relu(self.conv1(x))
@@ -245,9 +247,11 @@ class SudokuValidatorCNN(nn.Module):
 class GroupPoolingConceptSudokuCNN(nn.Module):
     """Concept-based sudoku model using group pooling over rows/cols/blocks."""
 
+    _NUM_DIGITS = 10
+
     def __init__(self, embedding_dim=16, hidden_dim=64):
         super(GroupPoolingConceptSudokuCNN, self).__init__()
-        self.embedding = nn.Embedding(num_embeddings=10, embedding_dim=embedding_dim)
+        self.embedding = nn.Linear(self._NUM_DIGITS, embedding_dim, bias=False)
         self.head = nn.Sequential(
             nn.Linear(2 * embedding_dim, hidden_dim),
             nn.ReLU(),
@@ -260,7 +264,7 @@ class GroupPoolingConceptSudokuCNN(nn.Module):
         return torch.cat([mean, maxv], dim=-1)
 
     def forward(self, x):
-        x = x.long()
+        x = F.one_hot(x.long(), self._NUM_DIGITS).float()
         x = self.embedding(x)  # (N, 81, D)
         x = x.view(x.size(0), 9, 9, -1)  # (N, 9, 9, D)
 

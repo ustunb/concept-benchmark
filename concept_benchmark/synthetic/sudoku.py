@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
 from tqdm.auto import tqdm
-from typing import Sequence 
+from typing import Sequence
 
 def _get_default_font(size):
     """Load a default font at the requested size, compatible with Pillow <10 and >=10."""

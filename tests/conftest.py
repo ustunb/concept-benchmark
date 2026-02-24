@@ -219,7 +219,7 @@ def make_image_arrays(
     X_paths = _write_synthetic_images(root=root, n=n, size=size, mode=mode)
     if add_missing:
         X_paths.append(str(root / "does_not_exist.png"))
-    
+
     X_paths = np.array(X_paths, dtype=object)  # Use object dtype for string paths
 
     C = (np.random.rand(n, k) < concept_density).astype(np.int8)

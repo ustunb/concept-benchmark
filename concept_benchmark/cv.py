@@ -161,8 +161,8 @@ def generate_folds(n_folds=5, n_samples=None, strata=None):
 def generate_cvindices(
     n_samples=None,
     strata=None,
-    total_folds_for_cv=[1, 2, 3, 5, 10],
-    total_folds_for_inner_cv=[2, 3, 5],
+    total_folds_for_cv=None,
+    total_folds_for_inner_cv=None,
     replicates=3,
     seed=None,
 ):
@@ -175,6 +175,10 @@ def generate_cvindices(
     :param seed:
     :return:
     """
+    if total_folds_for_cv is None:
+        total_folds_for_cv = [1, 2, 3, 5, 10]
+    if total_folds_for_inner_cv is None:
+        total_folds_for_inner_cv = [2, 3, 5]
 
     # type checks
     assert (
@@ -202,6 +206,7 @@ def generate_cvindices(
         np.random.seed(seed)
 
     # generate CV indices
+    total_folds_for_cv = list(total_folds_for_cv)  # avoid mutating caller's list
     cvindices = dict()
     if 1 in total_folds_for_cv:
         cvindices[TRIVIAL_FOLD_ID] = np.ones(n_samples, dtype=int)

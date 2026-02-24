@@ -230,8 +230,6 @@ def test_alignment(h_test, align_params, fe, test):
     original_acc = (original_preds == test_labels).mean()
     aligned_acc = (aligned_preds == test_labels).mean()
 
-    aligned_preds = aligned_frontend.predict(h_test)
-
     return {
         "original_accuracy": float(original_acc),
         "aligned_accuracy": float(aligned_acc),
