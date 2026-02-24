@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import platform
 from pathlib import Path
@@ -10,6 +11,8 @@ from typing import Dict, Optional
 import numpy as np
 import torch
 import torch.nn as nn
+
+logger = logging.getLogger(__name__)
 
 
 def determine_device() -> torch.device:
@@ -134,9 +137,9 @@ def create_skewed_splits_full(
     rng.shuffle(val_candidates)
     val_indices = np.array(val_candidates)[:val_size]
 
-    print(
-        f"Final splits - Train: {len(train_indices)}, "
-        f"Val: {len(val_indices)}, Test: {len(test_indices)}"
+    logger.info(
+        "Final splits - Train: %d, Val: %d, Test: %d",
+        len(train_indices), len(val_indices), len(test_indices),
     )
 
     dataset.drop_concepts(drop_concepts)
@@ -167,9 +170,9 @@ def _create_skewed_training_set(dataset, skew_specs, available_indices, target_s
         train_indices.extend(take)
         used.update(take)
 
-        print(
-            f"Skew spec {spec['concepts']}: needed {needed}, "
-            f"got {len(take)} (max available {len(spec_indices)})"
+        logger.info(
+            "Skew spec %s: needed %d, got %d (max available %d)",
+            spec["concepts"], needed, len(take), len(spec_indices),
         )
 
     remaining_slots = target_size - len(train_indices)
@@ -221,11 +224,11 @@ def run_alignment(
         monotonicity_constraints=monotonicity_constraints,
     )
 
-    print("\n=== Alignment Results ===")
-    print(f"  Original accuracy: {stats['original_accuracy']:.4f}")
-    print(f"  Aligned accuracy:  {stats['aligned_accuracy']:.4f}")
-    print(f"  Accuracy change:   {stats['accuracy_change']:+.4f}")
-    print(f"  Predictions changed: {stats['predictions_changed']}")
+    logger.info("\n=== Alignment Results ===")
+    logger.info("  Original accuracy: %.4f", stats["original_accuracy"])
+    logger.info("  Aligned accuracy:  %.4f", stats["aligned_accuracy"])
+    logger.info("  Accuracy change:   %+.4f", stats["accuracy_change"])
+    logger.info("  Predictions changed: %d", stats["predictions_changed"])
 
     if save_path is not None:
         save_path = Path(save_path)
@@ -238,6 +241,6 @@ def run_alignment(
         }
         with open(save_path, "w") as f:
             json.dump(serializable, f, indent=2)
-        print(f"  Saved to {save_path}")
+        logger.info("  Saved to %s", save_path)
 
     return stats

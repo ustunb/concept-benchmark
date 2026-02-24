@@ -5,6 +5,7 @@ Provides functions to run each stage of the sudoku benchmark programmatically.
 from __future__ import annotations
 
 import copy
+import logging
 import platform
 from typing import List, Optional
 
@@ -45,6 +46,8 @@ if "scripts.sudoku_demo.sudoku_models" not in _sys.modules:
         _sys.modules["scripts.sudoku_demo"] = _sd
         _sys.modules["scripts"].sudoku_demo = _sd
     _sys.modules["scripts.sudoku_demo.sudoku_models"] = _compat_models
+
+logger = logging.getLogger(__name__)
 
 
 # ── Stage: setup_dataset ──────────────────────────────────────────────
@@ -144,7 +147,7 @@ def train_cs(
     )
 
     test_pred = cbm.predict(data.test)
-    print("Test Accuracy:", np.mean(test_pred == data.test.y))
+    logger.info("Test Accuracy: %s", np.mean(test_pred == data.test.y))
 
     save(cbm, config.get_model_path("cs", data_type="tabular"), overwrite=True)
     return cbm
@@ -217,9 +220,9 @@ def train_dnn(
         else:
             epochs_no_improve += 1
             if config.patience > 0 and epochs_no_improve >= config.patience:
-                print(
-                    f"Early stopping at epoch {epoch + 1} "
-                    f"with best val loss {best_val_loss:.6f}"
+                logger.info(
+                    "Early stopping at epoch %d with best val loss %.6f",
+                    epoch + 1, best_val_loss,
                 )
                 break
 
@@ -229,9 +232,9 @@ def train_dnn(
     train_acc = compute_accuracy(model, train_loader, device=device)
     valid_acc = compute_accuracy(model, valid_loader, device=device)
     test_acc = compute_accuracy(model, test_loader, device=device)
-    print(f"Training Accuracy: {train_acc * 100:.2f}%")
-    print(f"Validation Accuracy: {valid_acc * 100:.2f}%")
-    print(f"Test Accuracy: {test_acc * 100:.2f}%")
+    logger.info("Training Accuracy: %.2f%%", train_acc * 100)
+    logger.info("Validation Accuracy: %.2f%%", valid_acc * 100)
+    logger.info("Test Accuracy: %.2f%%", test_acc * 100)
 
     weights = best_state_dict if best_state_dict is not None else model.state_dict()
     save(weights, config.get_model_path("dnn", data_type="tabular"), overwrite=True)
@@ -328,7 +331,7 @@ def run_interventions(
     )
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     cs_intervention_df.to_csv(csv_path, index=False)
-    print(f"Saved intervention results to {csv_path}")
+    logger.info("Saved intervention results to %s", csv_path)
 
     return cs_intervention_df
 
@@ -371,17 +374,17 @@ def align(
         test=data.test,
     )
 
-    print("\n=== Alignment Results ===")
-    print(f"  Original accuracy: {stats['original_accuracy']:.4f}")
-    print(f"  Aligned accuracy:  {stats['aligned_accuracy']:.4f}")
-    print(f"  Accuracy change:   {stats['accuracy_change']:+.4f}")
-    print(f"  Predictions changed: {stats['predictions_changed']}")
+    logger.info("=== Alignment Results ===")
+    logger.info("  Original accuracy: %.4f", stats['original_accuracy'])
+    logger.info("  Aligned accuracy:  %.4f", stats['aligned_accuracy'])
+    logger.info("  Accuracy change:   %+.4f", stats['accuracy_change'])
+    logger.info("  Predictions changed: %s", stats['predictions_changed'])
 
     save_path = config.get_alignment_results_path()
     save_path.parent.mkdir(parents=True, exist_ok=True)
     with open(save_path, "w") as f:
         _json.dump(stats, f, indent=2)
-    print(f"  Saved to {save_path}")
+    logger.info("  Saved to %s", save_path)
 
     return stats
 
@@ -510,7 +513,7 @@ def collect_results(
     out_path = results_dir / "sudoku_demo_results.csv"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     final_df.to_csv(out_path, index=False)
-    print(f"Saved {len(final_df)} rows to {out_path}")
+    logger.info("Saved %d rows to %s", len(final_df), out_path)
     return final_df
 
 
@@ -547,13 +550,11 @@ def run(
 
     if "intervene" in stages:
         df = run_interventions(config)
-        print("\n=== Intervention Results ===")
-        print(df.to_string(index=False))
+        logger.info("=== Intervention Results ===\n%s", df.to_string(index=False))
 
     if "selective" in stages:
         sel_df = compute_selective_results(config)
-        print("\n=== Selective Metrics ===")
-        print(sel_df.to_string(index=False))
+        logger.info("=== Selective Metrics ===\n%s", sel_df.to_string(index=False))
 
     if "align" in stages:
         align(config)
@@ -561,7 +562,7 @@ def run(
     if "collect" in stages:
         collect_results()
 
-    print("\nPipeline complete!")
+    logger.info("Pipeline complete!")
 
 
 # ── Helper functions ──────────────────────────────────────────────────
@@ -764,6 +765,6 @@ def compute_selective_results(
     )
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(csv_path, index=False)
-    print(f"Saved selective metrics to {csv_path}")
+    logger.info("Saved selective metrics to %s", csv_path)
 
     return df

@@ -6,6 +6,7 @@ programmatically, following the same pattern as robot.py and sudoku.py.
 from __future__ import annotations
 
 import json
+import logging
 import random
 from pathlib import Path
 from typing import List, Optional
@@ -35,6 +36,8 @@ from concept_benchmark.synthetic.robot_text.dataset import (
     build_text_dataset,
     kfold_by_robot_identity,
 )
+
+logger = logging.getLogger(__name__)
 
 # Lazy imports for intervention modules
 _intervention_imported = False
@@ -84,7 +87,7 @@ def setup_dataset(
     n_pos = int((_lbl == "glorp").sum())
     n_neg = int((_lbl == "drent").sum())
     minority_label = "glorp" if n_pos < n_neg else "drent"
-    print(f"Catalog: {n_pos} glorp, {n_neg} drent (minority={minority_label})")
+    logger.info("Catalog: %d glorp, %d drent (minority=%s)", n_pos, n_neg, minority_label)
 
     # Determine per-row variant counts
     row_variants = [
@@ -123,7 +126,7 @@ def setup_dataset(
         generic_rate=config.generic_rate if config.generic_enable else 0.0,
     )
 
-    print(f"Split sizes — train: {ds.training.n}, val: {ds.validation.n}, test: {ds.test.n}")
+    logger.info("Split sizes — train: %d, val: %d, test: %d", ds.training.n, ds.validation.n, ds.test.n)
     save(ds, config.get_dataset_path(), overwrite=True)
     return ds
 
@@ -192,7 +195,7 @@ def train_cbm(
 
     test_pred = cbm.predict(data.test)
     acc = float(np.mean(test_pred == data.test.y))
-    print(f"CBM Test Accuracy: {acc:.4f}")
+    logger.info("CBM Test Accuracy: %.4f", acc)
 
     save(cbm, config.get_model_path("cbm"), overwrite=True)
     return cbm
@@ -243,7 +246,7 @@ def train_cbm_subjective(
 
     test_pred = cbm.predict(data.test)
     acc = float(np.mean(test_pred == data.test.y))
-    print(f"Subjective CBM Test Accuracy: {acc:.4f}")
+    logger.info("Subjective CBM Test Accuracy: %.4f", acc)
 
     save(cbm, config.get_model_path("cbm_subjective"), overwrite=True)
     return cbm
@@ -363,7 +366,7 @@ def train_dnn(
     calibrator = _fit_platt(data.validation.X, data.validation.y, tok, model, device)
 
     metrics = {"accuracy": acc, "seed": config.seed, "model": config.dnn_model_name}
-    print(f"DNN Test Accuracy: {acc:.4f}")
+    logger.info("DNN Test Accuracy: %.4f", acc)
 
     # Save model and metrics
     model_dir = config.get_model_path("dnn")
@@ -444,7 +447,7 @@ def train_lfcbm(
 
     test_pred = cbm.predict(data.test)
     acc = float(np.mean(test_pred == data.test.y))
-    print(f"LFCBM Test Accuracy: {acc:.4f}")
+    logger.info("LFCBM Test Accuracy: %.4f", acc)
 
     save(cbm, config.get_model_path("lfcbm"), overwrite=True)
     det_lf.save(str(config.get_model_path("lfcbm")) + "_lf")
@@ -580,17 +583,17 @@ def run_interventions(
             regime_df = _run_text_regime(config, regime, model, data, budgets, threshold)
             all_dfs.append(regime_df)
         except (FileNotFoundError, NotImplementedError) as e:
-            print(f"Skipping regime {regime!r}: {e}")
+            logger.warning("Skipping regime %r: %s", regime, e)
 
     if not all_dfs:
-        print("No regimes produced results.")
+        logger.warning("No regimes produced results.")
         return pd.DataFrame()
 
     results_df = pd.concat(all_dfs, axis=0).reset_index(drop=True)
     results_df["seed"] = config.seed
     results_df["human_accuracy"] = config.intervention_accuracy
     results_df.to_csv(config.get_results_path("cbm"), index=False)
-    print(f"Saved intervention results to {config.get_results_path('cbm')}")
+    logger.info("Saved intervention results to %s", config.get_results_path("cbm"))
     return results_df
 
 
@@ -682,7 +685,7 @@ def collect_results(
     out_path = results_dir / "robot_text_results.csv"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     final_df.to_csv(out_path, index=False)
-    print(f"Saved {len(final_df)} rows to {out_path}")
+    logger.info("Saved %d rows to %s", len(final_df), out_path)
     return final_df
 
 
@@ -724,4 +727,4 @@ def run(
     if "collect" in stages:
         collect_results([config])
 
-    print("\nRobot text pipeline complete!")
+    logger.info("Robot text pipeline complete!")

@@ -9,6 +9,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 
 
@@ -71,6 +72,17 @@ def main(argv: list[str] | None = None) -> None:
         prog="cbm-benchmark",
         description="Run concept benchmark experiments.",
     )
+    # Global verbosity flags
+    verbosity = parser.add_mutually_exclusive_group()
+    verbosity.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Show debug-level output.",
+    )
+    verbosity.add_argument(
+        "-q", "--quiet", action="store_true",
+        help="Only show warnings and errors.",
+    )
+
     subparsers = parser.add_subparsers(dest="benchmark", required=True)
 
     # Robot subcommand
@@ -120,6 +132,16 @@ def main(argv: list[str] | None = None) -> None:
     robot_text_p.set_defaults(func=_robot_text_cmd)
 
     args = parser.parse_args(argv)
+
+    # Configure logging based on verbosity flags
+    from concept_benchmark._logging import setup_logging
+    if args.verbose:
+        setup_logging(level=logging.DEBUG, verbose_format=True)
+    elif args.quiet:
+        setup_logging(level=logging.WARNING)
+    else:
+        setup_logging(level=logging.INFO)
+
     args.func(args)
 
 

@@ -5,9 +5,12 @@ Provides functions to run each stage of the robot benchmark programmatically.
 from __future__ import annotations
 
 import copy
+import logging
 import platform
 from itertools import product
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import pandas as pd
@@ -171,7 +174,7 @@ def train_cbm(
     )
 
     test_pred = cbm.predict(data.test)
-    print("Test Accuracy:", np.mean(test_pred == data.test.y))
+    logger.info("Test Accuracy: %s", np.mean(test_pred == data.test.y))
 
     if save_key is not None:
         save(cbm, config.get_model_path(save_key), overwrite=True)
@@ -341,7 +344,7 @@ def train_lfcbm(
         valid_y=data.validation.y.astype(int),
         concept_set=concept_set,
     )
-    print(f"LFCBM stats: {stats.get('kept_concepts')}/{stats.get('total_concepts')} concepts kept")
+    logger.info("LFCBM stats: %s/%s concepts kept", stats.get("kept_concepts"), stats.get("total_concepts"))
 
     out_dir = str(config.get_model_path("lfcbm")) + "_bundle"
     lfcbm.save(out_dir)
@@ -413,9 +416,9 @@ def train_dnn(
         else:
             epochs_no_improve += 1
             if config.patience > 0 and epochs_no_improve >= config.patience:
-                print(
-                    f"Early stopping at epoch {epoch + 1} "
-                    f"with best val loss {best_val_loss:.6f}"
+                logger.info(
+                    "Early stopping at epoch %d with best val loss %.6f",
+                    epoch + 1, best_val_loss,
                 )
                 break
 
@@ -425,9 +428,9 @@ def train_dnn(
     train_acc = compute_accuracy(model, train_loader, device=device)
     valid_acc = compute_accuracy(model, valid_loader, device=device)
     test_acc = compute_accuracy(model, test_loader, device=device)
-    print(f"Training Accuracy: {train_acc * 100:.2f}%")
-    print(f"Validation Accuracy: {valid_acc * 100:.2f}%")
-    print(f"Test Accuracy: {test_acc * 100:.2f}%")
+    logger.info("Training Accuracy: %.2f%%", train_acc * 100)
+    logger.info("Validation Accuracy: %.2f%%", valid_acc * 100)
+    logger.info("Test Accuracy: %.2f%%", test_acc * 100)
 
     weights = best_state_dict if best_state_dict is not None else model.state_dict()
     save(weights, config.get_model_path("dnn"), overwrite=True)
@@ -554,23 +557,22 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
                     "Respond like: {\"conceptA\":1,\"conceptB\":0}"
                 )
                 attempts = 0
-                print(f"[LLM] fallback judge start image={image_path}, concepts={len(names)}", flush=True)
+                logger.debug("LLM fallback judge start image=%s, concepts=%d", image_path, len(names))
                 while True:
                     try:
-                        print(f"[LLM]  single-image call attempt {attempts + 1} ...", flush=True)
+                        logger.debug("LLM single-image call attempt %d ...", attempts + 1)
                         raw = (client.generate(prompt, [image_path]) or "").strip()
-                        print("[LLM]  single-image call ok", flush=True)
+                        logger.debug("LLM single-image call ok")
                         break
                     except Exception as e:
                         if ResourceExhausted is not None and isinstance(e, ResourceExhausted):
                             attempts += 1
-                            print(
-                                f"[LLM]  ResourceExhausted on single-image attempt {attempts}: {e}. "
-                                "Backing off 30s before retry.",
-                                flush=True,
+                            logger.warning(
+                                "LLM ResourceExhausted on single-image attempt %d: %s. "
+                                "Backing off 30s before retry.", attempts, e,
                             )
                             if attempts >= 5:
-                                print("[LLM]  giving up after 5 ResourceExhausted errors in fallback.", flush=True)
+                                logger.error("LLM giving up after 5 ResourceExhausted errors in fallback.")
                                 raise
                             time.sleep(30.0)
                         else:
@@ -627,11 +629,10 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
                 try:
                     obj = json.loads(raw_clean)
                 except Exception as e:
-                    print("[LLM-DEBUG] json.loads failed in _llm_judge_batch:", repr(e), flush=True)
-                    print(
-                        "[LLM-DEBUG] raw_clean (first 400 chars):",
+                    logger.debug("json.loads failed in _llm_judge_batch: %r", e)
+                    logger.debug(
+                        "raw_clean (first 400 chars): %s",
                         raw_clean[:400].replace("\n", "\\n"),
-                        flush=True,
                     )
                     return out
 
@@ -754,11 +755,10 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
                     tasks.append((i, image_path, names, missing))
 
                 cached_pairs = total_pairs - missing_pairs
-                print(
-                    f"[LLM] intervention selection: total={total_pairs}, "
-                    f"from_cache={cached_pairs}, to_query={missing_pairs}, "
-                    f"images_needing_llm={len(tasks)}",
-                    flush=True,
+                logger.info(
+                    "LLM intervention selection: total=%d, from_cache=%d, "
+                    "to_query=%d, images_needing_llm=%d",
+                    total_pairs, cached_pairs, missing_pairs, len(tasks),
                 )
 
                 bs = int((llm_cfg.get("batch_size") or sttngs.get("llm_batch_size") or 32))
@@ -766,10 +766,9 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
                     bs = 1
                 n_batches = (len(tasks) + bs - 1) // bs
                 if n_batches > 0:
-                    print(
-                        f"[LLM] starting batched calls: {len(tasks)} images, "
-                        f"batch_size={bs}, n_batches={n_batches}",
-                        flush=True,
+                    logger.info(
+                        "LLM starting batched calls: %d images, batch_size=%d, n_batches=%d",
+                        len(tasks), bs, n_batches,
                     )
 
                 for batch_idx, s in enumerate(range(0, len(tasks), bs), start=1):
@@ -780,10 +779,9 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
                     attempts = 0
                     while True:
                         try:
-                            print(
-                                f"[LLM] batch {batch_idx}/{n_batches}: "
-                                f"{len(chunk)} images, attempt {attempts + 1} ...",
-                                flush=True,
+                            logger.debug(
+                                "LLM batch %d/%d: %d images, attempt %d ...",
+                                batch_idx, n_batches, len(chunk), attempts + 1,
                             )
                             votes_list = _llm_judge_batch(image_paths, per_image_names)
                             sleep_time = float(
@@ -791,20 +789,18 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
                                 or sttngs.get("llm_batch_sleep")
                                 or 5.0
                             )
-                            print(
-                                f"[LLM] batch {batch_idx}/{n_batches} ok; "
-                                f"sleeping {sleep_time} seconds to respect rate limits",
-                                flush=True,
+                            logger.debug(
+                                "LLM batch %d/%d ok; sleeping %.1fs to respect rate limits",
+                                batch_idx, n_batches, sleep_time,
                             )
                             time.sleep(sleep_time)
                             break
                         except Exception as e:
                             if ResourceExhausted is not None and isinstance(e, ResourceExhausted):
                                 attempts += 1
-                                print(
-                                    f"[LLM] ResourceExhausted on batch {batch_idx}/{n_batches}, "
-                                    f"attempt {attempts}: {e}. Backing off 30s.",
-                                    flush=True,
+                                logger.warning(
+                                    "LLM ResourceExhausted on batch %d/%d, attempt %d: %s. Backing off.",
+                                    batch_idx, n_batches, attempts, e,
                                 )
                                 retry_backoff = float(
                                     llm_cfg.get("retry_backoff")
@@ -817,16 +813,12 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
                                     or 5
                                 )
                                 if attempts >= max_retries:
-                                    print(
-                                        f"[LLM] giving up on batch {batch_idx}/{n_batches} "
-                                        f"after {attempts} ResourceExhausted errors.",
-                                        flush=True,
+                                    logger.error(
+                                        "LLM giving up on batch %d/%d after %d ResourceExhausted errors.",
+                                        batch_idx, n_batches, attempts,
                                     )
                                     raise
-                                print(
-                                    f"[LLM] backing off {retry_backoff}s ...",
-                                    flush=True,
-                                )
+                                logger.debug("LLM backing off %.1fs ...", retry_backoff)
                                 time.sleep(retry_backoff)
                             else:
                                 raise
@@ -842,13 +834,10 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
                                 _intervention_cache[i_idx][j] = v
 
                     _flush_cache(_intervention_cache)
-                    print(
-                        f"[LLM] batch {batch_idx}/{n_batches} complete; cache flushed.",
-                        flush=True,
-                    )
+                    logger.debug("LLM batch %d/%d complete; cache flushed.", batch_idx, n_batches)
 
                 if n_batches > 0:
-                    print(f"[LLM] all {n_batches} batches complete.", flush=True)
+                    logger.info("LLM all %d batches complete.", n_batches)
 
                 # rank concepts per instance by single-bit flip effect (reuse for budgets < K)
                 order = [np.array([], dtype=int)] * C_before.shape[0]
@@ -1015,7 +1004,7 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
     lfcbm_path = config.get_model_path(lfcbm_key)
 
     if lfcbm_path.exists() and not config.force_retrain:
-        print(f"Loading existing LFCBM for {regime}: {lfcbm_path}")
+        logger.info("Loading existing LFCBM for %s: %s", regime, lfcbm_path)
         lf = load(lfcbm_path)
     else:
         cfg = LFTrainingConfig(
@@ -1037,7 +1026,7 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
             concept_set=concept_set,
             cache_dir=cfg.cache_dir,
         )
-        print(f"LFCBM ({regime}) stats: {stats.get('kept_concepts')}/{stats.get('total_concepts')} concepts kept")
+        logger.info("LFCBM (%s) stats: %s/%s concepts kept", regime, stats.get("kept_concepts"), stats.get("total_concepts"))
         save(lf, lfcbm_path, overwrite=True)
 
     # Get concept probabilities from LFCBM
@@ -1230,10 +1219,10 @@ def run_interventions(
             regime_df = _run_regime(config, regime, model, data, budgets, thresholds)
             all_dfs.append(regime_df)
         except (FileNotFoundError, NotImplementedError) as e:
-            print(f"Skipping regime {regime!r}: {e}")
+            logger.warning("Skipping regime %r: %s", regime, e)
 
     if not all_dfs:
-        print("No regimes produced results.")
+        logger.warning("No regimes produced results.")
         return pd.DataFrame()
 
     results_df = pd.concat(all_dfs, axis=0).reset_index(drop=True)
@@ -1457,7 +1446,7 @@ def collect_results(
     out_path = results_dir / "robot_demo_results.csv"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     final_df.to_csv(out_path, index=False)
-    print(f"Saved {len(final_df)} rows to {out_path}")
+    logger.info("Saved %d rows to %s", len(final_df), out_path)
     return final_df
 
 
@@ -1516,7 +1505,7 @@ def run(
             cfg = make_cfg()
             cfg.seed = config.seed
             if cfg.get_model_path("cbm").exists():
-                print(f"Using existing CBM: {cfg.get_model_path('cbm')}")
+                logger.info("Using existing CBM: %s", cfg.get_model_path("cbm"))
             else:
                 train_cbm(cfg)
 
@@ -1532,7 +1521,7 @@ def run(
                     cfg.concept_missing = MISSING_PROP
                     cfg.concept_missing_mech = mech
                     if cfg.get_model_path("cbm").exists():
-                        print(f"Using existing CBM: {cfg.get_model_path('cbm')}")
+                        logger.info("Using existing CBM: %s", cfg.get_model_path("cbm"))
                     else:
                         train_cbm(cfg)
 
@@ -1543,7 +1532,7 @@ def run(
                 cfg.seed = config.seed
                 _copy_regime_fields(config, cfg)
                 if cfg.get_model_path("cbm_subjective").exists():
-                    print(f"Using existing subjective CBM: {cfg.get_model_path('cbm_subjective')}")
+                    logger.info("Using existing subjective CBM: %s", cfg.get_model_path("cbm_subjective"))
                 else:
                     train_cbm_subjective(cfg)
 
@@ -1560,7 +1549,7 @@ def run(
                         cfg.concept_missing_mech = mech
                         _copy_regime_fields(config, cfg)
                         if cfg.get_model_path("cbm_subjective").exists():
-                            print(f"Using existing subjective CBM: {cfg.get_model_path('cbm_subjective')}")
+                            logger.info("Using existing subjective CBM: %s", cfg.get_model_path("cbm_subjective"))
                         else:
                             train_cbm_subjective(cfg)
 
@@ -1570,7 +1559,7 @@ def run(
                 cfg.seed = config.seed
                 _copy_regime_fields(config, cfg)
                 if cfg.get_model_path("lfcbm").exists():
-                    print(f"Using existing LFCBM: {cfg.get_model_path('lfcbm')}")
+                    logger.info("Using existing LFCBM: %s", cfg.get_model_path("lfcbm"))
                 else:
                     train_lfcbm(cfg)
 
@@ -1587,7 +1576,7 @@ def run(
                         cfg.concept_missing_mech = mech
                         _copy_regime_fields(config, cfg)
                         if cfg.get_model_path("lfcbm").exists():
-                            print(f"Using existing LFCBM: {cfg.get_model_path('lfcbm')}")
+                            logger.info("Using existing LFCBM: %s", cfg.get_model_path("lfcbm"))
                         else:
                             train_lfcbm(cfg)
 
@@ -1596,7 +1585,7 @@ def run(
         ideal_cfg = RobotBenchmarkConfig.default_ideal()
         ideal_cfg.seed = config.seed
         if ideal_cfg.get_model_path("dnn").exists():
-            print(f"Using existing DNN: {ideal_cfg.get_model_path('dnn')}")
+            logger.info("Using existing DNN: %s", ideal_cfg.get_model_path("dnn"))
         else:
             train_dnn(ideal_cfg)
 
