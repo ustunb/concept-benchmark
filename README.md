@@ -39,7 +39,7 @@ pip install -e .
 
 ## Quick Start
 
-A CBM pipeline has three steps: (1) generate a dataset with ground-truth concept annotations, (2) train a concept bottleneck model that predicts concepts from inputs and labels from concepts, and (3) evaluate whether correcting ("intervening on") the model's concept predictions at test time improves label accuracy.
+A CBM predicts concepts from inputs (e.g., "has pointy feet"), then predicts the label from those concepts. At test time, a human can correct mispredicted concepts — this is called an *intervention*. The key question is whether correcting *k* concepts actually improves the label prediction.
 
 The example below runs this pipeline on the robot benchmark with default settings:
 
@@ -58,6 +58,7 @@ The same pipeline runs from the CLI in one command:
 
 ```bash
 cbm-benchmark robot --seed 1014
+cbm-benchmark sudoku --seed 171
 ```
 
 For fully-commented examples, see [`scripts/demo_robot.py`](scripts/demo_robot.py) and [`scripts/demo_sudoku.py`](scripts/demo_sudoku.py).
@@ -87,11 +88,11 @@ Each benchmark runs a sequence of stages. You can select specific stages with `-
 | `setup` | all | Generate synthetic dataset (images, text, or boards) |
 | `ocr` | sudoku | Train a digit recognizer on rendered board images |
 | `cbm` | robot, robot-text | Train concept detector (input → concepts) + frontend (concepts → label) |
-| `cs` | sudoku | Train concept-supervised model (concepts predicted from board features) |
+| `cs` | sudoku | Train concept-supervised (CS) model (concepts predicted from board features) |
 | `dnn` | all | Train end-to-end neural network baseline (input → label, no concepts) |
-| `intervene` | all | Evaluate concept interventions (k-flip for robot, conceptual safeguards for sudoku) |
+| `intervene` | all | Evaluate concept interventions: correct up to *k* concept predictions and measure label accuracy change |
 | `selective` | sudoku | Compute selective accuracy and coverage at each confidence threshold |
-| `align` | all | Retrain frontend with monotonicity constraints and compare to unconstrained |
+| `align` | all | Retrain label predictor with sign constraints on concept weights (e.g., force `has_knees` to be positive) and compare to unconstrained |
 | `collect` | all | Aggregate per-stage results into a single CSV |
 
 ## Benchmarks
@@ -110,12 +111,12 @@ Classify synthetic robots into two species (**glorp** vs. **drent**) based on vi
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `subconcept` | `False` | Use 12 fine-grained foot subtypes instead of 7 coarse concepts |
-| `drop_concepts` | `IDEAL_DROP` | Concept names to exclude. Controls concept granularity. |
+| `drop_concepts` | `IDEAL_DROP` | Concept names to exclude. Two presets are provided (`IDEAL_DROP`, `SUBCONCEPT_DROP`), or define your own subset. |
+| `subconcept` | `False` | Convenience flag: switches `drop_concepts` to the `SUBCONCEPT_DROP` preset (12 fine-grained foot subtypes instead of 7 coarse concepts). |
 | `model_rule` | see `config.py` | Python expression defining the label rule over concepts |
 | `weights` | `{"mouth_type": 5, ...}` | Concept weights for the stochastic label model |
 | `concept_missing` | `0.0` | Fraction of concept labels to mask during training |
-| `regimes` | `["baseline"]` | Intervention regimes: `baseline` (perfect), `expert` (noisy human), `subjective` (noisy concepts), `machine`/`llm`/`clip` (LFCBM-discovered). `llm`/`clip` require `GEMINI_API_KEY`. |
+| `regimes` | `["baseline"]` | Intervention regimes: `baseline` (perfect), `expert` (noisy human), `subjective` (noisy concepts), `machine`/`llm`/`clip` (discovered via [Label-Free CBM](https://arxiv.org/abs/2304.06129)). `llm`/`clip` require `GEMINI_API_KEY`. |
 
 <details>
 <summary>All parameters</summary>
