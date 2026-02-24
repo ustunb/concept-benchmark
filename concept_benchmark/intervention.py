@@ -328,8 +328,8 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
         mask = np.zeros_like(batch.C_pred, dtype=bool)
         self._apply_ordering(mask, order, selected, config=config)
         return StrategyProposal(
-            mask=mask, 
-            ordering_used=order, 
+            mask=mask,
+            ordering_used=order,
             selected_instances=selected,
             details={
                 "selective_acc_before": selective_acc_before,
@@ -695,7 +695,7 @@ class ConceptInterventionRunner:
     ) -> InterventionResult:
 
         # Future: sample noise if config.noise > 0.0 (call parent)
-        if concept_true is None and config.noise <= 0.0: 
+        if concept_true is None and config.noise <= 0.0:
                 concept_true = dataset.base_concepts
 
         batch = self._build_batch(
@@ -742,7 +742,7 @@ class ConceptInterventionRunner:
 
             strat_metrics['selective_acc_after'] = (y_pred_after[~abstain_post] == batch.y_true[~abstain_post]).mean() if (~abstain_post).any() else -np.inf
             strat_metrics['coverage_after'] = 1 - abstain_post.mean()
-        
+
         elif isinstance(strategy, ScoreIntervention):
             strat_metrics['overall_acc_before'] = proposal.details.get("overall_acc_before", None)
             strat_metrics['overall_acc_after'] = proposal.details.get("overall_acc_after", None)

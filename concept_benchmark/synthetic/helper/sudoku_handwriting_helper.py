@@ -8,14 +8,14 @@ def _get_default_font(size):
         return ImageFont.load_default(size=size)
     except TypeError:
         return ImageFont.load_default()
-import random 
+import random
 import os
 import glob
 import math
 from scipy import ndimage
 from scipy.ndimage import gaussian_filter, map_coordinates
 
-class SimpleHandwrittenGenerator: 
+class SimpleHandwrittenGenerator:
     def __init__(self, fonts_dir='./fonts'):
         """ Initialize the generator with handwritten fonts.
         Args:
@@ -35,7 +35,7 @@ class SimpleHandwrittenGenerator:
         font_files = glob.glob(os.path.join(self.fonts_dir, '*.ttf'))
         font_files.extend(glob.glob(os.path.join(self.fonts_dir, '*.otf')))
         return font_files
-    
+
     def generate(self, digit, size=64, color=(91,58,99), rng_seed=None):
         """
         Generate a handwritten digit image with random variations.
@@ -107,7 +107,7 @@ class SimpleHandwrittenGenerator:
         if rng.random() > 0.7:
             result_img = self._vary_thickness(result_img, rng=rng)
         return result_img
-    
+
     def _vary_thickness(self, img, *, rng=None):
         """
         Randomly vary the thickness of the digit slightly.
@@ -133,7 +133,7 @@ class SimpleHandwrittenGenerator:
             alpha = ndimage.minimum_filter(alpha, footprint=kernel)
             img_array[:, :, 3] = alpha
         return Image.fromarray(img_array, mode='RGBA')
-    
+
     def generate_batch(self, digit, count=10, size=64, color=(0, 0, 0), base_seed=None):
         """
         Generate multiple variations of the same digit.
@@ -153,7 +153,7 @@ class SimpleHandwrittenGenerator:
             images.append(img)
         return images
 
-class AdvancedHandwrittenGenerator(SimpleHandwrittenGenerator): 
+class AdvancedHandwrittenGenerator(SimpleHandwrittenGenerator):
     def __init__(self, fonts_dir='./fonts'):
         super().__init__(fonts_dir)
 
@@ -181,7 +181,7 @@ class AdvancedHandwrittenGenerator(SimpleHandwrittenGenerator):
         img = Image.fromarray(img_array, mode='RGBA')
         img = img.resize((size, size), Image.LANCZOS)
         return img
-    
+
     def _elastic_transform(self, image, alpha, sigma):
         """Apply elastic distortion to the image."""
         random_state = np.random.RandomState(None)

@@ -1,13 +1,24 @@
 [project]
 name = "concept-benchmark"
-version = "0.0.1"
-description = "Concept Benchmark"
+version = "0.1.0"
+description = "Synthetic benchmarks for evaluating Concept Bottleneck Models."
+license = "MIT"
 authors = [
     { name = "Julian Skirzynski" },
     { name = "Harry Cheon" },
     { name = "Shreyas Kadekodi" },
     { name = "Meredith Stewart" },
     { name = "Berk Ustun" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
 requires-python = ">=3.10"
@@ -22,7 +33,6 @@ dependencies = [
     "matplotlib>=3.10.3",
     "psutil>=7.0.0",
     "torch>=2.7.1",
-    "gitpython>=3.1.45",
     "pyarrow>=21.0.0",
     "fastparquet>=2024.11.0",
     "datasets>=4.0.0",
@@ -42,6 +52,9 @@ dependencies = [
     "google-generativeai>=0.3.0",
 ]
 
+[project.urls]
+Repository = "https://github.com/ustunb/concept-benchmark"
+
 [project.scripts]
 cbm-benchmark = "concept_benchmark.cli:main"
 
@@ -60,6 +73,21 @@ default-groups = ["dev"]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = [
+    "E402",   # module-import-not-at-top (intentional lazy imports)
+    "E501",   # line-too-long (research code, not worth reformatting)
+    "E731",   # lambda-assignment (used in data pipelines)
+    "E701",   # multiple-statements-on-one-line-colon
+    "E702",   # multiple-statements-on-one-line-semicolon
+    "F841",   # unused-variable (readability assignments in drawing/data code)
+    "W291",   # trailing-whitespace
+]
 
 [tool.pytest.ini_options]
 filterwarnings = [

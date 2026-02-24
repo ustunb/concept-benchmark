@@ -17,7 +17,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: uv tool install ruff
+      - name: Lint
+        run: ruff check concept_benchmark/ tests/
+      - name: Format check
+        run: ruff format --check concept_benchmark/ tests/
+
   test:
+    needs: lint
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     env:
@@ -26,8 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]            
-        # python-version: ["3.10", "3.11", "3.12", "3.13"]
+        os: [ubuntu-latest]
         # 3.11 has bugs: meson
         python-version: ["3.10", "3.12", "3.13"]
 
