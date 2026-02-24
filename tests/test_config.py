@@ -1,6 +1,8 @@
 """Tests for config validation."""
 from __future__ import annotations
 
+from dataclasses import fields
+
 import pytest
 from concept_benchmark.config import (
     RobotBenchmarkConfig,
@@ -71,3 +73,44 @@ class TestRobotTextConfigValidation:
     def test_rejects_bad_strategy(self):
         with pytest.raises(ValueError, match="intervention_strategy must be one of"):
             RobotTextBenchmarkConfig(intervention_strategy="random")
+
+
+class TestYAMLRoundTrip:
+    """YAML serialization/deserialization preserves all public fields."""
+
+    def _assert_roundtrip(self, cfg, cls, tmp_path):
+        path = tmp_path / "config.yaml"
+        cfg.to_yaml(path)
+        restored = cls.from_yaml(path)
+        for f in fields(cls):
+            if f.name.startswith("_"):
+                continue
+            assert getattr(restored, f.name) == getattr(cfg, f.name), (
+                f"Field {f.name!r} differs after YAML round-trip"
+            )
+
+    def test_robot_config_roundtrip(self, tmp_path):
+        cfg = RobotBenchmarkConfig(
+            seed=42,
+            subconcept=True,
+            intervention_regimes=["baseline", "expert"],
+            concept_missing=0.3,
+            concept_missing_mech="mcar",
+        )
+        self._assert_roundtrip(cfg, RobotBenchmarkConfig, tmp_path)
+
+    def test_sudoku_config_roundtrip(self, tmp_path):
+        cfg = SudokuBenchmarkConfig(
+            seed=99,
+            max_corrupt=21,
+            target_accuracy=0.99,
+        )
+        self._assert_roundtrip(cfg, SudokuBenchmarkConfig, tmp_path)
+
+    def test_robot_text_config_roundtrip(self, tmp_path):
+        cfg = RobotTextBenchmarkConfig(
+            seed=7,
+            difficulty="medium",
+            intervention_regimes=["baseline", "subjective"],
+        )
+        self._assert_roundtrip(cfg, RobotTextBenchmarkConfig, tmp_path)

@@ -1,0 +1,12 @@
+{"key": "head_shape", "text": "a robot with a round head"}
+{"key": "body_shape", "text": "a robot with a round body"}
+{"key": "has_knees", "text": "a robot with knee joints"}
+{"key": "has_antennae", "text": "a robot with antennae"}
+{"key": "ears_shape", "text": "a robot with triangular ears"}
+{"key": "mouth_type", "text": "a robot with an open mouth"}
+{"key": "foot_shape_flat_trapezoid", "text": "a robot with flat trapezoid-shaped feet"}
+{"key": "foot_shape_flat_square", "text": "a robot with flat square feet"}
+{"key": "foot_shape_flat_5sided", "text": "a robot with flat five-sided feet"}
+{"key": "foot_shape_pointy_rounded", "text": "a robot with pointy rounded feet"}
+{"key": "foot_shape_pointy_square", "text": "a robot with pointy square feet"}
+{"key": "foot_shape_pointy_4sided", "text": "a robot with pointy four-sided feet"}

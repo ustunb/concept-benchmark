@@ -533,6 +533,17 @@ def run(
     if stages is None:
         stages = ["setup", "ocr", "cs", "dnn", "intervene", "selective", "align", "collect"]
 
+    # Early validation: check that dataset directory exists if we need it
+    _needs_data = {"cs", "dnn", "intervene", "selective", "align", "collect"}
+    if _needs_data & set(stages) and "setup" not in stages:
+        tab_dir = config.get_dataset_path(data_type="tabular")
+        ds_path = tab_dir / "sudoku_dataset.pkl"
+        if not ds_path.exists():
+            raise FileNotFoundError(
+                f"Dataset not found: {ds_path}\n"
+                f"Run with --stages setup ocr first, or include 'setup' and 'ocr' in --stages."
+            )
+
     device = determine_device()
     logger.info(
         "=== Sudoku Benchmark === seed=%d, stages=%s, device=%s",

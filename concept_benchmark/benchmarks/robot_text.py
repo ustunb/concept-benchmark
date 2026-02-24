@@ -706,6 +706,16 @@ def run(
     if stages is None:
         stages = ["setup", "cbm", "dnn", "intervene", "align", "collect"]
 
+    # Early validation: check that dataset exists if we need it
+    _needs_data = {"cbm", "dnn", "intervene", "align", "collect"}
+    if _needs_data & set(stages) and "setup" not in stages:
+        ds_path = config.get_dataset_path()
+        if not ds_path.exists():
+            raise FileNotFoundError(
+                f"Dataset not found: {ds_path}\n"
+                f"Run with --stages setup first, or include 'setup' in --stages."
+            )
+
     device = determine_device()
     logger.info(
         "=== Robot Text Benchmark === seed=%d, stages=%s, device=%s",

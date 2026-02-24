@@ -308,9 +308,9 @@ def train_lfcbm(
 
     concepts_file = config.lfcbm_concepts_file
     if not concepts_file:
-        from concept_benchmark.paths import data_dir
+        from concept_benchmark.paths import pkg_dir
         suffix = "_subconcept" if config.subconcept else ""
-        default = data_dir / "robot_images" / f"gt_concepts{suffix}.jsonl"
+        default = pkg_dir / "concept_descriptions" / f"gt_concepts{suffix}.jsonl"
         if default.exists():
             concepts_file = str(default)
         else:
@@ -974,15 +974,15 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
     from concept_benchmark.lfcbm import LabelFreeCBM, LFConceptSet, LFTrainingConfig
 
     # Load concept descriptions for this regime
-    from concept_benchmark.paths import data_dir
+    from concept_benchmark.paths import pkg_dir
     if regime == "llm":
         concepts_file = config.llm_concepts_file
         if not concepts_file:
-            concepts_file = str(data_dir / "robot_images" / "llm.jsonl")
+            concepts_file = str(pkg_dir / "concept_descriptions" / "llm.jsonl")
     else:  # clip
         concepts_file = config.clip_concepts_file
         if not concepts_file:
-            concepts_file = str(data_dir / "robot_images" / "clip.jsonl")
+            concepts_file = str(pkg_dir / "concept_descriptions" / "clip.jsonl")
 
     p_cf = Path(concepts_file)
     if not p_cf.is_absolute():
@@ -1451,6 +1451,16 @@ def run(
         config = RobotBenchmarkConfig.default_ideal()
     if stages is None:
         stages = ["setup", "cbm", "dnn", "intervene", "align", "collect"]
+
+    # Early validation: check that dataset exists if we need it
+    _needs_data = {"cbm", "dnn", "intervene", "align", "collect"}
+    if _needs_data & set(stages) and "setup" not in stages:
+        ds_path = config.get_dataset_path()
+        if not ds_path.exists():
+            raise FileNotFoundError(
+                f"Dataset not found: {ds_path}\n"
+                f"Run with --stages setup first, or include 'setup' in --stages."
+            )
 
     device = determine_device()
     variant = "subconcept" if config.subconcept else "ideal"
