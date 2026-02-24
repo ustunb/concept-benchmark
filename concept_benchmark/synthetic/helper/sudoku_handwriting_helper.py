@@ -161,7 +161,7 @@ class AdvancedHandwrittenGenerator(SimpleHandwrittenGenerator):
     def generate(self, digit, size=64, color=(0, 0, 0), rng_seed=None):
         """Generate with elastic distortions."""
         try:
-            import cv2
+            import cv2  # noqa: F401 — availability check only
         except ImportError:
             print("OpenCV not available, falling back to simple generation")
             return super().generate(digit, size, color, rng_seed)
@@ -184,7 +184,6 @@ class AdvancedHandwrittenGenerator(SimpleHandwrittenGenerator):
     
     def _elastic_transform(self, image, alpha, sigma):
         """Apply elastic distortion to the image."""
-        import cv2
         random_state = np.random.RandomState(None)
         shape = image.shape[:2]
         dx = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma) * alpha

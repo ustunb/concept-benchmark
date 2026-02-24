@@ -16,7 +16,6 @@ from tqdm import tqdm
 from .robot_draw import (
     ALL_ROBOT_FEATURES,
     COLOR_SCHEMES,
-    ROBOT_TYPES,
     draw_robot,
     blur_parts,
 )

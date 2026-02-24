@@ -11,7 +11,10 @@ import base64
 import json
 import os
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import TYPE_CHECKING, List, Optional, Sequence
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 class _LLMBase:

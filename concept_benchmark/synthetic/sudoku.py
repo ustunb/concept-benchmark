@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
 from tqdm.auto import tqdm
-from typing import Sequence, Tuple, Optional 
+from typing import Sequence 
 
 def _get_default_font(size):
     """Load a default font at the requested size, compatible with Pillow <10 and >=10."""
@@ -43,7 +43,7 @@ from concept_benchmark.synthetic.helper.sudoku_handwriting_helper import (
 SUDOKU_DIR = data_dir / "sudoku"
 
 
-# TODO: label noise, concept noise, concept masking toggles
+# Future: label noise, concept noise, concept masking toggles
 def create_sudoku_dataset(
     *,
     n: int = 3,

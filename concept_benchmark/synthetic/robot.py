@@ -5,7 +5,6 @@ import copy
 
 import numpy as np
 import pandas as pd
-from scipy.special import expit
 
 from concept_benchmark.data import ConceptDataset
 

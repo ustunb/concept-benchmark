@@ -12,14 +12,16 @@ __all__ = [
     "ConceptBasedModel",
 ]
 
+import copy
 import itertools
+import os
+import warnings
+from typing import Any, Callable, Dict, Optional, Tuple, Union
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import copy
-import warnings
-from typing import Any, Callable, Dict, Optional, Tuple, Union
 from sklearn.linear_model import LogisticRegression
 from tqdm import tqdm
 
@@ -843,8 +845,7 @@ class FrontEndModel:
         return self.model.predict_proba(C)
 
 
-# Consider inheriting BaseEstimator and ClassifierMixin?
-# TODO: add monte carlo sampling propagation
+# Future: add monte carlo sampling propagation
 class ConceptBasedModel:
     """
     A model that uses concept-based predictions.

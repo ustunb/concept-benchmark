@@ -4,16 +4,13 @@ from __future__ import annotations
 __all__ = ["LFTrainingConfig", "LFConceptSet", "LabelFreeCBM"]
 
 import json
-import math
-import os
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
-import torch.nn as nn
 from PIL import Image
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler

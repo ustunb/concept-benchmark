@@ -694,7 +694,7 @@ class ConceptInterventionRunner:
         instance_ids: Optional[np.ndarray] = None,
     ) -> InterventionResult:
 
-        # TODO: sample noise if config.noise > 0.0 (call parent)
+        # Future: sample noise if config.noise > 0.0 (call parent)
         if concept_true is None and config.noise <= 0.0: 
                 concept_true = dataset.base_concepts
 
@@ -714,7 +714,7 @@ class ConceptInterventionRunner:
             f" {proposal.mask.shape}, expected {batch.C_pred.shape}."
             )
 
-        # TODO: see if we can get rid of explicit >= 0.5
+        # Future: consider removing explicit >= 0.5 threshold
         # Determine how to get predictions from the downstream model.
         # Conceptual safeguards operate on concept probabilities, others on binarized concepts.
         if isinstance(strategy, ConceptualSafeguardsStrategy):

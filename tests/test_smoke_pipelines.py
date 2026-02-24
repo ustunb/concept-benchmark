@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import torch
 
 
 # ── Shared tiny concept space ────────────────────────────────────────
@@ -134,8 +133,6 @@ def test_robot_text_generation_and_training():
     """Generate ~20 robot text descriptions and train a tiny text detector."""
     from concept_benchmark.synthetic.robot import create_robot_text_dataset
     from concept_benchmark.synthetic.helper.robot_catalog import generate_robot_catalog
-    from concept_benchmark.data import ConceptDataset
-    from concept_benchmark.models import ConceptDetector, ConceptBasedModel, FrontEndModel
 
     # Step 1: Generate catalog (no images)
     catalog_df, _ = generate_robot_catalog(

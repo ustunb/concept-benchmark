@@ -4,7 +4,6 @@ These tests load saved artifacts (datasets, models, results CSVs) and
 verify that key metrics match the expected values from the paper.
 They serve as a safety net during refactoring.
 """
-import numpy as np
 import pandas as pd
 import pytest
 

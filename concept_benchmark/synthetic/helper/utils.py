@@ -6,7 +6,6 @@ import re
 import numpy as np
 from colorir import StackPalette
 from colorir import simplified_dist as colordist
-from pero import Color
 
 
 # Color Schemes
