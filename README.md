@@ -107,6 +107,38 @@ This benchmark targets decision-support settings where a human uses the model's 
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
 </p>
 
+The following example uses the subconcept variant (12 fine-grained foot subtypes instead of 7 coarse concepts), masks 20% of concept labels during training (MCAR), and tests whether imposing a sign constraint on the `has_knees` weight preserves or destroys the benefit of interventions.
+
+```python
+from concept_benchmark.benchmarks import robot
+from concept_benchmark.config import RobotBenchmarkConfig, SUBCONCEPT_DROP
+
+cfg = RobotBenchmarkConfig(
+    seed=1014,
+    size="medium",                             # 32x32 pixel images
+    model_type="stochastic",                   # stochastic labeling function
+    subconcept=True,                           # 12 subconcepts instead of 7
+    drop_concepts=list(SUBCONCEPT_DROP),        # which concepts to exclude
+    spurious_features=["has_elbows", "hand_shape"],
+    concept_missing=0.2,                       # mask 20% of concept labels
+    concept_missing_mech="mcar",               # missing completely at random
+    intervention_budgets=[1, 3],               # correct k=1 or k=3 concepts
+    intervention_thresholds=[0.2],
+    alignment_constraints={"has_knees": 1},    # force has_knees weight to be positive
+)
+
+data = robot.setup_dataset(cfg)
+cbm = robot.train_cbm(cfg, data)
+dnn = robot.train_dnn(cfg, data)
+
+# correct up to k concept predictions per sample and measure label accuracy
+results = robot.run_interventions(cfg, cbm, data)
+print(results[["budget", "accuracy"]].to_string(index=False))
+
+# retrain with the sign constraint and check whether interventions still help
+align_stats = robot.align(cfg, cbm, data)
+```
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `drop_concepts` | `IDEAL_DROP` | Which concepts to exclude. Two presets are provided (`IDEAL_DROP` for 7 coarse concepts, `SUBCONCEPT_DROP` for 12 fine-grained foot subtypes), or define your own. |
@@ -141,38 +173,6 @@ See `RobotBenchmarkConfig` and `RobotTextBenchmarkConfig` in [`concept_benchmark
 > export GEMINI_API_KEY=your_key_here
 > ```
 
-The following example uses the subconcept variant (12 fine-grained foot subtypes instead of 7 coarse concepts), masks 20% of concept labels during training (MCAR), and tests whether imposing a sign constraint on the `has_knees` weight preserves or destroys the benefit of interventions.
-
-```python
-from concept_benchmark.benchmarks import robot
-from concept_benchmark.config import RobotBenchmarkConfig, SUBCONCEPT_DROP
-
-cfg = RobotBenchmarkConfig(
-    seed=1014,
-    size="medium",                             # 32x32 pixel images
-    model_type="stochastic",                   # stochastic labeling function
-    subconcept=True,                           # 12 subconcepts instead of 7
-    drop_concepts=list(SUBCONCEPT_DROP),        # which concepts to exclude
-    spurious_features=["has_elbows", "hand_shape"],
-    concept_missing=0.2,                       # mask 20% of concept labels
-    concept_missing_mech="mcar",               # missing completely at random
-    intervention_budgets=[1, 3],               # correct k=1 or k=3 concepts
-    intervention_thresholds=[0.2],
-    alignment_constraints={"has_knees": 1},    # force has_knees weight to be positive
-)
-
-data = robot.setup_dataset(cfg)
-cbm = robot.train_cbm(cfg, data)
-dnn = robot.train_dnn(cfg, data)
-
-# correct up to k concept predictions per sample and measure label accuracy
-results = robot.run_interventions(cfg, cbm, data)
-print(results[["budget", "accuracy"]].to_string(index=False))
-
-# retrain with the sign constraint and check whether interventions still help
-align_stats = robot.align(cfg, cbm, data)
-```
-
 ### Sudoku Validation
 
 This benchmark targets automation settings where the system handles routine cases and defers uncertain ones to a human. The task is to determine whether a 9x9 Sudoku board is valid, i.e., contains the digits 1-9 exactly once in each row, column, and block. The 27 concepts correspond to the validity of each row, column, and 3x3 block. A board is valid if and only if all 27 concepts are true (AND structure), so a single violated concept is enough to invalidate the board. When the model abstains, a human can verify specific concepts (e.g., "is row 5 valid?") to resolve the uncertainty.
@@ -180,6 +180,25 @@ This benchmark targets automation settings where the system handles routine case
 <p align="center">
   <img src="docs/assets/sudoku_handwritten.png" width="400" alt="Sudoku board with handwritten digits and concept annotations">
 </p>
+
+The following example generates 1000 boards with handwritten digits, corrupting up to 9 cells in invalid boards, and requires 95% accuracy on kept predictions.
+
+```python
+from concept_benchmark.benchmarks import sudoku
+from concept_benchmark.config import SudokuBenchmarkConfig
+
+cfg = SudokuBenchmarkConfig(
+    seed=171,
+    max_corrupt=9,
+    handwriting=True,
+    target_accuracy=0.95,
+)
+
+sudoku.setup_dataset(cfg)                   # generate boards with handwritten digits
+sudoku.train_ocr(cfg)                       # train digit recognizer
+cs_model = sudoku.train_cs(cfg)             # train concept-supervised model
+results = sudoku.run_interventions(cfg, cs_model)  # measure effect of concept verification
+```
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -200,23 +219,6 @@ This benchmark targets automation settings where the system handles routine case
 </details>
 
 See `SudokuBenchmarkConfig` in [`concept_benchmark/config.py`](concept_benchmark/config.py) for the full list.
-
-```python
-from concept_benchmark.benchmarks import sudoku
-from concept_benchmark.config import SudokuBenchmarkConfig
-
-cfg = SudokuBenchmarkConfig(
-    seed=171,
-    max_corrupt=9,
-    handwriting=True,
-    target_accuracy=0.95,
-)
-
-sudoku.setup_dataset(cfg)
-sudoku.train_ocr(cfg)
-cs_model = sudoku.train_cs(cfg)
-results = sudoku.run_interventions(cfg, cs_model)
-```
 
 ## Citation
 
