@@ -7,7 +7,7 @@
   <img src="docs/assets/logo.svg" width="400" alt="Concept Benchmark logo">
 </p>
 
-**Concept Benchmark** is a Python package for benchmarking [concept bottleneck models](https://arxiv.org/abs/2007.04612) (CBMs). It provides synthetic datasets with fully-specified ground-truth concept labels, enabling controlled evaluation of CBM pipelines: concept detection accuracy, intervention effectiveness, robustness to noisy or missing annotations, and alignment between learned and expected concept-label relationships. For more details, see [our paper](https://arxiv.org/abs/TODO).
+**Concept Benchmark** is a Python package for benchmarking [concept bottleneck models](https://arxiv.org/abs/2007.04612) (CBMs). It provides synthetic datasets with fully-specified ground-truth concept labels, enabling controlled evaluation of CBM pipelines: concept detection accuracy, intervention effectiveness, robustness to noisy or missing annotations, and alignment between learned and expected concept-label relationships.
 
 ## Table of Contents
 
@@ -25,6 +25,12 @@ cd concept-benchmark
 source venv/bin/activate
 ```
 
+Verify the installation:
+
+```bash
+python -c "import concept_benchmark; print('OK')"
+```
+
 You can also install directly via pip (note: `./install.sh` also installs dev tools like `pytest` and `ruff`):
 
 ```bash
@@ -35,49 +41,23 @@ pip install -e .
 
 A CBM pipeline has three steps: (1) generate a dataset with ground-truth concept annotations, (2) train a concept bottleneck model that predicts concepts from inputs and labels from concepts, and (3) evaluate whether correcting ("intervening on") the model's concept predictions at test time improves label accuracy.
 
-The example below runs this pipeline on the robot benchmark. It uses the **subconcept** variant (12 fine-grained foot shape features instead of the default 7 coarse concepts), masks 20% of concept labels during training (MCAR), and tests whether interventions help recover the lost accuracy.
+The example below runs this pipeline on the robot benchmark with default settings:
 
 ```python
 from concept_benchmark.benchmarks import robot
-from concept_benchmark.config import RobotBenchmarkConfig, SUBCONCEPT_DROP
+from concept_benchmark.config import RobotBenchmarkConfig
 
-cfg = RobotBenchmarkConfig(
-    seed=1014,
-    size="medium",                             # 32x32 pixel images
-    model_type="stochastic",                   # stochastic label rule
-    subconcept=True,                           # use 12 subconcepts (vs 7 ideal)
-    drop_concepts=list(SUBCONCEPT_DROP),        # which concepts to exclude
-    spurious_features=["has_elbows", "hand_shape"],
-    concept_missing=0.2,                       # mask 20% of concept labels
-    concept_missing_mech="mcar",               # missing completely at random
-    intervention_budgets=[1, 3],               # intervene on k=1, k=3 concepts
-    intervention_thresholds=[0.2],
-    alignment_constraints={"has_knees": 1},    # test sign constraint on has_knees
-)
-
-# 1. Generate dataset: robot images with concept annotations and train/val/test splits
-data = robot.setup_dataset(cfg)
-
-# 2. Train CBM: concept detector (image -> concept probabilities) + frontend (concepts -> label)
-cbm = robot.train_cbm(cfg, data)
-
-# 3. Train DNN baseline: end-to-end model that bypasses concepts entirely
-dnn = robot.train_dnn(cfg, data)
-
-# 4. Intervene: for each test sample, correct up to k concept predictions and measure
-#    whether the label prediction improves
-results = robot.run_interventions(cfg, cbm, data)
-print(results[["budget", "accuracy"]].to_string(index=False))
-
-# 5. Alignment: retrain the frontend with a monotonicity constraint (has_knees must have
-#    positive weight) and check whether interventions still help under the constraint
-align_stats = robot.align(cfg, cbm, data)
+cfg = RobotBenchmarkConfig(seed=1014)
+data = robot.setup_dataset(cfg)                # generate 32x32 robot images
+cbm = robot.train_cbm(cfg, data)               # concept detector + frontend
+dnn = robot.train_dnn(cfg, data)               # end-to-end baseline
+results = robot.run_interventions(cfg, cbm, data)  # test concept corrections
 ```
 
 The same pipeline runs from the CLI in one command:
 
 ```bash
-cbm-benchmark robot --seed 1014 --subconcept
+cbm-benchmark robot --seed 1014
 ```
 
 For fully-commented examples, see [`scripts/demo_robot.py`](scripts/demo_robot.py) and [`scripts/demo_sudoku.py`](scripts/demo_sudoku.py).
@@ -135,21 +115,30 @@ Classify synthetic robots into two species (**glorp** vs. **drent**) based on vi
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `subconcept` | `False` | Use 12 fine-grained foot subtypes instead of 7 coarse concepts |
+| `drop_concepts` | `IDEAL_DROP` | Concept names to exclude. Controls concept granularity. |
+| `concept_missing` | `0.0` | Fraction of concept labels to mask during training |
+| `regimes` | `["baseline"]` | Intervention regimes: `baseline` (perfect), `expert` (noisy human), `subjective` (noisy concepts), `machine`/`llm`/`clip` (LFCBM-discovered). `llm`/`clip` require `GEMINI_API_KEY`. |
+
+<details>
+<summary>All parameters</summary>
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
 | `seed` | `1014` / `1337` | Random seed (image / text) |
 | `size` | `"medium"` | Image resolution: `"small"` (8px), `"medium"` (32px), `"large"` (600px). Image only. |
 | `model_type` | `"stochastic"` | Label model: `"deterministic"` or `"stochastic"` |
 | `model_rule` | see `config.py` | Python expression defining the label rule over concepts |
 | `weights` | `{"mouth_type": 5, ...}` | Concept weights for the stochastic label model |
-| `drop_concepts` | `IDEAL_DROP` | Concept names to exclude. Controls concept granularity. |
-| `concept_missing` | `0.0` | Fraction of concept labels to mask during training |
 | `concept_missing_mech` | `"none"` | Missingness mechanism: `"none"`, `"mcar"`, or `"mnar"` |
 | `intervention_budgets` | `[1, 3]` | Number of concepts to intervene on per sample |
 | `intervention_thresholds` | `[0.2, 0.4]` | Concept confidence thresholds for intervention candidates |
 | `intervention_strategy` | `"kflip"` | `"kflip"` (up-to-k, tries sizes 1 through *k*) or `"exact_k"` (exactly *k* concepts) |
-| `regimes` | `["baseline"]` | Intervention regimes: `baseline` (perfect), `expert` (noisy human), `subjective` (noisy concepts), `machine`/`llm`/`clip` (LFCBM-discovered). `llm`/`clip` require `GEMINI_API_KEY`. See paper. |
 | `alignment_constraints` | `{}` | Sign constraints on concept weights (e.g., `{"has_knees": 1}`). Retrains frontend and re-evaluates interventions. |
 | `difficulty` | `"hard"` | Corpus difficulty (text only) |
 | `generic_rate` | `0.7` | Fraction of test set using concept-ambiguous text (text only) |
+
+</details>
 
 The full list of parameters is documented in `RobotBenchmarkConfig` and `RobotTextBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
 
@@ -158,7 +147,7 @@ The full list of parameters is documented in `RobotBenchmarkConfig` and `RobotTe
 > export GEMINI_API_KEY=your_key_here
 > ```
 
-The example below uses the paper's default seed and switches to the 12 fine-grained subconcepts. It also masks 20% of concept labels at random (MCAR) to test whether interventions can recover accuracy lost to missing annotations.
+The example below uses the **subconcept** variant (12 fine-grained foot shape features instead of the default 7 coarse concepts), masks 20% of concept labels during training (MCAR), and tests alignment constraints -- matching the paper's experimental setup.
 
 ```python
 from concept_benchmark.benchmarks import robot
@@ -166,15 +155,35 @@ from concept_benchmark.config import RobotBenchmarkConfig, SUBCONCEPT_DROP
 
 cfg = RobotBenchmarkConfig(
     seed=1014,
-    subconcept=True,
-    drop_concepts=list(SUBCONCEPT_DROP),
-    concept_missing=0.2,
-    concept_missing_mech="mcar",
+    size="medium",                             # 32x32 pixel images
+    model_type="stochastic",                   # stochastic label rule
+    subconcept=True,                           # use 12 subconcepts (vs 7 ideal)
+    drop_concepts=list(SUBCONCEPT_DROP),        # which concepts to exclude
+    spurious_features=["has_elbows", "hand_shape"],
+    concept_missing=0.2,                       # mask 20% of concept labels
+    concept_missing_mech="mcar",               # missing completely at random
+    intervention_budgets=[1, 3],               # intervene on k=1, k=3 concepts
+    intervention_thresholds=[0.2],
+    alignment_constraints={"has_knees": 1},    # test sign constraint on has_knees
 )
 
+# 1. Generate dataset: robot images with concept annotations and train/val/test splits
 data = robot.setup_dataset(cfg)
+
+# 2. Train CBM: concept detector (image -> concept probabilities) + frontend (concepts -> label)
 cbm = robot.train_cbm(cfg, data)
+
+# 3. Train DNN baseline: end-to-end model that bypasses concepts entirely
+dnn = robot.train_dnn(cfg, data)
+
+# 4. Intervene: for each test sample, correct up to k concept predictions and measure
+#    whether the label prediction improves
 results = robot.run_interventions(cfg, cbm, data)
+print(results[["budget", "accuracy"]].to_string(index=False))
+
+# 5. Alignment: retrain the frontend with a monotonicity constraint (has_knees must have
+#    positive weight) and check whether interventions still help under the constraint
+align_stats = robot.align(cfg, cbm, data)
 ```
 
 ### Sudoku Validation
@@ -196,13 +205,21 @@ Determine whether a 9x9 sudoku board is valid. The 27 concepts correspond to the
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `max_corrupt` | `9` | Maximum cells corrupted in invalid boards (higher = harder to detect) |
+| `target_accuracy` | `0.9` | Minimum accuracy demanded on kept predictions |
+
+<details>
+<summary>All parameters</summary>
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
 | `seed` | `171` | Random seed for reproducibility |
 | `n_samples` | `1000` | Number of boards to generate |
-| `max_corrupt` | `9` | Maximum cells corrupted in invalid boards (higher = harder to detect) |
 | `valid_ratio` | `0.5` | Fraction of valid boards |
 | `handwriting` | `True` | Render digits in handwritten style (enables OCR pipeline) |
-| `target_accuracy` | `0.9` | Minimum accuracy demanded on kept predictions |
 | `intervention_thresholds` | `[0.2, 0.4, 0.6, 0.8]` | Concept confidence thresholds for intervention candidates |
+
+</details>
 
 The full list of parameters is documented in `SudokuBenchmarkConfig` (see [`concept_benchmark/config.py`](concept_benchmark/config.py)).
 
