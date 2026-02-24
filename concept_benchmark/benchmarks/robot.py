@@ -26,11 +26,7 @@ from concept_benchmark.benchmarks._common import (
     patch_macos_dataloader,
     run_alignment,
 )
-from concept_benchmark.config import (
-    MISSING_PROP,
-    SUBCONCEPT_DROP,
-    RobotBenchmarkConfig,
-)
+from concept_benchmark.config import RobotBenchmarkConfig
 from concept_benchmark.ext.fileutils import load, save
 from concept_benchmark.models import (
     ConceptBasedModel,
@@ -1287,42 +1283,28 @@ def collect_results(
     import json
 
     if configs is None:
-        configs = []
-        for subconcept in [False, True]:
-            for missing, missing_mech in [
-                (0.0, "none"),
-                (MISSING_PROP, "mcar"),
-                (MISSING_PROP, "mnar"),
-            ]:
-                cfg = RobotBenchmarkConfig(
-                    subconcept=subconcept,
-                    concept_missing=missing,
-                    concept_missing_mech=missing_mech,
-                )
-                if subconcept:
-                    cfg.drop_concepts = list(SUBCONCEPT_DROP)
-                configs.append(cfg)
+        configs = [RobotBenchmarkConfig.default_ideal()]
 
-    ideal_config = RobotBenchmarkConfig.default_ideal()
-    data = load(ideal_config.get_dataset_path())
     device = determine_device()
     loader_config = get_loader_config(device)
-
     rows = []
 
-    # ── DNN accuracy (shared baseline) ───────────────────────────────
-    dnn_weights = load(ideal_config.get_model_path("dnn"))
-    dnn = RobotClassifierCNN(input_size=ideal_config.input_size).to(device)
-    dnn.load_state_dict(dnn_weights)
-    test_loader = data.test.loader(shuffle=False, **loader_config)
-    dnn_accuracy = compute_accuracy(dnn, test_loader, device)
-
-    # Emit one DNN row per dataset
-    dataset_labels_seen = set()
+    # ── Per-config: DNN, CBM, interventions, alignment ───────────────
     for cfg in configs:
         label = _dataset_label(cfg)
-        if label not in dataset_labels_seen:
-            dataset_labels_seen.add(label)
+
+        # Load this config's dataset
+        data = load(cfg.get_dataset_path())
+
+        # DNN accuracy
+        dnn_path = cfg.get_model_path("dnn")
+        dnn_accuracy = None
+        if dnn_path.exists():
+            dnn_weights = load(dnn_path)
+            dnn = RobotClassifierCNN(input_size=cfg.input_size).to(device)
+            dnn.load_state_dict(dnn_weights)
+            test_loader = data.test.loader(shuffle=False, **loader_config)
+            dnn_accuracy = compute_accuracy(dnn, test_loader, device)
             rows.append({
                 "dataset": label,
                 "model": "dnn",
@@ -1335,20 +1317,21 @@ def collect_results(
                 "predictions_changed": "",
             })
 
-    # ── Per-config: CBM, interventions, alignment ────────────────────
-    for cfg in configs:
-        label = _dataset_label(cfg)
-
         # CBM no-intervention (k=0)
-        cbm = load(cfg.get_model_path("cbm"))
+        cbm_path = cfg.get_model_path("cbm")
+        if not cbm_path.exists():
+            logger.warning("CBM not found for %s, skipping: %s", label, cbm_path)
+            continue
+        cbm = load(cbm_path)
         cbm_acc = float((cbm.predict(data.test) == data.test.y).mean())
+        gain_ref = dnn_accuracy if dnn_accuracy is not None else cbm_acc
         rows.append({
             "dataset": label,
             "model": "cbm",
             "budget": 0,
             "threshold": "",
             "accuracy": round(cbm_acc, 4),
-            "gain": round(cbm_acc - dnn_accuracy, 4),
+            "gain": round(cbm_acc - gain_ref, 4),
             "predictions_intervened_on": "",
             "avg_concepts_per_sample": "",
             "predictions_changed": "",
@@ -1375,7 +1358,7 @@ def collect_results(
                     "budget": budget,
                     "threshold": 0.2,
                     "accuracy": round(acc, 4),
-                    "gain": round(acc - dnn_accuracy, 4),
+                    "gain": round(acc - gain_ref, 4),
                     "predictions_intervened_on": pio,
                     "avg_concepts_per_sample": avg_cps,
                     "predictions_changed": int(row["predictions_changed"]),
@@ -1394,7 +1377,7 @@ def collect_results(
                     "budget": 0,
                     "threshold": "",
                     "accuracy": round(aligned_acc, 4),
-                    "gain": round(aligned_acc - dnn_accuracy, 4),
+                    "gain": round(aligned_acc - gain_ref, 4),
                     "predictions_intervened_on": "",
                     "avg_concepts_per_sample": "",
                     "predictions_changed": "",
@@ -1436,7 +1419,7 @@ def collect_results(
                             "budget": 3,
                             "threshold": 0.2,
                             "accuracy": round(float(res["accuracy"]), 4),
-                            "gain": round(float(res["accuracy"]) - dnn_accuracy, 4),
+                            "gain": round(float(res["accuracy"]) - gain_ref, 4),
                             "predictions_intervened_on": pio,
                             "avg_concepts_per_sample": avg_cps,
                             "predictions_changed": int(res["predictions_changed"]),
@@ -1455,14 +1438,12 @@ def collect_results(
 def run(
     config: Optional[RobotBenchmarkConfig] = None,
     stages: Optional[List[str]] = None,
-    missing: bool = True,
 ) -> None:
-    """Run the full robot benchmark pipeline.
+    """Run the robot benchmark pipeline for a single configuration.
 
     Args:
         config: Benchmark configuration. Defaults to ideal.
         stages: List of stages to run. Default: all.
-        missing: Whether to also run MCAR/MNAR variants.
     """
     patch_macos_dataloader()
 
@@ -1478,162 +1459,42 @@ def run(
         config.seed, variant, stages, device,
     )
 
-    # Setup
     if "setup" in stages:
         logger.info("=== Stage: setup ===")
-        # Ideal
-        ideal_cfg = RobotBenchmarkConfig.default_ideal()
-        ideal_cfg.seed = config.seed
-        setup_dataset(ideal_cfg)
+        setup_dataset(config)
 
-        # Subconcept
-        sub_cfg = RobotBenchmarkConfig.default_subconcept()
-        sub_cfg.seed = config.seed
-        setup_dataset(sub_cfg)
-
-    def _copy_regime_fields(src, dst):
-        """Copy regime-related config fields from src to dst."""
-        dst.intervention_regimes = list(src.intervention_regimes)
-        dst.intervention_strategy = src.intervention_strategy
-        dst.expert_intervention_accuracy = src.expert_intervention_accuracy
-        dst.subjective_noise_rate = src.subjective_noise_rate
-        dst.subjective_intervention_accuracy = src.subjective_intervention_accuracy
-        dst.lfcbm_concepts_file = src.lfcbm_concepts_file
-        dst.llm_concepts_file = src.llm_concepts_file
-        dst.clip_concepts_file = src.clip_concepts_file
-        dst.llm_provider = src.llm_provider
-        dst.llm_model = src.llm_model
-        dst.llm_api_key = src.llm_api_key
-        dst.llm_api_key_env = src.llm_api_key_env
-        dst.force_retrain = src.force_retrain
-
-    # CBM training
     if "cbm" in stages:
         logger.info("=== Stage: cbm ===")
-        for make_cfg in [RobotBenchmarkConfig.default_ideal, RobotBenchmarkConfig.default_subconcept]:
-            cfg = make_cfg()
-            cfg.seed = config.seed
-            if cfg.get_model_path("cbm").exists():
-                logger.info("Using existing CBM: %s", cfg.get_model_path("cbm"))
-            else:
-                train_cbm(cfg)
-
-        if missing:
-            for mech in ["mcar", "mnar"]:
-                for subconcept in [False, True]:
-                    cfg = (
-                        RobotBenchmarkConfig.default_subconcept()
-                        if subconcept
-                        else RobotBenchmarkConfig.default_ideal()
-                    )
-                    cfg.seed = config.seed
-                    cfg.concept_missing = MISSING_PROP
-                    cfg.concept_missing_mech = mech
-                    if cfg.get_model_path("cbm").exists():
-                        logger.info("Using existing CBM: %s", cfg.get_model_path("cbm"))
-                    else:
-                        train_cbm(cfg)
-
-        # Train regime-specific models if needed
+        if config.get_model_path("cbm").exists() and not config.force_retrain:
+            logger.info("Using existing CBM: %s", config.get_model_path("cbm"))
+        else:
+            train_cbm(config)
         if "subjective" in config.intervention_regimes:
-            for make_cfg in [RobotBenchmarkConfig.default_ideal, RobotBenchmarkConfig.default_subconcept]:
-                cfg = make_cfg()
-                cfg.seed = config.seed
-                _copy_regime_fields(config, cfg)
-                if cfg.get_model_path("cbm_subjective").exists():
-                    logger.info("Using existing subjective CBM: %s", cfg.get_model_path("cbm_subjective"))
-                else:
-                    train_cbm_subjective(cfg)
-
-            if missing:
-                for mech in ["mcar", "mnar"]:
-                    for subconcept in [False, True]:
-                        cfg = (
-                            RobotBenchmarkConfig.default_subconcept()
-                            if subconcept
-                            else RobotBenchmarkConfig.default_ideal()
-                        )
-                        cfg.seed = config.seed
-                        cfg.concept_missing = MISSING_PROP
-                        cfg.concept_missing_mech = mech
-                        _copy_regime_fields(config, cfg)
-                        if cfg.get_model_path("cbm_subjective").exists():
-                            logger.info("Using existing subjective CBM: %s", cfg.get_model_path("cbm_subjective"))
-                        else:
-                            train_cbm_subjective(cfg)
-
+            if config.get_model_path("cbm_subjective").exists() and not config.force_retrain:
+                logger.info("Using existing subjective CBM: %s", config.get_model_path("cbm_subjective"))
+            else:
+                train_cbm_subjective(config)
         if "machine" in config.intervention_regimes:
-            for make_cfg in [RobotBenchmarkConfig.default_ideal, RobotBenchmarkConfig.default_subconcept]:
-                cfg = make_cfg()
-                cfg.seed = config.seed
-                _copy_regime_fields(config, cfg)
-                if cfg.get_model_path("lfcbm").exists():
-                    logger.info("Using existing LFCBM: %s", cfg.get_model_path("lfcbm"))
-                else:
-                    train_lfcbm(cfg)
+            if config.get_model_path("lfcbm").exists() and not config.force_retrain:
+                logger.info("Using existing LFCBM: %s", config.get_model_path("lfcbm"))
+            else:
+                train_lfcbm(config)
 
-            if missing:
-                for mech in ["mcar", "mnar"]:
-                    for subconcept in [False, True]:
-                        cfg = (
-                            RobotBenchmarkConfig.default_subconcept()
-                            if subconcept
-                            else RobotBenchmarkConfig.default_ideal()
-                        )
-                        cfg.seed = config.seed
-                        cfg.concept_missing = MISSING_PROP
-                        cfg.concept_missing_mech = mech
-                        _copy_regime_fields(config, cfg)
-                        if cfg.get_model_path("lfcbm").exists():
-                            logger.info("Using existing LFCBM: %s", cfg.get_model_path("lfcbm"))
-                        else:
-                            train_lfcbm(cfg)
-
-    # DNN training
     if "dnn" in stages:
         logger.info("=== Stage: dnn ===")
-        ideal_cfg = RobotBenchmarkConfig.default_ideal()
-        ideal_cfg.seed = config.seed
-        if ideal_cfg.get_model_path("dnn").exists():
-            logger.info("Using existing DNN: %s", ideal_cfg.get_model_path("dnn"))
+        if config.get_model_path("dnn").exists() and not config.force_retrain:
+            logger.info("Using existing DNN: %s", config.get_model_path("dnn"))
         else:
-            train_dnn(ideal_cfg)
+            train_dnn(config)
 
-    # Interventions
     if "intervene" in stages:
         logger.info("=== Stage: intervene ===")
-        for make_cfg in [RobotBenchmarkConfig.default_ideal, RobotBenchmarkConfig.default_subconcept]:
-            cfg = make_cfg()
-            cfg.seed = config.seed
-            _copy_regime_fields(config, cfg)
-            run_interventions(cfg)
+        run_interventions(config)
 
-        if missing:
-            for mech in ["mcar", "mnar"]:
-                for subconcept in [False, True]:
-                    cfg = (
-                        RobotBenchmarkConfig.default_subconcept()
-                        if subconcept
-                        else RobotBenchmarkConfig.default_ideal()
-                    )
-                    cfg.seed = config.seed
-                    cfg.concept_missing = MISSING_PROP
-                    cfg.concept_missing_mech = mech
-                    _copy_regime_fields(config, cfg)
-                    run_interventions(cfg)
-
-    # Alignment
     if "align" in stages:
         logger.info("=== Stage: align ===")
-        ideal_cfg = RobotBenchmarkConfig.default_ideal()
-        ideal_cfg.seed = config.seed
-        align(ideal_cfg)
+        align(config)
 
-        sub_cfg = RobotBenchmarkConfig.default_subconcept()
-        sub_cfg.seed = config.seed
-        align(sub_cfg)
-
-    # Collect results
     if "collect" in stages:
         logger.info("=== Stage: collect ===")
-        collect_results()
+        collect_results([config])

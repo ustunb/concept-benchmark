@@ -9,14 +9,13 @@
 
 **Concept Benchmark** is a Python package for benchmarking [concept bottleneck models](https://arxiv.org/abs/2007.04612) (CBMs). It provides synthetic datasets with ground-truth concept labels, allowing users to vary concept granularity, annotation quality, and the labeling rule, and measure how each factor affects model performance and the value of interventions. The package includes two benchmarks -- robot classification (decision support) and Sudoku validation (automation) -- across image, text, and tabular modalities.
 
-For more details, see [our paper](https://arxiv.org/abs/TODO).
-
 ## Table of Contents
 
 1. [Installation](#installation)
 2. [Quick Start](#quick-start)
 3. [Benchmarks](#benchmarks)
-4. [Citation](#citation)
+4. [CLI Reference](#cli-reference)
+5. [Citation](#citation)
 
 ## Installation
 
@@ -52,6 +51,15 @@ data = robot.setup_dataset(cfg)                # generate 32x32 robot images
 cbm = robot.train_cbm(cfg, data)               # concept detectors + label predictor
 dnn = robot.train_dnn(cfg, data)               # end-to-end baseline (no concepts)
 results = robot.run_interventions(cfg, cbm, data)  # measure effect of corrections
+print(results[["budget", "accuracy"]].to_string(index=False))
+```
+
+Expected output:
+```
+ budget  accuracy
+      0    0.8673
+      1    0.9736
+      3    0.9769
 ```
 
 The same pipeline runs from the CLI:
@@ -81,19 +89,25 @@ cbm-benchmark robot --config my_experiment.yaml
 
 ### Pipeline Stages
 
-Each benchmark runs a sequence of stages. You can select specific stages with `--stages`:
+Each benchmark runs a sequence of stages. You can select specific stages with `--stages`. Each stage corresponds to a Python API function on the benchmark module (e.g., `robot.setup_dataset()`, `sudoku.train_cs()`):
 
-| Stage | Benchmarks | What It Does |
-|-------|-----------|--------------|
-| `setup` | all | Generate synthetic dataset (images, text, or boards) |
-| `ocr` | sudoku | Train a digit recognizer on rendered board images |
-| `cbm` | robot, robot-text | Train concept detectors + label predictor |
-| `cs` | sudoku | Train concept-supervised (CS) model |
-| `dnn` | all | Train end-to-end baseline (input to label, no concepts) |
-| `intervene` | all | Correct up to *k* predicted concepts per sample and measure label accuracy change |
-| `selective` | sudoku | Compute selective accuracy and coverage at each confidence threshold |
-| `align` | all | Retrain label predictor with sign constraints on concept weights and compare to unconstrained |
-| `collect` | all | Aggregate per-stage results into a single CSV |
+| Stage | Benchmarks | Python API | What It Does |
+|-------|-----------|------------|--------------|
+| `setup` | all | `setup_dataset()` | Generate synthetic dataset (images, text, or boards) |
+| `ocr` | sudoku | `train_ocr()` | Train a digit recognizer on rendered board images |
+| `cbm` | robot, robot-text | `train_cbm()` | Train concept detectors + label predictor |
+| `cs` | sudoku | `train_cs()` | Train concept-supervised (CS) model |
+| `dnn` | all | `train_dnn()` | Train end-to-end baseline (input to label, no concepts) |
+| `intervene` | all | `run_interventions()` | Correct up to *k* predicted concepts and measure label accuracy change |
+| `selective` | sudoku | `compute_selective_results()` | Compute selective accuracy and coverage at each confidence threshold |
+| `align` | all | `align()` | Retrain label predictor with sign constraints on concept weights |
+| `collect` | all | `collect_results()` | Aggregate per-stage results into a single CSV |
+
+For example, to skip data generation and only retrain models:
+
+```bash
+cbm-benchmark robot --seed 1014 --stages cbm dnn intervene align collect
+```
 
 ## Benchmarks
 
@@ -101,13 +115,13 @@ The package includes two benchmarks. **Robot classification** is a decision-supp
 
 ### Robot Classification
 
-This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot -- **Glorp** or **Drent** -- from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The ground-truth labeling rule, which features matter, and which are spurious are all configurable, modeling settings where the true relationship between features and labels is unknown. Available as image (`cbm-benchmark robot`) and text (`cbm-benchmark robot-text`) modalities.
+This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot -- **Glorp** or **Drent** -- from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The default labeling rule is: Glorp if mouth is closed, foot is pointy, and robot has knees (all three); Drent otherwise. Which features matter and which are spurious are configurable, modeling settings where the true relationship between features and labels is unknown. Available as image (`cbm-benchmark robot`) and text (`cbm-benchmark robot-text`) modalities.
 
 <p align="center">
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
 </p>
 
-The following example uses the subconcept variant (12 fine-grained foot subtypes instead of 7 coarse concepts), masks 20% of concept labels during training (MCAR), and tests whether imposing a sign constraint on the `has_knees` weight preserves or destroys the benefit of interventions.
+The following example uses the subconcept variant (which splits foot_shape into 5 fine-grained subtypes, yielding 12 concepts instead of the default 7), masks 20% of concept labels during training (MCAR), and tests whether imposing a sign constraint on the `has_knees` weight preserves or destroys the benefit of interventions.
 
 ```python
 from concept_benchmark.benchmarks import robot
@@ -115,38 +129,61 @@ from concept_benchmark.config import RobotBenchmarkConfig, SUBCONCEPT_DROP
 
 cfg = RobotBenchmarkConfig(
     seed=1014,
-    size="medium",                             # 32x32 pixel images
-    model_type="stochastic",                   # stochastic labeling function
-    subconcept=True,                           # 12 subconcepts instead of 7
+    subconcept=True,                           # use fine-grained foot subtypes
     drop_concepts=list(SUBCONCEPT_DROP),        # which concepts to exclude
     spurious_features=["has_elbows", "hand_shape"],
     concept_missing=0.2,                       # mask 20% of concept labels
     concept_missing_mech="mcar",               # missing completely at random
-    intervention_budgets=[1, 3],               # correct k=1 or k=3 concepts
+    intervention_budgets=[1, 3],               # correct k=1 or k=3 concepts per sample
     intervention_thresholds=[0.2],
     alignment_constraints={"has_knees": 1},    # force has_knees weight to be positive
 )
 
+# run all stages
 data = robot.setup_dataset(cfg)
 cbm = robot.train_cbm(cfg, data)
 dnn = robot.train_dnn(cfg, data)
-
-# correct up to k concept predictions per sample and measure label accuracy
 results = robot.run_interventions(cfg, cbm, data)
-print(results[["budget", "accuracy"]].to_string(index=False))
-
-# retrain with the sign constraint and check whether interventions still help
 align_stats = robot.align(cfg, cbm, data)
+
+print(results[["budget", "accuracy"]].to_string(index=False))
 ```
+
+Expected output:
+```
+ budget  accuracy
+      0    0.7812
+      1    0.9212
+      3    0.9439
+```
+
+To run this experiment from the CLI, save the config to YAML and pass it with `--config`:
+
+```python
+cfg.to_yaml("my_experiment.yaml")
+```
+```bash
+cbm-benchmark robot --config my_experiment.yaml
+```
+
+For simpler experiments, CLI flags suffice. For example, to run the default subconcept variant with expert interventions:
+
+```bash
+cbm-benchmark robot --seed 1014 --subconcept --regimes baseline expert
+```
+
+See [CLI Reference](#cli-reference) for all available flags.
+
+The most important parameters used in the config above are listed below. For the full list, see `RobotBenchmarkConfig` in [`concept_benchmark/config.py`](concept_benchmark/config.py) or the fully-commented [`scripts/demo_robot.py`](scripts/demo_robot.py).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `drop_concepts` | `IDEAL_DROP` | Which concepts to exclude. Two presets are provided (`IDEAL_DROP` for 7 coarse concepts, `SUBCONCEPT_DROP` for 12 fine-grained foot subtypes), or define your own. |
+| `drop_concepts` | `IDEAL_DROP` | Which concepts to exclude. Two presets are provided: `IDEAL_DROP` for 7 coarse concepts (binary foot_shape), `SUBCONCEPT_DROP` for 12 concepts (5 fine-grained foot subtypes). |
 | `subconcept` | `False` | Shortcut that switches `drop_concepts` to `SUBCONCEPT_DROP`. |
-| `model_rule` | see `config.py` | Python expression defining the labeling rule over concepts |
-| `weights` | `{"mouth_type": 5, ...}` | Concept weights for the stochastic labeling function |
-| `concept_missing` | `0.0` | Fraction of concept labels masked during training |
-| `regimes` | `["baseline"]` | How interventions are performed: `baseline` (oracle), `expert` (noisy human), `subjective` (noisy concept labels + noisy human), `machine`/`llm`/`clip` (concepts discovered via [Label-Free CBM](https://arxiv.org/abs/2304.06129)). `llm`/`clip` require `GEMINI_API_KEY`. |
+| `model_rule` | see `config.py` | Python expression defining the labeling rule. Default: Glorp if `(mouth_closed + foot_pointy + has_knees) >= 3`. |
+| `weights` | `{"mouth_type": 5, "foot_shape": 8, "has_knees": -5}` | Concept weights for the stochastic labeling function. |
+| `concept_missing` | `0.0` | Fraction of concept labels masked during training. |
+| `regimes` | `["baseline"]` | How interventions are performed: `baseline` (oracle), `expert` (noisy human), `subjective` (noisy concept labels + noisy human), `machine`/`llm`/`clip` (concepts discovered via [Label-Free CBM](https://arxiv.org/abs/2304.06129)). |
 
 <details>
 <summary>All parameters</summary>
@@ -158,15 +195,13 @@ align_stats = robot.align(cfg, cbm, data)
 | `model_type` | `"stochastic"` | Labeling function: `"deterministic"` or `"stochastic"` |
 | `concept_missing_mech` | `"none"` | Missingness mechanism: `"none"`, `"mcar"`, or `"mnar"` |
 | `intervention_budgets` | `[1, 3]` | Number of concepts to correct per sample |
-| `intervention_thresholds` | `[0.2, 0.4]` | Concept confidence thresholds that determine which concepts are candidates for intervention |
+| `intervention_thresholds` | `[0.2, 0.4]` | Concepts whose predicted probability is within this distance of 0.5 are candidates for intervention |
 | `intervention_strategy` | `"kflip"` | `"kflip"` (up to *k* concepts) or `"exact_k"` (exactly *k*) |
 | `alignment_constraints` | `{}` | Sign constraints on concept weights (e.g., `{"has_knees": 1}`). Retrains the label predictor and re-evaluates interventions. |
 | `difficulty` | `"hard"` | Corpus difficulty (text only) |
 | `generic_rate` | `0.7` | Fraction of test set using concept-ambiguous text (text only) |
 
 </details>
-
-See `RobotBenchmarkConfig` and `RobotTextBenchmarkConfig` in [`concept_benchmark/config.py`](concept_benchmark/config.py) for the full list.
 
 > **Note:** The `llm` and `clip` regimes call the Gemini API at intervention time. Set your key before running:
 > ```bash
@@ -181,7 +216,7 @@ This benchmark targets automation settings where the system handles routine case
   <img src="docs/assets/sudoku_handwritten.png" width="400" alt="Sudoku board with handwritten digits and concept annotations">
 </p>
 
-The following example generates 1000 boards with handwritten digits, corrupting up to 9 cells in invalid boards, and requires 95% accuracy on kept predictions.
+The following example generates 1000 boards with handwritten digits, corrupting up to 9 cells in invalid boards. The concept-supervised (CS) model -- the Sudoku equivalent of a CBM -- predicts 27 binary concepts, then a label predictor determines board validity. The selective classification stage finds a confidence threshold that achieves at least 95% accuracy on kept predictions.
 
 ```python
 from concept_benchmark.benchmarks import sudoku
@@ -189,16 +224,36 @@ from concept_benchmark.config import SudokuBenchmarkConfig
 
 cfg = SudokuBenchmarkConfig(
     seed=171,
-    max_corrupt=9,
-    handwriting=True,
-    target_accuracy=0.95,
+    max_corrupt=9,                             # cells corrupted in invalid boards
+    handwriting=True,                          # render with handwritten digits
+    target_accuracy=0.95,                      # minimum accuracy on kept predictions
 )
 
-sudoku.setup_dataset(cfg)                   # generate boards with handwritten digits
-sudoku.train_ocr(cfg)                       # train digit recognizer
-cs_model = sudoku.train_cs(cfg)             # train concept-supervised model
-results = sudoku.run_interventions(cfg, cs_model)  # measure effect of concept verification
+# run all stages
+sudoku.setup_dataset(cfg)                      # generate boards + handwritten digit images
+sudoku.train_ocr(cfg)                          # train digit recognizer on cell crops
+cs_model = sudoku.train_cs(cfg)                # concept-supervised model (27 concepts -> valid/invalid)
+dnn = sudoku.train_dnn(cfg)                    # end-to-end baseline (no concepts)
+results = sudoku.run_interventions(cfg, cs_model)
+sel = sudoku.compute_selective_results(cfg)     # selective accuracy and coverage
+
+print(sel[["model", "selective_acc", "selective_cov"]].to_string(index=False))
 ```
+
+Expected output:
+```
+ model  selective_acc  selective_cov
+    cs         0.9773         0.9950
+   dnn         0.8182         0.0550
+```
+
+Or equivalently from the CLI:
+
+```bash
+cbm-benchmark sudoku --seed 171
+```
+
+The most important parameters are listed below. For the full list, see `SudokuBenchmarkConfig` in [`concept_benchmark/config.py`](concept_benchmark/config.py) or the fully-commented [`scripts/demo_sudoku.py`](scripts/demo_sudoku.py).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -218,7 +273,25 @@ results = sudoku.run_interventions(cfg, cs_model)  # measure effect of concept v
 
 </details>
 
-See `SudokuBenchmarkConfig` in [`concept_benchmark/config.py`](concept_benchmark/config.py) for the full list.
+## CLI Reference
+
+All benchmarks are run via `cbm-benchmark <benchmark>`. The following flags are available:
+
+| Flag | Benchmarks | Description |
+|------|-----------|-------------|
+| `--seed` | all | Random seed |
+| `--stages` | all | Which stages to run (default: all). See [Pipeline Stages](#pipeline-stages). |
+| `--config` | all | Path to YAML config file. CLI flags like `--regimes` and `--strategy` can further override values loaded from the file. |
+| `--subconcept` | robot | Use subconcept variant (12 concepts with fine-grained foot subtypes instead of 7 coarse) |
+| `--regimes` | robot, robot-text | Intervention regimes: `baseline`, `expert`, `subjective`, `machine`, `llm`, `clip` |
+| `--strategy` | robot, robot-text | `kflip` (up to *k*) or `exact_k` (exactly *k* concepts) |
+| `--concept-missing` | robot | Fraction of concept labels to mask (e.g. `0.2`) |
+| `--concept-missing-mech` | robot | Missingness mechanism: `none`, `mcar`, or `mnar` |
+| `--force-retrain` | robot | Retrain LFCBM/subjective models even if cached |
+| `--lfcbm` | robot-text | Also run the Label-Free CBM variant |
+| `--llm-api-key` | robot | API key for LLM provider (alternative to `GEMINI_API_KEY` env var) |
+| `--dry-run` | all | Print configuration and exit without running |
+| `-v` / `-q` | all | Verbose / quiet output |
 
 ## Citation
 

@@ -50,7 +50,13 @@ def _robot_cmd(args: argparse.Namespace) -> None:
     if getattr(args, "force_retrain", False):
         config.force_retrain = True
 
-    run(config, stages=args.stages, missing=args.missing)
+    if args.concept_missing is not None:
+        config.concept_missing = args.concept_missing
+        config.concept_missing_mech = args.concept_missing_mech or "mcar"
+    elif args.concept_missing_mech is not None:
+        config.concept_missing_mech = args.concept_missing_mech
+
+    run(config, stages=args.stages)
 
 
 def _sudoku_cmd(args: argparse.Namespace) -> None:
@@ -77,6 +83,8 @@ def _robot_text_cmd(args: argparse.Namespace) -> None:
         config = RobotTextBenchmarkConfig(seed=args.seed)
     if args.lfcbm:
         config.lfcbm_enable = True
+        if "lfcbm" not in args.stages:
+            args.stages.append("lfcbm")
     if args.regimes:
         config.intervention_regimes = args.regimes
     if args.strategy:
@@ -111,9 +119,11 @@ def main(argv: list[str] | None = None) -> None:
     )
     robot_p.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
     robot_p.add_argument("--subconcept", action="store_true")
-    robot_p.add_argument("--missing", action="store_true", default=True,
-                         help="Run MCAR/MNAR missingness variants.")
-    robot_p.add_argument("--no-missing", dest="missing", action="store_false")
+    robot_p.add_argument("--concept-missing", type=float, default=None,
+                         help="Fraction of concept labels to mask (e.g. 0.2).")
+    robot_p.add_argument("--concept-missing-mech", type=str, default=None,
+                         choices=["none", "mcar", "mnar"],
+                         help="Missingness mechanism (default: mcar if --concept-missing is set).")
     robot_p.add_argument("--regimes", nargs="+", default=None,
                          help="Intervention regimes (e.g. baseline expert subjective machine).")
     robot_p.add_argument("--strategy", type=str, default=None,

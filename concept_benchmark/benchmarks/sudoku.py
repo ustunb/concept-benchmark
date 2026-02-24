@@ -418,10 +418,7 @@ def collect_results(
     from concept_benchmark.paths import results_dir
 
     if configs is None:
-        configs = [
-            SudokuBenchmarkConfig(max_corrupt=9),
-            SudokuBenchmarkConfig(max_corrupt=21),
-        ]
+        configs = [SudokuBenchmarkConfig.default()]
 
     rows: list[dict] = []
 
@@ -574,7 +571,7 @@ def run(
 
     if "collect" in stages:
         logger.info("=== Stage: collect ===")
-        collect_results()
+        collect_results([config])
 
     logger.info("Pipeline complete!")
 
