@@ -32,11 +32,29 @@ Verify the installation:
 python -c "import concept_benchmark; print('OK')"
 ```
 
-Or, from the cloned repo, install without dev tools:
+<details>
+<summary>Manual install / troubleshooting</summary>
+
+Robot image generation requires the cairo C library. If `./install.sh` can't install it automatically, install it manually first:
+
+```bash
+# macOS
+brew install cairo pkg-config
+
+# Ubuntu / Debian
+sudo apt-get install libcairo2-dev pkg-config python3-dev
+
+# Fedora / RHEL
+sudo dnf install cairo-devel pkg-config python3-devel
+```
+
+Then install the Python package:
 
 ```bash
 pip install -e .
 ```
+
+</details>
 
 ## Quick Start
 

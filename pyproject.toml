@@ -45,7 +45,6 @@ dependencies = [
     "pero>=0.18.0",
     "pycairo>=1.28.0",
     "transformers>=4.55.2",
-    "wand>=0.6.13",
     "cvxpy>=1.4.0",
     "pyyaml>=6.0",
     "open-clip-torch>=2.20.0",
