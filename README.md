@@ -19,23 +19,7 @@
 
 ## Installation
 
-```bash
-git clone https://github.com/ustunb/concept-benchmark.git
-cd concept-benchmark
-./install.sh
-source venv/bin/activate
-```
-
-Verify the installation:
-
-```bash
-python3 -c "import concept_benchmark; print('OK')"
-```
-
-<details>
-<summary>Manual install / troubleshooting</summary>
-
-Robot image generation requires the cairo C library. If `./install.sh` can't install it automatically, install it manually first:
+The package requires the **cairo** graphics library. Install it first:
 
 ```bash
 # macOS
@@ -48,13 +32,20 @@ sudo apt-get install libcairo2-dev pkg-config python3-dev
 sudo dnf install cairo-devel pkg-config python3-devel
 ```
 
-Then install the Python package:
+Then clone and install the package:
 
 ```bash
-pip install -e .
+git clone https://github.com/ustunb/concept-benchmark.git
+cd concept-benchmark
+./install.sh
+source venv/bin/activate
 ```
 
-</details>
+Verify the installation:
+
+```bash
+python3 -c "import concept_benchmark; print('OK')"
+```
 
 ## Quick Start
 
