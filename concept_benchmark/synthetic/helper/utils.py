@@ -21,10 +21,10 @@ def generate_color_schemes(shuffle=True, random_seed=123456, include_flipped=Tru
     """
 
     # use spectral since we can easily drop similar colors
-    pal = StackPalette.load("spectral", palettes_dir=colorir.config.USR_PALETTES_DIR)
+    pal = StackPalette.load("spectral", palettes_dir=colorir.config.DEFAULT_PALETTES_DIR)
 
     # add in "dark" colors from paired for extra colors
-    qal = StackPalette.load("paired", palettes_dir=colorir.config.USR_PALETTES_DIR)
+    qal = StackPalette.load("paired", palettes_dir=colorir.config.DEFAULT_PALETTES_DIR)
     qal = StackPalette([qal[i] for i in range(1, len(qal), 2)])
 
     # we want the color schemes for the robot halves to be distinguishable

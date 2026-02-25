@@ -13,7 +13,9 @@ __all__ = [
 ]
 
 import copy
-from dataclasses import dataclass, field
+import hashlib
+import json
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -293,6 +295,23 @@ class RobotBenchmarkConfig:
         filename += "_alignment.json"
         return results_dir / filename
 
+    def _config_hash(self) -> str:
+        """Short hex hash of all config fields for filename uniqueness."""
+        d = asdict(self)
+        d.pop("llm_api_key", None)
+        blob = json.dumps(d, sort_keys=True, default=str).encode()
+        return hashlib.sha256(blob).hexdigest()[:8]
+
+    def get_collect_path(self) -> Path:
+        """Return the path for the collect-stage summary CSV."""
+        if self.drop_concepts == list(IDEAL_DROP):
+            variant = "ideal"
+        elif self.drop_concepts == list(SUBCONCEPT_DROP):
+            variant = "subconcept"
+        else:
+            variant = "custom"
+        return results_dir / f"robot_{variant}_seed{self.seed}_{self._config_hash()}_results.csv"
+
     def to_yaml(self, path: str | Path) -> None:
         """Serialize config to YAML."""
         d = {
@@ -425,6 +444,15 @@ class SudokuBenchmarkConfig:
         if self.concept_missing_mech != "none" and self.concept_missing > 0.0:
             filename += f"_cm{self.concept_missing_mech}{self.concept_missing}"
         return results_dir / f"{filename}.json"
+
+    def _config_hash(self) -> str:
+        """Short hex hash of all config fields for filename uniqueness."""
+        blob = json.dumps(asdict(self), sort_keys=True, default=str).encode()
+        return hashlib.sha256(blob).hexdigest()[:8]
+
+    def get_collect_path(self) -> Path:
+        """Return the path for the collect-stage summary CSV."""
+        return results_dir / f"sudoku_seed{self.seed}_{self._config_hash()}_results.csv"
 
     def to_yaml(self, path: str | Path) -> None:
         """Serialize config to YAML."""

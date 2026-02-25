@@ -507,7 +507,8 @@ def collect_results(
             })
 
     final_df = pd.DataFrame(rows)
-    out_path = results_dir / "sudoku_demo_results.csv"
+    cfg0 = configs[0]
+    out_path = cfg0.get_collect_path()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     final_df.to_csv(out_path, index=False)
     logger.info("Saved %d rows to %s", len(final_df), out_path)

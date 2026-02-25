@@ -93,7 +93,7 @@ You can also run this from the command line:
 cbm-benchmark robot --seed 1014 --stages setup cbm dnn intervene collect
 ```
 
-Results are saved to `results/robot_demo_results.csv`. Filter to `model == "cbm"` and `threshold == 0.2` to see the same accuracy numbers as above.
+Results are saved to `results/robot_ideal_seed1014_2d0aa353_results.csv`. Filter to `model == "cbm"` and `threshold == 0.2` to see the same accuracy numbers as above.
 
 See [`scripts/demo_robot.py`](scripts/demo_robot.py) and [`scripts/demo_sudoku.py`](scripts/demo_sudoku.py) for fully-commented examples.
 
@@ -266,7 +266,7 @@ All benchmarks are run via `cbm-benchmark <benchmark>`. Use `cbm-benchmark <benc
 
 ### Pipeline Stages
 
-Each benchmark runs a sequence of stages. Use `--stages` to run a subset. The `setup` stage generates the synthetic dataset. The `collect` stage produces a single results table (e.g., `results/robot_demo_results.csv`) with all accuracy numbers across models, intervention budgets, and alignment variants.
+Each benchmark runs a sequence of stages. Use `--stages` to run a subset. The `setup` stage generates the synthetic dataset. The `collect` stage produces a single results table (e.g., `results/robot_ideal_seed1014_2d0aa353_results.csv`) with all accuracy numbers across models, intervention budgets, and alignment variants.
 
 ```bash
 # retrain models on existing data (skip data generation)
