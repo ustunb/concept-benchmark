@@ -1481,10 +1481,12 @@ def run(
         cached_fp = fp_path.read_text().strip() if fp_path.exists() else None
 
         if force_setup or cached_fp != current_fp:
-            if cached_fp is not None and cached_fp != current_fp:
-                logger.info("Config changed since last setup — regenerating data")
             if force_setup:
                 logger.info("--force-setup: regenerating data from scratch")
+            elif cached_fp is None:
+                logger.info("No cached data found — generating dataset and robot images (this may take a minute)")
+            else:
+                logger.info("Config changed since last setup — regenerating data")
             # Clear cached images and dataset
             img_dir = config.to_dict()["output_directory"]
             if Path(img_dir).exists():

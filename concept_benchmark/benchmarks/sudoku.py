@@ -561,10 +561,12 @@ def run(
         cached_fp = fp_path.read_text().strip() if fp_path.exists() else None
 
         if force_setup or cached_fp != current_fp:
-            if cached_fp is not None and cached_fp != current_fp:
-                logger.info("Config changed since last setup — regenerating data")
             if force_setup:
                 logger.info("--force-setup: regenerating data from scratch")
+            elif cached_fp is None:
+                logger.info("No cached data found — generating sudoku boards (this may take a few minutes)")
+            else:
+                logger.info("Config changed since last setup — regenerating data")
             for dt in ("tabular", "image"):
                 ds_dir = config.get_dataset_path(data_type=dt)
                 if ds_dir.exists():
