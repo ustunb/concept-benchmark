@@ -56,6 +56,14 @@ class TestSudokuConfigValidation:
         with pytest.raises(ValueError, match="n_samples must be positive"):
             SudokuBenchmarkConfig(n_samples=0)
 
+    def test_default_data_type_is_image(self):
+        cfg = SudokuBenchmarkConfig()
+        assert cfg.data_type == "image"
+
+    def test_explicit_tabular_data_type(self):
+        cfg = SudokuBenchmarkConfig(data_type="tabular")
+        assert cfg.data_type == "tabular"
+
 
 class TestRobotTextConfigValidation:
     def test_default_config_is_valid(self):

@@ -69,6 +69,14 @@ def _sudoku_cmd(args: argparse.Namespace) -> None:
     else:
         config = SudokuBenchmarkConfig(seed=args.seed)
 
+    # CLI flags override config
+    if args.no_handwriting:
+        config.handwriting = False
+    elif getattr(args, "handwriting", None):
+        config.handwriting = True
+    if getattr(args, "data_type", None) is not None:
+        config.data_type = args.data_type
+
     run(config, stages=args.stages, force_setup=getattr(args, "force_setup", False))
 
 
@@ -147,6 +155,12 @@ def main(argv: list[str] | None = None) -> None:
         help=f"Pipeline stages to run (default: all). Valid: {' -> '.join(SUDOKU_STAGES)}",
     )
     sudoku_p.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
+    sudoku_p.add_argument("--data-type", type=str, default=None, choices=["tabular", "image"],
+                          help="Data modality: 'tabular' (pure digit values) or 'image' (OCR from board images).")
+    sudoku_p.add_argument("--handwriting", action="store_true", default=None,
+                          help="Use handwritten digits (implies --data-type image).")
+    sudoku_p.add_argument("--no-handwriting", action="store_true",
+                          help="Use printed digits (with --data-type image) or skip OCR entirely (with --data-type tabular).")
     sudoku_p.set_defaults(func=_sudoku_cmd)
 
     # Robot-text subcommand

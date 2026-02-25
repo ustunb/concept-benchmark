@@ -369,7 +369,7 @@ class SudokuBenchmarkConfig:
     valid_ratio: float = 0.5
     max_corrupt: int = 9
     seed: int = 171
-    data_type: str = "tabular"
+    data_type: str = "image"
 
     # Training
     epochs: int = 20

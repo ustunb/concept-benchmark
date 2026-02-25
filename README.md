@@ -254,7 +254,8 @@ The most important parameters are listed below. For the full list, see `SudokuBe
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `max_corrupt` | `9` | Number of cells corrupted in invalid boards (higher values produce subtler errors) |
-| `handwriting` | `True` | Render digits in handwritten style (adds an OCR stage) |
+| `data_type` | `"image"` | `"image"` evaluates on OCR-inferred digits (adds OCR stage); `"tabular"` evaluates on ground-truth digit values (no OCR). Training always uses ground-truth values. |
+| `handwriting` | `True` | Render digits in handwritten style (only applies when `data_type="image"`) |
 | `target_accuracy` | `0.9` | Minimum accuracy required on kept predictions |
 
 <details>
@@ -303,6 +304,9 @@ cbm-benchmark robot --subconcept --regimes baseline expert --stages intervene co
 | `--strategy` | robot, robot-text | `kflip` (up to *k*) or `exact_k` (exactly *k* concepts) |
 | `--concept-missing` | robot | Fraction of concept labels to mask (e.g. `0.2`) |
 | `--concept-missing-mech` | robot | Missingness mechanism: `none`, `mcar`, or `mnar` |
+| `--data-type` | sudoku | Data modality: `tabular` (ground-truth digits) or `image` (OCR from board images) |
+| `--handwriting` | sudoku | Use handwritten digits (only applies with `--data-type image`) |
+| `--no-handwriting` | sudoku | Use printed digits (only applies with `--data-type image`) |
 | `--force-setup` | all | Regenerate all data (images, boards) from scratch, even if cached |
 | `--force-retrain` | robot | Retrain LFCBM/subjective models even if cached |
 | `--lfcbm` | robot-text | Also run the Label-Free CBM variant |
