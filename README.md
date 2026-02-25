@@ -87,11 +87,13 @@ CBM (k=0): 0.8673
       7    0.9769
 ```
 
-The same pipeline runs from the CLI:
+You can also run this from the command line:
 
 ```bash
-cbm-benchmark robot --seed 1014
+cbm-benchmark robot --seed 1014 --stages setup cbm dnn intervene collect
 ```
+
+Results are saved to `results/robot_demo_results.csv`. Filter to `model == "cbm"` and `threshold == 0.2` to see the same accuracy numbers as above.
 
 See [`scripts/demo_robot.py`](scripts/demo_robot.py) and [`scripts/demo_sudoku.py`](scripts/demo_sudoku.py) for fully-commented examples.
 
