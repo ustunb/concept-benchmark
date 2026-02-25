@@ -60,6 +60,16 @@ pip install -e .
 
 A CBM predicts concepts from inputs (e.g., "has pointy feet"), then predicts the label from those concepts. At test time, a user can correct mispredicted concepts -- this is called an *intervention*. The package lets you measure whether correcting *k* concepts improves the label prediction, and how that depends on concept quality and annotation noise.
 
+The fastest way to run the benchmark is from the command line. This generates data, trains models, runs interventions, and saves a results CSV — with automatic caching so repeated runs skip completed stages:
+
+```bash
+cbm-benchmark robot --seed 1014 --stages setup cbm dnn intervene collect
+```
+
+Results are saved to `results/robot_ideal_seed1014_2d0aa353_results.csv`. Filter to `model == "cbm"` and `threshold == 0.2` to see accuracy numbers.
+
+`robot.run()` is the same pipeline, built from individual functions that you can also call directly when you want to inspect intermediate objects (e.g., the trained CBM or raw intervention results):
+
 ```python
 import numpy as np
 from concept_benchmark.benchmarks import robot
@@ -86,14 +96,6 @@ CBM (k=0): 0.8673
       3    0.9769
       7    0.9769
 ```
-
-You can also run this from the command line:
-
-```bash
-cbm-benchmark robot --seed 1014 --stages setup cbm dnn intervene collect
-```
-
-Results are saved to `results/robot_ideal_seed1014_2d0aa353_results.csv`. Filter to `model == "cbm"` and `threshold == 0.2` to see the same accuracy numbers as above.
 
 See [`scripts/demo_robot.py`](scripts/demo_robot.py) and [`scripts/demo_sudoku.py`](scripts/demo_sudoku.py) for fully-commented examples.
 
