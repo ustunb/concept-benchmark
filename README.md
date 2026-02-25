@@ -137,7 +137,6 @@ cfg = RobotBenchmarkConfig(
     alignment_constraints={"has_knees": 1},    # force has_knees weight to be positive
 )
 
-# run all stages
 data = robot.setup_dataset(cfg)
 cbm = robot.train_cbm(cfg, data)
 dnn = robot.train_dnn(cfg, data)
@@ -147,6 +146,8 @@ align_stats = robot.align(cfg, cbm, data)
 cbm_acc = float(np.mean(cbm.predict(data.test) == data.test.y))
 print(f"CBM (k=0): {cbm_acc:.4f}")
 print(results[["budget", "accuracy"]].to_string(index=False))
+
+cfg.to_yaml("my_experiment.yaml")             # save config for CLI use
 ```
 
 Expected output:
@@ -158,11 +159,8 @@ CBM (k=0): 0.7812
      12    0.9439
 ```
 
-To run this experiment from the CLI, save the config to YAML and pass it with `--config`:
+To re-run this experiment from the CLI (with automatic caching):
 
-```python
-cfg.to_yaml("my_experiment.yaml")
-```
 ```bash
 cbm-benchmark robot --config my_experiment.yaml
 ```
@@ -222,7 +220,6 @@ cfg = SudokuBenchmarkConfig(
     target_accuracy=0.95,                      # minimum accuracy on kept predictions
 )
 
-# run all stages
 sudoku.setup_dataset(cfg)                      # generate boards + handwritten digit images
 sudoku.train_ocr(cfg)                          # train digit recognizer on cell crops
 cs_model = sudoku.train_cs(cfg)                # concept-supervised model (27 concepts -> valid/invalid)
@@ -233,6 +230,8 @@ sel = sudoku.compute_selective_results(cfg)     # selective accuracy and coverag
 # Filter to the target accuracy threshold
 t95 = sel[sel["target_accuracy"] == 0.95]
 print(t95[["model", "selective_acc", "selective_cov"]].to_string(index=False))
+
+cfg.to_yaml("my_experiment.yaml")             # save config for CLI use
 ```
 
 Expected output:
@@ -242,11 +241,7 @@ model  selective_acc  selective_cov
   dnn        0.6667         0.0150
 ```
 
-Or equivalently, save the config to YAML and run from the CLI:
-
-```python
-cfg.to_yaml("my_experiment.yaml")
-```
+To re-run this experiment from the CLI (with automatic caching):
 
 ```bash
 cbm-benchmark sudoku --config my_experiment.yaml
