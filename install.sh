@@ -5,14 +5,23 @@ REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="${REPO_DIR}/venv"
 PYTHON="${PYTHON:-python3}"
 
-echo "=== Concept Benchmark Installer ==="
-echo "Repository: ${REPO_DIR}"
+# ── Progress helpers ─────────────────────────────────────────────────
+TOTAL_STEPS=5
+CURRENT_STEP=0
 
-# ── 1. Install system dependencies needed to compile pycairo ──────────
+step() {
+    CURRENT_STEP=$((CURRENT_STEP + 1))
+    echo ""
+    echo "[${CURRENT_STEP}/${TOTAL_STEPS}] $1"
+}
+
+# ── 1. System dependencies (cairo for pycairo) ──────────────────────
+step "Checking system dependencies ..."
+
 install_system_deps() {
     if [[ "$(uname)" == "Darwin" ]]; then
         if command -v brew &>/dev/null; then
-            echo "Installing system dependencies via Homebrew ..."
+            echo "  Installing cairo via Homebrew ..."
             brew install cairo pkg-config 2>/dev/null || true
         else
             echo "ERROR: Homebrew not found. Install it from https://brew.sh then re-run."
@@ -20,11 +29,11 @@ install_system_deps() {
             exit 1
         fi
     elif [[ -f /etc/debian_version ]]; then
-        echo "Installing system dependencies via apt ..."
+        echo "  Installing cairo via apt ..."
         sudo apt-get update -qq
         sudo apt-get install -y -qq libcairo2-dev pkg-config python3-dev
     elif [[ -f /etc/redhat-release ]]; then
-        echo "Installing system dependencies via dnf ..."
+        echo "  Installing cairo via dnf ..."
         sudo dnf install -y cairo-devel pkg-config python3-devel
     else
         echo "WARNING: Unrecognized OS. pycairo requires the cairo C library."
@@ -33,34 +42,39 @@ install_system_deps() {
     fi
 }
 
-# Check if cairo headers are already available
-if ! pkg-config --exists cairo 2>/dev/null; then
+if pkg-config --exists cairo 2>/dev/null; then
+    echo "  cairo found"
+else
     install_system_deps
 fi
 
-# ── 2. Create virtual environment if it doesn't exist ─────────────────
+# ── 2. Virtual environment ───────────────────────────────────────────
+step "Setting up virtual environment ..."
+
 if [ ! -d "${VENV_DIR}" ]; then
-    echo "Creating virtual environment in ${VENV_DIR} ..."
     "${PYTHON}" -m venv "${VENV_DIR}"
+    echo "  Created ${VENV_DIR}"
 else
-    echo "Virtual environment already exists at ${VENV_DIR}"
+    echo "  Already exists at ${VENV_DIR}"
 fi
 
-# ── 3. Activate ──────────────────────────────────────────────────────
 # shellcheck disable=SC1091
 source "${VENV_DIR}/bin/activate"
-echo "Using python: $(which python) ($(python --version))"
+echo "  Python: $(python --version)"
 
-# ── 4. Upgrade pip ───────────────────────────────────────────────────
+# ── 3. Upgrade pip ───────────────────────────────────────────────────
+step "Upgrading pip ..."
 python -m pip install --upgrade pip --quiet
 
-# ── 5. Install the package in editable mode with all dependencies ────
-echo "Installing concept-benchmark and dependencies ..."
+# ── 4. Install package + dependencies ────────────────────────────────
+step "Installing concept-benchmark (this may take a few minutes) ..."
 pip install -e "${REPO_DIR}" --quiet
+echo "  Done"
 
-# ── 6. Install dev dependencies ──────────────────────────────────────
-echo "Installing dev dependencies ..."
+# ── 5. Dev dependencies ─────────────────────────────────────────────
+step "Installing dev tools (pytest, ruff, jupyter) ..."
 pip install pytest ruff jupyter ipykernel rich --quiet
+echo "  Done"
 
 echo ""
 echo "=== Installation complete ==="
@@ -69,4 +83,4 @@ echo "To activate the environment:"
 echo "  source ${VENV_DIR}/bin/activate"
 echo ""
 echo "To verify:"
-echo "  python -c \"import concept_benchmark; print('concept-benchmark installed successfully')\""
+echo "  python3 -c \"import concept_benchmark; print('concept-benchmark installed successfully')\""

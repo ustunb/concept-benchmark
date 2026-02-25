@@ -108,7 +108,7 @@ class RobotBenchmarkConfig:
     data_type: str = "image"
     size: str = "medium"
     samples_per_instance: int = 4
-    draw: int = 0
+    draw: bool = True
     seed: int = 1014
     concepts: Dict[str, list] = field(default_factory=lambda: copy.deepcopy(ROBOT_CONCEPTS))
     model_rule: str = ROBOT_MODEL_RULE

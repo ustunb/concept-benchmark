@@ -29,7 +29,7 @@ source venv/bin/activate
 Verify the installation:
 
 ```bash
-python -c "import concept_benchmark; print('OK')"
+python3 -c "import concept_benchmark; print('OK')"
 ```
 
 <details>
