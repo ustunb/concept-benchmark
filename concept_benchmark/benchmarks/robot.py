@@ -1439,6 +1439,8 @@ def run(
         stages: List of stages to run. Default: all.
         force_setup: If True, delete cached images/data before regenerating.
     """
+    from concept_benchmark._logging import setup_logging
+    setup_logging()
     patch_macos_dataloader()
 
     if config is None:

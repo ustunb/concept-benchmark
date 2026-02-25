@@ -814,9 +814,7 @@ class FrontEndModel:
             "random_state": 42,
             "max_iter": 1000,
             "solver": "lbfgs",
-            "penalty": "l2",
             "C": 1.0,
-            "n_jobs": -1,
         }
 
         if fit_params:

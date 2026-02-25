@@ -703,6 +703,8 @@ def run(
         stages: List of stages to run. Default: all.
         force_setup: If True, delete cached data before regenerating.
     """
+    from concept_benchmark._logging import setup_logging
+    setup_logging()
     if config is None:
         config = RobotTextBenchmarkConfig()
     if stages is None:

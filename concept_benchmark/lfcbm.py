@@ -464,13 +464,11 @@ class LabelFreeCBM:
 
         for C in self.cfg.C_grid:
             clf = LogisticRegression(
-                penalty="elasticnet",
                 solver="saga",
                 l1_ratio=float(self.cfg.l1_ratio),
                 C=float(C),
                 multi_class="multinomial",
                 max_iter=5000,
-                n_jobs=-1,
                 random_state=int(self.cfg.seed),
             )
             clf.fit(Z_tr, y_tr)

@@ -64,7 +64,7 @@ class ConstrainedFrontEndModel(FrontEndModel):
 
             self.model = LogisticRegression(
                 random_state=42, max_iter=1000, solver="lbfgs",
-                penalty="l2", C=1.0, n_jobs=-1,
+                C=1.0,
             )
             self.model.fit(C, y)
             return
@@ -91,7 +91,7 @@ class ConstrainedFrontEndModel(FrontEndModel):
 
             self.model = LogisticRegression(
                 random_state=42, max_iter=1000, solver="lbfgs",
-                penalty="l2", C=1.0, n_jobs=-1,
+                C=1.0,
             )
             self.model.fit(C, y)
             return
