@@ -337,14 +337,18 @@ class RobotBenchmarkConfig:
             variant = "custom"
         return results_dir / f"robot_{variant}_seed{self.seed}_{self._config_hash()}_results.csv"
 
-    def to_yaml(self, path: str | Path) -> None:
-        """Serialize config to YAML."""
+    def to_yaml(self, path: str | Path) -> Path:
+        """Serialize config to YAML and return the resolved path."""
+        path = Path(path).resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
         d = {
             k: v for k, v in self.__dict__.items()
             if not k.startswith("_")
         }
         with open(path, "w") as f:
             yaml.dump(d, f, default_flow_style=False, sort_keys=False)
+        print(f"Config saved to: {path}")
+        return path
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> RobotBenchmarkConfig:
@@ -496,14 +500,18 @@ class SudokuBenchmarkConfig:
         """Return the path for the collect-stage summary CSV."""
         return results_dir / f"sudoku_seed{self.seed}_{self._config_hash()}_results.csv"
 
-    def to_yaml(self, path: str | Path) -> None:
-        """Serialize config to YAML."""
+    def to_yaml(self, path: str | Path) -> Path:
+        """Serialize config to YAML and return the resolved path."""
+        path = Path(path).resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
         d = {
             k: v for k, v in self.__dict__.items()
             if not k.startswith("_")
         }
         with open(path, "w") as f:
             yaml.dump(d, f, default_flow_style=False, sort_keys=False)
+        print(f"Config saved to: {path}")
+        return path
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> SudokuBenchmarkConfig:
@@ -649,14 +657,18 @@ class RobotTextBenchmarkConfig:
             return self.alignment_constraints
         return {"mouth_is_open": 1}
 
-    def to_yaml(self, path: str | Path) -> None:
-        """Serialize config to YAML."""
+    def to_yaml(self, path: str | Path) -> Path:
+        """Serialize config to YAML and return the resolved path."""
+        path = Path(path).resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
         d = {
             k: v for k, v in self.__dict__.items()
             if not k.startswith("_")
         }
         with open(path, "w") as f:
             yaml.dump(d, f, default_flow_style=False, sort_keys=False)
+        print(f"Config saved to: {path}")
+        return path
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> RobotTextBenchmarkConfig:

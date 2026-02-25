@@ -147,7 +147,8 @@ cbm_acc = float(np.mean(cbm.predict(data.test) == data.test.y))
 print(f"CBM (k=0): {cbm_acc:.4f}")
 print(results[["budget", "accuracy"]].to_string(index=False))
 
-cfg.to_yaml("my_experiment.yaml")             # save config for CLI use
+from concept_benchmark.paths import results_dir
+cfg.to_yaml(results_dir / "my_experiment.yaml")  # save config for CLI use
 ```
 
 Expected output:
@@ -162,7 +163,7 @@ CBM (k=0): 0.7812
 To re-run this experiment from the CLI (with automatic caching):
 
 ```bash
-cbm-benchmark robot --config my_experiment.yaml
+cbm-benchmark robot --config results/my_experiment.yaml
 ```
 
 The most important parameters used in the config above are listed below. For the full list, see `RobotBenchmarkConfig` in [`concept_benchmark/config.py`](concept_benchmark/config.py) or the fully-commented [`scripts/demo_robot.py`](scripts/demo_robot.py).
@@ -231,7 +232,8 @@ sel = sudoku.compute_selective_results(cfg)     # selective accuracy and coverag
 t95 = sel[sel["target_accuracy"] == 0.95]
 print(t95[["model", "selective_acc", "selective_cov"]].to_string(index=False))
 
-cfg.to_yaml("my_experiment.yaml")             # save config for CLI use
+from concept_benchmark.paths import results_dir
+cfg.to_yaml(results_dir / "my_experiment.yaml")  # save config for CLI use
 ```
 
 Expected output:
@@ -244,7 +246,7 @@ model  selective_acc  selective_cov
 To re-run this experiment from the CLI (with automatic caching):
 
 ```bash
-cbm-benchmark sudoku --config my_experiment.yaml
+cbm-benchmark sudoku --config results/my_experiment.yaml
 ```
 
 The most important parameters are listed below. For the full list, see `SudokuBenchmarkConfig` in [`concept_benchmark/config.py`](concept_benchmark/config.py) or the fully-commented [`scripts/demo_sudoku.py`](scripts/demo_sudoku.py).
