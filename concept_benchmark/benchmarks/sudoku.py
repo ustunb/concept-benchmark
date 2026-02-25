@@ -256,8 +256,12 @@ def run_interventions(
     device = determine_device()
 
     if data is None:
-        img_dir = config.get_dataset_path(data_type="image")
-        data = load(img_dir / "ocr_inferred_full_dataset.pkl")
+        if config.data_type == "image":
+            img_dir = config.get_dataset_path(data_type="image")
+            data = load(img_dir / "ocr_inferred_full_dataset.pkl")
+        else:
+            tab_dir = config.get_dataset_path(data_type="tabular")
+            data = load(tab_dir / "sudoku_dataset.pkl")
         data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=config.seed)
         data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
 
@@ -584,11 +588,14 @@ def run(
     model_stale = cached_model_fp != current_model_fp
 
     if "ocr" in stages:
-        logger.info("=== Stage: ocr ===")
-        if model_stale or not config.get_model_path("ocr").exists():
-            train_ocr(config)
+        if config.data_type == "tabular":
+            logger.info("=== Stage: ocr === (skipped — data_type is tabular)")
         else:
-            logger.info("Using existing OCR model: %s", config.get_model_path("ocr"))
+            logger.info("=== Stage: ocr ===")
+            if model_stale or not config.get_model_path("ocr").exists():
+                train_ocr(config)
+            else:
+                logger.info("Using existing OCR model: %s", config.get_model_path("ocr"))
 
     if "cs" in stages:
         logger.info("=== Stage: cs ===")
@@ -747,10 +754,14 @@ def compute_selective_results(
         target_accuracies = [0.55, 0.60, 0.65, 0.70, 0.75,
                              0.80, 0.85, 0.90, 0.95, 0.99, 1.00]
 
-    # Load OCR-inferred data
+    # Load evaluation data: OCR-inferred (image mode) or tabular
     if data is None:
-        img_dir = config.get_dataset_path(data_type="image")
-        data = load(img_dir / "ocr_inferred_full_dataset.pkl")
+        if config.data_type == "image":
+            img_dir = config.get_dataset_path(data_type="image")
+            data = load(img_dir / "ocr_inferred_full_dataset.pkl")
+        else:
+            tab_dir = config.get_dataset_path(data_type="tabular")
+            data = load(tab_dir / "sudoku_dataset.pkl")
         data.generate_cvindices(
             strata=data.y, total_folds_for_cv=[5], seed=config.seed
         )
