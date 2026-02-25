@@ -616,19 +616,47 @@ def run(
         model_fp_path.parent.mkdir(parents=True, exist_ok=True)
         model_fp_path.write_text(current_model_fp)
 
+    # Pre-load shared data and models for intervene/selective/align stages
+    _eval_stages = {"intervene", "selective", "align"}
+    _shared_data = None
+    _shared_cs = None
+    _shared_dnn = None
+    if _eval_stages & set(stages):
+        if config.data_type == "image":
+            img_dir = config.get_dataset_path(data_type="image")
+            _shared_data = load(img_dir / "ocr_inferred_full_dataset.pkl")
+        else:
+            tab_dir = config.get_dataset_path(data_type="tabular")
+            _shared_data = load(tab_dir / "sudoku_dataset.pkl")
+        _shared_data.generate_cvindices(
+            strata=_shared_data.y, total_folds_for_cv=[5], seed=config.seed
+        )
+        _shared_data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
+
+        cs_path = config.get_model_path("cs", data_type="tabular")
+        if cs_path.exists():
+            _shared_cs = load(cs_path)
+            _shared_cs._random_state = config.seed
+
+        dnn_path = config.get_model_path("dnn", data_type="tabular")
+        if dnn_path.exists():
+            _shared_dnn = load(dnn_path)
+
     if "intervene" in stages:
         logger.info("=== Stage: intervene ===")
-        df = run_interventions(config)
+        df = run_interventions(config, cs_model=_shared_cs, data=_shared_data)
         logger.info("=== Intervention Results ===\n%s", df.to_string(index=False))
 
     if "selective" in stages:
         logger.info("=== Stage: selective ===")
-        sel_df = compute_selective_results(config)
+        sel_df = compute_selective_results(
+            config, cs_model=_shared_cs, dnn_weights=_shared_dnn, data=_shared_data
+        )
         logger.info("=== Selective Metrics ===\n%s", sel_df.to_string(index=False))
 
     if "align" in stages:
         logger.info("=== Stage: align ===")
-        align(config)
+        align(config, cs_model=_shared_cs, data=_shared_data)
 
     if "collect" in stages:
         logger.info("=== Stage: collect ===")
