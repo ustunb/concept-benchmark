@@ -294,6 +294,7 @@ cbm-benchmark robot --subconcept --regimes baseline expert --stages intervene co
 | `--strategy` | robot, robot-text | `kflip` (up to *k*) or `exact_k` (exactly *k* concepts) |
 | `--concept-missing` | robot | Fraction of concept labels to mask (e.g. `0.2`) |
 | `--concept-missing-mech` | robot | Missingness mechanism: `none`, `mcar`, or `mnar` |
+| `--force-setup` | all | Regenerate all data (images, boards) from scratch, even if cached |
 | `--force-retrain` | robot | Retrain LFCBM/subjective models even if cached |
 | `--lfcbm` | robot-text | Also run the Label-Free CBM variant |
 | `--llm-api-key` | robot | API key for LLM provider (alternative to `GEMINI_API_KEY` env var) |

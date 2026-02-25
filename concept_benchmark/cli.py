@@ -56,7 +56,7 @@ def _robot_cmd(args: argparse.Namespace) -> None:
     elif args.concept_missing_mech is not None:
         config.concept_missing_mech = args.concept_missing_mech
 
-    run(config, stages=args.stages)
+    run(config, stages=args.stages, force_setup=getattr(args, "force_setup", False))
 
 
 def _sudoku_cmd(args: argparse.Namespace) -> None:
@@ -69,7 +69,7 @@ def _sudoku_cmd(args: argparse.Namespace) -> None:
     else:
         config = SudokuBenchmarkConfig(seed=args.seed)
 
-    run(config, stages=args.stages)
+    run(config, stages=args.stages, force_setup=getattr(args, "force_setup", False))
 
 
 def _robot_text_cmd(args: argparse.Namespace) -> None:
@@ -90,7 +90,7 @@ def _robot_text_cmd(args: argparse.Namespace) -> None:
     if args.strategy:
         config.intervention_strategy = args.strategy
 
-    run(config, stages=args.stages)
+    run(config, stages=args.stages, force_setup=getattr(args, "force_setup", False))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -109,6 +109,8 @@ def main(argv: list[str] | None = None) -> None:
                      help="Show debug-level output.")
     _sv.add_argument("-q", "--quiet", action="store_true",
                      help="Only show warnings and errors.")
+    _shared.add_argument("--force-setup", action="store_true",
+                         help="Force regeneration of all data (images, boards, etc.) even if cached.")
 
     # Robot subcommand
     robot_p = subparsers.add_parser("robot", parents=[_shared],

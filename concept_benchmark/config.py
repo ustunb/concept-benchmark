@@ -239,6 +239,15 @@ class RobotBenchmarkConfig:
             "concept_missing_mech": self.concept_missing_mech,
         }
 
+    def setup_fingerprint(self) -> str:
+        """Hash of all parameters that affect data generation."""
+        d = self.to_dict()
+        d.pop("draw", None)            # meta-flag, not a data param
+        d.pop("output_directory", None) # derived from size
+        d.pop("train_dnn", None)        # not a data param
+        blob = json.dumps(d, sort_keys=True, default=str).encode()
+        return hashlib.sha256(blob).hexdigest()
+
     def get_dataset_path(self) -> Path:
         """Return the path where the dataset file is saved."""
         filename = f"robot_{self.data_type}_{self.samples_per_instance}"
@@ -399,6 +408,13 @@ class SudokuBenchmarkConfig:
             "concept_missing_mech": self.concept_missing_mech,
         }
 
+    def setup_fingerprint(self) -> str:
+        """Hash of all parameters that affect data generation."""
+        d = self.to_dict()
+        d.pop("temp_train_data_path", None)
+        blob = json.dumps(d, sort_keys=True, default=str).encode()
+        return hashlib.sha256(blob).hexdigest()
+
     def get_dataset_path(self, data_type: Optional[str] = None) -> Path:
         """Return the directory path for the dataset."""
         dt = data_type or self.data_type
@@ -555,6 +571,19 @@ class RobotTextBenchmarkConfig:
                 f"unknown intervention regimes: {sorted(unknown)}. "
                 f"Valid: {sorted(self._VALID_REGIMES)}"
             )
+
+    def setup_fingerprint(self) -> str:
+        """Hash of all parameters that affect data generation."""
+        d = asdict(self)
+        # Remove non-data params
+        for k in ("llm_api_key", "llm_api_key_env", "force_retrain",
+                   "lfcbm_enable", "lfcbm_encoder", "lfcbm_concepts_csv",
+                   "alignment_constraints", "intervention_budgets",
+                   "intervention_thresholds", "intervention_strategy",
+                   "intervention_regimes", "intervention_accuracy"):
+            d.pop(k, None)
+        blob = json.dumps(d, sort_keys=True, default=str).encode()
+        return hashlib.sha256(blob).hexdigest()
 
     def get_dataset_path(self) -> Path:
         """Return the path where the dataset file is saved."""

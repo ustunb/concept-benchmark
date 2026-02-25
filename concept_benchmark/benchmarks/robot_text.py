@@ -694,12 +694,14 @@ def collect_results(
 def run(
     config: Optional[RobotTextBenchmarkConfig] = None,
     stages: Optional[List[str]] = None,
+    force_setup: bool = False,
 ) -> None:
     """Run the full robot text benchmark pipeline.
 
     Args:
         config: Benchmark configuration.
         stages: List of stages to run. Default: all.
+        force_setup: If True, delete cached data before regenerating.
     """
     if config is None:
         config = RobotTextBenchmarkConfig()
@@ -724,7 +726,23 @@ def run(
 
     if "setup" in stages:
         logger.info("=== Stage: setup ===")
-        setup_dataset(config)
+        fp_path = config.get_dataset_path().with_suffix(".fingerprint")
+        current_fp = config.setup_fingerprint()
+        cached_fp = fp_path.read_text().strip() if fp_path.exists() else None
+
+        if force_setup or cached_fp != current_fp:
+            if cached_fp is not None and cached_fp != current_fp:
+                logger.info("Config changed since last setup — regenerating data")
+            if force_setup:
+                logger.info("--force-setup: regenerating data from scratch")
+            ds_path = config.get_dataset_path()
+            if ds_path.exists():
+                ds_path.unlink()
+            setup_dataset(config)
+            fp_path.parent.mkdir(parents=True, exist_ok=True)
+            fp_path.write_text(current_fp)
+        else:
+            logger.info("Setup data is up to date (fingerprint matches), skipping")
 
     if "cbm" in stages:
         logger.info("=== Stage: cbm ===")
