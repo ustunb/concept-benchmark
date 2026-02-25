@@ -15,6 +15,19 @@ import torch.nn as nn
 logger = logging.getLogger(__name__)
 
 
+def set_deterministic_seed(seed: int):
+    """Full reproducibility: numpy, torch, random, PYTHONHASHSEED."""
+    import random
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
 def determine_device() -> torch.device:
     """Determine the best available compute device.
 

@@ -237,8 +237,8 @@ cfg.to_yaml("my_experiment.yaml")             # save config for CLI use
 Expected output:
 ```
 model  selective_acc  selective_cov
-   cs        0.9347         0.9950
-  dnn        0.6667         0.0150
+  dnn       0.923077          0.065
+   cs       0.959596          0.990
 ```
 
 To re-run this experiment from the CLI (with automatic caching):

@@ -20,6 +20,7 @@ from concept_benchmark.benchmarks._common import (
     determine_device,
     get_loader_config,
     patch_macos_dataloader,
+    set_deterministic_seed,
 )
 from concept_benchmark.config import SudokuBenchmarkConfig
 from concept_benchmark.ext.fileutils import load, save
@@ -91,6 +92,7 @@ def train_cs(
     config: SudokuBenchmarkConfig,
     data=None,
 ) -> ConceptBasedModel:
+    set_deterministic_seed(config.seed)
     """Train a concept supervision model (concept detector + frontend).
 
     Returns the trained CBM.
@@ -124,7 +126,6 @@ def train_cs(
         "num_workers": 0 if _macos else 12,
         "pin_memory": not _macos,
     }
-    torch.manual_seed(config.seed)
 
     from concept_benchmark.models import (
         GroupPoolingConceptSudokuCNN as SudokuConceptModel,
@@ -163,6 +164,7 @@ def train_dnn(
 
     Returns the best state_dict.
     """
+    set_deterministic_seed(config.seed)
     patch_macos_dataloader()
     device = determine_device()
 
@@ -171,8 +173,6 @@ def train_dnn(
         data = load(tab_dir / "sudoku_dataset.pkl")
         data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=config.seed)
         data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
-
-    torch.manual_seed(config.seed)
 
     from concept_benchmark.models import SudokuValidatorCNN as DNNSudokuModel
 

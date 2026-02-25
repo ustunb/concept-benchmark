@@ -1114,7 +1114,6 @@ class ConceptBasedModel:
         Monte Carlo propagation: approximate E_y[ y | concept probabilities ]
         by sampling concept vectors and averaging front-end predictions.
         """
-        print("Using MC concept propagation...")
         P = np.asarray(concept_preds, dtype=np.float64)
         P = np.clip(P, 1e-9, 1.0 - 1e-9)
         N, C = P.shape
@@ -1133,6 +1132,7 @@ class ConceptBasedModel:
         max_samples = max(target_samples, self._mc_max_samples)
         chunk_size = max(1, self._mc_chunk_size)
 
+        pbar = tqdm(total=N, desc="MC concept propagation", unit="samples")
         while True:
             active_idx = np.where(~done)[0]
             if active_idx.size == 0:
@@ -1184,14 +1184,21 @@ class ConceptBasedModel:
             # This can be swapped out for other strategies if needed.
             se_agg = np.max(se, axis=1)
             conv_mask = (se_agg <= self._mc_tol) & (counts[active_idx] >= target_samples)
-            done[active_idx[conv_mask]] = True
+            newly_done = active_idx[conv_mask]
+            done[newly_done] = True
+            pbar.update(len(newly_done))
 
             # Also stop if everyone has at least target_samples and we've hit that
             if np.all(counts >= target_samples) and done.all():
                 break
 
             # If some have reached max_samples after this update, mark done
-            done |= counts >= max_samples
+            newly_maxed = ~done & (counts >= max_samples)
+            pbar.update(int(newly_maxed.sum()))
+            done |= newly_maxed
+
+        pbar.update(N - pbar.n)  # ensure bar reaches 100%
+        pbar.close()
 
         # Final means as output
         if sum_acc is None:
