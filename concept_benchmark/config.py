@@ -248,6 +248,22 @@ class RobotBenchmarkConfig:
         blob = json.dumps(d, sort_keys=True, default=str).encode()
         return hashlib.sha256(blob).hexdigest()
 
+    def model_fingerprint(self) -> str:
+        """Hash of all parameters that affect model training."""
+        d = asdict(self)
+        # Remove params that don't affect training
+        for k in ("llm_api_key", "llm_api_key_env", "force_retrain",
+                   "draw", "alignment_constraints",
+                   "intervention_budgets", "intervention_thresholds",
+                   "intervention_accuracy", "intervention_strategy",
+                   "intervention_regimes", "expert_intervention_accuracy",
+                   "subjective_noise_rate", "subjective_intervention_accuracy",
+                   "lfcbm_concepts_file", "llm_concepts_file", "clip_concepts_file",
+                   "llm_provider", "llm_model"):
+            d.pop(k, None)
+        blob = json.dumps(d, sort_keys=True, default=str).encode()
+        return hashlib.sha256(blob).hexdigest()
+
     def get_dataset_path(self) -> Path:
         """Return the path where the dataset file is saved."""
         filename = f"robot_{self.data_type}_{self.samples_per_instance}"
@@ -412,6 +428,16 @@ class SudokuBenchmarkConfig:
         """Hash of all parameters that affect data generation."""
         d = self.to_dict()
         d.pop("temp_train_data_path", None)
+        blob = json.dumps(d, sort_keys=True, default=str).encode()
+        return hashlib.sha256(blob).hexdigest()
+
+    def model_fingerprint(self) -> str:
+        """Hash of all parameters that affect model training."""
+        d = asdict(self)
+        # Remove params that don't affect training
+        for k in ("intervention_thresholds", "target_accuracy",
+                   "decision_threshold", "alignment_weights"):
+            d.pop(k, None)
         blob = json.dumps(d, sort_keys=True, default=str).encode()
         return hashlib.sha256(blob).hexdigest()
 
@@ -581,6 +607,18 @@ class RobotTextBenchmarkConfig:
                    "alignment_constraints", "intervention_budgets",
                    "intervention_thresholds", "intervention_strategy",
                    "intervention_regimes", "intervention_accuracy"):
+            d.pop(k, None)
+        blob = json.dumps(d, sort_keys=True, default=str).encode()
+        return hashlib.sha256(blob).hexdigest()
+
+    def model_fingerprint(self) -> str:
+        """Hash of all parameters that affect model training."""
+        d = asdict(self)
+        for k in ("llm_api_key", "llm_api_key_env", "force_retrain",
+                   "alignment_constraints",
+                   "intervention_budgets", "intervention_thresholds",
+                   "intervention_accuracy", "intervention_strategy",
+                   "intervention_regimes"):
             d.pop(k, None)
         blob = json.dumps(d, sort_keys=True, default=str).encode()
         return hashlib.sha256(blob).hexdigest()

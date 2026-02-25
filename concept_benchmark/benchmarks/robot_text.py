@@ -746,17 +746,37 @@ def run(
         else:
             logger.info("Setup data is up to date (fingerprint matches), skipping")
 
+    # Model fingerprint: retrain if config changed since last training
+    model_fp_path = config.get_model_path("cbm").with_suffix(".fingerprint")
+    current_model_fp = config.model_fingerprint()
+    cached_model_fp = model_fp_path.read_text().strip() if model_fp_path.exists() else None
+    model_stale = cached_model_fp != current_model_fp
+
     if "cbm" in stages:
         logger.info("=== Stage: cbm ===")
-        train_cbm(config)
+        if model_stale or config.force_retrain or not config.get_model_path("cbm").exists():
+            train_cbm(config)
+        else:
+            logger.info("Using existing CBM: %s", config.get_model_path("cbm"))
 
     if "dnn" in stages:
         logger.info("=== Stage: dnn ===")
-        train_dnn(config)
+        if model_stale or config.force_retrain or not config.get_model_path("dnn").exists():
+            train_dnn(config)
+        else:
+            logger.info("Using existing DNN: %s", config.get_model_path("dnn"))
 
     if "lfcbm" in stages and config.lfcbm_enable:
         logger.info("=== Stage: lfcbm ===")
-        train_lfcbm(config)
+        if model_stale or config.force_retrain or not config.get_model_path("lfcbm").exists():
+            train_lfcbm(config)
+        else:
+            logger.info("Using existing LFCBM: %s", config.get_model_path("lfcbm"))
+
+    # Save model fingerprint after training stages
+    if any(s in stages for s in ("cbm", "dnn", "lfcbm")) and model_stale:
+        model_fp_path.parent.mkdir(parents=True, exist_ok=True)
+        model_fp_path.write_text(current_model_fp)
 
     if "intervene" in stages:
         logger.info("=== Stage: intervene ===")

@@ -1500,29 +1500,51 @@ def run(
         else:
             logger.info("Setup data is up to date (fingerprint matches), skipping")
 
+    # Model fingerprint: retrain if config changed since last training
+    model_fp_path = config.get_model_path("cbm").with_suffix(".fingerprint")
+    current_model_fp = config.model_fingerprint()
+    cached_model_fp = model_fp_path.read_text().strip() if model_fp_path.exists() else None
+    model_stale = cached_model_fp != current_model_fp
+
+    def _should_train(model_key: str) -> bool:
+        model_path = config.get_model_path(model_key)
+        if config.force_retrain:
+            return True
+        if not model_path.exists():
+            return True
+        if model_stale:
+            logger.info("Config changed since last training — retraining %s", model_key)
+            return True
+        return False
+
     if "cbm" in stages:
         logger.info("=== Stage: cbm ===")
-        if config.get_model_path("cbm").exists() and not config.force_retrain:
-            logger.info("Using existing CBM: %s", config.get_model_path("cbm"))
-        else:
+        if _should_train("cbm"):
             train_cbm(config)
+        else:
+            logger.info("Using existing CBM: %s", config.get_model_path("cbm"))
         if "subjective" in config.intervention_regimes:
-            if config.get_model_path("cbm_subjective").exists() and not config.force_retrain:
-                logger.info("Using existing subjective CBM: %s", config.get_model_path("cbm_subjective"))
-            else:
+            if _should_train("cbm_subjective"):
                 train_cbm_subjective(config)
-        if "machine" in config.intervention_regimes:
-            if config.get_model_path("lfcbm").exists() and not config.force_retrain:
-                logger.info("Using existing LFCBM: %s", config.get_model_path("lfcbm"))
             else:
+                logger.info("Using existing subjective CBM: %s", config.get_model_path("cbm_subjective"))
+        if "machine" in config.intervention_regimes:
+            if _should_train("lfcbm"):
                 train_lfcbm(config)
+            else:
+                logger.info("Using existing LFCBM: %s", config.get_model_path("lfcbm"))
 
     if "dnn" in stages:
         logger.info("=== Stage: dnn ===")
-        if config.get_model_path("dnn").exists() and not config.force_retrain:
-            logger.info("Using existing DNN: %s", config.get_model_path("dnn"))
-        else:
+        if _should_train("dnn"):
             train_dnn(config)
+        else:
+            logger.info("Using existing DNN: %s", config.get_model_path("dnn"))
+
+    # Save model fingerprint after training stages
+    if ("cbm" in stages or "dnn" in stages) and model_stale:
+        model_fp_path.parent.mkdir(parents=True, exist_ok=True)
+        model_fp_path.write_text(current_model_fp)
 
     if "intervene" in stages:
         logger.info("=== Stage: intervene ===")
