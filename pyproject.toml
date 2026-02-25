@@ -3,6 +3,7 @@ name = "concept-benchmark"
 version = "0.1.0"
 description = "Synthetic benchmarks for evaluating Concept Bottleneck Models."
 license = "MIT"
+readme = "README.md"
 authors = [
     { name = "Julian Skirzynski" },
     { name = "Harry Cheon" },
