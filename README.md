@@ -68,7 +68,17 @@ cbm-benchmark robot --seed 1014 --stages setup cbm dnn intervene collect
 
 Results are saved to `results/robot_ideal_seed1014_2d0aa353_results.csv`. Filter to `model == "cbm"` and `threshold == 0.2` to see accuracy numbers.
 
-`robot.run()` is the same pipeline, built from individual functions that you can also call directly when you want to inspect intermediate objects (e.g., the trained CBM or raw intervention results):
+The same pipeline from Python:
+
+```python
+from concept_benchmark.benchmarks import robot
+from concept_benchmark.config import RobotBenchmarkConfig
+
+cfg = RobotBenchmarkConfig(seed=1014)
+robot.run(cfg, stages=["setup", "cbm", "dnn", "intervene", "collect"])
+```
+
+Under the hood, `robot.run()` calls individual functions that you can also use directly to inspect intermediate objects:
 
 ```python
 import numpy as np
