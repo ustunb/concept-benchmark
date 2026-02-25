@@ -32,7 +32,13 @@ sudo apt-get install libcairo2-dev pkg-config python3-dev
 sudo dnf install cairo-devel pkg-config python3-devel
 ```
 
-Then clone and install the package:
+Then install the package:
+
+```bash
+pip install concept-benchmark
+```
+
+Or install from source:
 
 ```bash
 git clone https://github.com/ustunb/concept-benchmark.git
