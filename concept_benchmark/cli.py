@@ -98,21 +98,21 @@ def main(argv: list[str] | None = None) -> None:
         prog="cbm-benchmark",
         description="Run concept benchmark experiments.",
     )
-    # Global verbosity flags
-    verbosity = parser.add_mutually_exclusive_group()
-    verbosity.add_argument(
-        "-v", "--verbose", action="store_true",
-        help="Show debug-level output.",
-    )
-    verbosity.add_argument(
-        "-q", "--quiet", action="store_true",
-        help="Only show warnings and errors.",
-    )
-
     subparsers = parser.add_subparsers(dest="benchmark", required=True)
 
+    # Shared flags added to each subparser via parents=
+    _shared = argparse.ArgumentParser(add_help=False)
+    _shared.add_argument("--dry-run", action="store_true", dest="dry_run",
+                         help="Print configuration and stages without executing.")
+    _sv = _shared.add_mutually_exclusive_group()
+    _sv.add_argument("-v", "--verbose", action="store_true",
+                     help="Show debug-level output.")
+    _sv.add_argument("-q", "--quiet", action="store_true",
+                     help="Only show warnings and errors.")
+
     # Robot subcommand
-    robot_p = subparsers.add_parser("robot", help="Run the robot classification benchmark.")
+    robot_p = subparsers.add_parser("robot", parents=[_shared],
+                                    help="Run the robot classification benchmark.")
     robot_p.add_argument("--seed", type=int, default=1014)
     robot_p.add_argument(
         "--stages", nargs="+", default=list(ROBOT_STAGES),
@@ -137,7 +137,8 @@ def main(argv: list[str] | None = None) -> None:
     robot_p.set_defaults(func=_robot_cmd)
 
     # Sudoku subcommand
-    sudoku_p = subparsers.add_parser("sudoku", help="Run the sudoku validation benchmark.")
+    sudoku_p = subparsers.add_parser("sudoku", parents=[_shared],
+                                     help="Run the sudoku validation benchmark.")
     sudoku_p.add_argument("--seed", type=int, default=171)
     sudoku_p.add_argument(
         "--stages", nargs="+", default=list(SUDOKU_STAGES),
@@ -147,7 +148,8 @@ def main(argv: list[str] | None = None) -> None:
     sudoku_p.set_defaults(func=_sudoku_cmd)
 
     # Robot-text subcommand
-    robot_text_p = subparsers.add_parser("robot-text", help="Run the robot text classification benchmark.")
+    robot_text_p = subparsers.add_parser("robot-text", parents=[_shared],
+                                         help="Run the robot text classification benchmark.")
     robot_text_p.add_argument("--seed", type=int, default=1337)
     robot_text_p.add_argument(
         "--stages", nargs="+", default=list(ROBOT_TEXT_STAGES),
@@ -161,12 +163,6 @@ def main(argv: list[str] | None = None) -> None:
                               choices=["kflip", "exact_k"],
                               help="Intervention strategy: kflip (up-to-k) or exact_k.")
     robot_text_p.set_defaults(func=_robot_text_cmd)
-
-    # Global --dry-run flag
-    parser.add_argument(
-        "--dry-run", action="store_true",
-        help="Print configuration and stages without executing.",
-    )
 
     args = parser.parse_args(argv)
 

@@ -167,6 +167,10 @@ class RobotBenchmarkConfig:
     _VALID_STRATEGIES = frozenset({"kflip", "exact_k"})
 
     def __post_init__(self):
+        # If subconcept=True but drop_concepts still has the ideal default,
+        # automatically switch to SUBCONCEPT_DROP so the flag alone is sufficient.
+        if self.subconcept and self.drop_concepts == list(IDEAL_DROP):
+            self.drop_concepts = list(SUBCONCEPT_DROP)
         if self.seed < 0:
             raise ValueError(f"seed must be non-negative, got {self.seed}")
         if self.size not in INPUT_MAP:

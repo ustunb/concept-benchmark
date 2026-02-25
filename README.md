@@ -61,6 +61,7 @@ pip install -e .
 A CBM predicts concepts from inputs (e.g., "has pointy feet"), then predicts the label from those concepts. At test time, a user can correct mispredicted concepts -- this is called an *intervention*. The package lets you measure whether correcting *k* concepts improves the label prediction, and how that depends on concept quality and annotation noise.
 
 ```python
+import numpy as np
 from concept_benchmark.benchmarks import robot
 from concept_benchmark.config import RobotBenchmarkConfig
 
@@ -69,15 +70,21 @@ data = robot.setup_dataset(cfg)                # generate 32x32 robot images
 cbm = robot.train_cbm(cfg, data)               # concept detectors + label predictor
 dnn = robot.train_dnn(cfg, data)               # end-to-end baseline (no concepts)
 results = robot.run_interventions(cfg, cbm, data)  # measure effect of corrections
-print(results[["budget", "accuracy"]].to_string(index=False))
+
+# CBM baseline (no interventions)
+cbm_acc = float(np.mean(cbm.predict(data.test) == data.test.y))
+print(f"CBM (k=0): {cbm_acc:.4f}")
+# Intervention gains at threshold=0.2
+print(results.query("threshold == 0.2")[["budget", "accuracy"]].to_string(index=False))
 ```
 
 Expected output:
 ```
+CBM (k=0): 0.8673
  budget  accuracy
-      0    0.8673
       1    0.9736
       3    0.9769
+      7    0.9769
 ```
 
 The same pipeline runs from the CLI:
@@ -101,18 +108,16 @@ This benchmark targets decision-support settings where a human uses the model's 
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
 </p>
 
-The following example uses the subconcept variant (which splits foot_shape into 5 fine-grained subtypes, yielding 12 concepts instead of the default 7), masks 20% of concept labels during training (MCAR), and tests whether imposing a sign constraint on the `has_knees` weight preserves or destroys the benefit of interventions.
+The following example uses the subconcept variant (which splits foot_shape into 5 fine-grained subtypes, yielding 12 concepts instead of the default 7), and tests whether imposing a sign constraint on the `has_knees` weight preserves or destroys the benefit of interventions.
 
 ```python
+import numpy as np
 from concept_benchmark.benchmarks import robot
 from concept_benchmark.config import RobotBenchmarkConfig
 
 cfg = RobotBenchmarkConfig(
     seed=1014,
     subconcept=True,                           # use fine-grained foot subtypes (12 instead of 7)
-    spurious_features=["has_elbows", "hand_shape"],
-    concept_missing=0.2,                       # mask 20% of concept labels
-    concept_missing_mech="mcar",               # missing completely at random
     intervention_budgets=[1, 3],               # correct k=1 or k=3 concepts per sample
     intervention_thresholds=[0.2],
     alignment_constraints={"has_knees": 1},    # force has_knees weight to be positive
@@ -125,15 +130,18 @@ dnn = robot.train_dnn(cfg, data)
 results = robot.run_interventions(cfg, cbm, data)
 align_stats = robot.align(cfg, cbm, data)
 
+cbm_acc = float(np.mean(cbm.predict(data.test) == data.test.y))
+print(f"CBM (k=0): {cbm_acc:.4f}")
 print(results[["budget", "accuracy"]].to_string(index=False))
 ```
 
 Expected output:
 ```
+CBM (k=0): 0.7812
  budget  accuracy
-      0    0.7812
       1    0.9212
       3    0.9439
+     12    0.9439
 ```
 
 To run this experiment from the CLI, save the config to YAML and pass it with `--config`:
@@ -208,14 +216,16 @@ dnn = sudoku.train_dnn(cfg)                    # end-to-end baseline (no concept
 results = sudoku.run_interventions(cfg, cs_model)
 sel = sudoku.compute_selective_results(cfg)     # selective accuracy and coverage
 
-print(sel[["model", "selective_acc", "selective_cov"]].to_string(index=False))
+# Filter to the target accuracy threshold
+t95 = sel[sel["target_accuracy"] == 0.95]
+print(t95[["model", "selective_acc", "selective_cov"]].to_string(index=False))
 ```
 
 Expected output:
 ```
- model  selective_acc  selective_cov
-    cs         0.9773         0.9950
-   dnn         0.8182         0.0550
+model  selective_acc  selective_cov
+   cs        0.9347         0.9950
+  dnn        0.6667         0.0150
 ```
 
 Or equivalently, save the config to YAML and run from the CLI:

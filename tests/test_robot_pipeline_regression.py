@@ -106,6 +106,8 @@ class TestResultsCSV:
         assert abs(row.iloc[0]["accuracy"] - 0.8673) < 0.001
 
     def test_cbm_no_int_accuracy_subconcept(self, results_df):
+        if "subconcept" not in results_df["dataset"].values:
+            pytest.skip("subconcept results not in CSV (run with --subconcept)")
         row = results_df[
             (results_df["model"] == "cbm")
             & (results_df["dataset"] == "subconcept")
