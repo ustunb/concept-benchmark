@@ -316,10 +316,8 @@ def image_transform(
     # ---- build handwritten generator + starters + prior_options ----
     generator = None
     if handwriting:
-        from pathlib import Path as _Path
-        from concept_benchmark.paths import _repo_dir
-        # Try repo-relative first (editable install), fall back to CWD
-        _fonts_dir = str(_repo_dir / "fonts") if (_repo_dir / "fonts").is_dir() else str(_Path.cwd() / "fonts")
+        from concept_benchmark.paths import pkg_dir
+        _fonts_dir = str(pkg_dir / "data" / "fonts")
         try:
             import cv2  # noqa: F401
             generator = AdvancedHandwrittenGenerator(fonts_dir=_fonts_dir)
