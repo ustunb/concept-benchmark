@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/pretty_branch/docs/assets/logo.svg" width="400" alt="Concept Benchmark logo">
+  <img src="docs/assets/logo.svg" width="400" alt="Concept Benchmark logo">
 </p>
 
 **Concept Benchmark** is a Python package for benchmarking [concept bottleneck models](https://arxiv.org/abs/2007.04612) (CBMs). It provides synthetic datasets with ground-truth concept labels, allowing users to vary concept granularity, annotation quality, and the labeling rule, and measure how each factor affects model performance and the value of interventions. The package includes two benchmarks -- robot classification (decision support) and Sudoku validation (automation) -- across image, text, and tabular modalities.
@@ -117,7 +117,7 @@ The package includes two benchmarks. **Robot classification** is a decision-supp
 This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot -- **Glorp** or **Drent** -- from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The default labeling rule is: Glorp if mouth is closed, foot is pointy, and robot has knees (all three); Drent otherwise. Which features matter and which are spurious are configurable, mimicking real-world settings where the true relationship between features and labels is unknown. Available as image (`cbm-benchmark robot`) and text (`cbm-benchmark robot-text`) modalities.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/pretty_branch/docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
+  <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
 </p>
 
 The following example uses the subconcept variant (which splits foot_shape into 5 fine-grained subtypes, yielding 12 concepts instead of the default 7), and tests whether imposing a sign constraint on the `has_knees` weight preserves or destroys the benefit of interventions.
@@ -203,7 +203,7 @@ The most important parameters used in the config above are listed below. For the
 This benchmark targets automation settings where the system handles routine cases and defers uncertain ones to a human. The task is to determine whether a 9x9 Sudoku board is valid, i.e., contains the digits 1-9 exactly once in each row, column, and block. The 27 concepts correspond to the validity of each row, column, and 3x3 block. A board is valid if and only if all 27 concepts are true (AND structure), so a single violated concept is enough to invalidate the board. When the model abstains, a human can verify specific concepts (e.g., "is row 5 valid?") to resolve the uncertainty.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/pretty_branch/docs/assets/sudoku_handwritten.png" width="400" alt="Sudoku board with handwritten digits and concept annotations">
+  <img src="docs/assets/sudoku_handwritten.png" width="400" alt="Sudoku board with handwritten digits and concept annotations">
 </p>
 
 The following example generates 1000 boards with handwritten digits, corrupting up to 9 cells in invalid boards. The concept-supervised (CS) model -- the Sudoku equivalent of a CBM -- predicts 27 binary concepts, then a label predictor determines board validity. The selective classification stage finds a confidence threshold that achieves at least 95% accuracy on kept predictions.
