@@ -99,6 +99,7 @@ Expected output:
 ```
 CBM (k=0): 0.8673
  budget  accuracy
+      0    0.8673
       1    0.9736
       3    0.9769
       7    0.9769
@@ -152,9 +153,9 @@ Expected output:
 ```
 CBM (k=0): 0.7812
  budget  accuracy
+      0    0.7812
       1    0.9212
       3    0.9439
-     12    0.9439
 ```
 
 To re-run this experiment from the CLI (with automatic caching):
@@ -297,6 +298,7 @@ cbm-benchmark robot --subconcept --regimes baseline expert --stages intervene co
 | `--stages` | all | Which stages to run (default: all) |
 | `--config` | all | Path to YAML config file. CLI flags like `--regimes` and `--strategy` can further override values loaded from the file. |
 | `--subconcept` | robot | Use subconcept variant (12 concepts with fine-grained foot subtypes instead of 7 coarse) |
+| `--budgets` | all | Intervention budgets (e.g. `1 3 5 max`). `max` resolves to the number of concepts. |
 | `--regimes` | robot, robot-text | Intervention regimes: `baseline`, `expert`, `subjective`, `machine`, `llm`, `clip` |
 | `--strategy` | robot, robot-text | `kflip` (up to *k*) or `exact_k` (exactly *k* concepts) |
 | `--concept-missing` | robot | Fraction of concept labels to mask (e.g. `0.2`) |
