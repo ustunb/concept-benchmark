@@ -487,10 +487,12 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
                 "accuracy": float(acc_det),
                 "accuracy_gain": 0.0,
                 "predictions_intervened_on": 0,
+                "predictions_changed": 0,
                 "interventions_rate": 0.0,
                 "intervention_rate": 0.0,
                 "avg_edits_per_intervention": 0.0,
                 "total_concept_checks": 0,
+                "total_concept_confirmations": 0,
                 "total_concept_edits_made": 0,
                 "concepts_intervened": {},
                 "concepts_edits": {},
@@ -1198,7 +1200,9 @@ def run_interventions(
     if model is None:
         model = load(config.get_model_path("cbm"))
 
-    budgets = list(config.intervention_budgets) + [data.n_concepts]
+    budgets = sorted(set(
+        [0] + [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
+    ))
     thresholds = config.intervention_thresholds
 
     all_dfs = []
@@ -1337,7 +1341,7 @@ def collect_results(
             if "regime" in interv_df.columns:
                 interv_df = interv_df[interv_df["regime"] == "baseline"]
             # Use threshold=0.2 as the canonical threshold for the summary
-            t02 = interv_df[interv_df["threshold"] == 0.2]
+            t02 = interv_df[(interv_df["threshold"] == 0.2) & (interv_df["budget"] > 0)]
             for _, row in t02.iterrows():
                 budget = int(row["budget"])
                 acc = float(row["accuracy"])
@@ -1461,13 +1465,15 @@ def run(
 
     device = determine_device()
     variant = "subconcept" if config.subconcept else "ideal"
+    n_stages = len(stages)
+    _si = {s: i for i, s in enumerate(stages, 1)}
     logger.info(
         "=== Robot Benchmark === seed=%d, variant=%s, stages=%s, device=%s",
         config.seed, variant, stages, device,
     )
 
     if "setup" in stages:
-        logger.info("=== Stage: setup ===")
+        logger.info("=== [%d/%d] Setup ===", _si["setup"], n_stages)
         import shutil
         fp_path = config.get_dataset_path().with_suffix(".fingerprint")
         current_fp = config.setup_fingerprint()
@@ -1511,7 +1517,7 @@ def run(
         return False
 
     if "cbm" in stages:
-        logger.info("=== Stage: cbm ===")
+        logger.info("=== [%d/%d] Train CBM ===", _si["cbm"], n_stages)
         if _should_train("cbm"):
             train_cbm(config)
         else:
@@ -1528,7 +1534,7 @@ def run(
                 logger.info("Using existing LFCBM: %s", config.get_model_path("lfcbm"))
 
     if "dnn" in stages:
-        logger.info("=== Stage: dnn ===")
+        logger.info("=== [%d/%d] Train DNN ===", _si["dnn"], n_stages)
         if _should_train("dnn"):
             train_dnn(config)
         else:
@@ -1540,13 +1546,13 @@ def run(
         model_fp_path.write_text(current_model_fp)
 
     if "intervene" in stages:
-        logger.info("=== Stage: intervene ===")
+        logger.info("=== [%d/%d] Intervene ===", _si["intervene"], n_stages)
         run_interventions(config)
 
     if "align" in stages:
-        logger.info("=== Stage: align ===")
+        logger.info("=== [%d/%d] Align ===", _si["align"], n_stages)
         align(config)
 
     if "collect" in stages:
-        logger.info("=== Stage: collect ===")
+        logger.info("=== [%d/%d] Collect ===", _si["collect"], n_stages)
         collect_results([config])

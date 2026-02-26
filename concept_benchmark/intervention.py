@@ -513,31 +513,24 @@ class ScoreIntervention(InterventionStrategy):
 
         best_subset_arrays: List[Optional[np.ndarray]] = [None] * n_samples
 
+        # Vectorized: iterate over combos (C(n,m)), batch all N samples per call.
+        # Reduces from N × C(n,m) to C(n,m) predict_proba calls.
+        best_combo_idx = np.full(n_samples, -1, dtype=int)
+
         from tqdm import tqdm
-        with tqdm(total=batch.n_samples, desc="Computing intervention scores") as pbar:
+        for ci, combo_indices in enumerate(tqdm(combination_arrays, desc="Computing intervention scores")):
+            all_flipped = concepts_before.copy()
+            all_flipped[:, combo_indices] = 1 - all_flipped[:, combo_indices]
+            p_after = model.front_end_model.predict_proba(all_flipped)
+            scores_combo = np.max(np.abs(p_after - p_before), axis=1)
+            improve = scores_combo > scores
+            scores[improve] = scores_combo[improve]
+            best_combo_idx[improve] = ci
 
-            for idx in range(n_samples):
-                base_vector = concepts_before[idx]
-                base_prob = p_before[idx]
-                best_score = -math.inf
-                best_subset_array: Optional[np.ndarray] = None
-
-                for combo_indices in combination_arrays:
-                    flipped = base_vector.copy()
-                    flipped[combo_indices] = 1 - flipped[combo_indices]
-                    p_after = model.front_end_model.predict_proba(flipped[None, :])[0]
-                    score = float(np.max(np.abs(p_after - base_prob)))
-                    if score > best_score:
-                        best_score = score
-                        best_subset_array = combo_indices
-
-                if best_subset_array is not None:
-                    scores[idx] = max(best_score, 0.0)
-                    best_subset_arrays[idx] = best_subset_array
-
-                pbar.update(1)
-                if idx % 100 == 0:  # Update postfix every 100 samples
-                    pbar.set_postfix({'avg_score': f"{scores[:idx + 1].mean():.3f}"})
+        for idx in range(n_samples):
+            ci = best_combo_idx[idx]
+            if ci >= 0:
+                best_subset_arrays[idx] = combination_arrays[ci]
 
         selected_indices: List[int] = []
         for idx, subset_array in enumerate(best_subset_arrays):
@@ -593,10 +586,8 @@ class ScoreIntervention(InterventionStrategy):
 
         def compute_confusion(y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
             n_classes = p_before.shape[1]
-            matrix = np.zeros((n_classes, n_classes), dtype=int)
-            for truth, prediction in zip(y_true, y_pred):
-                matrix[int(truth), int(prediction)] += 1
-            return matrix
+            indices = y_true.astype(int) * n_classes + y_pred.astype(int)
+            return np.bincount(indices, minlength=n_classes * n_classes).reshape(n_classes, n_classes)
 
         if batch.y_true is not None:
             overall_acc_before = float(np.mean(y_pred_before == batch.y_true))

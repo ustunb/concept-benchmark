@@ -22,7 +22,7 @@ class TestRobotConfigValidation:
 
     def test_rejects_negative_budget(self):
         with pytest.raises(ValueError, match="intervention_budgets must be non-negative"):
-            RobotBenchmarkConfig(intervention_budgets=[-1, 3])
+            RobotBenchmarkConfig(intervention_budgets=[-2, 3])
 
     def test_rejects_unknown_regime(self):
         with pytest.raises(ValueError, match="unknown intervention regimes"):

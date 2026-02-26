@@ -13,9 +13,22 @@ import logging
 import sys
 
 
+BUDGET_MAX_SENTINEL = -1
+
 ROBOT_STAGES = ("setup", "cbm", "dnn", "intervene", "align", "collect")
 SUDOKU_STAGES = ("setup", "ocr", "cs", "dnn", "intervene", "selective", "align", "collect")
 ROBOT_TEXT_STAGES = ("setup", "cbm", "dnn", "lfcbm", "intervene", "align", "collect")
+
+
+def _parse_budgets(raw: list[str]) -> list[int]:
+    """Parse budget values from CLI. Accepts integers and 'max'."""
+    budgets = []
+    for v in raw:
+        if v.lower() == "max":
+            budgets.append(BUDGET_MAX_SENTINEL)
+        else:
+            budgets.append(int(v))
+    return budgets
 
 
 def _validate_stages(stages: list[str], valid: tuple[str, ...], benchmark: str) -> None:
@@ -41,6 +54,8 @@ def _robot_cmd(args: argparse.Namespace) -> None:
     else:
         config = RobotBenchmarkConfig(seed=args.seed)
 
+    if args.budgets:
+        config.intervention_budgets = _parse_budgets(args.budgets)
     if args.regimes:
         config.intervention_regimes = args.regimes
     if args.strategy:
@@ -69,6 +84,8 @@ def _sudoku_cmd(args: argparse.Namespace) -> None:
     else:
         config = SudokuBenchmarkConfig(seed=args.seed)
 
+    if args.budgets:
+        config.intervention_budgets = _parse_budgets(args.budgets)
     # CLI flags override config
     if args.no_handwriting:
         config.handwriting = False
@@ -89,6 +106,8 @@ def _robot_text_cmd(args: argparse.Namespace) -> None:
         config = RobotTextBenchmarkConfig.from_yaml(args.config)
     else:
         config = RobotTextBenchmarkConfig(seed=args.seed)
+    if args.budgets:
+        config.intervention_budgets = _parse_budgets(args.budgets)
     if args.lfcbm:
         config.lfcbm_enable = True
         if "lfcbm" not in args.stages:
@@ -135,6 +154,8 @@ def main(argv: list[str] | None = None) -> None:
     robot_p.add_argument("--concept-missing-mech", type=str, default=None,
                          choices=["none", "mcar", "mnar"],
                          help="Missingness mechanism (default: mcar if --concept-missing is set).")
+    robot_p.add_argument("--budgets", nargs="+", default=None,
+                         help="Intervention budgets (e.g. 1 3 5 max). 'max' = number of concepts.")
     robot_p.add_argument("--regimes", nargs="+", default=None,
                          help="Intervention regimes (e.g. baseline expert subjective machine).")
     robot_p.add_argument("--strategy", type=str, default=None,
@@ -155,6 +176,8 @@ def main(argv: list[str] | None = None) -> None:
         help=f"Pipeline stages to run (default: all). Valid: {' -> '.join(SUDOKU_STAGES)}",
     )
     sudoku_p.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
+    sudoku_p.add_argument("--budgets", nargs="+", default=None,
+                          help="Intervention budgets (e.g. 1 3 5 max). 'max' = number of concepts.")
     sudoku_p.add_argument("--data-type", type=str, default=None, choices=["tabular", "image"],
                           help="Data modality: 'tabular' (pure digit values) or 'image' (OCR from board images).")
     sudoku_p.add_argument("--handwriting", action="store_true", default=None,
@@ -173,6 +196,8 @@ def main(argv: list[str] | None = None) -> None:
     )
     robot_text_p.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
     robot_text_p.add_argument("--lfcbm", action="store_true", help="Also run LFCBM variant.")
+    robot_text_p.add_argument("--budgets", nargs="+", default=None,
+                              help="Intervention budgets (e.g. 1 3 5 max). 'max' = number of concepts.")
     robot_text_p.add_argument("--regimes", nargs="+", default=None,
                               help="Intervention regimes (e.g. baseline expert subjective machine).")
     robot_text_p.add_argument("--strategy", type=str, default=None,

@@ -179,8 +179,8 @@ class RobotBenchmarkConfig:
             raise ValueError(
                 f"size must be one of {sorted(INPUT_MAP)}, got {self.size!r}"
             )
-        if any(b < 0 for b in self.intervention_budgets):
-            raise ValueError(f"intervention_budgets must be non-negative, got {self.intervention_budgets}")
+        if any(b < -1 for b in self.intervention_budgets):
+            raise ValueError(f"intervention_budgets must be non-negative (or -1 for max), got {self.intervention_budgets}")
         if self.intervention_strategy not in self._VALID_STRATEGIES:
             raise ValueError(
                 f"intervention_strategy must be one of {sorted(self._VALID_STRATEGIES)}, "
@@ -383,6 +383,7 @@ class SudokuBenchmarkConfig:
     concept_missing_mech: str = "none"
 
     # Intervention
+    intervention_budgets: List[int] = field(default_factory=lambda: [1, 3, 27])
     intervention_thresholds: List[float] = field(
         default_factory=lambda: [0.2, 0.4, 0.6, 0.8]
     )

@@ -574,7 +574,8 @@ def run_interventions(
     if model is None:
         model = load(config.get_model_path("cbm"))
 
-    budgets = [b for b in config.intervention_budgets if b > 0]
+    budgets = [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
+    budgets = [b for b in budgets if b > 0]
     threshold = config.flip_threshold
 
     all_dfs = []
@@ -721,13 +722,15 @@ def run(
             )
 
     device = determine_device()
+    n_stages = len(stages)
+    _si = {s: i for i, s in enumerate(stages, 1)}
     logger.info(
         "=== Robot Text Benchmark === seed=%d, stages=%s, device=%s",
         config.seed, stages, device,
     )
 
     if "setup" in stages:
-        logger.info("=== Stage: setup ===")
+        logger.info("=== [%d/%d] Setup ===", _si["setup"], n_stages)
         fp_path = config.get_dataset_path().with_suffix(".fingerprint")
         current_fp = config.setup_fingerprint()
         cached_fp = fp_path.read_text().strip() if fp_path.exists() else None
@@ -755,21 +758,21 @@ def run(
     model_stale = cached_model_fp != current_model_fp
 
     if "cbm" in stages:
-        logger.info("=== Stage: cbm ===")
+        logger.info("=== [%d/%d] Train CBM ===", _si["cbm"], n_stages)
         if model_stale or config.force_retrain or not config.get_model_path("cbm").exists():
             train_cbm(config)
         else:
             logger.info("Using existing CBM: %s", config.get_model_path("cbm"))
 
     if "dnn" in stages:
-        logger.info("=== Stage: dnn ===")
+        logger.info("=== [%d/%d] Train DNN ===", _si["dnn"], n_stages)
         if model_stale or config.force_retrain or not config.get_model_path("dnn").exists():
             train_dnn(config)
         else:
             logger.info("Using existing DNN: %s", config.get_model_path("dnn"))
 
     if "lfcbm" in stages and config.lfcbm_enable:
-        logger.info("=== Stage: lfcbm ===")
+        logger.info("=== [%d/%d] Train LFCBM ===", _si["lfcbm"], n_stages)
         if model_stale or config.force_retrain or not config.get_model_path("lfcbm").exists():
             train_lfcbm(config)
         else:
@@ -781,15 +784,15 @@ def run(
         model_fp_path.write_text(current_model_fp)
 
     if "intervene" in stages:
-        logger.info("=== Stage: intervene ===")
+        logger.info("=== [%d/%d] Intervene ===", _si["intervene"], n_stages)
         run_interventions(config)
 
     if "align" in stages:
-        logger.info("=== Stage: align ===")
+        logger.info("=== [%d/%d] Align ===", _si["align"], n_stages)
         align(config)
 
     if "collect" in stages:
-        logger.info("=== Stage: collect ===")
+        logger.info("=== [%d/%d] Collect ===", _si["collect"], n_stages)
         collect_results([config])
 
     logger.info("Robot text pipeline complete!")

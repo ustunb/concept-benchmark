@@ -302,7 +302,8 @@ def run_interventions(
     }
 
     rows = [no_interv]
-    for budget in [1, 3, 27]:
+    budgets = [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
+    for budget in budgets:
         interv_cfg = InterventionConfig(
             tau=cs_t,
             max_concepts_per_instance=budget,
@@ -554,13 +555,15 @@ def run(
             )
 
     device = determine_device()
+    n_stages = len(stages)
+    _si = {s: i for i, s in enumerate(stages, 1)}
     logger.info(
         "=== Sudoku Benchmark === seed=%d, stages=%s, device=%s",
         config.seed, stages, device,
     )
 
     if "setup" in stages:
-        logger.info("=== Stage: setup ===")
+        logger.info("=== [%d/%d] Setup ===", _si["setup"], n_stages)
         import shutil
         fp_path = config.get_dataset_path(data_type="tabular") / ".fingerprint"
         current_fp = config.setup_fingerprint()
@@ -591,23 +594,23 @@ def run(
 
     if "ocr" in stages:
         if config.data_type == "tabular":
-            logger.info("=== Stage: ocr === (skipped — data_type is tabular)")
+            logger.info("=== [%d/%d] Train OCR === (skipped — data_type is tabular)", _si["ocr"], n_stages)
         else:
-            logger.info("=== Stage: ocr ===")
+            logger.info("=== [%d/%d] Train OCR ===", _si["ocr"], n_stages)
             if model_stale or not config.get_model_path("ocr").exists():
                 train_ocr(config)
             else:
                 logger.info("Using existing OCR model: %s", config.get_model_path("ocr"))
 
     if "cs" in stages:
-        logger.info("=== Stage: cs ===")
+        logger.info("=== [%d/%d] Train CS ===", _si["cs"], n_stages)
         if model_stale or not config.get_model_path("cs").exists():
             train_cs(config)
         else:
             logger.info("Using existing CS model: %s", config.get_model_path("cs"))
 
     if "dnn" in stages:
-        logger.info("=== Stage: dnn ===")
+        logger.info("=== [%d/%d] Train DNN ===", _si["dnn"], n_stages)
         if model_stale or not config.get_model_path("dnn").exists():
             train_dnn(config)
         else:
@@ -645,23 +648,23 @@ def run(
             _shared_dnn = load(dnn_path)
 
     if "intervene" in stages:
-        logger.info("=== Stage: intervene ===")
+        logger.info("=== [%d/%d] Intervene ===", _si["intervene"], n_stages)
         df = run_interventions(config, cs_model=_shared_cs, data=_shared_data)
         logger.info("=== Intervention Results ===\n%s", df.to_string(index=False))
 
     if "selective" in stages:
-        logger.info("=== Stage: selective ===")
+        logger.info("=== [%d/%d] Selective ===", _si["selective"], n_stages)
         sel_df = compute_selective_results(
             config, cs_model=_shared_cs, dnn_weights=_shared_dnn, data=_shared_data
         )
         logger.info("=== Selective Metrics ===\n%s", sel_df.to_string(index=False))
 
     if "align" in stages:
-        logger.info("=== Stage: align ===")
+        logger.info("=== [%d/%d] Align ===", _si["align"], n_stages)
         align(config, cs_model=_shared_cs, data=_shared_data)
 
     if "collect" in stages:
-        logger.info("=== Stage: collect ===")
+        logger.info("=== [%d/%d] Collect ===", _si["collect"], n_stages)
         collect_results([config])
 
     logger.info("Pipeline complete!")

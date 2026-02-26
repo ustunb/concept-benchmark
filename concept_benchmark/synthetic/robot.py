@@ -331,7 +331,6 @@ def create_robot_image_dataset(
     else:
         raise ValueError("Invalid model_type. Use 'deterministic' or 'stochastic'.")
 
-    df[OUTCOME_NAME] = df.apply(glorp_model_true, axis=1)
     catalog_df[OUTCOME_NAME] = catalog_df.apply(glorp_model_true, axis=1)
 
     if model_type == "deterministic":
@@ -352,26 +351,24 @@ def create_robot_image_dataset(
 
     # X: Image paths (stored as strings)
     image_dir = output_directory
-    X = np.array([row["png_filename"] for _, row in catalog_df.iterrows()])
+    X = catalog_df["png_filename"].to_numpy()
 
     copy_features = copy.deepcopy(ALL_ROBOT_FEATURES)
     copy_features.update(new_concepts)
 
-    pos_map = {
-        feat: list(dict.fromkeys([str(f).split("_")[0] for f in copy_features[feat]]))[1]
-        for feat in catalog_df.columns if feat in copy_features
-    }
-
-    UC_cols = []
+    # Compute positive value and binarized column for every feature once
+    pos_map = {}
+    _binary_cache: dict[str, np.ndarray] = {}
     for feat in copy_features:
         pos_val = list(dict.fromkeys([str(f).split("_")[0] for f in copy_features[feat]]))[1]
-        col = (
+        pos_map[feat] = pos_val
+        _binary_cache[feat] = (
             (catalog_df[feat].astype(str).str.split("_").str[0] == str(pos_val))
             .astype(np.int32)
             .to_numpy()
         )
-        UC_cols.append(col)
-    UC = np.stack(UC_cols, axis=1).astype(np.int8)
+
+    UC = np.stack([_binary_cache[feat] for feat in copy_features], axis=1).astype(np.int8)
 
     if drop_irrelevant and irrelevant:
         # check if irrelevant features are in the catalog
@@ -381,21 +378,15 @@ def create_robot_image_dataset(
         if existing_irrelevant_features:
             catalog_df.drop(columns=existing_irrelevant_features, inplace=True)
 
-    # C: Concept matrix
+    # C: Concept matrix — reuse cached binary columns
     feature_names = [
         feat for feat in catalog_df.columns if feat in copy_features
     ]
-    # Binary encode concepts: 1 if feature equals designated positive value, else 0
     C_cols = []
     for feat in feature_names:
-        pos_val = pos_map.get(feat)
-        col = (
-            (catalog_df[feat].astype(str).str.split("_").str[0] == str(pos_val))
-            .astype(np.int32)
-            .to_numpy()
-        )
+        col = _binary_cache[feat]
         if verbose:
-            print(f"Feature '{feat}': positive value '{pos_val}' -> column head {col.tolist()[:10]}")
+            print(f"Feature '{feat}': positive value '{pos_map[feat]}' -> column head {col.tolist()[:10]}")
         C_cols.append(col)
     C = np.stack(C_cols, axis=1).astype(np.int8)
 
