@@ -1,6 +1,6 @@
 [project]
 name = "concept-benchmark"
-version = "0.1.2"
+version = "0.1.4"
 description = "Synthetic benchmarks for evaluating Concept Bottleneck Models."
 license = "MIT"
 readme = "README.md"
@@ -73,6 +73,9 @@ default-groups = ["dev"]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.sdist]
+exclude = ["data/", "results/", "scripts/", ".claude/"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["concept_benchmark"]
