@@ -86,7 +86,8 @@ class ConstrainedFrontEndModel(FrontEndModel):
         problem.solve()
 
         if problem.status in ("infeasible", "unbounded"):
-            print(f"Warning: CVXPY {problem.status}, falling back to unconstrained")
+            import logging
+            logging.getLogger(__name__).warning("CVXPY %s, falling back to unconstrained", problem.status)
             from sklearn.linear_model import LogisticRegression
 
             self.model = LogisticRegression(
@@ -158,10 +159,11 @@ def retrain_aligned(
         aligned_weights[concept] = float(aligned_fe.model.coef_[0, i])
     aligned_weights["bias"] = float(aligned_fe.model.intercept_[0])
 
-    print("\n=== Aligned Frontend Weights ===")
+    _log = logging.getLogger(__name__)
+    _log.info("Aligned frontend weights:")
     for i, concept in enumerate(concept_names):
-        print(f"  {concept}: {aligned_fe.model.coef_[0, i]:.4f}")
-    print(f"  bias: {aligned_fe.model.intercept_[0]:.4f}")
+        _log.info("  %s: %.4f", concept, aligned_fe.model.coef_[0, i])
+    _log.info("  bias: %.4f", aligned_fe.model.intercept_[0])
 
     return {
         "original_accuracy": original_acc,

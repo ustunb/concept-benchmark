@@ -15,6 +15,7 @@ __all__ = [
     "check_strata",
 ]
 
+import logging
 import re
 import numpy as np
 from sklearn.model_selection import StratifiedKFold, KFold
@@ -334,7 +335,7 @@ def validate_cvindices(cvindices, stratified=True):
                 cvindices[fold_id], fold_id, n_samples, stratified
             )
         except AssertionError:
-            print("could not validate fold: %s" % fold_id)
+            logging.getLogger(__name__).warning("could not validate fold: %s", fold_id)
             pass
 
     for fold_id in inner_ids:
@@ -345,7 +346,7 @@ def validate_cvindices(cvindices, stratified=True):
                     cvindices[fold_id], fold_id, stratified=stratified
                 )
             except AssertionError:
-                print("could not validate fold: %s" % fold_id)
+                logging.getLogger(__name__).warning("could not validate fold: %s", fold_id)
                 pass
 
     return validated_indices

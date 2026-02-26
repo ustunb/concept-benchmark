@@ -24,8 +24,8 @@ class SimpleHandwrittenGenerator:
         self.fonts_dir = fonts_dir
         self.font_files = self._load_font_files()
         if not self.font_files:
-            print(f"WARNING: No fonts found in {fonts_dir}")
-            print("Please download handwritten fonts and place them in the fonts directory")
+            import logging
+            logging.getLogger(__name__).warning("No fonts found in %s", fonts_dir)
 
     def _load_font_files(self):
         """Load all TTF font files from the fonts directory."""
@@ -67,7 +67,8 @@ class SimpleHandwrittenGenerator:
         try:
             font = ImageFont.truetype(font_file, font_size)
         except Exception as e:
-            print(f"Error loading font {font_file}: {e}")
+            import logging
+            logging.getLogger(__name__).warning("Error loading font %s: %s", font_file, e)
             # Fallback to default
             font = ImageFont.load_default()
         # Create temporary image for text

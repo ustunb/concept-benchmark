@@ -4,6 +4,7 @@ from __future__ import annotations
 __all__ = ["LFTrainingConfig", "LFConceptSet", "LabelFreeCBM"]
 
 import json
+import logging
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,8 @@ import torch
 from PIL import Image
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
+
+logger = logging.getLogger(__name__)
 
 _EPS = 1e-8
 
@@ -358,7 +361,7 @@ class LabelFreeCBM:
         self.concept_set = concept_set
         cache = Path(cache_dir or self.cfg.cache_dir or ".").resolve()
         cache.mkdir(parents=True, exist_ok=True)
-        print(f"[lfcbm] cache dir: {cache}")
+        logger.debug("LFCBM cache dir: %s", cache)
 
         # 1) Encode images and concepts (CLIP) and cache them
         def _cache(path: Path, arr: np.ndarray) -> None:

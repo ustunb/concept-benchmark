@@ -84,6 +84,7 @@ def setup_dataset(config: RobotBenchmarkConfig):
     Returns the saved ConceptDataset.
     """
     settings = config.to_dict()
+    print("Generating robot dataset...", flush=True)
     data = create_synthetic_dataset(**settings)
     tf = transforms.Compose([transforms.ToTensor()])
     data.transform = tf

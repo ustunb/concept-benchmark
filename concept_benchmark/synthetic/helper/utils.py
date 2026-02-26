@@ -79,7 +79,8 @@ def model_to_logistic(model: str, weights: dict, scalar = 1.0, intercept = None)
     matches = re.findall(r"row\['(.*?)'\]==(['\"].*?['\"])", expr)
     for feature, value in matches:
         if feature not in weights:
-            print(f"Weight for feature '{feature}' not found in weights dictionary.")
+            import logging
+            logging.getLogger(__name__).warning("Weight for feature '%s' not found in weights dictionary.", feature)
             weight = 1
         else:
             weight = weights[feature]

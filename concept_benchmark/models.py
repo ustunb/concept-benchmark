@@ -1059,9 +1059,7 @@ class ConceptBasedModel:
         """
         Predict probabilities using concept propagation.
         """
-        print("Using concept propagation...")
         if self._concept_poss is None or self._y_proba_all_concepts is None:
-            print("Preparing for propagation...")
             self._prep_propagation()
 
         # Vectorized propagation over all samples and concept combinations

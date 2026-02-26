@@ -9,6 +9,7 @@ __all__ = ["make_llm_client", "judge_concept", "judge_concepts_batch"]
 
 import base64
 import json
+import logging
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Sequence
@@ -247,7 +248,7 @@ def judge_concepts_batch(
                 cache[cache_key] = val
             done += 1
             if done % 50 == 0:
-                print(f"  LLM judgments: {done}/{total_calls}")
+                logging.getLogger(__name__).info("LLM judgments: %d/%d", done, total_calls)
 
     # Save cache
     if cache_path is not None:

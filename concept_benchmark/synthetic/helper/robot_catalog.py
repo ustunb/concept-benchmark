@@ -54,27 +54,26 @@ def collapse_robot_subtypes(
     collapses feature values with subtypes into feature_types
     """
     df_feature_names = [k for k in df.columns if k in robot_features]
-    separate = lambda x: pd.Series(str(x).split(subtype_separator))
     new_features = {}
     for name in df_feature_names:
-        sf = df[name].apply(separate)
-        if sf.shape[1] == 2:  # has subtypes
-            df[name] = sf.loc[:, 0].values
-            df[name + "_subtype"] = sf.loc[:, 1].values
-            if collapse_as_new_feature:
-                # create as many new features as there are subtypes per type
-                subtype_values = sf.loc[:, 1].unique()
-                types = sf.loc[:, 0].unique()
+        # Vectorized split instead of per-row apply
+        str_vals = df[name].astype(str)
+        split_df = str_vals.str.split(subtype_separator, n=1, expand=True)
+        if split_df.shape[1] == 2:  # has subtypes
+            types_col = split_df[0].values
+            subtypes_col = split_df[1].values
+            df[name] = types_col
+            df[name + "_subtype"] = subtypes_col
+            if collapse_as_new_feature and f"{name}_subtype" in collapse_as_new_feature:
+                subtype_values = np.unique(subtypes_col)
+                types = np.unique(types_col)
                 for t in types:
-                    if f"{name}_subtype" in collapse_as_new_feature:
-                        for sv in subtype_values:
-                            new_feature_name = f"{name}_{t}_{sv}"
-                            print(f"Creating new feature {new_feature_name}")
-                            if new_feature_name not in df.columns:
-                                df[new_feature_name] = False
-                                new_features[new_feature_name] = [False, True]
-                            df.loc[df[name] == t, new_feature_name] = (sf.loc[:, 1] == sv) & (sf.loc[:, 0] == t) # this call ensures that you only get True if the type matches
-                            df[new_feature_name] = df[new_feature_name].astype(str)
+                    type_mask = types_col == t
+                    for sv in subtype_values:
+                        new_feature_name = f"{name}_{t}_{sv}"
+                        if new_feature_name not in df.columns:
+                            new_features[new_feature_name] = [False, True]
+                        df[new_feature_name] = ((subtypes_col == sv) & type_mask).astype(str)
     return df, new_features
 
 
@@ -153,7 +152,7 @@ def generate_robot_catalog(
         df=catalog_df, robot_features=list(concepts.keys()),
         collapse_as_new_feature=additional_features or [],
     )
-    print(f"After collapse: {new_features}")
+    # new_features dict now contains any subconcept columns created
 
     constant_cols = [
         col
@@ -171,11 +170,13 @@ def generate_robot_catalog(
     n_skipped = 0
     n_generated = 0
 
-    if draw and verbose:
-        print(f"Drawing up to {len(catalog_df)} robot images (skipping existing)...")
-
     color_lefts, color_rights = [], []
-    for k, features in tqdm(init_catalog_df.iterrows(), total=len(catalog_df)):
+    for k, features in tqdm(
+        init_catalog_df.iterrows(),
+        total=len(catalog_df),
+        desc="Drawing robots" if draw else "Building catalog",
+        disable=not draw,
+    ):
         png_filename = f"robot_{k:03d}.png"
 
         png_file = output_path / png_filename
