@@ -61,6 +61,38 @@ def unlist0(obj):
         return obj
 
 
+def build_model_expression(
+    model_features: dict,
+    *,
+    model_type: str = "stochastic",
+    weights: dict | None = None,
+    intercept: float = 0.0,
+    scalar: float = 1.0,
+) -> str:
+    """Build a row-level label expression from structured feature spec.
+
+    Both modes compute:  score = Σ w_i · 1[f_i = v_i] + intercept
+
+    Deterministic: ``'glorp' if score >= 0 else 'drent'``
+    Stochastic:    ``expit(scalar * score)``  (probability for Bernoulli sampling)
+    """
+    weights = weights or {}
+    terms = []
+    for feat, val in model_features.items():
+        w = weights.get(feat, 1.0)
+        terms.append(f"{w}*int(row['{feat}']=='{val}')")
+    score_expr = " + ".join(terms) + f" + {intercept}"
+
+    if model_type == "deterministic":
+        return f"'glorp' if ({score_expr}) >= 0 else 'drent'"
+    elif model_type == "stochastic":
+        if scalar != 1.0:
+            score_expr = f"({score_expr}) * {scalar}"
+        return f"expit({score_expr})"
+    else:
+        raise ValueError(f"Invalid model_type: {model_type!r}")
+
+
 def model_to_logistic(model: str, weights: dict, scalar = 1.0, intercept = None) -> str:
     """
     Extracts the arithmetic expression inside the first (...) before a comparison operator and the number after the

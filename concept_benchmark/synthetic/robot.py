@@ -16,7 +16,7 @@ from .helper.robot_catalog import (
     generate_robot_catalog,
 )
 from .helper import textgen as text_helper
-from .helper.utils import model_to_logistic, unlist0
+from .helper.utils import build_model_expression, model_to_logistic, unlist0
 
 
 def create_synthetic_dataset(data_type: str = "image", **kwargs) -> ConceptDataset:
@@ -293,8 +293,9 @@ def create_robot_image_dataset(
 
     if not concepts:
         raise ValueError("'concepts' dictionary must be provided and non-empty")
-    if not model:
-        raise ValueError("'model' expression must be provided for label generation")
+    model_features = extra_params.get("model_features", {})
+    if not model and not model_features:
+        raise ValueError("Either 'model' expression or 'model_features' must be provided")
 
     num_combinations = int(np.prod([len(v) for v in concepts.values()]))
     total_robots = num_robots or num_combinations * samples_per_instance
@@ -322,14 +323,30 @@ def create_robot_image_dataset(
     df = catalog_df
 
     # Specify true labels
-    if model_type == "deterministic":
-        glorp_model_true = lambda row: eval(unlist0(model))
-    elif model_type == "stochastic":
-        glorp_model_true = lambda row: eval(model_to_logistic(model, scalar = extra_params.get("scalar", 1.0),
-                                                              weights = extra_params.get('weights', {}),
-                                                              intercept = extra_params.get("intercept", None)))
+    expr = ""  # populated by build_model_expression when model_features is used
+    if model_features:
+        # New structured path — build expression from explicit feature/weight spec
+        expr = build_model_expression(
+            model_features,
+            model_type=model_type,
+            weights=extra_params.get("model_weights"),
+            intercept=extra_params.get("model_intercept", 0.0),
+            scalar=extra_params.get("model_scalar", 1.0),
+        )
+        glorp_model_true = lambda row, _e=expr: eval(_e)
+    elif model:
+        # Legacy string path (backward compat for tests / custom usage)
+        if model_type == "deterministic":
+            glorp_model_true = lambda row: eval(unlist0(model))
+        elif model_type == "stochastic":
+            glorp_model_true = lambda row: eval(model_to_logistic(
+                model, scalar=extra_params.get("scalar", 1.0),
+                weights=extra_params.get('weights', {}),
+                intercept=extra_params.get("intercept", None)))
+        else:
+            raise ValueError("Invalid model_type. Use 'deterministic' or 'stochastic'.")
     else:
-        raise ValueError("Invalid model_type. Use 'deterministic' or 'stochastic'.")
+        raise ValueError("Either 'model' or 'model_features' must be provided")
 
     catalog_df[OUTCOME_NAME] = catalog_df.apply(glorp_model_true, axis=1)
 
@@ -428,7 +445,7 @@ def create_robot_image_dataset(
         "image_dir": image_dir,
         "resolution": eff_resolution,
         "color_mode": color_mode,
-        "labeling_function": model,
+        "labeling_function": model or expr,
         "num_robots": total_robots,
         "robot_ids": catalog_df["id"].values,
         "catalog_df": catalog_df,

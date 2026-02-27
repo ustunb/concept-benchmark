@@ -76,12 +76,6 @@ ROBOT_CONCEPTS = {
     ],
 }
 
-ROBOT_MODEL_RULE = (
-    "'glorp' if (int(row['mouth_type']=='closed') "
-    "+ int(row['foot_shape']=='pointy') "
-    "+ int(row['has_knees']=='true'))>= 3 else 'drent'"
-)
-
 ROBOT_SKEW_SPECS = [
     {"concepts": {"foot_shape_pointy_square": 1}, "min_fraction": 0.005},
     {"concepts": {"foot_shape_pointy_rounded": 1}, "min_fraction": 0.005},
@@ -113,13 +107,20 @@ class RobotBenchmarkConfig:
     draw: bool = True
     seed: int = 1014
     concepts: Dict[str, list] = field(default_factory=lambda: copy.deepcopy(ROBOT_CONCEPTS))
-    model_rule: str = ROBOT_MODEL_RULE
     model_type: str = "stochastic"
-    scalar: float = 4.2
-    intercept: float = -2.0
-    weights: Dict[str, float] = field(
-        default_factory=lambda: {"mouth_type": 5, "foot_shape": 8, "has_knees": -5}
-    )
+    # Label model: score = Σ w_i · 1[f_i = v_i] + model_intercept
+    #   deterministic: Glorp if score >= 0
+    #   stochastic:    P(Glorp) = σ(model_scalar × score), then Bernoulli sample
+    model_features: Dict[str, str] = field(default_factory=lambda: {
+        "mouth_type": "closed",
+        "foot_shape": "pointy",
+        "has_knees": "true",
+    })
+    model_weights: Dict[str, float] = field(default_factory=lambda: {
+        "mouth_type": 5.0, "foot_shape": 8.0, "has_knees": -5.0,
+    })
+    model_intercept: float = 2.0
+    model_scalar: float = 4.2  # sigmoid temperature (stochastic only)
     test_size: int = 10000
     train_skew_size: int = 3800
     skew_specs: List[Dict] = field(default_factory=lambda: copy.deepcopy(ROBOT_SKEW_SPECS))
@@ -222,7 +223,6 @@ class RobotBenchmarkConfig:
             "train_dnn": 0,
             "seed": self.seed,
             "rng_seed": self.seed,
-            "model": self.model_rule,
             "test_size": self.test_size,
             "train_skew_size": self.train_skew_size,
             "knows_concepts": self.knows_concepts,
@@ -232,9 +232,10 @@ class RobotBenchmarkConfig:
             "subconcept": self.subconcept,
             "drop_concepts": list(self.drop_concepts),
             "model_type": self.model_type,
-            "scalar": self.scalar,
-            "intercept": self.intercept,
-            "weights": dict(self.weights),
+            "model_features": dict(self.model_features),
+            "model_weights": dict(self.model_weights),
+            "model_intercept": self.model_intercept,
+            "model_scalar": self.model_scalar,
             "skew_specs": copy.deepcopy(self.skew_specs),
             "concept_missing": self.concept_missing,
             "concept_missing_mech": self.concept_missing_mech,
