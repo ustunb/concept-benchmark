@@ -37,7 +37,6 @@ cfg = RobotBenchmarkConfig(
     samples_per_instance=4,
     model_type="stochastic",
     subconcept=SUBCONCEPT,
-    spurious_features=["has_elbows", "hand_shape"],
     additional_features=["foot_shape_subtype"],
     epochs=50,
     lr=1e-3,

@@ -280,7 +280,6 @@ def create_robot_image_dataset(
     draw: bool = False,
     model: str = "",
     model_type: str = "deterministic",
-    spurious_features: Sequence[str] | None = None,
     additional_features: Sequence[str] | None = None,
     color_mode: str = "color",
     blur: dict | None = None,
@@ -300,8 +299,6 @@ def create_robot_image_dataset(
     num_combinations = int(np.prod([len(v) for v in concepts.values()]))
     total_robots = num_robots or num_combinations * samples_per_instance
     eff_resolution = resolution if resolution is not None else (600 if size == "large" else 32 if size == "medium" else 8)
-    irrelevant = list(spurious_features or [])
-    drop_irrelevant = extra_params.pop("drop_irrelevant", True)
     _ = (train_concept_detector, epochs)  # parameters accepted for API compatibility
 
     catalog_df, new_concepts = generate_robot_catalog(
@@ -386,14 +383,6 @@ def create_robot_image_dataset(
         )
 
     UC = np.stack([_binary_cache[feat] for feat in copy_features], axis=1).astype(np.int8)
-
-    if drop_irrelevant and irrelevant:
-        # check if irrelevant features are in the catalog
-        existing_irrelevant_features = [
-            f for f in irrelevant if f in catalog_df.columns
-        ]
-        if existing_irrelevant_features:
-            catalog_df.drop(columns=existing_irrelevant_features, inplace=True)
 
     # C: Concept matrix — reuse cached binary columns
     feature_names = [
@@ -482,7 +471,6 @@ def create_robot_image_dataset(
 #             'foot_shape': ['flat_4sided', 'flat_5sided', 'flat_lshaped',
 #                            'pointy_3sided', 'pointy_4sided', 'pointy_6sided'],
 #         },
-#         'spurious_features': ['has_elbows', 'hand_shape'],  # features that do not appear in the catalog + color
 #         'model': "'glorp' if (int(row['body_shape']=='square') + int(row['foot_shape']=='pointy') - 2 >= 0) else 'drent'",
 #         'model_type': 'deterministic',  # 'deterministic', 'stochastic'
 #         'size': 'large',  # 'small', 'large'

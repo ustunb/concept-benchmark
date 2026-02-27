@@ -77,28 +77,6 @@ def collapse_robot_subtypes(
     return df, new_features
 
 
-def add_irrelevant_feature(df, feature_name="has_elbows", values=[True, False]):
-    """
-    :param df:
-    :param feature_name:
-    :param values:
-    :return:
-    """
-
-    raise NotImplementedError()
-    # todo berk: only implement this if you have a way of ensuring that the feature does not change
-    assert isinstance(df, pd.DataFrame)
-    assert isinstance(feature_name, str) and len(feature_name) >= 1
-    assert feature_name not in df.columns
-    df[feature_name] = values[0]
-    df_list = [df]
-    for v in values[1:]:
-        df_new = df.copy()
-        df_new[feature_name] = v
-        df_list.append(df)
-
-    return pd.concat(df_list)
-
 def convert_to_grayscale(image_path):
     """Convert saved image to grayscale"""
     img = Image.open(image_path).convert("L")  # L = grayscale

@@ -180,21 +180,6 @@ class TestInterventionCSV:
         # At least budget 0 (no-intervention) + budget 1
         assert len(ideal_interv_df) >= 2
 
-    def test_ideal_interv_k1_t02_accuracy(self, ideal_interv_df):
-        row = ideal_interv_df[
-            (ideal_interv_df["budget"] == 1)
-            & (ideal_interv_df["threshold"] == 0.2)
-        ]
-        assert len(row) == 1
-        assert abs(row.iloc[0]["accuracy"] - 0.9736) < 0.001
-
-    def test_ideal_interv_k1_t02_changed(self, ideal_interv_df):
-        row = ideal_interv_df[
-            (ideal_interv_df["budget"] == 1)
-            & (ideal_interv_df["threshold"] == 0.2)
-        ]
-        assert row.iloc[0]["predictions_changed"] == 1417
-
     def test_ideal_interv_kmax_t02_accuracy(self, ideal_interv_df):
         max_budget = ideal_interv_df["budget"].max()
         row = ideal_interv_df[

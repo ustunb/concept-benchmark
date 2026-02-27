@@ -26,6 +26,8 @@ from concept_benchmark.paths import data_dir, results_dir
 # ── Robot benchmark constants ─────────────────────────────────────────
 
 IDEAL_DROP = [
+    "has_elbows",
+    "hand_shape",
     "foot_shape_flat_rounded",
     "foot_shape_pointy_trapezoid",
     "foot_shape_pointy_3sided",
@@ -39,6 +41,8 @@ IDEAL_DROP = [
 ]
 
 SUBCONCEPT_DROP = [
+    "has_elbows",
+    "hand_shape",
     "foot_shape_flat_rounded",
     "foot_shape_pointy_trapezoid",
     "foot_shape_pointy_3sided",
@@ -126,7 +130,6 @@ class RobotBenchmarkConfig:
     skew_specs: List[Dict] = field(default_factory=lambda: copy.deepcopy(ROBOT_SKEW_SPECS))
     drop_concepts: List[str] = field(default_factory=lambda: list(IDEAL_DROP))
     additional_features: List[str] = field(default_factory=lambda: ["foot_shape_subtype"])
-    spurious_features: List[str] = field(default_factory=lambda: ["has_elbows", "hand_shape"])
     color_mode: str = "color"
     knows_concepts: bool = False
 
@@ -228,7 +231,6 @@ class RobotBenchmarkConfig:
             "knows_concepts": self.knows_concepts,
             "concepts": copy.deepcopy(self.concepts),
             "additional_features": list(self.additional_features),
-            "spurious_features": list(self.spurious_features),
             "subconcept": self.subconcept,
             "drop_concepts": list(self.drop_concepts),
             "model_type": self.model_type,

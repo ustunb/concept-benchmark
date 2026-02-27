@@ -114,7 +114,7 @@ The package includes two benchmarks. **Robot classification** is a decision-supp
 
 ### Robot Classification
 
-This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot -- **Glorp** or **Drent** -- from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The default labeling rule is: Glorp if mouth is closed, foot is pointy, and robot has knees (all three); Drent otherwise. Which features matter and which are spurious are configurable, mimicking real-world settings where the true relationship between features and labels is unknown. Available as image (`cbm-benchmark robot`) and text (`cbm-benchmark robot-text`) modalities.
+This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot -- **Glorp** or **Drent** -- from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The default labeling rule is: Glorp if mouth is closed, foot is pointy, and robot has knees (all three); Drent otherwise. Which features matter and which are excluded (via `drop_concepts`) are configurable, mimicking real-world settings where the true relationship between features and labels is unknown. Available as image (`cbm-benchmark robot`) and text (`cbm-benchmark robot-text`) modalities.
 
 <p align="center">
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
