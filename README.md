@@ -170,8 +170,8 @@ The most important parameters used in the config above are listed below. For the
 |-----------|---------|-------------|
 | `drop_concepts` | `IDEAL_DROP` | Which concepts to exclude. Two presets are provided: `IDEAL_DROP` for 7 coarse concepts (binary foot_shape), `SUBCONCEPT_DROP` for 12 concepts (5 fine-grained foot subtypes). |
 | `subconcept` | `False` | Shortcut that switches `drop_concepts` to `SUBCONCEPT_DROP`. |
-| `model_rule` | see `config.py` | Python expression defining the labeling rule. Default: Glorp if `(mouth_closed + foot_pointy + has_knees) >= 3`. |
-| `weights` | `{"mouth_type": 5, "foot_shape": 8, "has_knees": -5}` | Concept weights for the stochastic labeling function. |
+| `model_features` | `{"mouth_type": "closed", "foot_shape": "pointy", "has_knees": "true"}` | Which feature values count toward the label score. |
+| `model_weights` | `{"mouth_type": 5.0, "foot_shape": 8.0, "has_knees": -5.0}` | Concept weights for the labeling function. Score = `Σ w_i · 1[f_i = v_i] + intercept`. |
 | `concept_missing` | `0.0` | Fraction of concept labels masked during training. |
 | `regimes` | `["baseline"]` | How interventions are performed: `baseline` (oracle), `expert` (noisy human), `subjective` (noisy concept labels + noisy human), `machine`/`llm`/`clip` (concepts discovered via [Label-Free CBM](https://arxiv.org/abs/2304.06129)). |
 
