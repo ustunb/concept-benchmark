@@ -221,6 +221,7 @@ class RobotBenchmarkConfig:
             "color_mode": self.color_mode,
             "train_dnn": 0,
             "seed": self.seed,
+            "rng_seed": self.seed,
             "model": self.model_rule,
             "test_size": self.test_size,
             "train_skew_size": self.train_skew_size,

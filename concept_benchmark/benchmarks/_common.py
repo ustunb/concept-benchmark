@@ -222,9 +222,10 @@ def run_alignment(
     """
     from concept_benchmark.alignment import retrain_aligned
 
-    # Threshold at 0.5 to match cbm.predict() which binarises concept
-    # predictions before passing them to the frontend.
-    h_train = (cbm.concept_detector.predict(train_dataset) > 0.5).astype(np.float32)
+    # Use ground-truth concepts for training (matching the paper where both
+    # original and aligned frontends are trained on GT labels).
+    # Test uses predicted concepts (binarised at 0.5, matching cbm.predict()).
+    h_train = train_dataset.C.astype(np.float32)
     h_test = (cbm.concept_detector.predict(test_dataset) > 0.5).astype(np.float32)
 
     stats = retrain_aligned(

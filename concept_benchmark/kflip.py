@@ -119,7 +119,9 @@ class KFlipInterventionStrategy(InterventionStrategy):
             _lr = getattr(model.front_end_model, "model", model.front_end_model)
             _coef = getattr(_lr, "coef_", None)
             _inter = getattr(_lr, "intercept_", None)
-            if _coef is not None and _inter is not None:
+            if _coef is not None and _inter is not None and getattr(
+                model.front_end_model, "_kflip_fast_path", True
+            ):
                 _coef = np.asarray(_coef)
                 if _coef.shape[0] == 1:  # binary classification
                     _fast_w = _coef[0].astype(np.float64)

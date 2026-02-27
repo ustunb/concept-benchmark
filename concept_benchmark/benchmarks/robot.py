@@ -46,6 +46,8 @@ class FEOnProbs(FrontEndModel):
     Applies logit transform before predict_proba, matching how the
     LFCBM classifier was trained (on z-scored, then logit-transformed features).
     """
+    _kflip_fast_path = False  # class-level: fast path skips our logit transform
+
     def __init__(self, clf):
         super().__init__()
         self.model = clf
@@ -1058,7 +1060,7 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
                 "model": config.llm_model,
                 "api_key": config.llm_api_key,
                 "api_key_env": config.llm_api_key_env,
-                "batch_size": 300,
+                "batch_size": 500,
             },
             "run_dir": str(results_dir),
         }
@@ -1105,6 +1107,7 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
 
     # Select model, concept predictions, and human accuracy per regime
     c_preds = None  # set below; None means use regime_model.concept_detector
+    regime_concept_names = None  # set for LFCBM regimes; None → use GT concepts
     if regime == "baseline":
         regime_model = model
         human_acc = config.intervention_accuracy
@@ -1125,6 +1128,7 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
             for p in data.test.X
         ]
         c_preds = lfcbm_obj.concept_proba(test_paths)
+        regime_concept_names = list(lfcbm_obj.concept_set.keys)
         regime_model = ConceptBasedModel(concept_detector=None, front_end_model=fe_machine)
         human_acc = config.expert_intervention_accuracy
     elif regime in ("llm", "clip"):
@@ -1166,6 +1170,7 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
             acc_det=acc_det,
             fe=regime_model.front_end_model,
             test=data.test,
+            concept_names=regime_concept_names,
         )
         df_lst.append(
             pd.DataFrame(r)
