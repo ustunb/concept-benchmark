@@ -121,7 +121,7 @@ def to_fold_id(
 #### fold generation ####
 
 
-def generate_folds(n_folds=5, n_samples=None, strata=None):
+def generate_folds(n_folds=5, n_samples=None, strata=None, seed=None):
     """
     generate fold indices for standard or stratified K-fold CV
 
@@ -143,11 +143,11 @@ def generate_folds(n_folds=5, n_samples=None, strata=None):
     if stratified:
         assert check_strata(strata)
         n_samples = len(strata)
-        fold_generator = StratifiedKFold(n_splits=n_folds, shuffle=True)
+        fold_generator = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
     else:
         assert isinstance(n_samples, int) and n_samples >= 2
         strata = np.empty(n_samples)
-        fold_generator = KFold(n_splits=n_folds, shuffle=True)
+        fold_generator = KFold(n_splits=n_folds, shuffle=True, random_state=seed)
 
     folds = np.zeros(n_samples, dtype=int)
     for k, (train_idx, test_idx) in enumerate(fold_generator.split(X=strata, y=strata)):
@@ -217,9 +217,9 @@ def generate_cvindices(
         for n in range(1, replicates + 1):
             fold_id = to_fold_id(total_folds=k, replicate_idx=n)
             if stratified:
-                cvindices[fold_id] = generate_folds(n_folds=k, strata=strata)
+                cvindices[fold_id] = generate_folds(n_folds=k, strata=strata, seed=seed)
             else:
-                cvindices[fold_id] = generate_folds(n_folds=k, n_samples=n_samples)
+                cvindices[fold_id] = generate_folds(n_folds=k, n_samples=n_samples, seed=seed)
 
             # generate inner folds for k-fold cv
             for f in range(1, k + 1):
@@ -234,11 +234,11 @@ def generate_cvindices(
                     )
                     if stratified:
                         cvindices[inner_fold_id] = generate_folds(
-                            n_folds=num_inner_folds, strata=strata[fold_idx]
+                            n_folds=num_inner_folds, strata=strata[fold_idx], seed=seed
                         )
                     else:
                         cvindices[inner_fold_id] = generate_folds(
-                            n_folds=num_inner_folds, n_samples=n_samples_fold
+                            n_folds=num_inner_folds, n_samples=n_samples_fold, seed=seed
                         )
 
     cvindices = validate_cvindices(cvindices, stratified=stratified)

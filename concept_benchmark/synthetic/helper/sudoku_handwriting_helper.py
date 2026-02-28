@@ -173,19 +173,21 @@ class AdvancedHandwrittenGenerator(SimpleHandwrittenGenerator):
         # Apply elastic distortion
         rng = random.Random(rng_seed) if rng_seed is not None else random
         if rng.random() > 0.5:
+            elastic_seed = rng.randint(0, 2**31 - 1)
             img_array = self._elastic_transform(
                 img_array,
                 alpha=rng.uniform(5, 15),
-                sigma=rng.uniform(2, 4)
+                sigma=rng.uniform(2, 4),
+                seed=elastic_seed,
             )
         # Convert back to PIL and resize
         img = Image.fromarray(img_array, mode='RGBA')
         img = img.resize((size, size), Image.LANCZOS)
         return img
 
-    def _elastic_transform(self, image, alpha, sigma):
+    def _elastic_transform(self, image, alpha, sigma, seed=None):
         """Apply elastic distortion to the image."""
-        random_state = np.random.RandomState(None)
+        random_state = np.random.RandomState(seed)
         shape = image.shape[:2]
         dx = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma) * alpha
         dy = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma) * alpha
@@ -227,6 +229,10 @@ def _build_given_mask(board: np.ndarray,
     if not coords:
         return mask
 
+    if starters_seed is None:
+        # Derive a deterministic seed from board contents so that
+        # the same board always produces the same starters mask.
+        starters_seed = int(np.sum(board * np.arange(1, board.size + 1).reshape(board.shape)) % (2**31))
     rng = np.random.default_rng(starters_seed)
 
     if starters_count is not None:

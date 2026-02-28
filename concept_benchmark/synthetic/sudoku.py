@@ -142,7 +142,8 @@ def create_sudoku_dataset(
     # ---- invalid boards
     for i in range(n_invalid):
         num_actions = max(1, int(random.randint(1, max_corrupt)))
-        b = generate_invalid_board(base_board=generate_valid_board(n=n), num_actions=num_actions)
+        inv_seed = random.randint(0, 2**31 - 1)
+        b = generate_invalid_board(base_board=generate_valid_board(n=n), num_actions=num_actions, seed=inv_seed)
         concepts = get_concepts(b, return_label=False)
         c_base = np.array(list(concepts.values()), dtype=np.int32).flatten()
 

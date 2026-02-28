@@ -28,6 +28,7 @@ from concept_benchmark.synthetic.sudoku_ocr.ocr_utils import (
     crop_cell,
     load_sidecars,
 )
+from concept_benchmark.benchmarks._common import set_deterministic_seed
 from concept_benchmark.config import SudokuBenchmarkConfig
 
 
@@ -227,13 +228,14 @@ def main():
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--val-fraction", type=float, default=0.12, help="Validation split fraction.")
     ap.add_argument("--min-val", type=int, default=600, help="Minimum validation examples.")
-    ap.add_argument("--num-workers", type=int, default=2)
+    ap.add_argument("--num-workers", type=int, default=0)
     ap.add_argument("--cell-px", type=int, default=50, help="Must match the render settings.")
     ap.add_argument("--margin-px", type=int, default=2, help="Must match the render settings.")
     ap.add_argument("--no-debug-dumps", action="store_true", help="Disable writing sample crops.")
     ap.add_argument("--skip-training", action="store_true", help="Skip training and use existing model.")
 
     args, _ = ap.parse_known_args()
+    set_deterministic_seed(args.seed)
     cfg = SudokuBenchmarkConfig(
         n=args.n, n_samples=args.n_samples,
         max_corrupt=args.max_corrupt, seed=args.seed,
@@ -264,7 +266,10 @@ def main():
     n_val = max(args.min_val, int(args.val_fraction * n_total))
     n_val = min(n_val, n_total // 2) if n_total > 1 else 0
     n_train = n_total - n_val
-    train_ds, val_ds = random_split(sudoku_ds, [n_train, n_val])
+    train_ds, val_ds = random_split(
+        sudoku_ds, [n_train, n_val],
+        generator=torch.Generator().manual_seed(args.seed),
+    )
     logger.info(f"[INFO] train={len(train_ds)} val={len(val_ds)}")
 
     train_loader = DataLoader(
@@ -273,6 +278,7 @@ def main():
         shuffle=True,
         num_workers=args.num_workers,
         pin_memory=True,
+        generator=torch.Generator().manual_seed(args.seed),
     )
     val_loader = DataLoader(
         val_ds,
