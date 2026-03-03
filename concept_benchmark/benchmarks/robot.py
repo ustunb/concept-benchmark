@@ -1060,7 +1060,7 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
                 "model": config.llm_model,
                 "api_key": config.llm_api_key,
                 "api_key_env": config.llm_api_key_env,
-                "batch_size": 500,
+                "batch_size": 100,
             },
             "run_dir": str(results_dir),
         }

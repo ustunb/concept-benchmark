@@ -73,15 +73,15 @@ def _encode_images_b64(image_paths: Sequence[str | Path]) -> List[tuple]:
 class _GeminiClient(_LLMBase):
     def generate(self, prompt: str, image_paths: Sequence[str | Path] = ()) -> str:
         try:
-            import google.generativeai as genai
+            from google import genai
+            from google.genai import types
             from PIL import Image
         except ImportError as e:
             raise ImportError(
-                "google-generativeai and pillow are required for Gemini. "
-                "Install with: pip install google-generativeai pillow"
+                "google-genai and pillow are required for Gemini. "
+                "Install with: pip install google-genai pillow"
             ) from e
-        genai.configure(api_key=self.api_key)
-        model = genai.GenerativeModel(self.model_name)
+        client = genai.Client(api_key=self.api_key)
         imgs = []
         for p in image_paths:
             try:
@@ -89,9 +89,12 @@ class _GeminiClient(_LLMBase):
             except (OSError, ValueError):
                 pass  # skip unreadable image files
         parts = [prompt] + imgs if imgs else [prompt]
-        resp = model.generate_content(
-            parts,
-            generation_config={"max_output_tokens": 65536},
+        resp = client.models.generate_content(
+            model=self.model_name,
+            contents=parts,
+            config=types.GenerateContentConfig(
+                max_output_tokens=65536,
+            ),
         )
         return (getattr(resp, "text", None) or "").strip()
 
