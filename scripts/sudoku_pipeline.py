@@ -1,6 +1,11 @@
 """Sudoku validation benchmark pipeline.
 
 Provides functions to run each stage of the sudoku benchmark programmatically.
+
+Usage:
+    PYTHONPATH=. python scripts/sudoku_pipeline.py --seed 171
+    PYTHONPATH=. python scripts/sudoku_pipeline.py --seed 171 --stages cs dnn selective
+    PYTHONPATH=. python scripts/sudoku_pipeline.py --config my_config.yaml
 """
 from __future__ import annotations
 
@@ -15,7 +20,7 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-from concept_benchmark.benchmarks._common import (
+from concept_benchmark.utils import (
     compute_accuracy,
     determine_device,
     get_loader_config,
@@ -877,3 +882,65 @@ def compute_selective_results(
     logger.info("Saved selective metrics to %s", csv_path)
 
     return df
+
+
+# ── CLI entry point ──────────────────────────────────────────────────
+
+SUDOKU_STAGES = ("setup", "ocr", "cs", "dnn", "intervene", "selective", "align", "collect")
+
+
+def _parse_args(argv=None):
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Run the sudoku validation benchmark pipeline.",
+    )
+    parser.add_argument("--seed", type=int, default=171)
+    parser.add_argument(
+        "--stages", nargs="+", default=list(SUDOKU_STAGES),
+        help=f"Pipeline stages to run (default: all). Valid: {' -> '.join(SUDOKU_STAGES)}",
+    )
+    parser.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
+    parser.add_argument("--budgets", nargs="+", default=None,
+                        help="Intervention budgets (e.g. 1 3 5 max).")
+    parser.add_argument("--data-type", type=str, default=None,
+                        choices=["tabular", "image"])
+    parser.add_argument("--handwriting", action="store_true", default=None)
+    parser.add_argument("--no-handwriting", action="store_true")
+    parser.add_argument("--force-setup", action="store_true")
+    return parser.parse_args(argv)
+
+
+def _parse_budgets(raw):
+    budgets = []
+    for v in raw:
+        budgets.append(-1 if v.lower() == "max" else int(v))
+    return budgets
+
+
+def main(argv=None):
+    args = _parse_args(argv)
+
+    unknown = set(args.stages) - set(SUDOKU_STAGES)
+    if unknown:
+        raise ValueError(f"unknown stages: {sorted(unknown)}. Valid: {list(SUDOKU_STAGES)}")
+
+    if args.config:
+        config = SudokuBenchmarkConfig.from_yaml(args.config)
+    else:
+        config = SudokuBenchmarkConfig(seed=args.seed)
+
+    if args.budgets:
+        config.intervention_budgets = _parse_budgets(args.budgets)
+    if args.no_handwriting:
+        config.handwriting = False
+    elif args.handwriting:
+        config.handwriting = True
+    if args.data_type is not None:
+        config.data_type = args.data_type
+
+    run(config, stages=args.stages, force_setup=args.force_setup)
+
+
+if __name__ == "__main__":
+    main()

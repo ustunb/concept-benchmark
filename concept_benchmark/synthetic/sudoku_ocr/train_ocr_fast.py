@@ -28,7 +28,7 @@ from concept_benchmark.synthetic.sudoku_ocr.ocr_utils import (
     crop_cell,
     load_sidecars,
 )
-from concept_benchmark.benchmarks._common import set_deterministic_seed
+from concept_benchmark.utils import set_deterministic_seed
 from concept_benchmark.config import SudokuBenchmarkConfig
 
 

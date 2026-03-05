@@ -1,3 +1,3 @@
-from . import benchmarks, config, synthetic
+from . import config, synthetic, utils
 
-__all__ = ["benchmarks", "config", "synthetic"]
+__all__ = ["config", "synthetic", "utils"]

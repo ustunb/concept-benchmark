@@ -7,6 +7,8 @@ __all__ = [
     "results_dir",
 ]
 
+import logging
+import os
 from pathlib import Path
 
 # path to the Python package
@@ -20,5 +22,11 @@ if (_repo_dir / "pyproject.toml").is_file():
     data_dir = _repo_dir / "data"
     results_dir = _repo_dir / "results"
 else:
-    data_dir = Path.cwd() / "data"
-    results_dir = Path.cwd() / "results"
+    logging.getLogger(__name__).warning(
+        "Running from site-packages install; data_dir=%s, results_dir=%s "
+        "default to CWD. Set CONCEPT_BENCHMARK_DATA_DIR / "
+        "CONCEPT_BENCHMARK_RESULTS_DIR to override.",
+        Path.cwd() / "data", Path.cwd() / "results",
+    )
+    data_dir = Path(os.environ.get("CONCEPT_BENCHMARK_DATA_DIR", Path.cwd() / "data"))
+    results_dir = Path(os.environ.get("CONCEPT_BENCHMARK_RESULTS_DIR", Path.cwd() / "results"))

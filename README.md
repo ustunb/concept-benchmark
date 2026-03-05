@@ -14,8 +14,7 @@
 1. [Installation](#installation)
 2. [Quick Start](#quick-start)
 3. [Benchmarks](#benchmarks)
-4. [CLI Reference](#cli-reference)
-5. [Citation](#citation)
+4. [Citation](#citation)
 
 ## Installation
 
@@ -43,8 +42,7 @@ Or install from source:
 ```bash
 git clone https://github.com/ustunb/concept-benchmark.git
 cd concept-benchmark
-./install.sh
-source venv/bin/activate
+uv sync
 ```
 
 Verify the installation:
@@ -57,55 +55,36 @@ python3 -c "import concept_benchmark; print('OK')"
 
 A CBM predicts concepts from inputs (e.g., "has pointy feet"), then predicts the label from those concepts. At test time, a user can correct mispredicted concepts -- this is called an *intervention*. The package lets you measure whether correcting *k* concepts improves the label prediction, and how that depends on concept quality and annotation noise.
 
-The fastest way to run the benchmark is from the command line. This generates data, trains models, runs interventions, and saves a results CSV — with automatic caching so repeated runs skip completed stages:
+Each benchmark has a pipeline script in `scripts/` that runs the full experiment end-to-end:
 
 ```bash
-cbm-benchmark robot --seed 1014 --stages setup cbm dnn intervene collect
+# Robot classification (image, default 7 concepts)
+PYTHONPATH=. python scripts/robot_pipeline.py --seed 1014
+
+# Robot classification (subconcept variant, 12 concepts)
+PYTHONPATH=. python scripts/robot_pipeline.py --seed 1014 --subconcept
+
+# Sudoku validation
+PYTHONPATH=. python scripts/sudoku_pipeline.py --seed 171
+
+# Robot text classification
+PYTHONPATH=. python scripts/robot_text_pipeline.py --seed 1337
 ```
 
-Results are saved to `results/robot_ideal_seed1014_2d0aa353_results.csv`. Filter to `model == "cbm"` and `threshold == 0.2` to see accuracy numbers.
+Each script supports `--help` for the full list of flags. Use `--stages` to run a subset of the pipeline (e.g., `--stages cbm dnn intervene` to retrain models on existing data).
 
-The same pipeline from Python:
+The pipeline scripts are also importable for programmatic use:
 
 ```python
-from concept_benchmark.benchmarks import robot
+import sys; sys.path.insert(0, "scripts")
+import robot_pipeline as robot
 from concept_benchmark.config import RobotBenchmarkConfig
 
 cfg = RobotBenchmarkConfig(seed=1014)
-robot.run(cfg, stages=["setup", "cbm", "dnn", "intervene", "collect"])
+data = robot.setup_dataset(cfg)
+cbm = robot.train_cbm(cfg, data)
+results = robot.run_interventions(cfg, cbm, data)
 ```
-
-Under the hood, `robot.run()` calls individual functions that you can also use directly to inspect intermediate objects:
-
-```python
-import numpy as np
-from concept_benchmark.benchmarks import robot
-from concept_benchmark.config import RobotBenchmarkConfig
-
-cfg = RobotBenchmarkConfig(seed=1014)
-data = robot.setup_dataset(cfg)                # generate 32x32 robot images
-cbm = robot.train_cbm(cfg, data)               # concept detectors + label predictor
-dnn = robot.train_dnn(cfg, data)               # end-to-end baseline (no concepts)
-results = robot.run_interventions(cfg, cbm, data)  # measure effect of corrections
-
-# CBM baseline (no interventions)
-cbm_acc = float(np.mean(cbm.predict(data.test) == data.test.y))
-print(f"CBM (k=0): {cbm_acc:.4f}")
-# Intervention gains at threshold=0.2
-print(results.query("threshold == 0.2")[["budget", "accuracy"]].to_string(index=False))
-```
-
-Expected output:
-```
-CBM (k=0): 0.8673
- budget  accuracy
-      0    0.8673
-      1    0.9736
-      3    0.9769
-      7    0.9769
-```
-
-See [`scripts/demo_robot.py`](scripts/demo_robot.py) and [`scripts/demo_sudoku.py`](scripts/demo_sudoku.py) for fully-commented examples.
 
 
 ## Benchmarks
@@ -114,42 +93,26 @@ The package includes two benchmarks. **Robot classification** is a decision-supp
 
 ### Robot Classification
 
-This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot -- **Glorp** or **Drent** -- from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The default labeling rule is: Glorp if mouth is closed, foot is pointy, and robot has knees (all three); Drent otherwise. Which features matter and which are excluded (via `drop_concepts`) are configurable, mimicking real-world settings where the true relationship between features and labels is unknown. Available as image (`cbm-benchmark robot`) and text (`cbm-benchmark robot-text`) modalities.
+This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot -- **Glorp** or **Drent** -- from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The default labeling rule is: Glorp if mouth is closed, foot is pointy, and robot has knees (all three); Drent otherwise. Which features matter and which are excluded (via `drop_concepts`) are configurable, mimicking real-world settings where the true relationship between features and labels is unknown. Available as image and text modalities.
 
 <p align="center">
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
 </p>
 
-The following example uses the subconcept variant (which splits foot_shape into 5 fine-grained subtypes, yielding 12 concepts instead of the default 7), and tests whether imposing a sign constraint on the `has_knees` weight preserves or destroys the benefit of interventions.
+The following example uses the subconcept variant (12 concepts instead of the default 7) with intervention regimes:
 
-```python
-import numpy as np
-from concept_benchmark.benchmarks import robot
-from concept_benchmark.config import RobotBenchmarkConfig
+```bash
+# Run the full pipeline with subconcepts and expert interventions
+PYTHONPATH=. python scripts/robot_pipeline.py --seed 1014 --subconcept --regimes baseline expert
 
-cfg = RobotBenchmarkConfig(
-    seed=1014,
-    subconcept=True,                           # use fine-grained foot subtypes (12 instead of 7)
-    intervention_budgets=[1, 3],               # correct k=1 or k=3 concepts per sample
-    intervention_thresholds=[0.2],
-    alignment_constraints={"has_knees": 1},    # force has_knees weight to be positive
-)
+# Run specific stages only (e.g., retrain and re-evaluate on existing data)
+PYTHONPATH=. python scripts/robot_pipeline.py --seed 1014 --subconcept --stages cbm dnn intervene collect
 
-data = robot.setup_dataset(cfg)
-cbm = robot.train_cbm(cfg, data)
-dnn = robot.train_dnn(cfg, data)
-results = robot.run_interventions(cfg, cbm, data)
-align_stats = robot.align(cfg, cbm, data)
-
-cbm_acc = float(np.mean(cbm.predict(data.test) == data.test.y))
-print(f"CBM (k=0): {cbm_acc:.4f}")
-print(results[["budget", "accuracy"]].to_string(index=False))
-
-from concept_benchmark.paths import results_dir
-cfg.to_yaml(results_dir / "my_experiment.yaml")  # save config for CLI use
+# Test concept missingness (MCAR, 20% of labels masked)
+PYTHONPATH=. python scripts/robot_pipeline.py --seed 1014 --subconcept --concept-missing 0.2
 ```
 
-Expected output:
+Expected results (subconcept, seed=1014, threshold=0.2):
 ```
 CBM (k=0): 0.7812
  budget  accuracy
@@ -158,13 +121,7 @@ CBM (k=0): 0.7812
       3    0.9439
 ```
 
-To re-run this experiment from the CLI (with automatic caching):
-
-```bash
-cbm-benchmark robot --config results/my_experiment.yaml
-```
-
-The most important parameters used in the config above are listed below. For the full list, see `RobotBenchmarkConfig` in [`concept_benchmark/config.py`](concept_benchmark/config.py) or the fully-commented [`scripts/demo_robot.py`](scripts/demo_robot.py).
+The most important parameters are listed below. For the full list, see `RobotBenchmarkConfig` in [`concept_benchmark/config.py`](concept_benchmark/config.py) or run `python scripts/robot_pipeline.py --help`.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -206,48 +163,24 @@ This benchmark targets automation settings where the system handles routine case
   <img src="docs/assets/sudoku_handwritten.png" width="400" alt="Sudoku board with handwritten digits and concept annotations">
 </p>
 
-The following example generates 1000 boards with handwritten digits, corrupting up to 9 cells in invalid boards. The concept-supervised (CS) model -- the Sudoku equivalent of a CBM -- predicts 27 binary concepts, then a label predictor determines board validity. The selective classification stage finds a confidence threshold that achieves at least 95% accuracy on kept predictions.
+The concept-supervised (CS) model -- the Sudoku equivalent of a CBM -- predicts 27 binary concepts, then a label predictor determines board validity. The selective classification stage finds a confidence threshold that achieves at least 95% accuracy on kept predictions.
 
-```python
-from concept_benchmark.benchmarks import sudoku
-from concept_benchmark.config import SudokuBenchmarkConfig
+```bash
+# Run the full pipeline (generates boards, trains OCR + models, evaluates)
+PYTHONPATH=. python scripts/sudoku_pipeline.py --seed 171
 
-cfg = SudokuBenchmarkConfig(
-    seed=171,
-    max_corrupt=9,                             # cells corrupted in invalid boards
-    handwriting=True,                          # render with handwritten digits
-    target_accuracy=0.95,                      # minimum accuracy on kept predictions
-)
-
-sudoku.setup_dataset(cfg)                      # generate boards + handwritten digit images
-sudoku.train_ocr(cfg)                          # train digit recognizer on cell crops
-cs_model = sudoku.train_cs(cfg)                # concept-supervised model (27 concepts -> valid/invalid)
-dnn = sudoku.train_dnn(cfg)                    # end-to-end baseline (no concepts)
-results = sudoku.run_interventions(cfg, cs_model)
-sel = sudoku.compute_selective_results(cfg)     # selective accuracy and coverage
-
-# Filter to the target accuracy threshold
-t95 = sel[sel["target_accuracy"] == 0.95]
-print(t95[["model", "selective_acc", "selective_cov"]].to_string(index=False))
-
-from concept_benchmark.paths import results_dir
-cfg.to_yaml(results_dir / "my_experiment.yaml")  # save config for CLI use
+# Skip data regeneration (reuse existing boards), only retrain models
+PYTHONPATH=. python scripts/sudoku_pipeline.py --seed 171 --stages cs dnn selective intervene align collect
 ```
 
-Expected output:
+Expected results (seed=171, target_accuracy=0.95):
 ```
 model  selective_acc  selective_cov
   dnn          0.875           0.04
    cs          0.915           1.00
 ```
 
-To re-run this experiment from the CLI (with automatic caching):
-
-```bash
-cbm-benchmark sudoku --config results/my_experiment.yaml
-```
-
-The most important parameters are listed below. For the full list, see `SudokuBenchmarkConfig` in [`concept_benchmark/config.py`](concept_benchmark/config.py) or the fully-commented [`scripts/demo_sudoku.py`](scripts/demo_sudoku.py).
+The most important parameters are listed below. For the full list, see `SudokuBenchmarkConfig` in [`concept_benchmark/config.py`](concept_benchmark/config.py) or run `python scripts/sudoku_pipeline.py --help`.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -267,51 +200,6 @@ The most important parameters are listed below. For the full list, see `SudokuBe
 | `intervention_thresholds` | `[0.2, 0.4, 0.6, 0.8]` | Concept confidence thresholds that determine which concepts are candidates for verification |
 
 </details>
-
-## CLI Reference
-
-All benchmarks are run via `cbm-benchmark <benchmark>`. Use `cbm-benchmark <benchmark> --help` to see all options. All outputs (datasets, model weights, intervention CSVs, summary tables) are saved under `results/`.
-
-### Pipeline Stages
-
-Each benchmark runs a sequence of stages. Use `--stages` to run a subset. The `setup` stage generates the synthetic dataset. The `collect` stage produces a single results table (e.g., `results/robot_ideal_seed1014_2d0aa353_results.csv`) with all accuracy numbers across models, intervention budgets, and alignment variants.
-
-```bash
-# retrain models on existing data (skip data generation)
-cbm-benchmark robot --stages cbm dnn intervene align collect
-
-# rerun interventions with different regimes (models already trained)
-cbm-benchmark robot --subconcept --regimes baseline expert --stages intervene collect
-```
-
-| Benchmark | Stages (in order) |
-|-----------|-------------------|
-| `robot` | `setup` · `cbm` · `dnn` · `intervene` · `align` · `collect` |
-| `sudoku` | `setup` · `ocr` · `cs` · `dnn` · `intervene` · `selective` · `align` · `collect` |
-| `robot-text` | `setup` · `cbm` · `dnn` · `lfcbm` · `intervene` · `align` · `collect` |
-
-### Flags
-
-| Flag | Benchmarks | Description |
-|------|-----------|-------------|
-| `--seed` | all | Random seed (defaults: robot 1014, sudoku 171, robot-text 1337) |
-| `--stages` | all | Which stages to run (default: all) |
-| `--config` | all | Path to YAML config file. CLI flags like `--regimes` and `--strategy` can further override values loaded from the file. |
-| `--subconcept` | robot | Use subconcept variant (12 concepts with fine-grained foot subtypes instead of 7 coarse) |
-| `--budgets` | all | Intervention budgets (e.g. `1 3 5 max`). `max` resolves to the number of concepts. |
-| `--regimes` | robot, robot-text | Intervention regimes: `baseline`, `expert`, `subjective`, `machine`, `llm`, `clip` |
-| `--strategy` | robot, robot-text | `kflip` (up to *k*) or `exact_k` (exactly *k* concepts) |
-| `--concept-missing` | robot | Fraction of concept labels to mask (e.g. `0.2`) |
-| `--concept-missing-mech` | robot | Missingness mechanism: `none`, `mcar`, or `mnar` |
-| `--data-type` | sudoku | Data modality: `tabular` (ground-truth digits) or `image` (OCR from board images) |
-| `--handwriting` | sudoku | Use handwritten digits (only applies with `--data-type image`) |
-| `--no-handwriting` | sudoku | Use printed digits (only applies with `--data-type image`) |
-| `--force-setup` | all | Regenerate all data (images, boards) from scratch, even if cached |
-| `--force-retrain` | robot | Retrain LFCBM/subjective models even if cached |
-| `--lfcbm` | robot-text | Also run the Label-Free CBM variant |
-| `--llm-api-key` | robot | API key for LLM provider (alternative to `GEMINI_API_KEY` env var) |
-| `--dry-run` | all | Print configuration and exit without running |
-| `-v` / `-q` | all | Verbose / quiet output |
 
 ## Citation
 

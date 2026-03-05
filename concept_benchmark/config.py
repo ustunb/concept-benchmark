@@ -97,6 +97,10 @@ INPUT_MAP = {
 
 MISSING_PROP = 0.2
 
+VALID_STRATEGIES = frozenset({"kflip", "exact_k"})
+ROBOT_VALID_REGIMES = frozenset({"baseline", "expert", "subjective", "machine", "llm", "clip"})
+ROBOT_TEXT_VALID_REGIMES = frozenset({"baseline", "expert", "subjective", "machine"})
+
 
 # ── Robot Benchmark Config ────────────────────────────────────────────
 
@@ -169,9 +173,6 @@ class RobotBenchmarkConfig:
     # Variant
     subconcept: bool = False
 
-    _VALID_REGIMES = frozenset({"baseline", "expert", "subjective", "machine", "llm", "clip"})
-    _VALID_STRATEGIES = frozenset({"kflip", "exact_k"})
-
     def __post_init__(self):
         # If subconcept=True but drop_concepts still has the ideal default,
         # automatically switch to SUBCONCEPT_DROP so the flag alone is sufficient.
@@ -185,16 +186,16 @@ class RobotBenchmarkConfig:
             )
         if any(b < -1 for b in self.intervention_budgets):
             raise ValueError(f"intervention_budgets must be non-negative (or -1 for max), got {self.intervention_budgets}")
-        if self.intervention_strategy not in self._VALID_STRATEGIES:
+        if self.intervention_strategy not in VALID_STRATEGIES:
             raise ValueError(
-                f"intervention_strategy must be one of {sorted(self._VALID_STRATEGIES)}, "
+                f"intervention_strategy must be one of {sorted(VALID_STRATEGIES)}, "
                 f"got {self.intervention_strategy!r}"
             )
-        unknown = set(self.intervention_regimes) - self._VALID_REGIMES
+        unknown = set(self.intervention_regimes) - ROBOT_VALID_REGIMES
         if unknown:
             raise ValueError(
                 f"unknown intervention regimes: {sorted(unknown)}. "
-                f"Valid: {sorted(self._VALID_REGIMES)}"
+                f"Valid: {sorted(ROBOT_VALID_REGIMES)}"
             )
 
     @classmethod
@@ -347,7 +348,7 @@ class RobotBenchmarkConfig:
         path.parent.mkdir(parents=True, exist_ok=True)
         d = {
             k: v for k, v in self.__dict__.items()
-            if not k.startswith("_")
+            if not k.startswith("_") and k != "llm_api_key"
         }
         with open(path, "w") as f:
             yaml.dump(d, f, default_flow_style=False, sort_keys=False)
@@ -593,22 +594,19 @@ class RobotTextBenchmarkConfig:
     # Alignment
     alignment_constraints: Optional[Dict[str, int]] = None
 
-    _VALID_REGIMES = frozenset({"baseline", "expert", "subjective", "machine"})
-    _VALID_STRATEGIES = frozenset({"kflip", "exact_k"})
-
     def __post_init__(self):
         if self.seed < 0:
             raise ValueError(f"seed must be non-negative, got {self.seed}")
-        if self.intervention_strategy not in self._VALID_STRATEGIES:
+        if self.intervention_strategy not in VALID_STRATEGIES:
             raise ValueError(
-                f"intervention_strategy must be one of {sorted(self._VALID_STRATEGIES)}, "
+                f"intervention_strategy must be one of {sorted(VALID_STRATEGIES)}, "
                 f"got {self.intervention_strategy!r}"
             )
-        unknown = set(self.intervention_regimes) - self._VALID_REGIMES
+        unknown = set(self.intervention_regimes) - ROBOT_TEXT_VALID_REGIMES
         if unknown:
             raise ValueError(
                 f"unknown intervention regimes: {sorted(unknown)}. "
-                f"Valid: {sorted(self._VALID_REGIMES)}"
+                f"Valid: {sorted(ROBOT_TEXT_VALID_REGIMES)}"
             )
 
     def setup_fingerprint(self) -> str:
@@ -668,7 +666,7 @@ class RobotTextBenchmarkConfig:
         path.parent.mkdir(parents=True, exist_ok=True)
         d = {
             k: v for k, v in self.__dict__.items()
-            if not k.startswith("_")
+            if not k.startswith("_") and k != "llm_api_key"
         }
         with open(path, "w") as f:
             yaml.dump(d, f, default_flow_style=False, sort_keys=False)

@@ -33,7 +33,7 @@ def test_robot_image_generation_and_training(tmp_path):
     from torchvision import transforms
 
     from concept_benchmark.synthetic.robot import create_robot_image_dataset
-    from concept_benchmark.benchmarks._common import create_skewed_splits_full
+    from concept_benchmark.utils import create_skewed_splits_full
     from concept_benchmark.models import (
         ConceptBasedModel,
         ConceptDetector,

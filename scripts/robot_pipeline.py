@@ -1,6 +1,12 @@
 """Robot classification benchmark pipeline.
 
 Provides functions to run each stage of the robot benchmark programmatically.
+
+Usage:
+    PYTHONPATH=. python scripts/robot_pipeline.py --seed 1014
+    PYTHONPATH=. python scripts/robot_pipeline.py --seed 1014 --subconcept
+    PYTHONPATH=. python scripts/robot_pipeline.py --seed 1014 --subconcept --regimes baseline expert
+    PYTHONPATH=. python scripts/robot_pipeline.py --config my_config.yaml
 """
 from __future__ import annotations
 
@@ -19,7 +25,7 @@ import torch.nn as nn
 from torchvision import transforms
 from tqdm import tqdm
 
-from concept_benchmark.benchmarks._common import (
+from concept_benchmark.utils import (
     compute_accuracy,
     create_skewed_splits_full,
     determine_device,
@@ -68,12 +74,12 @@ _intervention_imported = False
 def _ensure_intervention_imports():
     global _intervention_imported
     if not _intervention_imported:
-        global ConceptInterventionRunner, InterventionConfig, ScoreIntervention
+        global ConceptInterventionRunner, InterventionConfig, KFlipInterventionStrategy
         from concept_benchmark.intervention import (
             ConceptInterventionRunner,
             InterventionConfig,
         )
-        from concept_benchmark.kflip import KFlipInterventionStrategy as ScoreIntervention
+        from concept_benchmark.kflip import KFlipInterventionStrategy
 
         _intervention_imported = True
 
@@ -508,7 +514,7 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
             noise=1.0 - human_acc,
         )
 
-        strategy = ScoreIntervention(
+        strategy = KFlipInterventionStrategy(
             exact_k=(sttngs.get("intervention_strategy") == "exact_k"),
         )
 
@@ -1561,3 +1567,82 @@ def run(
     if "collect" in stages:
         logger.info("=== [%d/%d] Collect ===", _si["collect"], n_stages)
         collect_results([config])
+
+
+# ── CLI entry point ──────────────────────────────────────────────────
+
+ROBOT_STAGES = ("setup", "cbm", "dnn", "intervene", "align", "collect")
+
+
+def _parse_args(argv=None):
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Run the robot classification benchmark pipeline.",
+    )
+    parser.add_argument("--seed", type=int, default=1014)
+    parser.add_argument(
+        "--stages", nargs="+", default=list(ROBOT_STAGES),
+        help=f"Pipeline stages to run (default: all). Valid: {' -> '.join(ROBOT_STAGES)}",
+    )
+    parser.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
+    parser.add_argument("--subconcept", action="store_true")
+    parser.add_argument("--concept-missing", type=float, default=None,
+                        help="Fraction of concept labels to mask (e.g. 0.2).")
+    parser.add_argument("--concept-missing-mech", type=str, default=None,
+                        choices=["none", "mcar", "mnar"])
+    parser.add_argument("--budgets", nargs="+", default=None,
+                        help="Intervention budgets (e.g. 1 3 5 max).")
+    parser.add_argument("--regimes", nargs="+", default=None,
+                        help="Intervention regimes (e.g. baseline expert subjective machine).")
+    parser.add_argument("--strategy", type=str, default=None,
+                        choices=["kflip", "exact_k"])
+    parser.add_argument("--llm-api-key", type=str, default=None)
+    parser.add_argument("--force-retrain", action="store_true")
+    parser.add_argument("--force-setup", action="store_true")
+    return parser.parse_args(argv)
+
+
+def _parse_budgets(raw):
+    budgets = []
+    for v in raw:
+        budgets.append(-1 if v.lower() == "max" else int(v))
+    return budgets
+
+
+def main(argv=None):
+    args = _parse_args(argv)
+
+    unknown = set(args.stages) - set(ROBOT_STAGES)
+    if unknown:
+        raise ValueError(f"unknown stages: {sorted(unknown)}. Valid: {list(ROBOT_STAGES)}")
+
+    if args.config:
+        config = RobotBenchmarkConfig.from_yaml(args.config)
+    elif args.subconcept:
+        config = RobotBenchmarkConfig.default_subconcept()
+        config.seed = args.seed
+    else:
+        config = RobotBenchmarkConfig(seed=args.seed)
+
+    if args.budgets:
+        config.intervention_budgets = _parse_budgets(args.budgets)
+    if args.regimes:
+        config.intervention_regimes = args.regimes
+    if args.strategy:
+        config.intervention_strategy = args.strategy
+    if args.llm_api_key:
+        config.llm_api_key = args.llm_api_key
+    if args.force_retrain:
+        config.force_retrain = True
+    if args.concept_missing is not None:
+        config.concept_missing = args.concept_missing
+        config.concept_missing_mech = args.concept_missing_mech or "mcar"
+    elif args.concept_missing_mech is not None:
+        config.concept_missing_mech = args.concept_missing_mech
+
+    run(config, stages=args.stages, force_setup=args.force_setup)
+
+
+if __name__ == "__main__":
+    main()

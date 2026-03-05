@@ -7,7 +7,7 @@ They serve as a safety net during refactoring.
 import pandas as pd
 import pytest
 
-from concept_benchmark.benchmarks._common import compute_accuracy, determine_device
+from concept_benchmark.utils import compute_accuracy, determine_device
 from concept_benchmark.config import RobotBenchmarkConfig
 from concept_benchmark.ext.fileutils import load
 from concept_benchmark.models import RobotClassifierCNN

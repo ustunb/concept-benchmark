@@ -1,7 +1,13 @@
 """Robot text classification benchmark pipeline.
 
 Provides functions to run each stage of the robot text benchmark
-programmatically, following the same pattern as robot.py and sudoku.py.
+programmatically, following the same pattern as robot_pipeline.py and
+sudoku_pipeline.py.
+
+Usage:
+    PYTHONPATH=. python scripts/robot_text_pipeline.py --seed 1337
+    PYTHONPATH=. python scripts/robot_text_pipeline.py --regimes baseline expert
+    PYTHONPATH=. python scripts/robot_text_pipeline.py --config my_config.yaml
 """
 from __future__ import annotations
 
@@ -16,7 +22,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 
-from concept_benchmark.benchmarks._common import (
+from concept_benchmark.utils import (
     determine_device,
     run_alignment,
 )
@@ -796,3 +802,69 @@ def run(
         collect_results([config])
 
     logger.info("Robot text pipeline complete!")
+
+
+# ── CLI entry point ──────────────────────────────────────────────────
+
+ROBOT_TEXT_STAGES = ("setup", "cbm", "dnn", "lfcbm", "intervene", "align", "collect")
+
+
+def _parse_args(argv=None):
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Run the robot text classification benchmark pipeline.",
+    )
+    parser.add_argument("--seed", type=int, default=1337)
+    parser.add_argument(
+        "--stages", nargs="+", default=list(ROBOT_TEXT_STAGES),
+        help=f"Pipeline stages to run (default: all). Valid: {' -> '.join(ROBOT_TEXT_STAGES)}",
+    )
+    parser.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
+    parser.add_argument("--budgets", nargs="+", default=None,
+                        help="Intervention budgets (e.g. 1 2 5 max).")
+    parser.add_argument("--regimes", nargs="+", default=None,
+                        help="Intervention regimes (e.g. baseline expert subjective).")
+    parser.add_argument("--strategy", type=str, default=None,
+                        choices=["kflip", "exact_k"])
+    parser.add_argument("--lfcbm", action="store_true",
+                        help="Also run LFCBM variant.")
+    parser.add_argument("--force-setup", action="store_true")
+    return parser.parse_args(argv)
+
+
+def _parse_budgets(raw):
+    budgets = []
+    for v in raw:
+        budgets.append(-1 if v.lower() == "max" else int(v))
+    return budgets
+
+
+def main(argv=None):
+    args = _parse_args(argv)
+
+    unknown = set(args.stages) - set(ROBOT_TEXT_STAGES)
+    if unknown:
+        raise ValueError(f"unknown stages: {sorted(unknown)}. Valid: {list(ROBOT_TEXT_STAGES)}")
+
+    if args.config:
+        config = RobotTextBenchmarkConfig.from_yaml(args.config)
+    else:
+        config = RobotTextBenchmarkConfig(seed=args.seed)
+
+    if args.budgets:
+        config.intervention_budgets = _parse_budgets(args.budgets)
+    if args.regimes:
+        config.intervention_regimes = args.regimes
+    if args.strategy:
+        config.intervention_strategy = args.strategy
+    if args.lfcbm:
+        config.lfcbm_enable = True
+        if "lfcbm" not in args.stages:
+            args.stages.append("lfcbm")
+
+    run(config, stages=args.stages, force_setup=args.force_setup)
+
+
+if __name__ == "__main__":
+    main()

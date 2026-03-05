@@ -18,7 +18,7 @@ Expected results (seed=1014, subconcept, exact_k, threshold=0.2):
     expert:   k=1 gain ~+10%, k=3 gain ~+7%
 """
 import time
-from concept_benchmark.benchmarks import robot
+import robot_pipeline as robot
 from concept_benchmark.config import RobotBenchmarkConfig
 
 # ===================== EDIT THESE =====================
