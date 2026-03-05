@@ -122,3 +122,37 @@ class TestYAMLRoundTrip:
             intervention_regimes=["baseline", "subjective"],
         )
         self._assert_roundtrip(cfg, RobotTextBenchmarkConfig, tmp_path)
+
+
+class TestYAMLSecretExclusion:
+    """Ensure sensitive fields are excluded from YAML output."""
+
+    def test_robot_yaml_excludes_llm_api_key(self, tmp_path):
+        cfg = RobotBenchmarkConfig(llm_api_key="super_secret_key")
+        path = tmp_path / "robot.yaml"
+        cfg.to_yaml(path)
+        content = path.read_text()
+        # The secret value should not appear; llm_api_key_env is a different field
+        assert "super_secret_key" not in content
+        # The exact key "llm_api_key:" should not be a YAML key
+        # (llm_api_key_env is fine — it's not the secret)
+        lines = content.splitlines()
+        yaml_keys = [l.split(":")[0].strip() for l in lines if ":" in l]
+        assert "llm_api_key" not in yaml_keys
+
+    def test_robot_text_yaml_excludes_llm_api_key(self, tmp_path):
+        cfg = RobotTextBenchmarkConfig()
+        path = tmp_path / "robot_text.yaml"
+        cfg.to_yaml(path)
+        content = path.read_text()
+        lines = content.splitlines()
+        yaml_keys = [l.split(":")[0].strip() for l in lines if ":" in l]
+        assert "llm_api_key" not in yaml_keys
+
+    def test_sudoku_yaml_includes_all_fields(self, tmp_path):
+        cfg = SudokuBenchmarkConfig(seed=99, n_samples=500)
+        path = tmp_path / "sudoku.yaml"
+        cfg.to_yaml(path)
+        content = path.read_text()
+        assert "seed" in content
+        assert "n_samples" in content
