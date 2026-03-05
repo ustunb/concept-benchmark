@@ -687,7 +687,7 @@ class ConceptInterventionRunner:
 
         # Future: sample noise if config.noise > 0.0 (call parent)
         if concept_true is None and config.noise <= 0.0:
-                concept_true = dataset.base_concepts
+            concept_true = dataset.base_concepts
 
         batch = self._build_batch(
             dataset=dataset,
@@ -701,8 +701,8 @@ class ConceptInterventionRunner:
         proposal = strategy.propose(self.model, batch, config)
         if proposal.mask.shape != batch.C_pred.shape:
             raise InterventionError(
-            "Strategy returned a mask with shape"
-            f" {proposal.mask.shape}, expected {batch.C_pred.shape}."
+                "Strategy returned a mask with shape"
+                f" {proposal.mask.shape}, expected {batch.C_pred.shape}."
             )
 
         # Future: consider removing explicit >= 0.5 threshold

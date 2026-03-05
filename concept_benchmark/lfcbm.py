@@ -185,6 +185,7 @@ class _CLIPEncoder:
             self._init_model()
 
     def __getstate__(self):
+        """Pickle only config strings; the CLIP model is re-loaded on demand via __setstate__."""
         return {"model_name": self.model_name, "pretrained": self.pretrained, "_device_str": self._device_str}
 
     def __setstate__(self, state):
@@ -296,7 +297,7 @@ def _cos_cubed_similarity(q: torch.Tensor, p: torch.Tensor) -> Tuple[torch.Tenso
     def _z3(x: torch.Tensor) -> torch.Tensor:
         mu = x.mean(dim=1, keepdim=True)
         sd = x.std(dim=1, unbiased=False, keepdim=True) + 1e-6
-        z = (x - mu) / sd
+        z = ((x - mu) / sd).clamp(-6, 6)
         return z * z * z
 
     q3 = _z3(q)

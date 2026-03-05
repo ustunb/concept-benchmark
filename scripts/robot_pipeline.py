@@ -13,8 +13,9 @@ from __future__ import annotations
 import copy
 import logging
 import platform
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,20 @@ from concept_benchmark.models import (
 )
 from concept_benchmark.paths import results_dir
 from concept_benchmark.synthetic.robot import create_synthetic_dataset
+
+@dataclass
+class InterventionSettings:
+    """Typed config for _test_interventions, replacing the old ``sttngs`` dict."""
+
+    seed: int
+    budgets: List[int]
+    intervention_accuracy: float = 0.9
+    intervention_threshold: float = 1.0
+    intervention_strategy: str = "kflip"
+    intervention_expert: str = ""  # "" for standard path, "llm" for inline LLM
+    intervention_llm: Optional[Dict[str, Any]] = None
+    run_dir: str = "."
+
 
 class FEOnProbs(FrontEndModel):
     """Wrap an LFCBM sklearn classifier so it works as a FrontEndModel.
@@ -92,7 +107,7 @@ def setup_dataset(config: RobotBenchmarkConfig):
     Returns the saved ConceptDataset.
     """
     settings = config.to_dict()
-    print("Generating robot dataset...", flush=True)
+    logger.info("Generating robot dataset...")
     data = create_synthetic_dataset(**settings)
     tf = transforms.Compose([transforms.ToTensor()])
     data.transform = tf
@@ -436,7 +451,7 @@ def train_dnn(
 
 # ── Intervention helper ───────────────────────────────────────────────
 
-def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None):
+def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, test, concept_names=None):
     """Run interventions for each budget and return results dict.
 
     Matches the original ``test_interventions`` from ``robot_concept_regimes.py``,
@@ -452,11 +467,9 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
     _ensure_intervention_imports()
 
     intervention_results = {}
-    rng = np.random.default_rng(int(sttngs["seed"]))
-    budgets = sttngs.get("budget", [1])
-    if not isinstance(budgets, (list, tuple, np.ndarray)):
-        budgets = [budgets]
-    human_acc = sttngs.get("intervention_accuracy", 0.9)
+    rng = np.random.default_rng(settings.seed)
+    budgets = list(settings.budgets)
+    human_acc = settings.intervention_accuracy
     err_prob = 1.0 - human_acc
 
     _coerce_to_gt = concept_names is None
@@ -509,16 +522,16 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
 
         config = InterventionConfig(
             max_concepts_per_instance=budget,
-            random_state=int(sttngs["seed"]),
-            score_threshold=sttngs.get("intervention_threshold", 1.0),
+            random_state=settings.seed,
+            score_threshold=settings.intervention_threshold,
             noise=1.0 - human_acc,
         )
 
         strategy = KFlipInterventionStrategy(
-            exact_k=(sttngs.get("intervention_strategy") == "exact_k"),
+            exact_k=(settings.intervention_strategy == "exact_k"),
         )
 
-        if str(sttngs.get("intervention_expert", "")).lower() == "llm":
+        if settings.intervention_expert.lower() == "llm":
             # ── Inline LLM path (matching original robot_concept_regimes.py) ──
             try:
                 from google.api_core.exceptions import ResourceExhausted
@@ -527,7 +540,7 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
 
             from concept_benchmark.llm_client import make_llm_client
 
-            llm_cfg = sttngs.get("intervention_llm", {}) or {}
+            llm_cfg = settings.intervention_llm or {}
             provider = str(llm_cfg.get("provider", "gemini"))
             model_name = str(llm_cfg.get("model", "gemini-2.5-flash-lite"))
             api_key_env = str(llm_cfg.get("api_key_env", "GEMINI_API_KEY"))
@@ -540,6 +553,24 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
                 )
 
             client = make_llm_client(provider, model_name, api_key)
+
+            def _llm_call_with_retry(fn, *, max_retries=5, backoff=30.0, label="LLM"):
+                """Call *fn* and retry on ResourceExhausted with exponential back-off."""
+                for attempt in range(1, max_retries + 1):
+                    try:
+                        return fn()
+                    except Exception as e:
+                        if ResourceExhausted is not None and isinstance(e, ResourceExhausted):
+                            logger.warning(
+                                "%s ResourceExhausted attempt %d/%d: %s",
+                                label, attempt, max_retries, e,
+                            )
+                            if attempt >= max_retries:
+                                logger.error("%s giving up after %d attempts.", label, max_retries)
+                                raise
+                            time.sleep(backoff)
+                        else:
+                            raise
 
             def _resolve_img_path(i: int) -> str:
                 p = Path(str(test.X[i]))
@@ -555,27 +586,11 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
                     "concepts:\n- " + "\n- ".join(names) + "\n\n"
                     "Respond like: {\"conceptA\":1,\"conceptB\":0}"
                 )
-                attempts = 0
                 logger.debug("LLM fallback judge start image=%s, concepts=%d", image_path, len(names))
-                while True:
-                    try:
-                        logger.debug("LLM single-image call attempt %d ...", attempts + 1)
-                        raw = (client.generate(prompt, [image_path]) or "").strip()
-                        logger.debug("LLM single-image call ok")
-                        break
-                    except Exception as e:
-                        if ResourceExhausted is not None and isinstance(e, ResourceExhausted):
-                            attempts += 1
-                            logger.warning(
-                                "LLM ResourceExhausted on single-image attempt %d: %s. "
-                                "Backing off 30s before retry.", attempts, e,
-                            )
-                            if attempts >= 5:
-                                logger.error("LLM giving up after 5 ResourceExhausted errors in fallback.")
-                                raise
-                            time.sleep(30.0)
-                        else:
-                            raise
+                raw = _llm_call_with_retry(
+                    lambda: (client.generate(prompt, [image_path]) or "").strip(),
+                    label="LLM single-image",
+                )
                 parsed: dict = {}
                 try:
                     obj = json.loads(raw)
@@ -678,8 +693,8 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
                 maxK = int(min(max_budget, batch.C_pred.shape[1]))
                 config_max = InterventionConfig(
                     max_concepts_per_instance=maxK,
-                    random_state=int(sttngs["seed"]),
-                    score_threshold=sttngs.get("intervention_threshold", 1.0),
+                    random_state=settings.seed,
+                    score_threshold=settings.intervention_threshold,
                     noise=1.0 - human_acc,
                 )
                 proposal_max = strategy.propose(cbm, batch, config_max)
@@ -691,7 +706,7 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
                 C_true_llm = np.full_like(C_before, np.nan, dtype=float)
 
                 # JSONL on-disk cache
-                run_root = Path(str(sttngs.get("run_dir", sttngs.get("out_dir", "."))))
+                run_root = Path(settings.run_dir)
                 cache_dir = run_root / "cache"
                 cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -760,7 +775,7 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
                     total_pairs, cached_pairs, missing_pairs, len(tasks),
                 )
 
-                bs = int((llm_cfg.get("batch_size") or sttngs.get("llm_batch_size") or 32))
+                bs = int(llm_cfg.get("batch_size") or 32)
                 if bs < 1:
                     bs = 1
                 n_batches = (len(tasks) + bs - 1) // bs
@@ -770,57 +785,32 @@ def _test_interventions(prob_test, sttngs, acc_det, fe, test, concept_names=None
                         len(tasks), bs, n_batches,
                     )
 
+                retry_backoff = float(
+                    llm_cfg.get("retry_backoff") or 30.0
+                )
+                max_retries = int(
+                    llm_cfg.get("max_retries") or 5
+                )
+                sleep_time = float(
+                    llm_cfg.get("batch_sleep") or 5.0
+                )
+
                 for batch_idx, s in enumerate(range(0, len(tasks), bs), start=1):
                     chunk = tasks[s:s + bs]
                     image_paths = [p for (_i, p, _n, _j) in chunk]
                     per_image_names = [names for (_i, _p, names, _idxs) in chunk]
 
-                    attempts = 0
-                    while True:
-                        try:
-                            logger.debug(
-                                "LLM batch %d/%d: %d images, attempt %d ...",
-                                batch_idx, n_batches, len(chunk), attempts + 1,
-                            )
-                            votes_list = _llm_judge_batch(image_paths, per_image_names)
-                            sleep_time = float(
-                                llm_cfg.get("batch_sleep")
-                                or sttngs.get("llm_batch_sleep")
-                                or 5.0
-                            )
-                            logger.debug(
-                                "LLM batch %d/%d ok; sleeping %.1fs to respect rate limits",
-                                batch_idx, n_batches, sleep_time,
-                            )
-                            time.sleep(sleep_time)
-                            break
-                        except Exception as e:
-                            if ResourceExhausted is not None and isinstance(e, ResourceExhausted):
-                                attempts += 1
-                                logger.warning(
-                                    "LLM ResourceExhausted on batch %d/%d, attempt %d: %s. Backing off.",
-                                    batch_idx, n_batches, attempts, e,
-                                )
-                                retry_backoff = float(
-                                    llm_cfg.get("retry_backoff")
-                                    or sttngs.get("llm_retry_backoff")
-                                    or 30.0
-                                )
-                                max_retries = int(
-                                    llm_cfg.get("max_retries")
-                                    or sttngs.get("llm_max_retries")
-                                    or 5
-                                )
-                                if attempts >= max_retries:
-                                    logger.error(
-                                        "LLM giving up on batch %d/%d after %d ResourceExhausted errors.",
-                                        batch_idx, n_batches, attempts,
-                                    )
-                                    raise
-                                logger.debug("LLM backing off %.1fs ...", retry_backoff)
-                                time.sleep(retry_backoff)
-                            else:
-                                raise
+                    votes_list = _llm_call_with_retry(
+                        lambda: _llm_judge_batch(image_paths, per_image_names),
+                        max_retries=max_retries,
+                        backoff=retry_backoff,
+                        label=f"LLM batch {batch_idx}/{n_batches}",
+                    )
+                    logger.debug(
+                        "LLM batch %d/%d ok; sleeping %.1fs to respect rate limits",
+                        batch_idx, n_batches, sleep_time,
+                    )
+                    time.sleep(sleep_time)
 
                     for (i_idx, _pth, names, idxs), votes in zip(chunk, votes_list):
                         if i_idx not in _intervention_cache:
@@ -1054,26 +1044,26 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
     all_dfs = []
 
     for t in thresholds:
-        sttngs = {
-            "seed": config.seed,
-            "budget": budgets,
-            "intervention_accuracy": ia_val,
-            "intervention_threshold": t,
-            "intervention_strategy": config.intervention_strategy,
-            "intervention_expert": "llm",
-            "intervention_llm": {
+        isettings = InterventionSettings(
+            seed=config.seed,
+            budgets=budgets,
+            intervention_accuracy=ia_val,
+            intervention_threshold=t,
+            intervention_strategy=config.intervention_strategy,
+            intervention_expert="llm",
+            intervention_llm={
                 "provider": config.llm_provider,
                 "model": config.llm_model,
                 "api_key": config.llm_api_key,
                 "api_key_env": config.llm_api_key_env,
                 "batch_size": 100,
             },
-            "run_dir": str(results_dir),
-        }
+            run_dir=str(results_dir),
+        )
 
         _, _, r = _test_interventions(
             prob_test=P_te,
-            sttngs=sttngs,
+            settings=isettings,
             acc_det=acc_det,
             fe=fe,
             test=data.test,
@@ -1158,21 +1148,19 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
                 (c_preds >= 0.5).astype(int)), axis=1) == data.test.y.astype(int)).mean()
         )
 
-    sttngs = {
-        "seed": config.seed,
-        "budget": budgets,
-        "intervention_accuracy": human_acc,
-        "intervention_threshold": thresholds[0] if thresholds else 0.2,
-        "intervention_strategy": config.intervention_strategy,
-    }
-
     COLS = ["budget", "threshold"] + METRIC_COLS
     df_lst = []
     for t in thresholds:
-        sttngs["intervention_threshold"] = t
+        isettings = InterventionSettings(
+            seed=config.seed,
+            budgets=budgets,
+            intervention_accuracy=human_acc,
+            intervention_threshold=t,
+            intervention_strategy=config.intervention_strategy,
+        )
         _, _, r = _test_interventions(
             prob_test=c_preds,
-            sttngs=sttngs,
+            settings=isettings,
             acc_det=acc_det,
             fe=regime_model.front_end_model,
             test=data.test,
@@ -1403,15 +1391,15 @@ def collect_results(
                         aligned_fe, list(cfg_data.test.concepts), aligned_weights,
                     )
                     c_preds = cbm.concept_detector.predict(cfg_data.test)
-                    sttngs = {
-                        "seed": cfg.seed,
-                        "budget": [3],
-                        "intervention_accuracy": cfg.intervention_accuracy,
-                        "intervention_threshold": 0.2,
-                    }
+                    isettings = InterventionSettings(
+                        seed=cfg.seed,
+                        budgets=[3],
+                        intervention_accuracy=cfg.intervention_accuracy,
+                        intervention_threshold=0.2,
+                    )
                     _, _, int_results = _test_interventions(
                         prob_test=c_preds,
-                        sttngs=sttngs,
+                        settings=isettings,
                         acc_det=aligned_acc,
                         fe=aligned_fe,
                         test=cfg_data.test,

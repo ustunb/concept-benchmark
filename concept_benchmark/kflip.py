@@ -124,12 +124,16 @@ class KFlipInterventionStrategy(InterventionStrategy):
             ):
                 _coef = np.asarray(_coef)
                 if _coef.shape[0] == 1:  # binary classification
+                    assert n_classes == 2, (
+                        f"Fast path assumes binary classification but got {n_classes} classes"
+                    )
                     _fast_w = _coef[0].astype(np.float64)
                     _fast_b = float(np.asarray(_inter).flat[0])
         except (AttributeError, IndexError, TypeError):
             pass
 
         if _fast_w is not None:
+            # Memory: O(N * 2^|S|) per subset, where |S| <= k.
             # Fast path: exploit logistic regression linearity.
             # logit = Z @ w + b, label = (logit >= 0)
             # For a subset S with assignment a:
@@ -180,7 +184,8 @@ class KFlipInterventionStrategy(InterventionStrategy):
                     for rel in np.nonzero(improve)[0]:
                         best_subset[rel] = tuple(int(x) for x in subset_arr.tolist())
         else:
-            # General path: call predict_proba on expanded arrays
+            # General path: call predict_proba on expanded arrays.
+            # Memory: O(batch_size * C) per chunk, chunked to stay within batch_size.
             rows_per_eval = max(1, self.batch_size)
 
             for subset in tqdm(all_subsets):
