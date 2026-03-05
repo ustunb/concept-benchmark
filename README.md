@@ -59,16 +59,16 @@ Each benchmark has a pipeline script in `scripts/` that runs the full experiment
 
 ```bash
 # Robot classification (image, default 7 concepts)
-PYTHONPATH=. python scripts/robot_pipeline.py --seed 1014
+python scripts/robot_pipeline.py --seed 1014
 
 # Robot classification (subconcept variant, 12 concepts)
-PYTHONPATH=. python scripts/robot_pipeline.py --seed 1014 --subconcept
+python scripts/robot_pipeline.py --seed 1014 --subconcept
 
 # Sudoku validation
-PYTHONPATH=. python scripts/sudoku_pipeline.py --seed 171
+python scripts/sudoku_pipeline.py --seed 171
 
 # Robot text classification
-PYTHONPATH=. python scripts/robot_text_pipeline.py --seed 1337
+python scripts/robot_text_pipeline.py --seed 1337
 ```
 
 Each script supports `--help` for the full list of flags. Use `--stages` to run a subset of the pipeline (e.g., `--stages cbm dnn intervene` to retrain models on existing data).
@@ -76,14 +76,14 @@ Each script supports `--help` for the full list of flags. Use `--stages` to run 
 The pipeline scripts are also importable for programmatic use:
 
 ```python
-import sys; sys.path.insert(0, "scripts")
-import robot_pipeline as robot
 from concept_benchmark.config import RobotBenchmarkConfig
+from concept_benchmark.models import ConceptBasedModel, ConceptDetector
+from concept_benchmark.utils import create_skewed_splits_full, set_deterministic_seed
+from concept_benchmark.synthetic.robot import create_synthetic_dataset
 
 cfg = RobotBenchmarkConfig(seed=1014)
-data = robot.setup_dataset(cfg)
-cbm = robot.train_cbm(cfg, data)
-results = robot.run_interventions(cfg, cbm, data)
+set_deterministic_seed(cfg.seed)
+data = create_synthetic_dataset(**cfg.to_dict())
 ```
 
 
@@ -103,13 +103,13 @@ The following example uses the subconcept variant (12 concepts instead of the de
 
 ```bash
 # Run the full pipeline with subconcepts and expert interventions
-PYTHONPATH=. python scripts/robot_pipeline.py --seed 1014 --subconcept --regimes baseline expert
+python scripts/robot_pipeline.py --seed 1014 --subconcept --regimes baseline expert
 
 # Run specific stages only (e.g., retrain and re-evaluate on existing data)
-PYTHONPATH=. python scripts/robot_pipeline.py --seed 1014 --subconcept --stages cbm dnn intervene collect
+python scripts/robot_pipeline.py --seed 1014 --subconcept --stages cbm dnn intervene collect
 
 # Test concept missingness (MCAR, 20% of labels masked)
-PYTHONPATH=. python scripts/robot_pipeline.py --seed 1014 --subconcept --concept-missing 0.2
+python scripts/robot_pipeline.py --seed 1014 --subconcept --concept-missing 0.2
 ```
 
 Expected results (subconcept, seed=1014, threshold=0.2):
@@ -167,10 +167,10 @@ The concept-supervised (CS) model -- the Sudoku equivalent of a CBM -- predicts 
 
 ```bash
 # Run the full pipeline (generates boards, trains OCR + models, evaluates)
-PYTHONPATH=. python scripts/sudoku_pipeline.py --seed 171
+python scripts/sudoku_pipeline.py --seed 171
 
 # Skip data regeneration (reuse existing boards), only retrain models
-PYTHONPATH=. python scripts/sudoku_pipeline.py --seed 171 --stages cs dnn selective intervene align collect
+python scripts/sudoku_pipeline.py --seed 171 --stages cs dnn selective intervene align collect
 ```
 
 Expected results (seed=171, target_accuracy=0.95):
