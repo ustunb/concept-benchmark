@@ -42,7 +42,6 @@ jobs:
     timeout-minutes: 20
     env:
       MODULE_NAME: concept_benchmark
-      PYTHONWARNINGS: error
     strategy:
       fail-fast: false
       matrix:
@@ -75,7 +74,7 @@ jobs:
 
       - name: Run tests
         run: >
-          uv run pytest -q -ra
+          uv run pytest -q -ra -W error
           --maxfail=1
           --durations=20
           --junitxml=./test-results/pytest.xml
