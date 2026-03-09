@@ -96,7 +96,6 @@ ignore = [
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::sklearn.exceptions.UndefinedMetricWarning",
-    "ignore::SyntaxWarning:pero",
 ]
 testpaths = [
     "tests"

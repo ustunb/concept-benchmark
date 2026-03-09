@@ -42,6 +42,7 @@ jobs:
     timeout-minutes: 20
     env:
       MODULE_NAME: concept_benchmark
+      PYTHONWARNINGS: error
     strategy:
       fail-fast: false
       matrix:
@@ -72,9 +73,14 @@ jobs:
       - name: Install the project (dev deps)
         run: uv sync --locked --all-extras --dev
 
+      - name: Patch pero invalid escape sequences (upstream bug)
+        run: |
+          PERO_DIR=$(uv run python -c "import pero, os; print(os.path.dirname(pero.__file__))")
+          find "$PERO_DIR" -name '*.py' -exec sed -i 's/re\.compile("/re.compile(r"/g' {} +
+
       - name: Run tests
         run: >
-          uv run pytest -q -ra -W error
+          uv run pytest -q -ra
           --maxfail=1
           --durations=20
           --junitxml=./test-results/pytest.xml
