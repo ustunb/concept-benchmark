@@ -19,9 +19,13 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import logging
+
 import yaml
 
 from concept_benchmark.paths import data_dir, results_dir
+
+logger = logging.getLogger(__name__)
 
 # ── Robot benchmark constants ─────────────────────────────────────────
 
@@ -352,7 +356,7 @@ class RobotBenchmarkConfig:
         }
         with open(path, "w") as f:
             yaml.dump(d, f, default_flow_style=False, sort_keys=False)
-        print(f"Config saved to: {path}")
+        logger.info("Config saved to: %s", path)
         return path
 
     @classmethod
@@ -516,7 +520,7 @@ class SudokuBenchmarkConfig:
         }
         with open(path, "w") as f:
             yaml.dump(d, f, default_flow_style=False, sort_keys=False)
-        print(f"Config saved to: {path}")
+        logger.info("Config saved to: %s", path)
         return path
 
     @classmethod
@@ -670,7 +674,7 @@ class RobotTextBenchmarkConfig:
         }
         with open(path, "w") as f:
             yaml.dump(d, f, default_flow_style=False, sort_keys=False)
-        print(f"Config saved to: {path}")
+        logger.info("Config saved to: %s", path)
         return path
 
     @classmethod

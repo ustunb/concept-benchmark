@@ -308,7 +308,10 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
         confidences = y_prob[np.arange(batch.n_samples), predicted]
         abstain_mask = (confidences >= config.tau) & (confidences <= 1.0 - config.tau)
 
-        selective_acc_before = (predicted[~abstain_mask] == batch.y_true[~abstain_mask]).mean()
+        non_abstained = ~abstain_mask
+        selective_acc_before = float(
+            (predicted[non_abstained] == batch.y_true[non_abstained]).mean()
+        ) if non_abstained.any() else float("nan")
 
         candidate_ids = np.nonzero(abstain_mask)[0]
         candidate_scores = self._instance_uncertainty_scores(

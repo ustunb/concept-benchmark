@@ -3,10 +3,10 @@
 Provides functions to run each stage of the robot benchmark programmatically.
 
 Usage:
-    PYTHONPATH=. python scripts/robot_pipeline.py --seed 1014
-    PYTHONPATH=. python scripts/robot_pipeline.py --seed 1014 --subconcept
-    PYTHONPATH=. python scripts/robot_pipeline.py --seed 1014 --subconcept --regimes baseline expert
-    PYTHONPATH=. python scripts/robot_pipeline.py --config my_config.yaml
+    python scripts/robot_pipeline.py --seed 1014
+    python scripts/robot_pipeline.py --seed 1014 --subconcept
+    python scripts/robot_pipeline.py --seed 1014 --subconcept --regimes baseline expert
+    python scripts/robot_pipeline.py --config my_config.yaml
 """
 from __future__ import annotations
 

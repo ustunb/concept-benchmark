@@ -11,7 +11,7 @@ Runs the full robot subconcept pipeline from scratch:
 Edit REGIMES and STRATEGY below to control what gets run.
 
 Usage:
-    PYTHONPATH=. ./venv/bin/python scripts/reproduce_interventions.py
+    python scripts/reproduce_interventions.py
 
 Expected results (seed=1014, subconcept, exact_k, threshold=0.2):
     baseline: k=0 ~0.78, k=1 ~0.92, k=3 ~0.94, k=12 ~0.94

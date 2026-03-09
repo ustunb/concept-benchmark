@@ -5,9 +5,9 @@ programmatically, following the same pattern as robot_pipeline.py and
 sudoku_pipeline.py.
 
 Usage:
-    PYTHONPATH=. python scripts/robot_text_pipeline.py --seed 1337
-    PYTHONPATH=. python scripts/robot_text_pipeline.py --regimes baseline expert
-    PYTHONPATH=. python scripts/robot_text_pipeline.py --config my_config.yaml
+    python scripts/robot_text_pipeline.py --seed 1337
+    python scripts/robot_text_pipeline.py --regimes baseline expert
+    python scripts/robot_text_pipeline.py --config my_config.yaml
 """
 from __future__ import annotations
 

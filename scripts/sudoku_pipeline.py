@@ -3,9 +3,9 @@
 Provides functions to run each stage of the sudoku benchmark programmatically.
 
 Usage:
-    PYTHONPATH=. python scripts/sudoku_pipeline.py --seed 171
-    PYTHONPATH=. python scripts/sudoku_pipeline.py --seed 171 --stages cs dnn selective
-    PYTHONPATH=. python scripts/sudoku_pipeline.py --config my_config.yaml
+    python scripts/sudoku_pipeline.py --seed 171
+    python scripts/sudoku_pipeline.py --seed 171 --stages cs dnn selective
+    python scripts/sudoku_pipeline.py --config my_config.yaml
 """
 from __future__ import annotations
 

@@ -361,41 +361,6 @@ def img_with_missing(tmp_path: Path) -> ConceptDataset:
     )
     return ds
 
-@pytest.fixture(scope="session")
-def trained_cbm():
-    """Session-scoped trained CBM for intervention/kflip/alignment tests.
-
-    Returns (model, valid_split, C_pred, C_true, y_true).
-    """
-    from concept_benchmark.models import ConceptBasedModel, ConceptDetector, FrontEndModel
-
-    ds, _ = make_tabular_dataset(n=40, d=8, k=4, n_classes=2, with_cv=True, K=5)
-    ds.split("K05N01", fold_num_validation=4, fold_num_test=5)
-    train, valid = ds.training, ds.validation
-
-    cd = ConceptDetector()
-    cbm = ConceptBasedModel(concept_detector=cd)
-    cbm.fit(
-        train_dataset=train,
-        valid_dataset=valid,
-        freeze=False,
-        concept_embed_params={"device": "cpu", "batch_size": 8, "num_workers": 0},
-        fit_params={
-            "epochs": 1,
-            "lr": 1e-3,
-            "patience": 1,
-            "device": "cpu",
-            "batch_size": 8,
-            "num_workers": 0,
-        },
-    )
-
-    C_pred = cbm.concept_detector.predict(valid)
-    C_true = valid.C.astype(np.float32)
-    y_true = valid.y.astype(np.int32)
-    return cbm, valid, C_pred, C_true, y_true
-
-
 @pytest.fixture
 def tabular_train_valid() -> tuple:
     """Provide small tabular training and validation splits for model tests."""
