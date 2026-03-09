@@ -13,6 +13,7 @@ from datetime import datetime
 from tqdm.auto import tqdm
 from typing import Sequence
 
+
 def _get_default_font(size):
     """Load a default font at the requested size, compatible with Pillow <10 and >=10."""
     try:
@@ -29,7 +30,7 @@ from concept_benchmark.synthetic.helper.sudoku_helper import (
     get_concepts,
     normalize_positions,
     normalize_digits,
-    cell_digit_concept_vector
+    cell_digit_concept_vector,
 )
 from concept_benchmark.synthetic.helper.sudoku_handwriting_helper import (
     SimpleHandwrittenGenerator,
@@ -37,7 +38,7 @@ from concept_benchmark.synthetic.helper.sudoku_handwriting_helper import (
     _build_given_mask,
     _synthesize_prior_from_neighbors,
     _render_inline_candidates,
-    _draw_wobbly_circle
+    _draw_wobbly_circle,
 )
 
 SUDOKU_DIR = data_dir / "sudoku"
@@ -58,7 +59,7 @@ def create_sudoku_dataset(
     positions_subset: Sequence[tuple[int, int]] | None = None,
     digits_subset: Sequence[int] | None = None,
     cell_concept_prefix: str = "cell",
-    **kwargs
+    **kwargs,
 ) -> ConceptDataset:
     """Create a synthetic dataset of Sudoku boards with concepts.
 
@@ -70,13 +71,13 @@ def create_sudoku_dataset(
             Defaults to 0.5.
         max_corrupt (int, optional): Maximum number of changes to
             make an invalid board. Defaults to 3.
-        data_type (str, optional): Type of data representation 
+        data_type (str, optional): Type of data representation
             (e.g., "tabular" or "image"). Defaults to "tabular".
-        seed (int, optional): Random seed for reproducibility. 
+        seed (int, optional): Random seed for reproducibility.
             Defaults to 42.
-        transform (Callable[[np.ndarray], np.ndarray], optional): 
-            Should take a board (N x N numpy array) and 
-            return a transformed representation as a np.ndarray. 
+        transform (Callable[[np.ndarray], np.ndarray], optional):
+            Should take a board (N x N numpy array) and
+            return a transformed representation as a np.ndarray.
             Default is None, which uses a simple flattening transform.
         dataset_name (str, optional): name of the dataset, used as folder name
             for saving images.
@@ -90,8 +91,9 @@ def create_sudoku_dataset(
 
     # (existing image folder setup unchanged)
     if data_type == "image":
-        dataset_name = dataset_name if dataset_name else \
-            datetime.now().strftime("%Y%m%d_%H%M%S")
+        dataset_name = (
+            dataset_name if dataset_name else datetime.now().strftime("%Y%m%d_%H%M%S")
+        )
         ds_path = SUDOKU_DIR / dataset_name
         ds_path.mkdir(parents=True, exist_ok=True)
 
@@ -113,7 +115,11 @@ def create_sudoku_dataset(
 
     X_list, C_list, y_list = [], [], []
 
-    pbar = tqdm(total=n_valid + n_invalid, desc="Generating Sudoku dataset") if tqdm else None
+    pbar = (
+        tqdm(total=n_valid + n_invalid, desc="Generating Sudoku dataset")
+        if tqdm
+        else None
+    )
 
     # ---- valid boards
     for i in range(n_valid):
@@ -137,13 +143,16 @@ def create_sudoku_dataset(
 
         C_list.append(c_vec)
         y_list.append(1)
-        if pbar: pbar.update(1)
+        if pbar:
+            pbar.update(1)
 
     # ---- invalid boards
     for i in range(n_invalid):
         num_actions = max(1, int(random.randint(1, max_corrupt)))
         inv_seed = random.randint(0, 2**31 - 1)
-        b = generate_invalid_board(base_board=generate_valid_board(n=n), num_actions=num_actions, seed=inv_seed)
+        b = generate_invalid_board(
+            base_board=generate_valid_board(n=n), num_actions=num_actions, seed=inv_seed
+        )
         concepts = get_concepts(b, return_label=False)
         c_base = np.array(list(concepts.values()), dtype=np.int32).flatten()
 
@@ -162,9 +171,11 @@ def create_sudoku_dataset(
 
         C_list.append(c_vec)
         y_list.append(0)
-        if pbar: pbar.update(1)
+        if pbar:
+            pbar.update(1)
 
-    if pbar: pbar.close()
+    if pbar:
+        pbar.close()
 
     X = np.stack(X_list, axis=0)
     C = np.stack(C_list, axis=0).astype(np.int32)
@@ -184,7 +195,7 @@ def create_sudoku_dataset(
     if add_cell_digit_concepts:
         # Names follow the same order as _cell_digit_concept_vector
         extra_names = [
-            f"{cell_concept_prefix}({r+1},{c+1})_is_{d}"
+            f"{cell_concept_prefix}({r + 1},{c + 1})_is_{d}"
             for (r, c) in _pos
             for d in _digs
         ]
@@ -201,7 +212,7 @@ def create_sudoku_dataset(
         "N": N,
         "cell_digit_concepts": {
             "enabled": add_cell_digit_concepts,
-            "positions_order_row_major_1based": [(r+1, c+1) for (r, c) in _pos],
+            "positions_order_row_major_1based": [(r + 1, c + 1) for (r, c) in _pos],
             "digits_order": _digs,
             "name_prefix": cell_concept_prefix,
         },
@@ -226,7 +237,7 @@ def onehot_transform(board: np.ndarray) -> np.ndarray:
     x = board.astype(np.int64) - 1
     eye = np.eye(N, dtype=np.float32)
     # For blanks (0→-1), map to all-zeros row by masking negatives
-    oh = eye[x.clip(0, N-1)]  # (N,N,N)
+    oh = eye[x.clip(0, N - 1)]  # (N,N,N)
     oh[(board <= 0)] = 0.0
     return oh
 
@@ -239,8 +250,8 @@ def histogram_transform(board: np.ndarray) -> np.ndarray:
     n = int(math.isqrt(N))
     assert n * n == N, "Board size must be a perfect square"
     oh = onehot_transform(board)  # (N,N,N)
-    row_h = oh.sum(axis=1)        # (N,N)
-    col_h = oh.sum(axis=0)        # (N,N)
+    row_h = oh.sum(axis=1)  # (N,N)
+    col_h = oh.sum(axis=0)  # (N,N)
     blocks = []
     for br in range(n):
         for bc in range(n):
@@ -249,6 +260,7 @@ def histogram_transform(board: np.ndarray) -> np.ndarray:
     blk_h = np.stack(blocks, axis=0)  # (N,N)
     feats = np.concatenate([row_h, col_h, blk_h], axis=0)  # (3N,N)
     return feats.astype(np.float32)
+
 
 def image_transform(
     board: np.ndarray,
@@ -266,13 +278,13 @@ def image_transform(
     starters_ratio: float | None = 0.35,
     starters_count: int | None = None,
     starters_seed: int | None = None,
-    given_color: tuple[int,int,int] = (30, 30, 30),     # gray/black (printed)
-    fill_color:  tuple[int,int,int] = (26, 71, 180),    # blue (user ink)
+    given_color: tuple[int, int, int] = (30, 30, 30),  # gray/black (printed)
+    fill_color: tuple[int, int, int] = (26, 71, 180),  # blue (user ink)
     # Prior candidates (built from adjacent non-starter pairs/triples)
     prior_options: dict | None = None,
     prior_groups_ratio: float = 0.22,
     prior_groups_seed: int | None = 1337,
-    prior_group_sizes: tuple[int,...] = (2,),
+    prior_group_sizes: tuple[int, ...] = (2,),
     prior_allow_diagonal: bool = False,
     # (compat only, not used directly)
     outfile: str | None = None,
@@ -280,12 +292,14 @@ def image_transform(
     return_meta: bool = False,
 ) -> np.ndarray | str | tuple:
     """Render an NxN Sudoku board to an RGB image with prior-option bubbles (handwritten).
-       Each bubble shows *all* options inline in one row (tight kerning). Starters never get bubbles.
+    Each bubble shows *all* options inline in one row (tight kerning). Starters never get bubbles.
     """
     import math
+
     N = board.shape[0]
     assert board.ndim == 2 and N == board.shape[1], "board must be square"
-    n = int(math.isqrt(N)); assert n*n == N, "board size must be n*n"
+    n = int(math.isqrt(N))
+    assert n * n == N, "board size must be n*n"
     W = H = margin_px * 2 + cell_px * N
 
     img = Image.new("RGB", (W, H), "white")
@@ -293,8 +307,11 @@ def image_transform(
 
     # Base font for non-handwritten/letters
     try:
-        font = (ImageFont.truetype(font_path, font_size) if font_path
-                else _get_default_font(font_size))
+        font = (
+            ImageFont.truetype(font_path, font_size)
+            if font_path
+            else _get_default_font(font_size)
+        )
     except Exception:
         font = _get_default_font(font_size)
 
@@ -318,9 +335,11 @@ def image_transform(
     generator = None
     if handwriting:
         from concept_benchmark.paths import pkg_dir
+
         _fonts_dir = str(pkg_dir / "data" / "fonts")
         try:
             import cv2  # noqa: F401
+
             generator = AdvancedHandwrittenGenerator(fonts_dir=_fonts_dir)
         except Exception:
             generator = SimpleHandwrittenGenerator(fonts_dir=_fonts_dir)
@@ -353,8 +372,7 @@ def image_transform(
     for (r, c), opts in prior_options.items():
         # ignore junk, keep positive ints
         clean = [
-            int(d) for d in opts
-            if isinstance(d, (int, np.integer)) and int(d) > 0
+            int(d) for d in opts if isinstance(d, (int, np.integer)) and int(d) > 0
         ]
         candidates[r, c] = len(clean)
 
@@ -374,7 +392,8 @@ def image_transform(
             own = int(raw) if raw is not None else 0
 
             opts = {
-                int(d) for d in prior_options.get((r, c), [])
+                int(d)
+                for d in prior_options.get((r, c), [])
                 if isinstance(d, (int, np.integer)) and int(d) > 0
             }
             if own > 0:
@@ -390,7 +409,7 @@ def image_transform(
 
             # target corner and padding
             inset = max(2, int(cell_px * 0.06))
-            pad   = max(2, int(cell_px * 0.05))
+            pad = max(2, int(cell_px * 0.05))
 
             # Compute the max bubble box we can afford in the corner
             max_w = cell_w - 2 * inset
@@ -404,10 +423,9 @@ def image_transform(
             tries = 0
             while mini >= 8 and tries < 6:
                 seq_img = _render_inline_candidates(
-                    generator, opts, fill_color,
-                    size=mini, seed_base=(r * N + c) * 997
+                    generator, opts, fill_color, size=mini, seed_base=(r * N + c) * 997
                 )
-                bubble_w = seq_img.width  + 2 * pad
+                bubble_w = seq_img.width + 2 * pad
                 bubble_h = seq_img.height + 2 * pad
 
                 if bubble_w <= max_w and bubble_h <= max_h:
@@ -425,29 +443,33 @@ def image_transform(
             mini, seq_img, bubble_w, bubble_h = fitted
 
             # Place top-left, fully inside the cell
-            left   = x0 + inset
-            top    = y0 + inset
-            right  = left + bubble_w
-            bottom = top  + bubble_h
+            left = x0 + inset
+            top = y0 + inset
+            right = left + bubble_w
+            bottom = top + bubble_h
 
             # (safety) clamp within the cell; this preserves size
             if right > x1 - 1:
                 shift = right - (x1 - 1)
-                left  -= shift; right  -= shift
+                left -= shift
+                right -= shift
             if bottom > y1 - 1:
                 shift = bottom - (y1 - 1)
-                top   -= shift; bottom -= shift
+                top -= shift
+                bottom -= shift
 
             # Draw the fine, wobbly circle outline
             _draw_wobbly_circle(
-                draw, (left, top, right, bottom),
-                color=fill_color, width=1,
-                seed=(r * N + c) * 137 + len(opts)
+                draw,
+                (left, top, right, bottom),
+                color=fill_color,
+                width=1,
+                seed=(r * N + c) * 137 + len(opts),
             )
 
             # Center the strip inside the circle
-            tx = int(left + (bubble_w - seq_img.width)  / 2)
-            ty = int(top  + (bubble_h - seq_img.height) / 2)
+            tx = int(left + (bubble_w - seq_img.width) / 2)
+            ty = int(top + (bubble_h - seq_img.height) / 2)
             img.paste(seq_img, (tx, ty), seq_img)
 
     # ---- SECOND PASS: draw main digits
@@ -462,8 +484,10 @@ def image_transform(
 
             x0, y0, x1, y1 = cell_rect(r, c)
             text = (
-                str(v) if v <= 9
-                else alphabet[v-10] if 0 <= (v-10) < len(alphabet)
+                str(v)
+                if v <= 9
+                else alphabet[v - 10]
+                if 0 <= (v - 10) < len(alphabet)
                 else str(v)
             )
             color = given_color if starters[r, c] else fill_color
@@ -474,21 +498,24 @@ def image_transform(
                 tw, th = tb[2] - tb[0], tb[3] - tb[1]
                 tx = x0 + (cell_px - tw) / 2
                 ty = y0 + (cell_px - th) / 2
-                draw.text((tx, ty), text, fill=given_color, font=_get_default_font(font_size))
+                draw.text(
+                    (tx, ty), text, fill=given_color, font=_get_default_font(font_size)
+                )
             else:
                 # Non-starters: handwritten if possible, otherwise printed
                 if text.isdigit() and (generator is not None):
                     hand_size_main = max(8, int(cell_px * 0.82))
                     rng_seed = (r * N + c) * 131 + v
                     digit_img = generator.generate(
-                        digit=int(text), size=hand_size_main,
-                        color=fill_color, rng_seed=rng_seed
+                        digit=int(text),
+                        size=hand_size_main,
+                        color=fill_color,
+                        rng_seed=rng_seed,
                     )
                     arr = np.array(digit_img, dtype=np.uint8)
                     if arr.shape[-1] == 4:
                         arr[:, :, 3] = np.clip(
-                            arr[:, :, 3].astype(np.float32) * 1.25,
-                            0, 255
+                            arr[:, :, 3].astype(np.float32) * 1.25, 0, 255
                         ).astype(np.uint8)
                     digit_img = Image.fromarray(arr, mode="RGBA")
                     dw, dh = digit_img.size
@@ -499,7 +526,8 @@ def image_transform(
     # Outer border
     draw.rectangle(
         [margin_px, margin_px, W - margin_px, H - margin_px],
-        outline=(0, 0, 0), width=bold_px
+        outline=(0, 0, 0),
+        width=bold_px,
     )
 
     # ----- returns -----
@@ -516,12 +544,11 @@ def image_transform(
     return arr
 
 
-
 def sudoku_image_preprocess(
     image: Image.Image,
     standardize: bool = True,
     to_tensor: bool = True,
-    vit: bool = True
+    vit: bool = True,
 ) -> np.ndarray:
     image = image.convert("L")  # Convert to grayscale
     img_arr = np.array(image)
@@ -545,11 +572,11 @@ def sudoku_image_preprocess(
         image = image.convert("RGB").resize((224, 224), resample)
 
         # HWC -> CHW, scale to [0,1] before mean/std
-        arr = np.asarray(image, dtype=np.float32) / 255.0          # [H,W,3] -> [0,1]
-        arr = np.transpose(arr, (2, 0, 1))                         # [3,H,W]
+        arr = np.asarray(image, dtype=np.float32) / 255.0  # [H,W,3] -> [0,1]
+        arr = np.transpose(arr, (2, 0, 1))  # [3,H,W]
 
         mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(3, 1, 1)
-        std  = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(3, 1, 1)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(3, 1, 1)
         arr = (arr - mean) / std
 
         return torch.from_numpy(arr).contiguous() if to_tensor else arr

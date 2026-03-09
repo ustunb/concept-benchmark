@@ -5,7 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-    types: [opened, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review]
   # Allow manual runs from the Actions tab
   workflow_dispatch:
 
@@ -72,6 +72,13 @@ jobs:
 
       - name: Install the project (dev deps)
         run: uv sync --locked --all-extras --dev
+
+      - name: Patch pero invalid escape sequences (upstream bug)
+        env:
+          PYTHONWARNINGS: default
+        run: |
+          PERO_DIR=$(uv run python -c "import pero, os; print(os.path.dirname(pero.__file__))")
+          find "$PERO_DIR" -name '*.py' -exec sed -i 's/re\.compile("/re.compile(r"/g' {} +
 
       - name: Run tests
         run: >

@@ -59,9 +59,7 @@ class InterventionBatch:
         if self.instance_ids is None:
             self.instance_ids = np.arange(self.C_pred.shape[0])
         if self.instance_ids.shape[0] != self.C_pred.shape[0]:
-            raise ValueError(
-                "Length of instance_ids must match the number of samples."
-            )
+            raise ValueError("Length of instance_ids must match the number of samples.")
 
     @property
     def n_samples(self) -> int:
@@ -222,7 +220,9 @@ class InterventionStrategy:
     ) -> np.ndarray:
         if candidates.size == 0:
             return candidates
-        shuffle = config.shuffle_candidates if shuffle_override is None else shuffle_override
+        shuffle = (
+            config.shuffle_candidates if shuffle_override is None else shuffle_override
+        )
         if shuffle:
             shuffled = candidates.copy()
             rng.shuffle(shuffled)
@@ -309,9 +309,11 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
         abstain_mask = (confidences >= config.tau) & (confidences <= 1.0 - config.tau)
 
         non_abstained = ~abstain_mask
-        selective_acc_before = float(
-            (predicted[non_abstained] == batch.y_true[non_abstained]).mean()
-        ) if non_abstained.any() else float("nan")
+        selective_acc_before = (
+            float((predicted[non_abstained] == batch.y_true[non_abstained]).mean())
+            if non_abstained.any()
+            else float("nan")
+        )
 
         candidate_ids = np.nonzero(abstain_mask)[0]
         candidate_scores = self._instance_uncertainty_scores(
@@ -400,7 +402,9 @@ class OrderedCBMStrategy(InterventionStrategy):
             y_prob = model.front_end_model.predict_proba(batch.C_pred)
             predicted = np.argmax(y_prob, axis=1)
             confidences = y_prob[np.arange(batch.n_samples), predicted]
-            abstain_mask = (confidences >= config.tau) & (confidences <= 1.0 - config.tau)
+            abstain_mask = (confidences >= config.tau) & (
+                confidences <= 1.0 - config.tau
+            )
             candidate_ids = np.nonzero(abstain_mask)[0]
         else:
             candidate_ids = np.arange(batch.n_samples)
@@ -415,7 +419,9 @@ class OrderedCBMStrategy(InterventionStrategy):
         details: Dict[str, Any] = {}
         if "error_deltas" in self.state:
             details["validation_error_deltas"] = self.state["error_deltas"]
-        return StrategyProposal(mask=mask, ordering_used=order, selected_instances=selected, details=details)
+        return StrategyProposal(
+            mask=mask, ordering_used=order, selected_instances=selected, details=details
+        )
 
 
 class RandomInterventionStrategy(InterventionStrategy):
@@ -434,7 +440,9 @@ class RandomInterventionStrategy(InterventionStrategy):
             y_prob = model.front_end_model.predict_proba(batch.C_pred)
             predicted = np.argmax(y_prob, axis=1)
             confidences = y_prob[np.arange(batch.n_samples), predicted]
-            abstain_mask = (confidences >= config.tau) & (confidences <= 1.0 - config.tau)
+            abstain_mask = (confidences >= config.tau) & (
+                confidences <= 1.0 - config.tau
+            )
             candidate_ids = np.nonzero(abstain_mask)[0]
         else:
             candidate_ids = np.arange(batch.n_samples)
@@ -475,8 +483,9 @@ class RandomInterventionStrategy(InterventionStrategy):
             )
             ordering_used = order
 
-        return StrategyProposal(mask=mask, ordering_used=ordering_used, selected_instances=selected)
-
+        return StrategyProposal(
+            mask=mask, ordering_used=ordering_used, selected_instances=selected
+        )
 
 
 class ScoreIntervention(InterventionStrategy):
@@ -512,7 +521,10 @@ class ScoreIntervention(InterventionStrategy):
             )
             m = n_concepts
 
-        combination_arrays = [np.asarray(combo, dtype=int) for combo in itertools.combinations(range(n_concepts), m)]
+        combination_arrays = [
+            np.asarray(combo, dtype=int)
+            for combo in itertools.combinations(range(n_concepts), m)
+        ]
 
         best_subset_arrays: List[Optional[np.ndarray]] = [None] * n_samples
 
@@ -521,7 +533,10 @@ class ScoreIntervention(InterventionStrategy):
         best_combo_idx = np.full(n_samples, -1, dtype=int)
 
         from tqdm import tqdm
-        for ci, combo_indices in enumerate(tqdm(combination_arrays, desc="Computing intervention scores")):
+
+        for ci, combo_indices in enumerate(
+            tqdm(combination_arrays, desc="Computing intervention scores")
+        ):
             all_flipped = concepts_before.copy()
             all_flipped[:, combo_indices] = 1 - all_flipped[:, combo_indices]
             p_after = model.front_end_model.predict_proba(all_flipped)
@@ -590,11 +605,15 @@ class ScoreIntervention(InterventionStrategy):
         def compute_confusion(y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
             n_classes = p_before.shape[1]
             indices = y_true.astype(int) * n_classes + y_pred.astype(int)
-            return np.bincount(indices, minlength=n_classes * n_classes).reshape(n_classes, n_classes)
+            return np.bincount(indices, minlength=n_classes * n_classes).reshape(
+                n_classes, n_classes
+            )
 
         if batch.y_true is not None:
             overall_acc_before = float(np.mean(y_pred_before == batch.y_true))
-            non_selected = np.setdiff1d(np.arange(batch.n_samples), selected, assume_unique=True)
+            non_selected = np.setdiff1d(
+                np.arange(batch.n_samples), selected, assume_unique=True
+            )
             if non_selected.size:
                 acc_non_intervened_before = float(
                     np.mean(y_pred_before[non_selected] == batch.y_true[non_selected])
@@ -603,16 +622,22 @@ class ScoreIntervention(InterventionStrategy):
                 acc_non_intervened_before = math.nan
 
             if selected.size:
-                confusion_selected_before = compute_confusion(batch.y_true[selected], y_pred_before[selected])
+                confusion_selected_before = compute_confusion(
+                    batch.y_true[selected], y_pred_before[selected]
+                )
             else:
-                confusion_selected_before = np.zeros((p_before.shape[1], p_before.shape[1]), dtype=int)
+                confusion_selected_before = np.zeros(
+                    (p_before.shape[1], p_before.shape[1]), dtype=int
+                )
 
             if non_selected.size:
                 confusion_non_selected_before = compute_confusion(
                     batch.y_true[non_selected], y_pred_before[non_selected]
                 )
             else:
-                confusion_non_selected_before = np.zeros((p_before.shape[1], p_before.shape[1]), dtype=int)
+                confusion_non_selected_before = np.zeros(
+                    (p_before.shape[1], p_before.shape[1]), dtype=int
+                )
 
         overwrite_mask = mask & ~np.isnan(batch.C_true)
         C_intervened = np.where(overwrite_mask, batch.C_true, batch.C_pred)
@@ -624,17 +649,25 @@ class ScoreIntervention(InterventionStrategy):
         if batch.y_true is not None:
             overall_acc_after = float(np.mean(y_pred_after == batch.y_true))
             if selected.size:
-                confusion_selected_after = compute_confusion(batch.y_true[selected], y_pred_after[selected])
+                confusion_selected_after = compute_confusion(
+                    batch.y_true[selected], y_pred_after[selected]
+                )
             else:
-                confusion_selected_after = np.zeros((p_before.shape[1], p_before.shape[1]), dtype=int)
+                confusion_selected_after = np.zeros(
+                    (p_before.shape[1], p_before.shape[1]), dtype=int
+                )
 
-            non_selected = np.setdiff1d(np.arange(batch.n_samples), selected, assume_unique=True)
+            non_selected = np.setdiff1d(
+                np.arange(batch.n_samples), selected, assume_unique=True
+            )
             if non_selected.size:
                 confusion_non_selected_after = compute_confusion(
                     batch.y_true[non_selected], y_pred_after[non_selected]
                 )
             else:
-                confusion_non_selected_after = np.zeros((p_before.shape[1], p_before.shape[1]), dtype=int)
+                confusion_non_selected_after = np.zeros(
+                    (p_before.shape[1], p_before.shape[1]), dtype=int
+                )
 
         return {
             "scores": scores,
@@ -722,26 +755,52 @@ class ConceptInterventionRunner:
         y_prob_before = predict_proba_fn(concepts_before)
         overwrite_mask = proposal.mask & ~np.isnan(batch.C_true)
         C_intervened = np.where(overwrite_mask, batch.C_true, batch.C_pred)
-        concepts_after = C_intervened if isinstance(strategy, ConceptualSafeguardsStrategy) else (C_intervened >= 0.5)
+        concepts_after = (
+            C_intervened
+            if isinstance(strategy, ConceptualSafeguardsStrategy)
+            else (C_intervened >= 0.5)
+        )
         y_prob_after = predict_proba_fn(concepts_after)
         y_pred_after = np.argmax(y_prob_after, axis=1)
 
         # Conceptual Safeguards results
         strat_metrics = {}
         if isinstance(strategy, ConceptualSafeguardsStrategy):
-            strat_metrics['selective_acc_before'] = proposal.details.get("selective_acc_before", None)
-            strat_metrics['coverage_before'] = 1 - (proposal.selected_instances.size / batch.n_samples) if batch.n_samples > 0 else 0.0
+            strat_metrics["selective_acc_before"] = proposal.details.get(
+                "selective_acc_before", None
+            )
+            strat_metrics["coverage_before"] = (
+                1 - (proposal.selected_instances.size / batch.n_samples)
+                if batch.n_samples > 0
+                else 0.0
+            )
 
-            abstain_post = (y_prob_after[:, 1] >= config.tau) & (y_prob_after[:, 1] <= 1.0 - config.tau)
+            abstain_post = (y_prob_after[:, 1] >= config.tau) & (
+                y_prob_after[:, 1] <= 1.0 - config.tau
+            )
 
-            strat_metrics['selective_acc_after'] = (y_pred_after[~abstain_post] == batch.y_true[~abstain_post]).mean() if (~abstain_post).any() else -np.inf
-            strat_metrics['coverage_after'] = 1 - abstain_post.mean()
+            strat_metrics["selective_acc_after"] = (
+                (y_pred_after[~abstain_post] == batch.y_true[~abstain_post]).mean()
+                if (~abstain_post).any()
+                else -np.inf
+            )
+            strat_metrics["coverage_after"] = 1 - abstain_post.mean()
 
         elif isinstance(strategy, ScoreIntervention):
-            strat_metrics['overall_acc_before'] = proposal.details.get("overall_acc_before", None)
-            strat_metrics['overall_acc_after'] = proposal.details.get("overall_acc_after", None)
-            strat_metrics['acc_non_intervened_before'] = proposal.details.get("acc_non_intervened_before", None)
-            strat_metrics['intervened'] = proposal.selected_instances.size / batch.n_samples if batch.n_samples > 0 else 0.0
+            strat_metrics["overall_acc_before"] = proposal.details.get(
+                "overall_acc_before", None
+            )
+            strat_metrics["overall_acc_after"] = proposal.details.get(
+                "overall_acc_after", None
+            )
+            strat_metrics["acc_non_intervened_before"] = proposal.details.get(
+                "acc_non_intervened_before", None
+            )
+            strat_metrics["intervened"] = (
+                proposal.selected_instances.size / batch.n_samples
+                if batch.n_samples > 0
+                else 0.0
+            )
 
         return InterventionResult(
             C_pred=batch.C_pred,

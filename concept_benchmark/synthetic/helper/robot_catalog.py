@@ -1,6 +1,7 @@
 """
 This file contains classes to represent and manipulate a set of all possible robots
 """
+
 from __future__ import annotations
 
 import copy
@@ -48,7 +49,10 @@ def get_robot_catalog_df(concepts, repetitions=1):
 
 
 def collapse_robot_subtypes(
-    df, robot_features=ALL_ROBOT_FEATURES, subtype_separator="_", collapse_as_new_feature=[]
+    df,
+    robot_features=ALL_ROBOT_FEATURES,
+    subtype_separator="_",
+    collapse_as_new_feature=[],
 ):
     """
     collapses feature values with subtypes into feature_types
@@ -73,7 +77,9 @@ def collapse_robot_subtypes(
                         new_feature_name = f"{name}_{t}_{sv}"
                         if new_feature_name not in df.columns:
                             new_features[new_feature_name] = [False, True]
-                        df[new_feature_name] = ((subtypes_col == sv) & type_mask).astype(str)
+                        df[new_feature_name] = (
+                            (subtypes_col == sv) & type_mask
+                        ).astype(str)
     return df, new_features
 
 
@@ -120,14 +126,17 @@ def generate_robot_catalog(
     init_catalog_df = copy.deepcopy(catalog_df)
 
     ids = init_catalog_df["id"].astype(str)
-    hb = ids.map(lambda s: int.from_bytes(hashlib.sha256(s.encode()).digest()[:4], "big") & 1).astype(int)
+    hb = ids.map(
+        lambda s: int.from_bytes(hashlib.sha256(s.encode()).digest()[:4], "big") & 1
+    ).astype(int)
     init_catalog_df["foot_orientation"] = np.where(hb.values == 1, "vertex", "side")
     if verbose:
         u, c = np.unique(init_catalog_df["foot_orientation"], return_counts=True)
         print("foot_orientation_counts:", dict(zip(u, c)))
 
     catalog_df, new_features = collapse_robot_subtypes(
-        df=catalog_df, robot_features=list(concepts.keys()),
+        df=catalog_df,
+        robot_features=list(concepts.keys()),
         collapse_as_new_feature=additional_features or [],
     )
     # new_features dict now contains any subconcept columns created
@@ -197,9 +206,7 @@ def generate_robot_catalog(
             n_skipped += 1
 
         png_filenames.append(png_filename)
-        color_scheme_id = np.mod(
-            features["color_scheme"], len(COLOR_SCHEMES)
-        )
+        color_scheme_id = np.mod(features["color_scheme"], len(COLOR_SCHEMES))
         color_left, color_right = COLOR_SCHEMES[color_scheme_id]
         color_lefts.append(color_left)
         color_rights.append(color_right)
@@ -215,7 +222,9 @@ def generate_robot_catalog(
     catalog_df["color_right"] = color_rights
 
     ids2 = catalog_df["id"].astype(str)
-    hb2 = ids2.map(lambda s: int.from_bytes(hashlib.sha256(s.encode()).digest()[:4], "big") & 1).astype(int)
+    hb2 = ids2.map(
+        lambda s: int.from_bytes(hashlib.sha256(s.encode()).digest()[:4], "big") & 1
+    ).astype(int)
     catalog_df["foot_orientation"] = np.where(hb2.values == 1, "vertex", "side")
 
     return catalog_df, new_features

@@ -18,7 +18,9 @@ def coerce_rng(rng: np.random.Generator | int | None) -> np.random.Generator:
     if isinstance(rng, np.random.RandomState):
         seed = rng.randint(low=0, high=2**32 - 1)
         return np.random.default_rng(seed)
-    raise TypeError("rng must be None, an int seed, np.random.Generator, or RandomState")
+    raise TypeError(
+        "rng must be None, an int seed, np.random.Generator, or RandomState"
+    )
 
 
 def broadcast_prob(value, n_concepts: int, *, default: float) -> np.ndarray:
@@ -29,11 +31,15 @@ def broadcast_prob(value, n_concepts: int, *, default: float) -> np.ndarray:
     if arr.ndim == 0:
         arr = np.full((n_concepts,), float(arr), dtype=float)
     elif arr.shape != (n_concepts,):
-        raise ValueError("Probability specification must be a scalar or length-n_concepts array")
+        raise ValueError(
+            "Probability specification must be a scalar or length-n_concepts array"
+        )
     return np.clip(arr, 0.0, 1.0)
 
 
-def sample_mcar_mask(rng: np.random.Generator, shape: tuple[int, ...], p: float) -> np.ndarray:
+def sample_mcar_mask(
+    rng: np.random.Generator, shape: tuple[int, ...], p: float
+) -> np.ndarray:
     if not 0.0 <= p <= 1.0:
         raise ValueError("p must be between 0 and 1 inclusive")
     return rng.random(shape) < p

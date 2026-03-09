@@ -7,6 +7,7 @@ import numpy as np
 # Parametric base board & valid board generation (supports N = n*n)
 # --------------------------
 
+
 def _assert_board_size(board: np.ndarray) -> tuple[int, int]:
     assert board.ndim == 2 and board.shape[0] == board.shape[1], "board must be square"
     N = board.shape[0]
@@ -22,7 +23,9 @@ def build_base_board(n: int) -> np.ndarray:
     digits are 1..N
     """
     N = n * n
-    board = np.fromfunction(lambda r, c: (n * (r % n) + r // n + c) % N + 1, (N, N), dtype=int)
+    board = np.fromfunction(
+        lambda r, c: (n * (r % n) + r // n + c) % N + 1, (N, N), dtype=int
+    )
     return board.astype(int)
 
 
@@ -84,6 +87,7 @@ def generate_valid_board(n: int = 3) -> np.ndarray:
     board = relabel_digits(board, N)
     return board
 
+
 # Backward-compatibility constant for 9x9 (n=3)
 BASE_BOARD = build_base_board(3)
 
@@ -101,7 +105,9 @@ BASE_BOARD = build_base_board(3)
 #      - Each action invalidates at most 3 units (row/column/block) due to a single-cell overwrite
 
 
-def invalid_rows_only_by_within_column_swap(board: np.ndarray, seed: Optional[int] = None) -> np.ndarray:
+def invalid_rows_only_by_within_column_swap(
+    board: np.ndarray, seed: Optional[int] = None
+) -> np.ndarray:
     """
     Swap two cells that share the same column and the same n x n block-band (i.e., same column, different
     rows within one band). Effect: exactly TWO row violations; columns and blocks remain valid.
@@ -117,7 +123,9 @@ def invalid_rows_only_by_within_column_swap(board: np.ndarray, seed: Optional[in
     return b
 
 
-def invalid_cols_only_by_within_row_swap(board: np.ndarray, seed: Optional[int] = None) -> np.ndarray:
+def invalid_cols_only_by_within_row_swap(
+    board: np.ndarray, seed: Optional[int] = None
+) -> np.ndarray:
     """
     Swap two cells that share the same row and the same n x n stack (i.e., same row, different columns within
     one stack). Effect: exactly TWO column violations; rows and blocks remain valid.
@@ -133,7 +141,9 @@ def invalid_cols_only_by_within_row_swap(board: np.ndarray, seed: Optional[int] 
     return b
 
 
-def invalid_blocks_only_by_row_swap_across_bands(board: np.ndarray, seed: Optional[int] = None) -> np.ndarray:
+def invalid_blocks_only_by_row_swap_across_bands(
+    board: np.ndarray, seed: Optional[int] = None
+) -> np.ndarray:
     """
     Swap two ENTIRE rows from different bands. Rows/columns remain valid (they are permutations and column
     multisets unchanged), but affected n x n blocks become invalid (composition within blocks changes).
@@ -148,7 +158,9 @@ def invalid_blocks_only_by_row_swap_across_bands(board: np.ndarray, seed: Option
     return b
 
 
-def invalid_blocks_only_by_col_swap_across_stacks(board: np.ndarray, seed: Optional[int] = None) -> np.ndarray:
+def invalid_blocks_only_by_col_swap_across_stacks(
+    board: np.ndarray, seed: Optional[int] = None
+) -> np.ndarray:
     """
     Swap two ENTIRE columns from different stacks. Rows/columns remain valid (still permutations), while
     the composition of blocks is disturbed, invalidating blocks.
@@ -163,7 +175,9 @@ def invalid_blocks_only_by_col_swap_across_stacks(board: np.ndarray, seed: Optio
     return b
 
 
-def duplicate_in_row(board: np.ndarray, r: int, seed: Optional[int] = None) -> np.ndarray:
+def duplicate_in_row(
+    board: np.ndarray, r: int, seed: Optional[int] = None
+) -> np.ndarray:
     """
     Duplicate one value within row r by copying a value from column c1 into column c2 (c2!=c1).
     Effect of ONE action: invalidates that row, the target column, and the target block (<= 3 concepts).
@@ -176,7 +190,9 @@ def duplicate_in_row(board: np.ndarray, r: int, seed: Optional[int] = None) -> n
     return b
 
 
-def duplicate_in_col(board: np.ndarray, c: int, seed: Optional[int] = None) -> np.ndarray:
+def duplicate_in_col(
+    board: np.ndarray, c: int, seed: Optional[int] = None
+) -> np.ndarray:
     """
     Duplicate one value within column c by copying a value from row r1 into row r2 (r2!=r1).
     Effect of ONE action: invalidates that column, the target row, and the target block (<= 3 concepts).
@@ -230,7 +246,9 @@ def generate_invalid_board(
         cur_seed = rng.randrange(1 << 30)
         if mode is None:
             # include duplicate modes in random choice
-            mode_choice = rng.choice(list(INVALID_MODES.keys()) + ["duplicate_row", "duplicate_col"])
+            mode_choice = rng.choice(
+                list(INVALID_MODES.keys()) + ["duplicate_row", "duplicate_col"]
+            )
         else:
             mode_choice = mode
 
@@ -251,6 +269,7 @@ def generate_invalid_board(
 # --------------------------
 # Create incomplete boards (mask clues)
 # --------------------------
+
 
 def make_incomplete_board(
     board: np.ndarray,
@@ -316,12 +335,14 @@ def make_incomplete_board(
     all_idx = [(r, c) for r in range(N) for c in range(N) if (r, c) not in keep]
     remaining_to_keep = num_clues - len(keep)
     if remaining_to_keep > 0 and len(all_idx) > 0:
-        chosen = rng.choice(len(all_idx), size=min(remaining_to_keep, len(all_idx)), replace=False)
+        chosen = rng.choice(
+            len(all_idx), size=min(remaining_to_keep, len(all_idx)), replace=False
+        )
         for i in np.atleast_1d(chosen):
             keep.add(all_idx[int(i)])
 
     puzzle = np.full_like(board, fill_value=blank_value)
-    for (r, c) in keep:
+    for r, c in keep:
         puzzle[r, c] = board[r, c]
 
     return puzzle
@@ -364,6 +385,7 @@ def get_concepts(board, return_label=False):
 # --------------------------
 # Partial-board concepts (work with blanks)
 # --------------------------
+
 
 def get_partial_concepts(
     board: np.ndarray,
@@ -426,9 +448,7 @@ def get_partial_concepts(
         all_consistent = (
             all(row_consistent) and all(col_consistent) and all(block_consistent)
         )
-        all_complete = (
-            all(row_complete) and all(col_complete) and all(block_complete)
-        )
+        all_complete = all(row_complete) and all(col_complete) and all(block_complete)
         concepts["board_consistent"] = int(all_consistent)
         concepts["board_complete"] = int(all_complete)
 
@@ -438,6 +458,7 @@ def get_partial_concepts(
 # --------------------------
 # Concept noise utilities
 # --------------------------
+
 
 def _bernoulli_mask(shape, p, rng):
     """Sample a boolean mask with True ~ Bernoulli(p)."""
@@ -472,7 +493,11 @@ def add_noise_to_concepts(
     rng = np.random.default_rng(seed)
 
     def _should_skip(k: str) -> bool:
-        if not include_board_flags and k in {"board_valid", "board_consistent", "board_complete"}:
+        if not include_board_flags and k in {
+            "board_valid",
+            "board_consistent",
+            "board_complete",
+        }:
             return True
         if keys is not None and k not in keys:
             return True
@@ -498,7 +523,9 @@ def add_noise_to_concepts(
     return out
 
 
-def add_noise_to_concept_vector(vec: np.ndarray, eta: float = 0.1, seed: int | None = None) -> np.ndarray:
+def add_noise_to_concept_vector(
+    vec: np.ndarray, eta: float = 0.1, seed: int | None = None
+) -> np.ndarray:
     """
     Flip bits of a 0/1 numpy vector with probability η (independent Bernoulli noise).
     Returns a new array with same shape and dtype int32.
@@ -515,9 +542,9 @@ def add_noise_to_concept_vector(vec: np.ndarray, eta: float = 0.1, seed: int | N
 # --------------------------
 
 
-def normalize_positions(N: int,
-                         positions_subset: Optional[Sequence[Tuple[int, int]]]
-                         ) -> list[Tuple[int, int]]:
+def normalize_positions(
+    N: int, positions_subset: Optional[Sequence[Tuple[int, int]]]
+) -> list[Tuple[int, int]]:
     """
     Validate and canonicalize a list of cell positions.
 
@@ -546,6 +573,7 @@ def normalize_positions(N: int,
     out.sort(key=lambda t: (t[0], t[1]))
     return out
 
+
 def normalize_digits(N: int, digits_subset: Optional[Sequence[int]]) -> list[int]:
     """
     Validate and canonicalize a list of digits.
@@ -572,9 +600,10 @@ def normalize_digits(N: int, digits_subset: Optional[Sequence[int]]) -> list[int
     out.sort()
     return out
 
-def cell_digit_concept_vector(board: np.ndarray,
-                               positions: Sequence[Tuple[int, int]],
-                               digits: Sequence[int]) -> np.ndarray:
+
+def cell_digit_concept_vector(
+    board: np.ndarray, positions: Sequence[Tuple[int, int]], digits: Sequence[int]
+) -> np.ndarray:
     """
     Build a binary vector encoding per-cell digit indicators.
 
@@ -598,7 +627,7 @@ def cell_digit_concept_vector(board: np.ndarray,
         ``len(positions) * len(digits)`` with entries in ``{0, 1}``.
     """
     vals = []
-    for (r, c) in positions:
+    for r, c in positions:
         v = int(board[r, c]) if board[r, c] is not None else 0
         for d in digits:
             vals.append(1 if v == d else 0)

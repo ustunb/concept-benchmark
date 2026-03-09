@@ -1,6 +1,7 @@
 """
 Helper functions to generate cross-validation indices for binary classification
 """
+
 from __future__ import annotations
 
 __all__ = [
@@ -346,7 +347,9 @@ def validate_cvindices(cvindices, stratified=True):
                     cvindices[fold_id], fold_id, stratified=stratified
                 )
             except AssertionError:
-                logging.getLogger(__name__).warning("could not validate fold: %s", fold_id)
+                logging.getLogger(__name__).warning(
+                    "could not validate fold: %s", fold_id
+                )
                 pass
 
     return validated_indices

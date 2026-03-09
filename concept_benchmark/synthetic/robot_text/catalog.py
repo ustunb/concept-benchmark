@@ -1,4 +1,5 @@
 """Robot text concept catalog and label computation."""
+
 from __future__ import annotations
 
 import re
@@ -14,15 +15,23 @@ TEXT_CONCEPTS = {
     "has_knees": ["false", "true"],
     "has_elbows": ["false", "true"],
     "foot_shape": [
-        "flat_4sided", "flat_5sided", "flat_lshaped",
-        "pointy_3sided", "pointy_4sided", "pointy_6sided",
+        "flat_4sided",
+        "flat_5sided",
+        "flat_lshaped",
+        "pointy_3sided",
+        "pointy_4sided",
+        "pointy_6sided",
     ],
     "has_antennae": ["false", "true"],
     "ears_shape": ["square", "triangle"],
     "mouth_type": ["closed", "open"],
     "hand_shape": [
-        "round_circle", "wide_oval", "tall_oval",
-        "edgy_square", "edgy_triangle", "edgy_trapezoid",
+        "round_circle",
+        "wide_oval",
+        "tall_oval",
+        "edgy_square",
+        "edgy_triangle",
+        "edgy_trapezoid",
     ],
 }
 
@@ -39,8 +48,8 @@ CORE_CONCEPT_NAMES = [
 ]
 
 DEFAULT_LABEL_EXPR = (
-    "'glorp' if (min(int(row[\"mouth_type\"]==\"open\"), "
-    "int(str(row[\"foot_shape\"]).startswith(\"pointy_\"))) >= 1) "
+    '\'glorp\' if (min(int(row["mouth_type"]=="open"), '
+    'int(str(row["foot_shape"]).startswith("pointy_"))) >= 1) '
     "else 'drent'"
 )
 
@@ -81,8 +90,15 @@ def compute_label(
     """
     SAFE_GLOBALS = {
         "__builtins__": None,
-        "int": int, "str": str, "float": float, "bool": bool,
-        "any": any, "all": all, "np": np, "min": min, "max": max,
+        "int": int,
+        "str": str,
+        "float": float,
+        "bool": bool,
+        "any": any,
+        "all": all,
+        "np": np,
+        "min": min,
+        "max": max,
     }
     rng = np.random.default_rng(int(seed))
 
@@ -91,7 +107,8 @@ def compute_label(
         cond = m.group("cond").strip() if m else expr.strip()
         m2 = re.search(
             r"^(?P<lhs>.+?)(?:\s*(?:>=|<=|>|<)\s*[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?)\s*$",
-            cond, flags=re.IGNORECASE,
+            cond,
+            flags=re.IGNORECASE,
         )
         lhs = m2.group("lhs").strip() if m2 else cond
         while lhs.startswith("(") and lhs.endswith(")"):
@@ -111,7 +128,9 @@ def compute_label(
                 break
         return lhs or None
 
-    score_expr = _cond_to_score(model_expr) if label_model_type == "stochastic" else None
+    score_expr = (
+        _cond_to_score(model_expr) if label_model_type == "stochastic" else None
+    )
 
     def eval_one(sr):
         row = sr.to_dict()

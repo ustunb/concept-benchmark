@@ -44,7 +44,13 @@ def test_detector_fit_predict_with_encoder_freeze_variants(tabular_train_valid):
         train,
         valid,
         freeze=False,
-        fit_params={"epochs": 2, "device": "cpu", "lr_encoder": 1e-2, "lr_heads": 1e-2, "batch_size": 8},
+        fit_params={
+            "epochs": 2,
+            "device": "cpu",
+            "lr_encoder": 1e-2,
+            "lr_heads": 1e-2,
+            "batch_size": 8,
+        },
     )
     after = det_ft.embedding_model.state_dict()
     assert _any_state_diff(before, after)
@@ -52,7 +58,9 @@ def test_detector_fit_predict_with_encoder_freeze_variants(tabular_train_valid):
     _proba_checks(pr, len(valid), k)
 
 
-def test_detector_predict_raises_when_calibrate_requested_but_not_fitted(tabular_train_valid):
+def test_detector_predict_raises_when_calibrate_requested_but_not_fitted(
+    tabular_train_valid,
+):
     train, valid, d, k = tabular_train_valid
     det = ConceptDetector(embedding_model=None)
     det.fit(train, valid, freeze=True, fit_params={"epochs": 1, "device": "cpu"})
@@ -70,7 +78,13 @@ def test_detector_calibrate_after_fit_changes_predictions(tabular_train_valid):
         valid,
         freeze=False,
         calibrate=False,
-        fit_params={"epochs": 2, "device": "cpu", "lr_encoder": 1e-2, "lr_heads": 1e-2, "batch_size": 8},
+        fit_params={
+            "epochs": 2,
+            "device": "cpu",
+            "lr_encoder": 1e-2,
+            "lr_heads": 1e-2,
+            "batch_size": 8,
+        },
     )
     pr_uncal = det.predict(valid, calibrate=False)
     # Calibrate afterwards

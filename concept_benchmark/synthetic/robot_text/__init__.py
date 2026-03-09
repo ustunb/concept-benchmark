@@ -1,4 +1,5 @@
 """Robot text data generation utilities."""
+
 from concept_benchmark.synthetic.robot_text.catalog import (
     TEXT_CONCEPTS,
     CORE_CONCEPT_NAMES,

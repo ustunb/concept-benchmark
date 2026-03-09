@@ -23,6 +23,7 @@ _EPS = 1e-8
 
 # --------- Configs and concept set handling ---------
 
+
 @dataclass
 class LFTrainingConfig:
     # CLIP backbone
@@ -63,7 +64,9 @@ class LFConceptSet:
         return s.replace("_", " ")
 
     @classmethod
-    def from_file(cls, path: str | Path, dataset_keys: Optional[Sequence[str]] = None) -> "LFConceptSet":
+    def from_file(
+        cls, path: str | Path, dataset_keys: Optional[Sequence[str]] = None
+    ) -> "LFConceptSet":
         p = Path(path)
         if not p.exists():
             raise FileNotFoundError(f"Concept file not found: {p}")
@@ -74,6 +77,7 @@ class LFConceptSet:
 
         if ext == ".csv":
             import csv
+
             with p.open("r", newline="", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 hdr = [h.strip().lower() for h in reader.fieldnames or []]
@@ -93,6 +97,7 @@ class LFConceptSet:
                             keys.append(k if k else t)
         elif ext in {".json", ".jsonl"}:
             import json
+
             if ext == ".jsonl":
                 with p.open("r", encoding="utf-8") as f:
                     for line in f:
@@ -109,7 +114,9 @@ class LFConceptSet:
                 if isinstance(obj, dict) and "concepts" in obj:
                     obj = obj["concepts"]
                 if not isinstance(obj, (list, tuple)):
-                    raise ValueError("JSON concept file must be a list of objects with 'text' (and optional 'key').")
+                    raise ValueError(
+                        "JSON concept file must be a list of objects with 'text' (and optional 'key')."
+                    )
                 for it in obj:
                     t = (it.get("text") or it.get("concept") or "").strip()
                     k = (it.get("key") or it.get("id") or t).strip()
@@ -117,7 +124,11 @@ class LFConceptSet:
                         texts.append(t)
                         keys.append(k if k else t)
         else:  # .txt or others -> one concept per line
-            lines = [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
+            lines = [
+                ln.strip()
+                for ln in p.read_text(encoding="utf-8").splitlines()
+                if ln.strip()
+            ]
             texts = lines
             keys = [str(i) for i in range(len(texts))]
 
@@ -139,7 +150,9 @@ class LFConceptSet:
                 for k in ds:
                     i = norm.get(k.lower().replace("_", " "))
                     if i is None:
-                        raise ValueError(f"Cannot align concept key '{k}' from dataset to provided concept file.")
+                        raise ValueError(
+                            f"Cannot align concept key '{k}' from dataset to provided concept file."
+                        )
                     remap.append(i)
                 keys = ds
                 texts = [texts[i] for i in remap]
@@ -150,6 +163,7 @@ class LFConceptSet:
 
 
 # --------- CLIP feature extraction (open_clip preferred, clip as fallback) ---------
+
 
 class _CLIPEncoder:
     def __init__(self, model_name: str, pretrained: str, device: str) -> None:
@@ -164,6 +178,7 @@ class _CLIPEncoder:
         self.backend = "open_clip"
         try:
             import open_clip  # type: ignore
+
             self.model, _, self.preprocess = open_clip.create_model_and_transforms(
                 self.model_name, pretrained=self.pretrained, device=self.device
             )
@@ -172,6 +187,7 @@ class _CLIPEncoder:
             self._encode_image = self._encode_image_openclip
         except ImportError:
             import clip  # type: ignore
+
             self.backend = "clip"
             name = self.model_name.replace("-", "/")
             self.model, self.preprocess = clip.load(name, device=self.device)
@@ -186,7 +202,11 @@ class _CLIPEncoder:
 
     def __getstate__(self):
         """Pickle only config strings; the CLIP model is re-loaded on demand via __setstate__."""
-        return {"model_name": self.model_name, "pretrained": self.pretrained, "_device_str": self._device_str}
+        return {
+            "model_name": self.model_name,
+            "pretrained": self.pretrained,
+            "_device_str": self._device_str,
+        }
 
     def __setstate__(self, state):
         self.model_name = state["model_name"]
@@ -203,11 +223,13 @@ class _CLIPEncoder:
             feats = self._encode_text(batch)
             out.append(feats)
         x = np.concatenate(out, axis=0)
-        x /= (np.linalg.norm(x, axis=1, keepdims=True) + _EPS)
+        x /= np.linalg.norm(x, axis=1, keepdims=True) + _EPS
         return x.astype(np.float32)
 
     @torch.no_grad()
-    def encode_images(self, paths: Sequence[str | Path], batch_size: int = 256) -> np.ndarray:
+    def encode_images(
+        self, paths: Sequence[str | Path], batch_size: int = 256
+    ) -> np.ndarray:
         self._ensure_loaded()
         from torch.utils.data import DataLoader, Dataset
 
@@ -218,7 +240,7 @@ class _CLIPEncoder:
                 self._base_dir = None
                 for it in self.items:
                     p = Path(str(it))
-                    if p.is_absolute() or (p.parent and p.parent != Path('.')):
+                    if p.is_absolute() or (p.parent and p.parent != Path(".")):
                         self._base_dir = p.parent
                         break
 
@@ -227,7 +249,11 @@ class _CLIPEncoder:
 
             def __getitem__(self, idx):
                 p = Path(str(self.items[idx]))
-                if not p.is_absolute() and not p.exists() and self._base_dir is not None:
+                if (
+                    not p.is_absolute()
+                    and not p.exists()
+                    and self._base_dir is not None
+                ):
                     p = self._base_dir / p
                 try:
                     im = Image.open(p).convert("RGB")
@@ -256,7 +282,7 @@ class _CLIPEncoder:
             feats = self._encode_image(xb)
             all_feats.append(feats)
         x = np.concatenate(all_feats, axis=0)
-        x /= (np.linalg.norm(x, axis=1, keepdims=True) + _EPS)
+        x /= np.linalg.norm(x, axis=1, keepdims=True) + _EPS
         return x.astype(np.float32)
 
     # backends
@@ -287,12 +313,16 @@ class _CLIPEncoder:
 
 # --------- Label-free CBM core ---------
 
-def _cos_cubed_similarity(q: torch.Tensor, p: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+
+def _cos_cubed_similarity(
+    q: torch.Tensor, p: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     q, p: shape (M, N), rows = concepts, columns = dataset items
     Implements Eq. (1) with per-row z-score, element-wise cube, then cosine similarity.
     Returns (mean_loss, per_concept_sim).
     """
+
     # z-score per row
     def _z3(x: torch.Tensor) -> torch.Tensor:
         mu = x.mean(dim=1, keepdim=True)
@@ -303,7 +333,9 @@ def _cos_cubed_similarity(q: torch.Tensor, p: torch.Tensor) -> Tuple[torch.Tenso
     q3 = _z3(q)
     p3 = _z3(p)
     num = (q3 * p3).sum(dim=1)
-    den = torch.linalg.vector_norm(q3, dim=1) * torch.linalg.vector_norm(p3, dim=1) + 1e-8
+    den = (
+        torch.linalg.vector_norm(q3, dim=1) * torch.linalg.vector_norm(p3, dim=1) + 1e-8
+    )
     sim = num / den
     loss = -sim.mean()
     return loss, sim
@@ -375,13 +407,22 @@ class LabelFreeCBM:
             _cache(path, arr)
             return arr
 
-        self._img_train = _maybe(cache / "clip_img_train.npy", lambda: self.encoder.encode_images(train_X, self.cfg.batch_size))
-        self._img_valid = _maybe(cache / "clip_img_valid.npy", lambda: self.encoder.encode_images(valid_X, self.cfg.batch_size))
-        self._txt_concepts = _maybe(cache / "clip_txt_concepts.npy", lambda: self.encoder.encode_texts(concept_set.texts, self.cfg.batch_size))
+        self._img_train = _maybe(
+            cache / "clip_img_train.npy",
+            lambda: self.encoder.encode_images(train_X, self.cfg.batch_size),
+        )
+        self._img_valid = _maybe(
+            cache / "clip_img_valid.npy",
+            lambda: self.encoder.encode_images(valid_X, self.cfg.batch_size),
+        )
+        self._txt_concepts = _maybe(
+            cache / "clip_txt_concepts.npy",
+            lambda: self.encoder.encode_texts(concept_set.texts, self.cfg.batch_size),
+        )
 
         # 2) CLIP similarity matrix P (train/valid)
-        P_tr = (self._img_train @ self._txt_concepts.T)  # (Ntr, M)
-        P_va = (self._img_valid @ self._txt_concepts.T)  # (Nva, M)
+        P_tr = self._img_train @ self._txt_concepts.T  # (Ntr, M)
+        P_va = self._img_valid @ self._txt_concepts.T  # (Nva, M)
 
         # 3) Learn Wc to maximize cos^3 similarity against CLIP concepts
         device = torch.device(self.cfg.device)
@@ -412,7 +453,9 @@ class LabelFreeCBM:
                 val_loss, sim_va = _cos_cubed_similarity(Q_va, P_va_t)
                 val_mean = float(sim_va.mean().item())
 
-            self.train_stats.setdefault("train_sim", []).append(float(sim_tr.mean().item()))
+            self.train_stats.setdefault("train_sim", []).append(
+                float(sim_tr.mean().item())
+            )
             self.train_stats.setdefault("valid_sim", []).append(val_mean)
 
             if val_mean > best_val + 1e-6:
@@ -494,7 +537,9 @@ class LabelFreeCBM:
                 "kept_concepts": int(keep.sum()),
                 "total_concepts": int(len(keep)),
                 "target_nnz_per_class": [low, high],
-                "coef_nnz_per_class": (np.abs(self.classifier.coef_) > 1e-8).sum(axis=1).tolist(),
+                "coef_nnz_per_class": (np.abs(self.classifier.coef_) > 1e-8)
+                .sum(axis=1)
+                .tolist(),
             }
         )
         return self.train_stats

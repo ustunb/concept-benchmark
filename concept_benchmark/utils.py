@@ -1,4 +1,5 @@
 """Shared utilities used by all benchmark pipelines."""
+
 from __future__ import annotations
 
 import json
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 def set_deterministic_seed(seed: int):
     """Full reproducibility: numpy, torch, random, PYTHONHASHSEED."""
     import random
+
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
@@ -104,6 +106,7 @@ def patch_macos_dataloader() -> None:
 
 # ── Dataset skewing ──────────────────────────────────────────────────
 
+
 def _create_sample(size, indices, dataset):
     mask = np.zeros(size, dtype=bool)
     mask[indices] = True
@@ -152,7 +155,9 @@ def create_skewed_splits_full(
 
     logger.info(
         "Final splits - Train: %d, Val: %d, Test: %d",
-        len(train_indices), len(val_indices), len(test_indices),
+        len(train_indices),
+        len(val_indices),
+        len(test_indices),
     )
 
     dataset.drop_concepts(drop_concepts)
@@ -163,7 +168,9 @@ def create_skewed_splits_full(
     return dataset
 
 
-def _create_skewed_training_set(dataset, skew_specs, available_indices, target_size, rng):
+def _create_skewed_training_set(
+    dataset, skew_specs, available_indices, target_size, rng
+):
     """Create training set that satisfies skewing requirements."""
     available_set = set(available_indices)
     train_indices = []
@@ -175,7 +182,9 @@ def _create_skewed_training_set(dataset, skew_specs, available_indices, target_s
             concept_idx = dataset.concepts.index(concept_name)
             mask &= dataset.C[:, concept_idx] == target_value
 
-        spec_indices = [i for i in np.where(mask)[0] if i in available_set and i not in used]
+        spec_indices = [
+            i for i in np.where(mask)[0] if i in available_set and i not in used
+        ]
         needed = int(target_size * spec["min_fraction"])
 
         rng.shuffle(spec_indices)
@@ -185,7 +194,10 @@ def _create_skewed_training_set(dataset, skew_specs, available_indices, target_s
 
         logger.info(
             "Skew spec %s: needed %d, got %d (max available %d)",
-            spec["concepts"], needed, len(take), len(spec_indices),
+            spec["concepts"],
+            needed,
+            len(take),
+            len(spec_indices),
         )
 
     remaining_slots = target_size - len(train_indices)
@@ -198,6 +210,7 @@ def _create_skewed_training_set(dataset, skew_specs, available_indices, target_s
 
 
 # ── Alignment ────────────────────────────────────────────────────────
+
 
 def run_alignment(
     cbm,
@@ -249,8 +262,11 @@ def run_alignment(
         save_path.parent.mkdir(parents=True, exist_ok=True)
         # Convert numpy types for JSON serialization
         serializable = {
-            k: (v if not isinstance(v, dict) else
-                {kk: float(vv) for kk, vv in v.items()})
+            k: (
+                v
+                if not isinstance(v, dict)
+                else {kk: float(vv) for kk, vv in v.items()}
+            )
             for k, v in stats.items()
         }
         with open(save_path, "w") as f:

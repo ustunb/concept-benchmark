@@ -3,6 +3,7 @@
 These exercise real pipeline code paths with tiny datasets and 1-epoch
 training. NOT marked slow — expected wall time ~3s total.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -15,6 +16,7 @@ from concept_benchmark.models import (
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
 
 def _tabular_dataset(n=60, k=4, seed=42, concept_names=None):
     """Generate a tiny tabular dataset with CV splits.
@@ -64,6 +66,7 @@ def _train_cbm(ds, epochs=1):
 
 # ── Tests ────────────────────────────────────────────────────────────
 
+
 def test_robot_tabular_end_to_end():
     """Generate tabular robots, split, train CBM 1 epoch, predict."""
     ds = _tabular_dataset(n=40, k=4)
@@ -79,7 +82,10 @@ def test_robot_tabular_end_to_end():
 
 def test_robot_intervention_end_to_end():
     """Train CBM + KFlip k=1 intervention."""
-    from concept_benchmark.intervention import ConceptInterventionRunner, InterventionConfig
+    from concept_benchmark.intervention import (
+        ConceptInterventionRunner,
+        InterventionConfig,
+    )
     from concept_benchmark.kflip import KFlipInterventionStrategy
 
     ds = _tabular_dataset(n=40, k=4)
@@ -129,7 +135,9 @@ def test_robot_alignment_end_to_end():
 def test_sudoku_tabular_end_to_end():
     """Generate tabular sudoku-like data, train CS 1 epoch, predict."""
     ds = _tabular_dataset(
-        n=40, k=9, seed=171,
+        n=40,
+        k=9,
+        seed=171,
         concept_names=[f"rule_{i}" for i in range(9)],
     )
     cbm = _train_cbm(ds)
@@ -141,7 +149,9 @@ def test_sudoku_tabular_end_to_end():
 def test_sudoku_selective():
     """Train CBM + selective prediction (confidence-based abstention)."""
     ds = _tabular_dataset(
-        n=50, k=9, seed=171,
+        n=50,
+        k=9,
+        seed=171,
         concept_names=[f"rule_{i}" for i in range(9)],
     )
     cbm = _train_cbm(ds)

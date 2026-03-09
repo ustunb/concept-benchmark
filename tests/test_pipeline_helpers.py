@@ -1,4 +1,5 @@
 """Tests for pipeline helper classes (InterventionSettings, FEOnProbs)."""
+
 from __future__ import annotations
 
 import numpy as np

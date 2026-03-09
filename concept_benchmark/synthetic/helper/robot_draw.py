@@ -31,7 +31,7 @@ ALL_ROBOT_FEATURES = {
     "body_shape": ("square", "round"),  # no subtypes (could add)
     "head_shape": ("square", "round"),  # no subtypes (could add)
     #
-    'has_elbows': ('false', 'true'),  # all round
+    "has_elbows": ("false", "true"),  # all round
     "has_knees": ("false", "true"),
     "has_antennae": ["false", "true"],
     "ears_shape": ("square", "triangle"),
@@ -259,8 +259,8 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
     line.draw(canvas, x1=x_right, x2=x_right, y1=y_top * 0.9, y2=y_top + leg_height)
 
     # knees
-    if "has_knees" in features.keys():# and features["has_knees"] == "true":
-        #knee_size = round(0.05 * r)
+    if "has_knees" in features.keys():  # and features["has_knees"] == "true":
+        # knee_size = round(0.05 * r)
         knee_size = 0.1 * r if width < 120 or features["has_knees"] == "true" else 0
 
         knee = pero.Ellipse(
@@ -292,7 +292,10 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
     if foot_subtype == "flat_trapezoid":
         # Add rounded/curved top edges like rounded shape
         p_left = (
-            (x_left - 0.45 * foot_width, y_top + 0.1 * foot_height),  # Start below top with curve
+            (
+                x_left - 0.45 * foot_width,
+                y_top + 0.1 * foot_height,
+            ),  # Start below top with curve
             (x_left - 0.3 * foot_width, y_top),  # Curve up
             (x_left, y_top),  # Top center
             (x_left + 0.3 * foot_width, y_top),  # Curve up
@@ -447,7 +450,10 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
             (x_left + 0.2 * foot_width, y_top),
             (x_left + 0.4 * foot_width, y_top + 0.1 * foot_height),
             (x_left + 0.5 * foot_width, y_top + 0.3 * foot_height),
-            (x_left + 0.18 * foot_width, y_top + 0.88 * foot_height),  # Match trapezoid angle
+            (
+                x_left + 0.18 * foot_width,
+                y_top + 0.88 * foot_height,
+            ),  # Match trapezoid angle
             (x_left, y_top + foot_height),
             (x_left - 0.18 * foot_width, y_top + 0.88 * foot_height),
         )
@@ -500,7 +506,6 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
             (x_right - 0.35 * foot_width, y_top + 1.0 * foot_height),
             (x_right - 0.35 * foot_width, y_top),
         )
-
 
     elif foot_subtype == "pointy_3sided":
         p_left = (

@@ -3,6 +3,7 @@
 Supports Gemini, OpenAI, and Anthropic providers. Used by the LLM and CLIP
 intervention regimes to get machine judgments about concept presence in images.
 """
+
 from __future__ import annotations
 
 __all__ = ["make_llm_client", "judge_concept", "judge_concepts_batch"]
@@ -37,6 +38,7 @@ class _LLMRegistry:
         def deco(kls):
             cls._providers[name.lower()] = kls
             return kls
+
         return deco
 
     @classmethod
@@ -111,10 +113,12 @@ class _OpenAIClient(_LLMBase):
         client = OpenAI(api_key=self.api_key)
         content: list = [{"type": "text", "text": prompt}]
         for b64, mime in _encode_images_b64(image_paths):
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime};base64,{b64}"},
-            })
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{b64}"},
+                }
+            )
         resp = client.chat.completions.create(
             model=self.model_name,
             messages=[{"role": "user", "content": content}],
@@ -135,10 +139,12 @@ class _AnthropicClient(_LLMBase):
         client = anthropic.Anthropic(api_key=self.api_key)
         content: list = [{"type": "text", "text": prompt}]
         for b64, mime in _encode_images_b64(image_paths):
-            content.append({
-                "type": "image",
-                "source": {"type": "base64", "media_type": mime, "data": b64},
-            })
+            content.append(
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": mime, "data": b64},
+                }
+            )
         resp = client.messages.create(
             model=self.model_name,
             max_tokens=1024,
@@ -251,7 +257,9 @@ def judge_concepts_batch(
                 cache[cache_key] = val
             done += 1
             if done % 50 == 0:
-                logging.getLogger(__name__).info("LLM judgments: %d/%d", done, total_calls)
+                logging.getLogger(__name__).info(
+                    "LLM judgments: %d/%d", done, total_calls
+                )
 
     # Save cache
     if cache_path is not None:

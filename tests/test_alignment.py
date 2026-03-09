@@ -1,4 +1,5 @@
 """Tests for concept_benchmark.alignment module."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -24,6 +25,7 @@ def _fit_frontend(k=4, n=50, seed=42):
 
 
 # ── ConstrainedFrontEndModel ─────────────────────────────────────────
+
 
 class TestConstrainedFE:
     def test_unconstrained_uses_sklearn(self):
@@ -75,6 +77,7 @@ class TestConstrainedFE:
 
 # ── retrain_aligned ──────────────────────────────────────────────────
 
+
 class TestRetrainAligned:
     def test_returns_expected_keys(self):
         fe, C, y = _fit_frontend(k=3, n=60)
@@ -87,8 +90,13 @@ class TestRetrainAligned:
             original_frontend=fe,
             monotonicity_constraints={"c0": 1},
         )
-        for key in ("original_accuracy", "aligned_accuracy", "accuracy_change",
-                     "predictions_changed", "aligned_weights"):
+        for key in (
+            "original_accuracy",
+            "aligned_accuracy",
+            "accuracy_change",
+            "predictions_changed",
+            "aligned_weights",
+        ):
             assert key in result, f"Missing key: {key}"
 
     def test_accuracy_change_consistent(self):
@@ -108,6 +116,7 @@ class TestRetrainAligned:
 
 # ── align_frontend_weights ───────────────────────────────────────────
 
+
 class TestAlignWeights:
     def test_weights_set_correctly(self):
         fe, _, _ = _fit_frontend(k=3)
@@ -125,6 +134,7 @@ class TestAlignWeights:
 
 
 # ── test_alignment ───────────────────────────────────────────────────
+
 
 class TestTestAlignment:
     def _make_test_dataset(self, k=3, n=20, seed=0):
@@ -145,7 +155,12 @@ class TestTestAlignment:
         h_test = np.random.default_rng(1).random((20, 3)).astype(np.float32)
         params = {"c0": 1.0, "c1": -1.0, "c2": 0.5, "bias": 0.0}
         result = alignment_test_fn(h_test, params, fe, ds)
-        for key in ("original_accuracy", "aligned_accuracy", "accuracy_change", "predictions_changed"):
+        for key in (
+            "original_accuracy",
+            "aligned_accuracy",
+            "accuracy_change",
+            "predictions_changed",
+        ):
             assert key in result
 
     def test_original_not_modified(self):

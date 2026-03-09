@@ -2,6 +2,7 @@
 """
 Fast inference for the Sudoku OCR demo (argmax per cell, no solver).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -56,7 +57,9 @@ def predict_board_argmax(
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Run fast argmax OCR on a Sudoku demo dataset.")
+    ap = argparse.ArgumentParser(
+        description="Run fast argmax OCR on a Sudoku demo dataset."
+    )
     default_dataset = DATA_SUDOKU / "demo_ocr_m_21"
     ap.add_argument("--dataset-dir", default=str(default_dataset))
     ap.add_argument(
@@ -66,9 +69,15 @@ def main():
     )
     ap.add_argument("--model", default=str(default_dataset / "ocr_best_model.pt"))
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    ap.add_argument("--cell-px", type=int, default=50, help="Must match the render settings.")
-    ap.add_argument("--margin-px", type=int, default=2, help="Must match the render settings.")
-    ap.add_argument("--preds-out", default=str(default_dataset / "ocr_predictions_fast_demo.jsonl"))
+    ap.add_argument(
+        "--cell-px", type=int, default=50, help="Must match the render settings."
+    )
+    ap.add_argument(
+        "--margin-px", type=int, default=2, help="Must match the render settings."
+    )
+    ap.add_argument(
+        "--preds-out", default=str(default_dataset / "ocr_predictions_fast_demo.jsonl")
+    )
 
     args = ap.parse_args()
 
@@ -126,9 +135,15 @@ def main():
     print(f"Wrote predictions to {preds_path}")
     if totals["cells"]:
         cell_acc = totals["correct_cells"] / totals["cells"]
-        board_acc = totals["correct_boards"] / totals["boards"] if totals["boards"] else 0.0
-        print(f"Cell acc:  {cell_acc:.4f} ({totals['correct_cells']}/{totals['cells']})")
-        print(f"Board acc: {board_acc:.4f} ({totals['correct_boards']}/{totals['boards']})")
+        board_acc = (
+            totals["correct_boards"] / totals["boards"] if totals["boards"] else 0.0
+        )
+        print(
+            f"Cell acc:  {cell_acc:.4f} ({totals['correct_cells']}/{totals['cells']})"
+        )
+        print(
+            f"Board acc: {board_acc:.4f} ({totals['correct_boards']}/{totals['boards']})"
+        )
     print(f"Elapsed: {t1 - t0:.2f}s")
 
 

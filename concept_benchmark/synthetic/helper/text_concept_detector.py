@@ -10,7 +10,9 @@ from transformers import AutoTokenizer, AutoModel, get_linear_schedule_with_warm
 from concept_benchmark.data import ConceptDatasetSample
 from concept_benchmark.models import ConceptDetector
 import os
+
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 
 def _tok(s: str) -> List[str]:
     s = s.lower()
@@ -18,8 +20,10 @@ def _tok(s: str) -> List[str]:
     s = re.sub(r"\s+", " ", s).strip()
     return s.split()
 
+
 def _make_bigrams(toks: List[str]) -> List[str]:
     return [f"{a}_{b}" for a, b in zip(toks, toks[1:])]
+
 
 def _cross_auroc(scores: np.ndarray, truth: np.ndarray) -> np.ndarray:
     n = scores.shape[1]
@@ -28,12 +32,18 @@ def _cross_auroc(scores: np.ndarray, truth: np.ndarray) -> np.ndarray:
         s = scores[:, j]
         for k in range(n):
             y = truth[:, k]
-            if y.ndim == 1 and len(np.unique(y)) == 2 and y.sum() > 0 and (1 - y).sum() > 0:
+            if (
+                y.ndim == 1
+                and len(np.unique(y)) == 2
+                and y.sum() > 0
+                and (1 - y).sum() > 0
+            ):
                 try:
                     A[j, k] = roc_auc_score(y, s)
                 except Exception:
                     A[j, k] = np.nan
     return A
+
 
 def _ece(scores: np.ndarray, y: np.ndarray, n_bins: int = 10) -> float:
     bins = np.linspace(0.0, 1.0, n_bins + 1)
@@ -52,27 +62,35 @@ def _ece(scores: np.ndarray, y: np.ndarray, n_bins: int = 10) -> float:
             out += abs(acc - conf) * (mask.sum() / m)
     return float(out)
 
+
 class _TxtDs(Dataset):
-    def __init__(self, texts: List[str], labels: np.ndarray, masks: Optional[np.ndarray] = None):
+    def __init__(
+        self, texts: List[str], labels: np.ndarray, masks: Optional[np.ndarray] = None
+    ):
         self.texts = list(texts)
         self.labels = np.asarray(labels, dtype=np.float32)
         if masks is None:
             masks = np.ones_like(self.labels, dtype=np.float32)
         self.masks = np.asarray(masks, dtype=np.float32)
+
     def __len__(self):
         return len(self.texts)
+
     def __getitem__(self, i):
         return self.texts[i], self.labels[i], self.masks[i]
+
 
 class _AttnPool(nn.Module):
     def __init__(self, hidden_size):
         super().__init__()
         self.w = nn.Parameter(torch.randn(hidden_size))
+
     def forward(self, x, mask):
         s = torch.matmul(x, self.w)
         s = s.masked_fill(mask.eq(0), -1e9)
         a = torch.softmax(s, dim=1).unsqueeze(-1)
         return (a * x).sum(dim=1)
+
 
 def _collate_hf(batch, tokenizer, max_len):
     texts = [b[0] for b in batch]
@@ -86,6 +104,7 @@ def _collate_hf(batch, tokenizer, max_len):
         return_tensors="pt",
     )
     return enc, y, m
+
 
 class TextConceptDetector(ConceptDetector):
     def __init__(
@@ -106,7 +125,7 @@ class TextConceptDetector(ConceptDetector):
         threshold_mode: str = "auto",
         validate: bool = True,
         device: Optional[str] = None,
-        model_name: str = "distilbert/distilbert-base-uncased", # alternatives: "prajjwal1/bert-tiny", "prajjwal1/bert-mini", "prajjwal1/bert-small", "distilbert/distilbert-base-uncased"
+        model_name: str = "distilbert/distilbert-base-uncased",  # alternatives: "prajjwal1/bert-tiny", "prajjwal1/bert-mini", "prajjwal1/bert-small", "distilbert/distilbert-base-uncased"
         pooling: str = "cls",
         base_lr: float = 2e-5,
         num_warmup_steps: int = 0,
@@ -130,7 +149,10 @@ class TextConceptDetector(ConceptDetector):
         if device is None:
             if torch.cuda.is_available():
                 device = "cuda"
-            elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            elif (
+                getattr(torch.backends, "mps", None)
+                and torch.backends.mps.is_available()
+            ):
                 device = "mps"
             else:
                 device = "cpu"
@@ -249,13 +271,18 @@ class TextConceptDetector(ConceptDetector):
 
         model = self._build_model(self._n_concepts).to(self.device)
 
-        if isinstance(self.pos_weight_cfg, str) and self.pos_weight_cfg.lower() == "auto":
+        if (
+            isinstance(self.pos_weight_cfg, str)
+            and self.pos_weight_cfg.lower() == "auto"
+        ):
             pos = torch.tensor(Ytr, dtype=torch.float32).sum(dim=0)
             neg = Ytr.shape[0] - pos
             pw = (neg / pos.clamp_min(1.0)).clamp_max(100.0)
             pos_weight = pw.to(self.device)
         elif isinstance(self.pos_weight_cfg, np.ndarray):
-            pos_weight = torch.tensor(self.pos_weight_cfg, dtype=torch.float32, device=self.device)
+            pos_weight = torch.tensor(
+                self.pos_weight_cfg, dtype=torch.float32, device=self.device
+            )
         else:
             pos_weight = None
 
@@ -273,7 +300,9 @@ class TextConceptDetector(ConceptDetector):
         )
 
         total_steps = max(1, self.epochs * len(tr_dl))
-        scheduler = get_linear_schedule_with_warmup(optimizer, self.num_warmup_steps, total_steps)
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer, self.num_warmup_steps, total_steps
+        )
 
         def _epoch(dloader, train_flag: bool):
             model.train() if train_flag else model.eval()
@@ -281,7 +310,9 @@ class TextConceptDetector(ConceptDetector):
             denom_total = 0.0
             with torch.set_grad_enabled(train_flag):
                 for enc, y, m in dloader:
-                    enc = {k: v.to(self.device, non_blocking=False) for k, v in enc.items()}
+                    enc = {
+                        k: v.to(self.device, non_blocking=False) for k, v in enc.items()
+                    }
                     y = y.to(self.device, non_blocking=False)
                     m = m.to(self.device, non_blocking=False)
                     logits = self._forward(model, enc)
@@ -326,13 +357,17 @@ class TextConceptDetector(ConceptDetector):
                     row = A[r].copy()
                     row[r] = np.nan
                     row_second.append(np.nanmax(row))
-                sap_margin = float(np.nanmean(row_max - np.array(row_second, dtype=np.float32)))
+                sap_margin = float(
+                    np.nanmean(row_max - np.array(row_second, dtype=np.float32))
+                )
             else:
                 sap_margin = float("nan")
             if A.size:
                 argmax = np.nanargmax(A, axis=1)
                 diag_top_fraction = float(np.mean(argmax == np.arange(A.shape[0])))
-                diag_top90_fraction = float(np.mean(((argmax == np.arange(A.shape[0])) & (diag >= 0.90))))
+                diag_top90_fraction = float(
+                    np.mean(((argmax == np.arange(A.shape[0])) & (diag >= 0.90)))
+                )
             else:
                 diag_top_fraction = float("nan")
                 diag_top90_fraction = float("nan")
@@ -379,7 +414,12 @@ class TextConceptDetector(ConceptDetector):
                 self.thresholds_ = np.full((self._n_concepts,), 0.5, dtype=np.float32)
 
     @torch.no_grad()
-    def predict(self, dataset: ConceptDatasetSample, embed_params: Optional[dict] = None, **kwargs) -> np.ndarray:
+    def predict(
+        self,
+        dataset: ConceptDatasetSample,
+        embed_params: Optional[dict] = None,
+        **kwargs,
+    ) -> np.ndarray:
         if self.model is None:
             raise RuntimeError("Model has not been fitted yet. Call fit() first.")
         texts = self._to_text_list(dataset)
@@ -399,12 +439,20 @@ class TextConceptDetector(ConceptDetector):
             logits = self._forward(self.model, enc)
             prob = torch.sigmoid(logits).cpu().numpy()
             outs.append(prob)
-        prob_all = np.vstack(outs) if outs else np.zeros((0, self._n_concepts), dtype=np.float32)
+        prob_all = (
+            np.vstack(outs)
+            if outs
+            else np.zeros((0, self._n_concepts), dtype=np.float32)
+        )
         if self.output_mode == "hard":
-            thr = self.thresholds_ if self.thresholds_ is not None else np.full(self._n_concepts, 0.5, dtype=np.float32)
+            thr = (
+                self.thresholds_
+                if self.thresholds_ is not None
+                else np.full(self._n_concepts, 0.5, dtype=np.float32)
+            )
             hard = (prob_all >= thr.reshape(1, -1)).astype(np.float32)
             gm = getattr(self, "_group_map", {})
-            for _, idxs in (gm.items() if isinstance(gm, dict) else []):
+            for _, idxs in gm.items() if isinstance(gm, dict) else []:
                 sub = hard[:, idxs]
                 cnt = sub.sum(axis=1)
                 need = cnt != 1

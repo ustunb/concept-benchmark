@@ -10,6 +10,7 @@ Provides two alignment approaches:
 2. **Direct weight replacement** (``test_alignment``): Replace frontend weights
    with exact human-specified values.  Useful for ablation studies.
 """
+
 from __future__ import annotations
 
 __all__ = [
@@ -29,6 +30,7 @@ from concept_benchmark.models import FrontEndModel
 
 
 # ── Constrained retraining via CVXPY ─────────────────────────────────
+
 
 class _MockModel:
     """Minimal sklearn-like model wrapping raw weights for FrontEndModel compat."""
@@ -64,7 +66,9 @@ class ConstrainedFrontEndModel(FrontEndModel):
             from sklearn.linear_model import LogisticRegression
 
             self.model = LogisticRegression(
-                random_state=42, max_iter=1000, solver="lbfgs",
+                random_state=42,
+                max_iter=1000,
+                solver="lbfgs",
                 C=1.0,
             )
             self.model.fit(C, y)
@@ -88,11 +92,16 @@ class ConstrainedFrontEndModel(FrontEndModel):
 
         if problem.status in ("infeasible", "unbounded"):
             import logging
-            logging.getLogger(__name__).warning("CVXPY %s, falling back to unconstrained", problem.status)
+
+            logging.getLogger(__name__).warning(
+                "CVXPY %s, falling back to unconstrained", problem.status
+            )
             from sklearn.linear_model import LogisticRegression
 
             self.model = LogisticRegression(
-                random_state=42, max_iter=1000, solver="lbfgs",
+                random_state=42,
+                max_iter=1000,
+                solver="lbfgs",
                 C=1.0,
             )
             self.model.fit(C, y)
@@ -176,6 +185,7 @@ def retrain_aligned(
 
 
 # ── Direct weight replacement ────────────────────────────────────────
+
 
 def align_frontend_weights(frontend_model, concept_names, weight_dict):
     """Directly set frontend model weights for alignment.

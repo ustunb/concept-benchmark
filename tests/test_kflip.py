@@ -1,4 +1,5 @@
 """Tests for concept_benchmark.kflip module."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -80,8 +81,12 @@ class TestKFlip:
         k = 4
         model = _make_model(k=k)
         batch = _make_batch(n=10, k=k)
-        low = InterventionConfig(max_concepts_per_instance=2, score_threshold=0.01, random_state=0)
-        high = InterventionConfig(max_concepts_per_instance=2, score_threshold=0.99, random_state=0)
+        low = InterventionConfig(
+            max_concepts_per_instance=2, score_threshold=0.01, random_state=0
+        )
+        high = InterventionConfig(
+            max_concepts_per_instance=2, score_threshold=0.99, random_state=0
+        )
         strat_low = KFlipInterventionStrategy()
         strat_high = KFlipInterventionStrategy()
         m_low = strat_low.propose(model, batch, low).mask.sum()

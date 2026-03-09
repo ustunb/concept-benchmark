@@ -4,6 +4,7 @@ Each benchmark domain (robot, sudoku) gets a config class that produces
 the same settings dicts used by the original scripts.  Factory methods
 produce the exact defaults matching the paper results.
 """
+
 from __future__ import annotations
 
 __all__ = [
@@ -102,11 +103,14 @@ INPUT_MAP = {
 MISSING_PROP = 0.2
 
 VALID_STRATEGIES = frozenset({"kflip", "exact_k"})
-ROBOT_VALID_REGIMES = frozenset({"baseline", "expert", "subjective", "machine", "llm", "clip"})
+ROBOT_VALID_REGIMES = frozenset(
+    {"baseline", "expert", "subjective", "machine", "llm", "clip"}
+)
 ROBOT_TEXT_VALID_REGIMES = frozenset({"baseline", "expert", "subjective", "machine"})
 
 
 # ── Robot Benchmark Config ────────────────────────────────────────────
+
 
 @dataclass
 class RobotBenchmarkConfig:
@@ -118,26 +122,38 @@ class RobotBenchmarkConfig:
     samples_per_instance: int = 4
     draw: bool = True
     seed: int = 1014
-    concepts: Dict[str, list] = field(default_factory=lambda: copy.deepcopy(ROBOT_CONCEPTS))
+    concepts: Dict[str, list] = field(
+        default_factory=lambda: copy.deepcopy(ROBOT_CONCEPTS)
+    )
     model_type: str = "stochastic"
     # Label model: score = Σ w_i · 1[f_i = v_i] + model_intercept
     #   deterministic: Glorp if score >= 0
     #   stochastic:    P(Glorp) = σ(model_scalar × score), then Bernoulli sample
-    model_features: Dict[str, str] = field(default_factory=lambda: {
-        "mouth_type": "closed",
-        "foot_shape": "pointy",
-        "has_knees": "true",
-    })
-    model_weights: Dict[str, float] = field(default_factory=lambda: {
-        "mouth_type": 5.0, "foot_shape": 8.0, "has_knees": -5.0,
-    })
+    model_features: Dict[str, str] = field(
+        default_factory=lambda: {
+            "mouth_type": "closed",
+            "foot_shape": "pointy",
+            "has_knees": "true",
+        }
+    )
+    model_weights: Dict[str, float] = field(
+        default_factory=lambda: {
+            "mouth_type": 5.0,
+            "foot_shape": 8.0,
+            "has_knees": -5.0,
+        }
+    )
     model_intercept: float = 2.0
     model_scalar: float = 4.2  # sigmoid temperature (stochastic only)
     test_size: int = 10000
     train_skew_size: int = 3800
-    skew_specs: List[Dict] = field(default_factory=lambda: copy.deepcopy(ROBOT_SKEW_SPECS))
+    skew_specs: List[Dict] = field(
+        default_factory=lambda: copy.deepcopy(ROBOT_SKEW_SPECS)
+    )
     drop_concepts: List[str] = field(default_factory=lambda: list(IDEAL_DROP))
-    additional_features: List[str] = field(default_factory=lambda: ["foot_shape_subtype"])
+    additional_features: List[str] = field(
+        default_factory=lambda: ["foot_shape_subtype"]
+    )
     color_mode: str = "color"
     knows_concepts: bool = False
 
@@ -189,7 +205,9 @@ class RobotBenchmarkConfig:
                 f"size must be one of {sorted(INPUT_MAP)}, got {self.size!r}"
             )
         if any(b < -1 for b in self.intervention_budgets):
-            raise ValueError(f"intervention_budgets must be non-negative (or -1 for max), got {self.intervention_budgets}")
+            raise ValueError(
+                f"intervention_budgets must be non-negative (or -1 for max), got {self.intervention_budgets}"
+            )
         if self.intervention_strategy not in VALID_STRATEGIES:
             raise ValueError(
                 f"intervention_strategy must be one of {sorted(VALID_STRATEGIES)}, "
@@ -251,9 +269,9 @@ class RobotBenchmarkConfig:
     def setup_fingerprint(self) -> str:
         """Hash of all parameters that affect data generation."""
         d = self.to_dict()
-        d.pop("draw", None)            # meta-flag, not a data param
-        d.pop("output_directory", None) # derived from size
-        d.pop("train_dnn", None)        # not a data param
+        d.pop("draw", None)  # meta-flag, not a data param
+        d.pop("output_directory", None)  # derived from size
+        d.pop("train_dnn", None)  # not a data param
         blob = json.dumps(d, sort_keys=True, default=str).encode()
         return hashlib.sha256(blob).hexdigest()
 
@@ -261,14 +279,26 @@ class RobotBenchmarkConfig:
         """Hash of all parameters that affect model training."""
         d = asdict(self)
         # Remove params that don't affect training
-        for k in ("llm_api_key", "llm_api_key_env", "force_retrain",
-                   "draw", "alignment_constraints",
-                   "intervention_budgets", "intervention_thresholds",
-                   "intervention_accuracy", "intervention_strategy",
-                   "intervention_regimes", "expert_intervention_accuracy",
-                   "subjective_noise_rate", "subjective_intervention_accuracy",
-                   "lfcbm_concepts_file", "llm_concepts_file", "clip_concepts_file",
-                   "llm_provider", "llm_model"):
+        for k in (
+            "llm_api_key",
+            "llm_api_key_env",
+            "force_retrain",
+            "draw",
+            "alignment_constraints",
+            "intervention_budgets",
+            "intervention_thresholds",
+            "intervention_accuracy",
+            "intervention_strategy",
+            "intervention_regimes",
+            "expert_intervention_accuracy",
+            "subjective_noise_rate",
+            "subjective_intervention_accuracy",
+            "lfcbm_concepts_file",
+            "llm_concepts_file",
+            "clip_concepts_file",
+            "llm_provider",
+            "llm_model",
+        ):
             d.pop(k, None)
         blob = json.dumps(d, sort_keys=True, default=str).encode()
         return hashlib.sha256(blob).hexdigest()
@@ -284,13 +314,17 @@ class RobotBenchmarkConfig:
 
     def get_model_path(self, model_class: str) -> Path:
         """Return the path where a trained model is saved."""
-        filename = f"robot_{self.data_type}_{self.model_type}_{self.samples_per_instance}"
+        filename = (
+            f"robot_{self.data_type}_{self.model_type}_{self.samples_per_instance}"
+        )
         if self.subconcept:
             filename += "_subconcept"
         else:
             filename += "_ideal"
         if self.concept_missing_mech != "none":
-            filename += f"_{self.concept_missing_mech}_{int(self.concept_missing * 100)}"
+            filename += (
+                f"_{self.concept_missing_mech}_{int(self.concept_missing * 100)}"
+            )
         filename += f"_{model_class}.model"
         return results_dir / filename
 
@@ -303,7 +337,9 @@ class RobotBenchmarkConfig:
             else:
                 filename += "_ideal"
         if self.concept_missing_mech != "none":
-            filename += f"_{self.concept_missing_mech}_{int(self.concept_missing * 100)}"
+            filename += (
+                f"_{self.concept_missing_mech}_{int(self.concept_missing * 100)}"
+            )
         filename += f"_{model_class}_results.csv"
         return results_dir / filename
 
@@ -325,7 +361,9 @@ class RobotBenchmarkConfig:
         else:
             filename += "_ideal"
         if self.concept_missing_mech != "none":
-            filename += f"_{self.concept_missing_mech}_{int(self.concept_missing * 100)}"
+            filename += (
+                f"_{self.concept_missing_mech}_{int(self.concept_missing * 100)}"
+            )
         filename += "_alignment.json"
         return results_dir / filename
 
@@ -344,14 +382,18 @@ class RobotBenchmarkConfig:
             variant = "subconcept"
         else:
             variant = "custom"
-        return results_dir / f"robot_{variant}_seed{self.seed}_{self._config_hash()}_results.csv"
+        return (
+            results_dir
+            / f"robot_{variant}_seed{self.seed}_{self._config_hash()}_results.csv"
+        )
 
     def to_yaml(self, path: str | Path) -> Path:
         """Serialize config to YAML and return the resolved path."""
         path = Path(path).resolve()
         path.parent.mkdir(parents=True, exist_ok=True)
         d = {
-            k: v for k, v in self.__dict__.items()
+            k: v
+            for k, v in self.__dict__.items()
             if not k.startswith("_") and k != "llm_api_key"
         }
         with open(path, "w") as f:
@@ -368,6 +410,7 @@ class RobotBenchmarkConfig:
 
 
 # ── Sudoku Benchmark Config ──────────────────────────────────────────
+
 
 @dataclass
 class SudokuBenchmarkConfig:
@@ -431,7 +474,11 @@ class SudokuBenchmarkConfig:
             "max_corrupt": self.max_corrupt,
             "seed": self.seed,
             "temp_train_data_path": (
-                data_dir / "sudoku" / "multimodal_m_21" / "tabular" / "sudoku_dataset.pkl"
+                data_dir
+                / "sudoku"
+                / "multimodal_m_21"
+                / "tabular"
+                / "sudoku_dataset.pkl"
             ),
             "epochs": self.epochs,
             "patience": self.patience,
@@ -449,8 +496,12 @@ class SudokuBenchmarkConfig:
         """Hash of all parameters that affect model training."""
         d = asdict(self)
         # Remove params that don't affect training
-        for k in ("intervention_thresholds", "target_accuracy",
-                   "decision_threshold", "alignment_weights"):
+        for k in (
+            "intervention_thresholds",
+            "target_accuracy",
+            "decision_threshold",
+            "alignment_weights",
+        ):
             d.pop(k, None)
         blob = json.dumps(d, sort_keys=True, default=str).encode()
         return hashlib.sha256(blob).hexdigest()
@@ -469,7 +520,9 @@ class SudokuBenchmarkConfig:
             filename += f"_cm{self.concept_missing_mech}{self.concept_missing}"
         return results_dir / f"{filename}.model"
 
-    def get_results_path(self, model_class: str = "cbm", data_type: Optional[str] = None) -> Path:
+    def get_results_path(
+        self, model_class: str = "cbm", data_type: Optional[str] = None
+    ) -> Path:
         """Return the path where results are saved."""
         dt = data_type or self.data_type
         filename = f"sudoku_{model_class}_{dt}_n{self.n}_mc{self.max_corrupt}"
@@ -514,10 +567,7 @@ class SudokuBenchmarkConfig:
         """Serialize config to YAML and return the resolved path."""
         path = Path(path).resolve()
         path.parent.mkdir(parents=True, exist_ok=True)
-        d = {
-            k: v for k, v in self.__dict__.items()
-            if not k.startswith("_")
-        }
+        d = {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
         with open(path, "w") as f:
             yaml.dump(d, f, default_flow_style=False, sort_keys=False)
         logger.info("Config saved to: %s", path)
@@ -534,8 +584,8 @@ class SudokuBenchmarkConfig:
 # ── Robot Text Benchmark Config ──────────────────────────────────────
 
 TEXT_LABEL_EXPR = (
-    "'glorp' if (min(int(row[\"mouth_type\"]==\"open\"), "
-    "int(str(row[\"foot_shape\"]).startswith(\"pointy_\"))) >= 1) "
+    '\'glorp\' if (min(int(row["mouth_type"]=="open"), '
+    'int(str(row["foot_shape"]).startswith("pointy_"))) >= 1) '
     "else 'drent'"
 )
 
@@ -617,11 +667,20 @@ class RobotTextBenchmarkConfig:
         """Hash of all parameters that affect data generation."""
         d = asdict(self)
         # Remove non-data params
-        for k in ("llm_api_key", "llm_api_key_env", "force_retrain",
-                   "lfcbm_enable", "lfcbm_encoder", "lfcbm_concepts_csv",
-                   "alignment_constraints", "intervention_budgets",
-                   "intervention_thresholds", "intervention_strategy",
-                   "intervention_regimes", "intervention_accuracy"):
+        for k in (
+            "llm_api_key",
+            "llm_api_key_env",
+            "force_retrain",
+            "lfcbm_enable",
+            "lfcbm_encoder",
+            "lfcbm_concepts_csv",
+            "alignment_constraints",
+            "intervention_budgets",
+            "intervention_thresholds",
+            "intervention_strategy",
+            "intervention_regimes",
+            "intervention_accuracy",
+        ):
             d.pop(k, None)
         blob = json.dumps(d, sort_keys=True, default=str).encode()
         return hashlib.sha256(blob).hexdigest()
@@ -629,11 +688,17 @@ class RobotTextBenchmarkConfig:
     def model_fingerprint(self) -> str:
         """Hash of all parameters that affect model training."""
         d = asdict(self)
-        for k in ("llm_api_key", "llm_api_key_env", "force_retrain",
-                   "alignment_constraints",
-                   "intervention_budgets", "intervention_thresholds",
-                   "intervention_accuracy", "intervention_strategy",
-                   "intervention_regimes"):
+        for k in (
+            "llm_api_key",
+            "llm_api_key_env",
+            "force_retrain",
+            "alignment_constraints",
+            "intervention_budgets",
+            "intervention_thresholds",
+            "intervention_accuracy",
+            "intervention_strategy",
+            "intervention_regimes",
+        ):
             d.pop(k, None)
         blob = json.dumps(d, sort_keys=True, default=str).encode()
         return hashlib.sha256(blob).hexdigest()
@@ -669,7 +734,8 @@ class RobotTextBenchmarkConfig:
         path = Path(path).resolve()
         path.parent.mkdir(parents=True, exist_ok=True)
         d = {
-            k: v for k, v in self.__dict__.items()
+            k: v
+            for k, v in self.__dict__.items()
             if not k.startswith("_") and k != "llm_api_key"
         }
         with open(path, "w") as f:

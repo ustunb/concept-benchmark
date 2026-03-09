@@ -109,7 +109,9 @@ class MeanEmbedder(torch.nn.Module):
 
 def test_embed_returns_tabular_and_preserves_indices(tab_small):
     s = tab_small.training
-    emb = s.embed(MeanEmbedder(), batch_size=8, shuffle=False, device="cpu", num_workers=0)
+    emb = s.embed(
+        MeanEmbedder(), batch_size=8, shuffle=False, device="cpu", num_workers=0
+    )
     assert isinstance(emb, ConceptDatasetSample)
     assert emb.meta.get("data_type") == "tabular"
     assert isinstance(emb.X, np.ndarray) and emb.X.ndim == 2 and emb.X.shape[1] == 2

@@ -46,10 +46,16 @@ class RobotClassifierCNN(nn.Module):
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
         self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)  # Halves the dimensions
         # Block 2
-        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1)
-        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)  # Halves the dimensions again
+        self.conv2 = nn.Conv2d(
+            in_channels=16, out_channels=32, kernel_size=3, padding=1
+        )
+        self.pool2 = nn.MaxPool2d(
+            kernel_size=2, stride=2
+        )  # Halves the dimensions again
         # Block 3
-        self.conv3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(
+            in_channels=32, out_channels=64, kernel_size=3, padding=1
+        )
         self.pool3 = nn.MaxPool2d(kernel_size=2, stride=2)
         self.backbone = nn.Sequential(
             self.conv1,
@@ -96,19 +102,25 @@ class RobotConceptClassifier(nn.Module):
         if input_size >= 128:
             # Large images: use pooling to reduce spatial dimensions
             self.backbone = nn.Sequential(
-                nn.Conv2d(3, 16, kernel_size=3, padding=1), nn.ReLU(),
+                nn.Conv2d(3, 16, kernel_size=3, padding=1),
+                nn.ReLU(),
                 nn.MaxPool2d(2, 2),
-                nn.Conv2d(16, 32, kernel_size=3, padding=1), nn.ReLU(),
+                nn.Conv2d(16, 32, kernel_size=3, padding=1),
+                nn.ReLU(),
                 nn.MaxPool2d(2, 2),
-                nn.Conv2d(32, 64, kernel_size=3, padding=1), nn.ReLU(),
-                nn.MaxPool2d(2, 2)
+                nn.Conv2d(32, 64, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.MaxPool2d(2, 2),
             )
         else:
             # Small images: No pooling, keep all spatial information
             self.backbone = nn.Sequential(
-                nn.Conv2d(3, 16, kernel_size=3, padding=1), nn.ReLU(),
-                nn.Conv2d(16, 32, kernel_size=3, padding=1), nn.ReLU(),
-                nn.Conv2d(32, 64, kernel_size=3, padding=1), nn.ReLU(),
+                nn.Conv2d(3, 16, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(16, 32, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(32, 64, kernel_size=3, padding=1),
+                nn.ReLU(),
             )
 
         # Automatically compute feature size with dummy forward pass
@@ -118,10 +130,9 @@ class RobotConceptClassifier(nn.Module):
             feature_size = dummy_out.view(1, -1).size(1)
 
         # Concept heads
-        self.heads = nn.ModuleList([
-            nn.Linear(feature_size, 1)
-            for _ in range(num_concepts)
-        ])
+        self.heads = nn.ModuleList(
+            [nn.Linear(feature_size, 1) for _ in range(num_concepts)]
+        )
 
     def forward(self, x):
         features = self.backbone(x)
@@ -134,21 +145,23 @@ class RobotViTConceptClassifier(nn.Module):
     def __init__(self, num_concepts: int):
         super(RobotViTConceptClassifier, self).__init__()
         from transformers import ViTModel
+
         self.vit = ViTModel.from_pretrained("google/vit-base-patch16-224")
 
         feature_size = 768  # ViT base model feature size
 
         # 2) One head per concept (order matches input labels), wrapped in nn.Sequential
-        self.heads = nn.ModuleList([
-            nn.Linear(feature_size, 1)
-            for _ in range(num_concepts)
-        ])
+        self.heads = nn.ModuleList(
+            [nn.Linear(feature_size, 1) for _ in range(num_concepts)]
+        )
 
     def forward(self, x):
         vit_outputs = self.vit(pixel_values=x)
         features = vit_outputs.last_hidden_state[:, 0, :]  # (N, 768)
         # Concatenate per-concept logits into shape (N, num_concepts)
-        logits = torch.cat([head(features) for head in self.heads], dim=1)  # (N, num_concepts)
+        logits = torch.cat(
+            [head(features) for head in self.heads], dim=1
+        )  # (N, num_concepts)
         return logits
 
 
@@ -156,11 +169,11 @@ class JointConceptModel(nn.Module):
     """Simple wrapper that links an optional backbone with a concept head."""
 
     def __init__(
-            self,
-            backbone: Optional[nn.Module],
-            head: nn.Module,
-            *,
-            flatten: bool = True,
+        self,
+        backbone: Optional[nn.Module],
+        head: nn.Module,
+        *,
+        flatten: bool = True,
     ) -> None:
         """Create a joint concept model.
 
@@ -202,7 +215,9 @@ class JointConceptModel(nn.Module):
             elif "last_hidden_state" in features:
                 features = features["last_hidden_state"][:, 0]
             else:
-                raise TypeError("Unable to extract tensor from backbone output dictionary.")
+                raise TypeError(
+                    "Unable to extract tensor from backbone output dictionary."
+                )
         if not isinstance(features, torch.Tensor):
             features = torch.as_tensor(features)
         if self.flatten and features.ndim > 2:
@@ -288,13 +303,13 @@ class ConceptDetector:
     """Concept detector with optional calibration and pluggable trainer."""
 
     def __init__(
-            self,
-            embedding_model: Optional[nn.Module] = None,
-            concept_layers: Optional[Any] = None,
-            *,
-            model: Optional[nn.Module] = None,
-            trainer: Optional[ConceptTrainer] = None,
-            model_builder: Optional[Callable[[int, int, int], nn.Module]] = None,
+        self,
+        embedding_model: Optional[nn.Module] = None,
+        concept_layers: Optional[Any] = None,
+        *,
+        model: Optional[nn.Module] = None,
+        trainer: Optional[ConceptTrainer] = None,
+        model_builder: Optional[Callable[[int, int, int], nn.Module]] = None,
     ) -> None:
         """Initialise a concept detector.
 
@@ -401,11 +416,11 @@ class ConceptDetector:
             self.training_result = None
 
     def save(
-            self,
-            path: Union[str, "os.PathLike"],
-            *,
-            overwrite: bool = False,
-            msg: bool = True,
+        self,
+        path: Union[str, "os.PathLike"],
+        *,
+        overwrite: bool = False,
+        msg: bool = True,
     ) -> "os.PathLike":
         """Persist the detector using concept_benchmark.ext.fileutils.save."""
         payload = {"version": 1, "state": self.state_dict()}
@@ -413,10 +428,10 @@ class ConceptDetector:
 
     @classmethod
     def load(
-            cls,
-            path: Union[str, "os.PathLike"],
-            *,
-            map_location: Optional[Union[str, torch.device]] = "cpu",
+        cls,
+        path: Union[str, "os.PathLike"],
+        *,
+        map_location: Optional[Union[str, torch.device]] = "cpu",
     ) -> "ConceptDetector":
         """Restore a detector previously saved with ``save``."""
         payload = load_object(path)
@@ -435,7 +450,9 @@ class ConceptDetector:
             detector.to(map_location)
         return detector
 
-    def _default_head(self, feature_dim: int, hidden_dim: int, num_concepts: int) -> nn.Module:
+    def _default_head(
+        self, feature_dim: int, hidden_dim: int, num_concepts: int
+    ) -> nn.Module:
         """Build a simple MLP concept head when the caller does not provide one.
 
         Args:
@@ -446,15 +463,19 @@ class ConceptDetector:
         Returns:
             nn.Module: Two-layer MLP that produces ``num_concepts`` logits.
         """
-        layers = [nn.Linear(feature_dim, hidden_dim), nn.ReLU(inplace=True), nn.Linear(hidden_dim, num_concepts)]
+        layers = [
+            nn.Linear(feature_dim, hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, num_concepts),
+        ]
         return nn.Sequential(*layers)
 
     def _build_default_model(
-            self,
-            train_dataset: ConceptDatasetSample,
-            *,
-            device: torch.device,
-            hidden_dim: int,
+        self,
+        train_dataset: ConceptDatasetSample,
+        *,
+        device: torch.device,
+        hidden_dim: int,
     ) -> nn.Module:
         """Infer feature dimensions and assemble a ``JointConceptModel``.
 
@@ -473,8 +494,12 @@ class ConceptDetector:
             TypeError: If the backbone output type is unsupported for shape
                 inference.
         """
-        sample_loader = train_dataset.loader(batch_size=min(8, max(1, getattr(train_dataset, "n", 8))), shuffle=False,
-                                             num_workers=0, pin_memory=False)
+        sample_loader = train_dataset.loader(
+            batch_size=min(8, max(1, getattr(train_dataset, "n", 8))),
+            shuffle=False,
+            num_workers=0,
+            pin_memory=False,
+        )
         try:
             sample_X, _, _ = next(iter(sample_loader))
         except StopIteration:
@@ -536,19 +561,19 @@ class ConceptDetector:
             param.requires_grad = not freeze_backbone
 
     def fit(
-            self,
-            train_dataset: ConceptDatasetSample,
-            valid_dataset: ConceptDatasetSample,
-            freeze: bool = False,
-            embed_params: Optional[dict] = None,
-            fit_params: Optional[dict] = None,
-            l1_size: Optional[int] = 100,
-            calibrate: bool = False,
-            log_training: bool = False,
-            log_interval: Optional[int] = None,
-            *,
-            model: Optional[nn.Module] = None,
-            trainer: Optional[ConceptTrainer] = None,
+        self,
+        train_dataset: ConceptDatasetSample,
+        valid_dataset: ConceptDatasetSample,
+        freeze: bool = False,
+        embed_params: Optional[dict] = None,
+        fit_params: Optional[dict] = None,
+        l1_size: Optional[int] = 100,
+        calibrate: bool = False,
+        log_training: bool = False,
+        log_interval: Optional[int] = None,
+        *,
+        model: Optional[nn.Module] = None,
+        trainer: Optional[ConceptTrainer] = None,
     ) -> None:
         """Train the detector and optionally calibrate the resulting logits.
 
@@ -589,7 +614,9 @@ class ConceptDetector:
             fit_params.setdefault("log_interval", int(log_interval))
 
         training_device = torch.device(fit_params.get("device", "cpu"))
-        eval_batch = int(fit_params.get("eval_batch_size", fit_params.get("batch_size", 128)))
+        eval_batch = int(
+            fit_params.get("eval_batch_size", fit_params.get("batch_size", 128))
+        )
         # Snapshot evaluation configuration so inference and calibration share settings.
         self._eval_config = {
             "batch_size": eval_batch,
@@ -603,13 +630,17 @@ class ConceptDetector:
         if self.model is None:
             hidden = int(l1_size or fit_params.get("hidden_dim", 100))
             builder = self.model_builder or self._build_default_model
-            self.model = builder(train_dataset, device=training_device, hidden_dim=hidden)
+            self.model = builder(
+                train_dataset, device=training_device, hidden_dim=hidden
+            )
 
         self._n_concepts = train_dataset.n_concepts
 
         lr_encoder = fit_params.pop("lr_encoder", None)
         lr_heads = fit_params.pop("lr_heads", None)
-        if (lr_encoder is not None or lr_heads is not None) and "optimizer_factory" not in fit_params:
+        if (
+            lr_encoder is not None or lr_heads is not None
+        ) and "optimizer_factory" not in fit_params:
 
             def _make_optimizer(param_iterable):
                 """Build an Adam optimizer honouring distinct backbone/head learning rates."""
@@ -621,18 +652,26 @@ class ConceptDetector:
                     groups = []
                     if self.model.backbone is not None:
                         enc_params = [
-                            p for p in self.model.backbone.parameters() if p.requires_grad
+                            p
+                            for p in self.model.backbone.parameters()
+                            if p.requires_grad
                         ]
                         if enc_params:
-                            groups.append({"params": enc_params, "lr": lr_encoder or base_lr})
+                            groups.append(
+                                {"params": enc_params, "lr": lr_encoder or base_lr}
+                            )
                     head_params = [
                         p for p in self.model.head.parameters() if p.requires_grad
                     ]
                     if head_params:
-                        groups.append({"params": head_params, "lr": lr_heads or base_lr})
+                        groups.append(
+                            {"params": head_params, "lr": lr_heads or base_lr}
+                        )
                     if not groups:
                         groups = [{"params": params_list}]
-                    return torch.optim.Adam(groups, lr=base_lr, weight_decay=weight_decay)
+                    return torch.optim.Adam(
+                        groups, lr=base_lr, weight_decay=weight_decay
+                    )
 
                 trainable = [p for p in params_list if p.requires_grad] or params_list
                 return torch.optim.Adam(
@@ -668,7 +707,7 @@ class ConceptDetector:
             self.calibration_params = None
 
     def _parse_trainer_output(
-            self, output: Union[nn.Module, Tuple[nn.Module, Dict[str, Any]], TrainerResult]
+        self, output: Union[nn.Module, Tuple[nn.Module, Dict[str, Any]], TrainerResult]
     ) -> Tuple[nn.Module, Optional[TrainerResult]]:
         """Normalise trainer outputs into a `(model, TrainerResult|None)` tuple."""
         if isinstance(output, TrainerResult):
@@ -677,16 +716,21 @@ class ConceptDetector:
             model, meta = output
             if isinstance(meta, TrainerResult):
                 return model, meta
-            result = TrainerResult(model=model, history=getattr(meta, "history", meta),
-                                   best_metric=getattr(meta, "best_metric", None))
+            result = TrainerResult(
+                model=model,
+                history=getattr(meta, "history", meta),
+                best_metric=getattr(meta, "best_metric", None),
+            )
             return model, result
         if isinstance(output, nn.Module):
             return output, None
-        raise TypeError("Trainer must return an nn.Module, (nn.Module, info), or TrainerResult instance.")
+        raise TypeError(
+            "Trainer must return an nn.Module, (nn.Module, info), or TrainerResult instance."
+        )
 
     def calibrate(
-            self,
-            valid_dataset: ConceptDatasetSample,
+        self,
+        valid_dataset: ConceptDatasetSample,
     ) -> None:
         """Fit Platt-scaling parameters on validation logits."""
         if self.model is None or self._n_concepts is None:
@@ -696,8 +740,8 @@ class ConceptDetector:
         concepts = valid_dataset.C.copy()
 
         if (
-                bool(getattr(valid_dataset, "concept_missing", False))
-                and getattr(valid_dataset, "concept_missing_mask", None) is not None
+            bool(getattr(valid_dataset, "concept_missing", False))
+            and getattr(valid_dataset, "concept_missing_mask", None) is not None
         ):
             fill_value = getattr(valid_dataset, "concept_missing_fill_value", np.nan)
             if isinstance(fill_value, float) and np.isnan(fill_value):
@@ -713,7 +757,7 @@ class ConceptDetector:
             if not np.any(observed):
                 params.append({"w": 1.0, "b": 0.0})
                 continue
-            z = logits[observed, i:i + 1]
+            z = logits[observed, i : i + 1]
             y = concepts[observed, i].astype(int)
             if np.unique(y).size < 2:
                 params.append({"w": 1.0, "b": 0.0})
@@ -764,14 +808,16 @@ class ConceptDetector:
         return int(self._n_concepts)
 
     def predict(
-            self,
-            dataset: ConceptDatasetSample,
-            embed_params: Optional[dict] = None,
-            calibrate: Optional[bool] = None,
+        self,
+        dataset: ConceptDatasetSample,
+        embed_params: Optional[dict] = None,
+        calibrate: Optional[bool] = None,
     ) -> np.ndarray:
         """Return per-concept probabilities, optionally applying calibration."""
         if self.model is None:
-            raise RuntimeError("Model has not been fitted yet. Please call fit() first.")
+            raise RuntimeError(
+                "Model has not been fitted yet. Please call fit() first."
+            )
 
         logits = self._predict_logits(dataset)
 
@@ -785,12 +831,20 @@ class ConceptDetector:
                 )
 
         if apply_cal and self.calibration_params is not None:
-            w = np.array([
-                (p.get("w", 1.0) if p is not None else 1.0) for p in self.calibration_params
-            ], dtype=np.float32)
-            b = np.array([
-                (p.get("b", 0.0) if p is not None else 0.0) for p in self.calibration_params
-            ], dtype=np.float32)
+            w = np.array(
+                [
+                    (p.get("w", 1.0) if p is not None else 1.0)
+                    for p in self.calibration_params
+                ],
+                dtype=np.float32,
+            )
+            b = np.array(
+                [
+                    (p.get("b", 0.0) if p is not None else 0.0)
+                    for p in self.calibration_params
+                ],
+                dtype=np.float32,
+            )
             z_scaled = logits * w.reshape(1, -1) + b.reshape(1, -1)
             return 1.0 / (1.0 + np.exp(-z_scaled))
 
@@ -805,7 +859,7 @@ class FrontEndModel:
         self.model = None
 
     def fit(
-            self, C: np.ndarray, y: np.ndarray, fit_params: Optional[dict] = None
+        self, C: np.ndarray, y: np.ndarray, fit_params: Optional[dict] = None
     ) -> None:
         """
         Fit the front-end model to the dataset.
@@ -854,19 +908,19 @@ class ConceptBasedModel:
     """
 
     def __init__(
-            self,
-            concept_detector: Optional[ConceptDetector] = None,
-            front_end_model: Optional[FrontEndModel] = None,
-            propagate: bool = False,
-            # Monte Carlo propagation configuration
-            mc_mode: str = "auto",  # 'auto' | 'mc' | 'exact'
-            mc_samples: int = 1024,
-            mc_max_samples: int = 16384,
-            mc_chunk_size: int = 2048,
-            mc_tol: float = 1e-3,
-            random_state: Optional[int] = None,
-            mc_exact_threshold: int = 4096,
-            **kwargs,
+        self,
+        concept_detector: Optional[ConceptDetector] = None,
+        front_end_model: Optional[FrontEndModel] = None,
+        propagate: bool = False,
+        # Monte Carlo propagation configuration
+        mc_mode: str = "auto",  # 'auto' | 'mc' | 'exact'
+        mc_samples: int = 1024,
+        mc_max_samples: int = 16384,
+        mc_chunk_size: int = 2048,
+        mc_tol: float = 1e-3,
+        random_state: Optional[int] = None,
+        mc_exact_threshold: int = 4096,
+        **kwargs,
     ) -> None:
         if concept_detector:
             assert isinstance(concept_detector, ConceptDetector), (
@@ -916,18 +970,18 @@ class ConceptBasedModel:
         return self._y_proba_all_concepts
 
     def fit(
-            self,
-            train_dataset: ConceptDatasetSample,
-            valid_dataset: ConceptDatasetSample,
-            freeze: bool = True,
-            *,
-            concept_fit_params: Optional[dict] = None,
-            concept_embed_params: Optional[dict] = None,
-            front_fit_params: Optional[dict] = None,
-            calibrate: bool = False,
-            log_training: bool = False,
-            log_interval: Optional[int] = None,
-            **kwargs,
+        self,
+        train_dataset: ConceptDatasetSample,
+        valid_dataset: ConceptDatasetSample,
+        freeze: bool = True,
+        *,
+        concept_fit_params: Optional[dict] = None,
+        concept_embed_params: Optional[dict] = None,
+        front_fit_params: Optional[dict] = None,
+        calibrate: bool = False,
+        log_training: bool = False,
+        log_interval: Optional[int] = None,
+        **kwargs,
     ) -> None:
         """
         Fit the concept detector and front-end model.
@@ -979,7 +1033,9 @@ class ConceptBasedModel:
         missing_mask = getattr(train_dataset, "concept_missing_mask", None)
         if missing_enabled:
             if missing_mask is None:
-                fill_value = getattr(train_dataset, "concept_missing_fill_value", np.nan)
+                fill_value = getattr(
+                    train_dataset, "concept_missing_fill_value", np.nan
+                )
                 if isinstance(fill_value, float) and np.isnan(fill_value):
                     missing_mask = np.isnan(C_train)
                 else:
@@ -993,7 +1049,9 @@ class ConceptBasedModel:
                     stacklevel=2,
                 )
             if not np.any(observed_rows):
-                raise ValueError("No fully-observed concept rows available for front-end training.")
+                raise ValueError(
+                    "No fully-observed concept rows available for front-end training."
+                )
             C_train = C_train[observed_rows]
             y_train = y_train[observed_rows]
 
@@ -1009,9 +1067,9 @@ class ConceptBasedModel:
                 self._prep_propagation()
 
     def predict(
-            self,
-            dataset: ConceptDatasetSample,
-            propagate: Optional[bool] = None,
+        self,
+        dataset: ConceptDatasetSample,
+        propagate: Optional[bool] = None,
     ) -> np.ndarray:
         """
         Predict label for the dataset.
@@ -1025,10 +1083,10 @@ class ConceptBasedModel:
         return preds
 
     def predict_proba(
-            self,
-            dataset: ConceptDatasetSample,
-            propagate: Optional[bool] = None,
-            return_concepts: bool = False,
+        self,
+        dataset: ConceptDatasetSample,
+        propagate: Optional[bool] = None,
+        return_concepts: bool = False,
     ) -> np.ndarray:
         """
         Predict probabilities for the dataset.
@@ -1053,8 +1111,8 @@ class ConceptBasedModel:
         return out
 
     def _propagate_predict_proba(
-            self,
-            concept_preds: np.ndarray,
+        self,
+        concept_preds: np.ndarray,
     ) -> np.ndarray:
         """
         Predict probabilities using concept propagation.
@@ -1071,10 +1129,12 @@ class ConceptBasedModel:
         # Ensure concept combination order aligns with y_proba matrix rows
         combs = self._concept_poss  # (M, C)
         # Stack dict values in the same order as combs
-        y_mat = np.vstack([
-            np.asarray(self._y_proba_all_concepts[tuple(c)]).reshape(1, -1)
-            for c in combs
-        ])  # (M, K)
+        y_mat = np.vstack(
+            [
+                np.asarray(self._y_proba_all_concepts[tuple(c)]).reshape(1, -1)
+                for c in combs
+            ]
+        )  # (M, K)
 
         P = np.asarray(concept_preds, dtype=np.float64)  # (N, C)
         # Clip for numerical stability when taking logs
@@ -1101,7 +1161,7 @@ class ConceptBasedModel:
             return False
         # auto: use exact if 2^C <= threshold
         try:
-            return (2 ** n_concepts) <= self._mc_exact_threshold
+            return (2**n_concepts) <= self._mc_exact_threshold
         except OverflowError:
             return False
 
@@ -1121,8 +1181,11 @@ class ConceptBasedModel:
         done = np.zeros(N, dtype=bool)
 
         # RNG: deterministic only if seed provided
-        rng = (np.random.default_rng(self._random_state)
-               if self._random_state is not None else np.random.default_rng())
+        rng = (
+            np.random.default_rng(self._random_state)
+            if self._random_state is not None
+            else np.random.default_rng()
+        )
 
         target_samples = max(1, self._mc_samples)
         max_samples = max(target_samples, self._mc_max_samples)
@@ -1144,7 +1207,9 @@ class ConceptBasedModel:
 
             # Sample Bernoulli for active examples: shape (A, s, C)
             P_active = P[active_idx]  # (A, C)
-            Z = (rng.random((P_active.shape[0], s, C)) < P_active[:, None, :]).astype(np.float32)
+            Z = (rng.random((P_active.shape[0], s, C)) < P_active[:, None, :]).astype(
+                np.float32
+            )
             Z_flat = Z.reshape(-1, C)
 
             # Deduplicate concept vectors to reduce model calls
@@ -1165,21 +1230,23 @@ class ConceptBasedModel:
 
             # Update accumulators
             chunk_sum = Y.sum(axis=1)  # (A, K)
-            chunk_sumsq = (Y ** 2).sum(axis=1)  # (A, K)
+            chunk_sumsq = (Y**2).sum(axis=1)  # (A, K)
             sum_acc[active_idx] += chunk_sum
             sumsq_acc[active_idx] += chunk_sumsq
             counts[active_idx] += s
 
             # Check convergence for active examples
             means = sum_acc[active_idx] / counts[active_idx][:, None]
-            vars_ = sumsq_acc[active_idx] / counts[active_idx][:, None] - means ** 2
+            vars_ = sumsq_acc[active_idx] / counts[active_idx][:, None] - means**2
             np.maximum(vars_, 0.0, out=vars_)  # numerical safety
             se = np.sqrt(vars_ / counts[active_idx][:, None])
 
             # Aggregate SE across classes (flexible; default: max over classes)
             # This can be swapped out for other strategies if needed.
             se_agg = np.max(se, axis=1)
-            conv_mask = (se_agg <= self._mc_tol) & (counts[active_idx] >= target_samples)
+            conv_mask = (se_agg <= self._mc_tol) & (
+                counts[active_idx] >= target_samples
+            )
             newly_done = active_idx[conv_mask]
             done[newly_done] = True
             pbar.update(len(newly_done))
@@ -1218,7 +1285,7 @@ class ConceptBasedModel:
         probas = {}
         for c in self.concept_poss:
             probas[tuple(c)] = np.prod(
-                (concept_probas ** c) * (1 - concept_probas) ** (1 - c)
+                (concept_probas**c) * (1 - concept_probas) ** (1 - c)
             )
 
         return probas

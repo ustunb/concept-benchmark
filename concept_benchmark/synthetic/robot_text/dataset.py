@@ -1,4 +1,5 @@
 """Dataset construction and splitting for robot text benchmark."""
+
 from __future__ import annotations
 
 import hashlib
@@ -58,14 +59,15 @@ def build_text_dataset(
 
     for i, sr in catalog_df.iterrows():
         row = {k: sr[k] for k in concepts}
-        repeats = int(row_variants[i]) if row_variants is not None else int(variants_per_row)
+        repeats = (
+            int(row_variants[i]) if row_variants is not None else int(variants_per_row)
+        )
         for v in range(repeats):
             # Decide whether to use generic corpus
             key = f"{seed}:{i}:{v}:{generic_target}_generic"
             h = int(hashlib.sha256(key.encode()).hexdigest(), 16)
-            use_gen = (
-                len(corpus_gen) > 0
-                and (h % 1_000_000) < int(max(0.0, min(1.0, float(generic_rate))) * 1_000_000)
+            use_gen = len(corpus_gen) > 0 and (h % 1_000_000) < int(
+                max(0.0, min(1.0, float(generic_rate))) * 1_000_000
             )
             corpus = corpus_gen if use_gen else corpus_spec
             text = render_from_corpus(row, corpus, seed + v)
@@ -178,7 +180,9 @@ def kfold_by_robot_identity(
         C_sub = ds.C[idx]
         y_sub = ds.y[idx]
         sub = ConceptDatasetSample(
-            X=X_sub, C=C_sub, y=y_sub,
+            X=X_sub,
+            C=C_sub,
+            y=y_sub,
             meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text"},
         )
         gm = getattr(ds, "_generic_mask", None)
@@ -215,8 +219,14 @@ def kfold_by_robot_identity(
         C_dep = test_ds.C[idx_dep]
         y_dep = test_ds.y[idx_dep]
         dep = ConceptDatasetSample(
-            X=X_dep, C=C_dep, y=y_dep,
-            meta={"concepts": test_ds.concepts, "classes": test_ds.classes, "data_type": "text"},
+            X=X_dep,
+            C=C_dep,
+            y=y_dep,
+            meta={
+                "concepts": test_ds.concepts,
+                "classes": test_ds.classes,
+                "data_type": "text",
+            },
         )
         gm = getattr(test_ds, "_generic_mask", None)
         if gm is not None:
