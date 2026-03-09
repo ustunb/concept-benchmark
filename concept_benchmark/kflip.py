@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+__all__ = ["KFlipInterventionStrategy"]
+
 import itertools
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+from tqdm import tqdm
 
 from concept_benchmark.models import ConceptBasedModel
 from concept_benchmark.intervention import (
@@ -36,10 +39,12 @@ class KFlipInterventionStrategy(InterventionStrategy):
         *,
         batch_size: int = 8192,
         limit_subsets: Optional[int] = None,
+        exact_k: bool = False,
     ) -> None:
         super().__init__(name="kflip")
         self.batch_size = int(batch_size)
         self.limit_subsets = limit_subsets
+        self.exact_k = exact_k
 
     def propose(
         self,
@@ -66,11 +71,13 @@ class KFlipInterventionStrategy(InterventionStrategy):
         base_lbl = base_probs.argmax(axis=1)
         n_classes = int(base_probs.shape[1])
 
-        # enumerate candidate subsets for all sizes up to k
-        all_subsets = []
-        for j in range(1, k+1):
-            all_subsets_j = list(itertools.combinations(range(n_concepts), j))
-            all_subsets.extend(all_subsets_j)
+        # enumerate candidate subsets
+        if self.exact_k:
+            all_subsets = list(itertools.combinations(range(n_concepts), k))
+        else:
+            all_subsets = []
+            for j in range(1, k+1):
+                all_subsets.extend(itertools.combinations(range(n_concepts), j))
         if self.limit_subsets is not None and self.limit_subsets < len(all_subsets):
             # simple heuristic: closeness to 0.5 weighted by |coef|
             try:
@@ -82,7 +89,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
                     if w.ndim == 1:
                         w = w[None, :]
                     w = np.max(w, axis=0, keepdims=True)
-            except Exception:
+            except (AttributeError, IndexError, ValueError):
                 w = np.ones((1, n_concepts), dtype=np.float32)
             feat_score = np.mean((0.5 - np.abs(P - 0.5)) * w, axis=0)
 
@@ -99,49 +106,130 @@ class KFlipInterventionStrategy(InterventionStrategy):
         best_subset: List[Tuple[int, ...]] = [tuple() for _ in range(n_samples)]
         best_label = np.full(n_samples, -1, dtype=int)
 
-        # batching
-        rows_per_eval = max(1, self.batch_size)
+        # Cache assignment grids by subset size (reused across subsets)
+        _assign_cache: Dict[int, np.ndarray] = {}
 
-        # evaluate all subsets
-        for subset in all_subsets:
-            subset = np.asarray(subset, dtype=int)
-            subset_size = len(subset)
+        # Try to extract logistic regression weights for the fast path.
+        # Instead of building (N*A, C) arrays and calling predict_proba,
+        # we precompute the base logit and update only the subset columns
+        # via broadcasting: logit[i,a] = base_logit[i] - sub_logit[i] + assign_logit[a]
+        _fast_w: Optional[np.ndarray] = None
+        _fast_b: Optional[float] = None
+        try:
+            _lr = getattr(model.front_end_model, "model", model.front_end_model)
+            _coef = getattr(_lr, "coef_", None)
+            _inter = getattr(_lr, "intercept_", None)
+            if _coef is not None and _inter is not None and getattr(
+                model.front_end_model, "_kflip_fast_path", True
+            ):
+                _coef = np.asarray(_coef)
+                if _coef.shape[0] == 1:  # binary classification
+                    assert n_classes == 2, (
+                        f"Fast path assumes binary classification but got {n_classes} classes"
+                    )
+                    _fast_w = _coef[0].astype(np.float64)
+                    _fast_b = float(np.asarray(_inter).flat[0])
+        except (AttributeError, IndexError, TypeError):
+            pass
 
-            # Create assignment grid for the particular subset size
-            assign = np.array(list(itertools.product([0.0, 1.0], repeat=subset_size)), dtype=np.float32)
-            A = int(assign.shape[0])
-            samples_per_chunk = max(1, rows_per_eval // A)
+        if _fast_w is not None:
+            # Memory: O(N * 2^|S|) per subset, where |S| <= k.
+            # Fast path: exploit logistic regression linearity.
+            # logit = Z @ w + b, label = (logit >= 0)
+            # For a subset S with assignment a:
+            #   logit_new = (base_logit - base_Z[:,S] @ w[S]) + a @ w[S]
+            # This replaces N*A*C matmuls with N*|S| + A*|S| + N*A broadcasting.
+            base_Z_f64 = base_Z.astype(np.float64)
+            base_logit = base_Z_f64 @ _fast_w + _fast_b  # (N,)
 
-            for s in range(0, n_samples, samples_per_chunk):
-                m = min(samples_per_chunk, n_samples - s)
+            for subset in tqdm(all_subsets):
+                subset_arr = np.asarray(subset, dtype=int)
+                ss = len(subset_arr)
 
-                pS = P[s: s + m][:, subset]  # (m, subset_size)
+                if ss not in _assign_cache:
+                    _assign_cache[ss] = np.array(
+                        list(itertools.product([0.0, 1.0], repeat=ss)),
+                        dtype=np.float64,
+                    )
+                assign = _assign_cache[ss]  # (A, ss)
+
+                w_sub = _fast_w[subset_arr]  # (ss,)
+                remaining = base_logit - base_Z_f64[:, subset_arr] @ w_sub  # (N,)
+                assign_logit = assign @ w_sub  # (A,)
+                all_logit = remaining[:, None] + assign_logit[None, :]  # (N, A)
+
+                all_lbl = (all_logit >= 0).astype(int)  # (N, A)
+                flip_mask = all_lbl != base_lbl[:, None]  # (N, A)
+
+                # Probability weights: P(assignment | concept probs)
+                pS = P[:, subset_arr]  # (N, ss)
                 w_assign = np.prod(
                     np.where(assign[None, :, :] == 1.0, pS[:, None, :], 1.0 - pS[:, None, :]),
                     axis=2,
-                )  # (m, A)
+                )  # (N, A)
 
-                Z_chunk = np.repeat(base_Z[s: s + m], A, axis=0)  # (m*A, C)
-                AS = np.tile(assign, (m, 1))  # (m*A, subset_size)
-                Z_chunk[:, subset] = AS
+                mass = (w_assign * flip_mask).sum(axis=1)  # (N,)
 
-                Y = model.front_end_model.predict_proba(Z_chunk)    # (m*A, j)
-                Y_lbl = Y.argmax(axis=1).reshape(m, A)              # (m, A)
+                # Destination label mass
+                all_prob1 = 1.0 / (1.0 + np.exp(-all_logit))  # (N, A)
+                weighted = w_assign * flip_mask
+                cls1 = (all_prob1 * weighted).sum(axis=1)  # (N,)
+                cls0 = ((1.0 - all_prob1) * weighted).sum(axis=1)  # (N,)
+                lbl_star = (cls1 >= cls0).astype(int)  # (N,)
 
-                flip_mask = (Y_lbl != base_lbl[s : s + m][:, None])  # (m, A)
-                mass = (w_assign * flip_mask).sum(axis=1)            # (m,)
-
-                # track destination label mass (optional)
-                cls_mass = (Y.reshape(m, A, n_classes) * (w_assign * flip_mask)[:, :, None]).sum(axis=1)
-                lbl_star = cls_mass.argmax(axis=1)
-
-                cur = flip_prob[s : s + m]
-                improve = mass > cur
+                improve = mass > flip_prob
                 if np.any(improve):
-                    flip_prob[s : s + m][improve] = mass[improve]
-                    best_label[s : s + m][improve] = lbl_star[improve]
+                    flip_prob[improve] = mass[improve]
+                    best_label[improve] = lbl_star[improve]
                     for rel in np.nonzero(improve)[0]:
-                        best_subset[s + rel] = tuple(int(x) for x in subset.tolist())
+                        best_subset[rel] = tuple(int(x) for x in subset_arr.tolist())
+        else:
+            # General path: call predict_proba on expanded arrays.
+            # Memory: O(batch_size * C) per chunk, chunked to stay within batch_size.
+            rows_per_eval = max(1, self.batch_size)
+
+            for subset in tqdm(all_subsets):
+                subset = np.asarray(subset, dtype=int)
+                subset_size = len(subset)
+
+                if subset_size not in _assign_cache:
+                    _assign_cache[subset_size] = np.array(
+                        list(itertools.product([0.0, 1.0], repeat=subset_size)),
+                        dtype=np.float32,
+                    )
+                assign = _assign_cache[subset_size]
+                A = int(assign.shape[0])
+                samples_per_chunk = max(1, rows_per_eval // A)
+
+                for s in range(0, n_samples, samples_per_chunk):
+                    m = min(samples_per_chunk, n_samples - s)
+
+                    pS = P[s: s + m][:, subset]  # (m, subset_size)
+                    w_assign = np.prod(
+                        np.where(assign[None, :, :] == 1.0, pS[:, None, :], 1.0 - pS[:, None, :]),
+                        axis=2,
+                    )  # (m, A)
+
+                    Z_chunk = np.repeat(base_Z[s: s + m], A, axis=0)  # (m*A, C)
+                    AS = np.tile(assign, (m, 1))  # (m*A, subset_size)
+                    Z_chunk[:, subset] = AS
+
+                    Y = model.front_end_model.predict_proba(Z_chunk)    # (m*A, j)
+                    Y_lbl = Y.argmax(axis=1).reshape(m, A)              # (m, A)
+
+                    flip_mask = (Y_lbl != base_lbl[s : s + m][:, None])  # (m, A)
+                    mass = (w_assign * flip_mask).sum(axis=1)            # (m,)
+
+                    cls_mass = (Y.reshape(m, A, n_classes) * (w_assign * flip_mask)[:, :, None]).sum(axis=1)
+                    lbl_star = cls_mass.argmax(axis=1)
+
+                    cur = flip_prob[s : s + m]
+                    improve = mass > cur
+                    if np.any(improve):
+                        flip_prob[s : s + m][improve] = mass[improve]
+                        best_label[s : s + m][improve] = lbl_star[improve]
+                        for rel in np.nonzero(improve)[0]:
+                            best_subset[s + rel] = tuple(int(x) for x in subset.tolist())
 
         # candidate instances: exceed threshold (+ optional abstention filter)
         y_prob_now = base_probs

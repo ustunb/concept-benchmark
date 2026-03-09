@@ -267,6 +267,31 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
     def __init__(self) -> None:
         super().__init__(name="conceptual_safeguards")
 
+    @staticmethod
+    def _instance_uncertainty_scores(C_pred: np.ndarray) -> np.ndarray:
+        distances = np.abs(C_pred - 0.5)
+        uncertainties = 0.5 - distances
+        scores = np.nanmean(uncertainties, axis=1)
+        return np.where(np.isnan(scores), -np.inf, scores)
+
+    def _select_instances_by_uncertainty(
+        self,
+        candidate_ids: np.ndarray,
+        scores: np.ndarray,
+        *,
+        config: InterventionConfig,
+    ) -> np.ndarray:
+        if candidate_ids.size == 0:
+            return candidate_ids
+        if config.shuffle_candidates:
+            tie_breaker = config.rng.random(candidate_ids.size)
+            order = np.lexsort((tie_breaker, -scores))
+        else:
+            order = np.argsort(-scores)
+        ranked = candidate_ids[order]
+        limit = config.resolve_instance_budget(ranked.size)
+        return ranked[:limit]
+
     def propose(
         self,
         model: ConceptBasedModel,
@@ -283,13 +308,19 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
         confidences = y_prob[np.arange(batch.n_samples), predicted]
         abstain_mask = (confidences >= config.tau) & (confidences <= 1.0 - config.tau)
 
-        selective_acc_before = (predicted[~abstain_mask] == batch.y_true[~abstain_mask]).mean()
+        non_abstained = ~abstain_mask
+        selective_acc_before = float(
+            (predicted[non_abstained] == batch.y_true[non_abstained]).mean()
+        ) if non_abstained.any() else float("nan")
 
         candidate_ids = np.nonzero(abstain_mask)[0]
-        selected = self._select_instances(
+        candidate_scores = self._instance_uncertainty_scores(
+            batch.C_pred[candidate_ids]
+        )
+        selected = self._select_instances_by_uncertainty(
             candidate_ids,
-            config,
-            rng=config.rng,
+            candidate_scores,
+            config=config,
         )
 
         order = (
@@ -300,10 +331,14 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
         mask = np.zeros_like(batch.C_pred, dtype=bool)
         self._apply_ordering(mask, order, selected, config=config)
         return StrategyProposal(
-            mask=mask, 
-            ordering_used=order, 
+            mask=mask,
+            ordering_used=order,
             selected_instances=selected,
-            details={"selective_acc_before": selective_acc_before}
+            details={
+                "selective_acc_before": selective_acc_before,
+                "candidate_uncertainty_scores": candidate_scores,
+                "candidate_ids": candidate_ids,
+            },
         )
 
 
@@ -469,7 +504,7 @@ class ScoreIntervention(InterventionStrategy):
         m = config.max_concepts_per_instance
         threshold = config.score_threshold
 
-        if (m > n_concepts) or (m is None) or (m <= 0):
+        if (m is None) or (m > n_concepts) or (m <= 0):
             warnings.warn(
                 "max_concepts_per_instance is None, <= 0, or larger than the number of concepts; defaulting to all concepts.",
                 RuntimeWarning,
@@ -481,31 +516,24 @@ class ScoreIntervention(InterventionStrategy):
 
         best_subset_arrays: List[Optional[np.ndarray]] = [None] * n_samples
 
+        # Vectorized: iterate over combos (C(n,m)), batch all N samples per call.
+        # Reduces from N × C(n,m) to C(n,m) predict_proba calls.
+        best_combo_idx = np.full(n_samples, -1, dtype=int)
+
         from tqdm import tqdm
-        with tqdm(total=batch.n_samples, desc="Computing intervention scores") as pbar:
+        for ci, combo_indices in enumerate(tqdm(combination_arrays, desc="Computing intervention scores")):
+            all_flipped = concepts_before.copy()
+            all_flipped[:, combo_indices] = 1 - all_flipped[:, combo_indices]
+            p_after = model.front_end_model.predict_proba(all_flipped)
+            scores_combo = np.max(np.abs(p_after - p_before), axis=1)
+            improve = scores_combo > scores
+            scores[improve] = scores_combo[improve]
+            best_combo_idx[improve] = ci
 
-            for idx in range(n_samples):
-                base_vector = concepts_before[idx]
-                base_prob = p_before[idx]
-                best_score = -math.inf
-                best_subset_array: Optional[np.ndarray] = None
-
-                for combo_indices in combination_arrays:
-                    flipped = base_vector.copy()
-                    flipped[combo_indices] = 1 - flipped[combo_indices]
-                    p_after = model.front_end_model.predict_proba(flipped[None, :])[0]
-                    score = float(np.max(np.abs(p_after - base_prob)))
-                    if score > best_score:
-                        best_score = score
-                        best_subset_array = combo_indices
-
-                if best_subset_array is not None:
-                    scores[idx] = max(best_score, 0.0)
-                    best_subset_arrays[idx] = best_subset_array
-
-                pbar.update(1)
-                if idx % 100 == 0:  # Update postfix every 100 samples
-                    pbar.set_postfix({'avg_score': f"{scores[:idx + 1].mean():.3f}"})
+        for idx in range(n_samples):
+            ci = best_combo_idx[idx]
+            if ci >= 0:
+                best_subset_arrays[idx] = combination_arrays[ci]
 
         selected_indices: List[int] = []
         for idx, subset_array in enumerate(best_subset_arrays):
@@ -561,10 +589,8 @@ class ScoreIntervention(InterventionStrategy):
 
         def compute_confusion(y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
             n_classes = p_before.shape[1]
-            matrix = np.zeros((n_classes, n_classes), dtype=int)
-            for truth, prediction in zip(y_true, y_pred):
-                matrix[int(truth), int(prediction)] += 1
-            return matrix
+            indices = y_true.astype(int) * n_classes + y_pred.astype(int)
+            return np.bincount(indices, minlength=n_classes * n_classes).reshape(n_classes, n_classes)
 
         if batch.y_true is not None:
             overall_acc_before = float(np.mean(y_pred_before == batch.y_true))
@@ -662,9 +688,9 @@ class ConceptInterventionRunner:
         instance_ids: Optional[np.ndarray] = None,
     ) -> InterventionResult:
 
-        # TODO: sample noise if config.noise > 0.0 (call parent)
-        if concept_true is None and config.noise <= 0.0: 
-                concept_true = dataset.base_concepts
+        # Future: sample noise if config.noise > 0.0 (call parent)
+        if concept_true is None and config.noise <= 0.0:
+            concept_true = dataset.base_concepts
 
         batch = self._build_batch(
             dataset=dataset,
@@ -678,11 +704,11 @@ class ConceptInterventionRunner:
         proposal = strategy.propose(self.model, batch, config)
         if proposal.mask.shape != batch.C_pred.shape:
             raise InterventionError(
-            "Strategy returned a mask with shape"
-            f" {proposal.mask.shape}, expected {batch.C_pred.shape}."
+                "Strategy returned a mask with shape"
+                f" {proposal.mask.shape}, expected {batch.C_pred.shape}."
             )
 
-        # TODO: see if we can get rid of explicit >= 0.5
+        # Future: consider removing explicit >= 0.5 threshold
         # Determine how to get predictions from the downstream model.
         # Conceptual safeguards operate on concept probabilities, others on binarized concepts.
         if isinstance(strategy, ConceptualSafeguardsStrategy):
@@ -710,7 +736,7 @@ class ConceptInterventionRunner:
 
             strat_metrics['selective_acc_after'] = (y_pred_after[~abstain_post] == batch.y_true[~abstain_post]).mean() if (~abstain_post).any() else -np.inf
             strat_metrics['coverage_after'] = 1 - abstain_post.mean()
-        
+
         elif isinstance(strategy, ScoreIntervention):
             strat_metrics['overall_acc_before'] = proposal.details.get("overall_acc_before", None)
             strat_metrics['overall_acc_after'] = proposal.details.get("overall_acc_after", None)

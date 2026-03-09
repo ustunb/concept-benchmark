@@ -5,7 +5,7 @@ import copy
 
 import numpy as np
 import pandas as pd
-from scipy.special import expit
+from scipy.special import expit  # noqa: F401 — used by eval() in stochastic labeling
 
 from concept_benchmark.data import ConceptDataset
 
@@ -16,7 +16,7 @@ from .helper.robot_catalog import (
     generate_robot_catalog,
 )
 from .helper import textgen as text_helper
-from .helper.utils import model_to_logistic, unlist0
+from .helper.utils import build_model_expression, model_to_logistic, unlist0
 
 
 def create_synthetic_dataset(data_type: str = "image", **kwargs) -> ConceptDataset:
@@ -280,7 +280,6 @@ def create_robot_image_dataset(
     draw: bool = False,
     model: str = "",
     model_type: str = "deterministic",
-    spurious_features: Sequence[str] | None = None,
     additional_features: Sequence[str] | None = None,
     color_mode: str = "color",
     blur: dict | None = None,
@@ -293,14 +292,13 @@ def create_robot_image_dataset(
 
     if not concepts:
         raise ValueError("'concepts' dictionary must be provided and non-empty")
-    if not model:
-        raise ValueError("'model' expression must be provided for label generation")
+    model_features = extra_params.get("model_features", {})
+    if not model and not model_features:
+        raise ValueError("Either 'model' expression or 'model_features' must be provided")
 
     num_combinations = int(np.prod([len(v) for v in concepts.values()]))
     total_robots = num_robots or num_combinations * samples_per_instance
     eff_resolution = resolution if resolution is not None else (600 if size == "large" else 32 if size == "medium" else 8)
-    irrelevant = list(spurious_features or [])
-    drop_irrelevant = extra_params.pop("drop_irrelevant", True)
     _ = (train_concept_detector, epochs)  # parameters accepted for API compatibility
 
     catalog_df, new_concepts = generate_robot_catalog(
@@ -322,16 +320,31 @@ def create_robot_image_dataset(
     df = catalog_df
 
     # Specify true labels
-    if model_type == "deterministic":
-        glorp_model_true = lambda row: eval(unlist0(model))
-    elif model_type == "stochastic":
-        glorp_model_true = lambda row: eval(model_to_logistic(model, scalar = extra_params.get("scalar", 1.0),
-                                                              weights = extra_params.get('weights', {}),
-                                                              intercept = extra_params.get("intercept", None)))
+    expr = ""  # populated by build_model_expression when model_features is used
+    if model_features:
+        # New structured path — build expression from explicit feature/weight spec
+        expr = build_model_expression(
+            model_features,
+            model_type=model_type,
+            weights=extra_params.get("model_weights"),
+            intercept=extra_params.get("model_intercept", 0.0),
+            scalar=extra_params.get("model_scalar", 1.0),
+        )
+        glorp_model_true = lambda row, _e=expr: eval(_e)
+    elif model:
+        # Legacy string path (backward compat for tests / custom usage)
+        if model_type == "deterministic":
+            glorp_model_true = lambda row: eval(unlist0(model))
+        elif model_type == "stochastic":
+            glorp_model_true = lambda row: eval(model_to_logistic(
+                model, scalar=extra_params.get("scalar", 1.0),
+                weights=extra_params.get('weights', {}),
+                intercept=extra_params.get("intercept", None)))
+        else:
+            raise ValueError("Invalid model_type. Use 'deterministic' or 'stochastic'.")
     else:
-        raise ValueError("Invalid model_type. Use 'deterministic' or 'stochastic'.")
+        raise ValueError("Either 'model' or 'model_features' must be provided")
 
-    df[OUTCOME_NAME] = df.apply(glorp_model_true, axis=1)
     catalog_df[OUTCOME_NAME] = catalog_df.apply(glorp_model_true, axis=1)
 
     if model_type == "deterministic":
@@ -352,50 +365,34 @@ def create_robot_image_dataset(
 
     # X: Image paths (stored as strings)
     image_dir = output_directory
-    X = np.array([row["png_filename"] for _, row in catalog_df.iterrows()])
+    X = catalog_df["png_filename"].to_numpy()
 
     copy_features = copy.deepcopy(ALL_ROBOT_FEATURES)
     copy_features.update(new_concepts)
 
-    pos_map = {
-        feat: list(dict.fromkeys([str(f).split("_")[0] for f in copy_features[feat]]))[1]
-        for feat in catalog_df.columns if feat in copy_features
-    }
-
-    UC_cols = []
+    # Compute positive value and binarized column for every feature once
+    pos_map = {}
+    _binary_cache: dict[str, np.ndarray] = {}
     for feat in copy_features:
         pos_val = list(dict.fromkeys([str(f).split("_")[0] for f in copy_features[feat]]))[1]
-        col = (
+        pos_map[feat] = pos_val
+        _binary_cache[feat] = (
             (catalog_df[feat].astype(str).str.split("_").str[0] == str(pos_val))
             .astype(np.int32)
             .to_numpy()
         )
-        UC_cols.append(col)
-    UC = np.stack(UC_cols, axis=1).astype(np.int8)
 
-    if drop_irrelevant and irrelevant:
-        # check if irrelevant features are in the catalog
-        existing_irrelevant_features = [
-            f for f in irrelevant if f in catalog_df.columns
-        ]
-        if existing_irrelevant_features:
-            catalog_df.drop(columns=existing_irrelevant_features, inplace=True)
+    UC = np.stack([_binary_cache[feat] for feat in copy_features], axis=1).astype(np.int8)
 
-    # C: Concept matrix
+    # C: Concept matrix — reuse cached binary columns
     feature_names = [
         feat for feat in catalog_df.columns if feat in copy_features
     ]
-    # Binary encode concepts: 1 if feature equals designated positive value, else 0
     C_cols = []
     for feat in feature_names:
-        pos_val = pos_map.get(feat)
-        col = (
-            (catalog_df[feat].astype(str).str.split("_").str[0] == str(pos_val))
-            .astype(np.int32)
-            .to_numpy()
-        )
+        col = _binary_cache[feat]
         if verbose:
-            print(f"Feature '{feat}': positive value '{pos_val}' -> column head {col.tolist()[:10]}")
+            print(f"Feature '{feat}': positive value '{pos_map[feat]}' -> column head {col.tolist()[:10]}")
         C_cols.append(col)
     C = np.stack(C_cols, axis=1).astype(np.int8)
 
@@ -437,7 +434,7 @@ def create_robot_image_dataset(
         "image_dir": image_dir,
         "resolution": eff_resolution,
         "color_mode": color_mode,
-        "labeling_function": model,
+        "labeling_function": model or expr,
         "num_robots": total_robots,
         "robot_ids": catalog_df["id"].values,
         "catalog_df": catalog_df,
@@ -474,7 +471,6 @@ def create_robot_image_dataset(
 #             'foot_shape': ['flat_4sided', 'flat_5sided', 'flat_lshaped',
 #                            'pointy_3sided', 'pointy_4sided', 'pointy_6sided'],
 #         },
-#         'spurious_features': ['has_elbows', 'hand_shape'],  # features that do not appear in the catalog + color
 #         'model': "'glorp' if (int(row['body_shape']=='square') + int(row['foot_shape']=='pointy') - 2 >= 0) else 'drent'",
 #         'model_type': 'deterministic',  # 'deterministic', 'stochastic'
 #         'size': 'large',  # 'small', 'large'

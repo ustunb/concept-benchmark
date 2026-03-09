@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+__all__ = [
+    "ConceptDataset",
+    "ConceptDatasetSample",
+    "ConceptImageDatasetSample",
+    "DataLoader",
+]
+
+import platform
 import warnings
 from collections.abc import Callable, Mapping, Set
 from pathlib import Path
@@ -8,8 +16,19 @@ import numpy as np
 import pandas as pd
 import torch
 from PIL import Image
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader as _TorchDataLoader, Dataset
 from tqdm import tqdm
+
+# On macOS, forked workers + MPS can deadlock. Wrap DataLoader to force
+# single-process loading so every call site is safe without remembering
+# to pass num_workers=0.
+if platform.system() == "Darwin":
+    def DataLoader(*args, **kwargs):
+        kwargs["num_workers"] = 0
+        kwargs["pin_memory"] = False
+        return _TorchDataLoader(*args, **kwargs)
+else:
+    DataLoader = _TorchDataLoader
 
 from .cv import generate_cvindices, validate_cvindices
 from .helper.data_utils import (
@@ -43,7 +62,7 @@ def _deep_equal(a, b) -> bool:
     if isinstance(a, Set) and isinstance(b, Set):
         try:
             return a == b
-        except Exception:
+        except TypeError:
             return sorted(map(repr, a)) == sorted(map(repr, b))
 
     if isinstance(a, np.ndarray) and isinstance(b, np.ndarray):
@@ -62,7 +81,7 @@ def _deep_equal(a, b) -> bool:
     if isinstance(a, Path) and isinstance(b, Path):
         try:
             return a.resolve() == b.resolve()
-        except Exception:
+        except OSError:
             return str(a) == str(b)
 
     if callable(a) or callable(b):
@@ -70,7 +89,7 @@ def _deep_equal(a, b) -> bool:
 
     try:
         eq = a == b
-    except Exception:
+    except (TypeError, ValueError):
         return repr(a) == repr(b)
     else:
         if isinstance(eq, (bool, np.bool_)):
@@ -78,12 +97,12 @@ def _deep_equal(a, b) -> bool:
         if hasattr(eq, "all"):
             try:
                 return bool(eq.all())
-            except Exception:
+            except (TypeError, ValueError):
                 pass
         return repr(a) == repr(b)
 
 
-class ConceptDataset(object):
+class ConceptDataset:
     SAMPLE_TYPES = ("training", "validation", "test")
 
     def __init__(
@@ -142,13 +161,13 @@ class ConceptDataset(object):
                 X = np.asarray(X)
             except Exception as e:
                 raise ValueError(f"cannot convert X to np.ndarray: {e}")
-        
+
         if not isinstance(C, np.ndarray):
             try:
                 C = np.asarray(C)
             except Exception as e:
                 raise ValueError(f"cannot convert C to np.ndarray: {e}")
-    
+
         if not isinstance(y, np.ndarray):
             try:
                 y = np.asarray(y)
@@ -1085,8 +1104,8 @@ class ConceptDatasetSample(Dataset):
                 ]
                 try:
                     x_batch = torch.stack(x_batch, dim=0)
-                except Exception:
-                    pass
+                except (RuntimeError, TypeError):
+                    pass  # heterogeneous shapes/types — keep as list
             if isinstance(x_batch, torch.Tensor):
                 x_batch = x_batch.to(device)
             with torch.no_grad():
@@ -1168,7 +1187,8 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         if self.base_dir is not None:
             img_path = self.base_dir / img_path
         try:
-            image = Image.open(img_path).convert("RGB")
+            import io
+            image = Image.open(io.BytesIO(Path(img_path).read_bytes())).convert("RGB")
             if self.preprocess is not None:
                 image = self.preprocess(image)
             if self.transform is not None:
@@ -1177,7 +1197,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             warnings.warn(f"{e}; cannot open image, returning path", RuntimeWarning)
             image = img_path
 
-        c = torch.from_numpy(np.array(c, dtype=np.int64))
+        c = torch.from_numpy(np.array(c, dtype=np.float32))
         y = torch.from_numpy(np.array(y, dtype=np.int64))
 
         if self.concept_transform is not None:

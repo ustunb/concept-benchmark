@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 205">
+  <!-- Edges -->
+  <g stroke="#94A3B8" stroke-width="1.8" stroke-linecap="round" fill="none">
+    <!-- C letter: sequential arc -->
+    <line x1="132" y1="55" x2="104" y2="37"/>
+    <line x1="104" y1="37" x2="71" y2="38"/>
+    <line x1="71" y1="38" x2="45" y2="58"/>
+    <line x1="45" y1="58" x2="35" y2="90"/>
+    <line x1="35" y1="90" x2="45" y2="122"/>
+    <line x1="45" y1="122" x2="71" y2="142"/>
+    <line x1="71" y1="142" x2="104" y2="143"/>
+    <line x1="104" y1="143" x2="132" y2="125"/>
+
+    <!-- B spine (vertical bottleneck) -->
+    <line x1="176" y1="36" x2="176" y2="63"/>
+    <line x1="176" y1="63" x2="176" y2="90"/>
+    <line x1="176" y1="90" x2="176" y2="117"/>
+    <line x1="176" y1="117" x2="176" y2="144"/>
+
+    <!-- B top bump perimeter -->
+    <line x1="176" y1="36" x2="208" y2="40"/>
+    <line x1="208" y1="40" x2="226" y2="63"/>
+    <line x1="226" y1="63" x2="208" y2="80"/>
+    <line x1="208" y1="80" x2="176" y2="90"/>
+
+    <!-- B bottom bump perimeter -->
+    <line x1="176" y1="90" x2="208" y2="100"/>
+    <line x1="208" y1="100" x2="226" y2="117"/>
+    <line x1="226" y1="117" x2="208" y2="140"/>
+    <line x1="208" y1="140" x2="176" y2="144"/>
+
+    <!-- B network fan: spine → top bump -->
+    <line x1="176" y1="63" x2="208" y2="40"/>
+    <line x1="176" y1="63" x2="226" y2="63"/>
+    <line x1="176" y1="63" x2="208" y2="80"/>
+
+    <!-- B network fan: spine → bottom bump -->
+    <line x1="176" y1="117" x2="208" y2="100"/>
+    <line x1="176" y1="117" x2="226" y2="117"/>
+    <line x1="176" y1="117" x2="208" y2="140"/>
+  </g>
+
+  <!-- C nodes (teal — features) -->
+  <g fill="#0D9488" stroke="#0F766E" stroke-width="1.5">
+    <circle cx="132" cy="55" r="6"/>
+    <circle cx="104" cy="37" r="6"/>
+    <circle cx="71" cy="38" r="6"/>
+    <circle cx="45" cy="58" r="6"/>
+    <circle cx="35" cy="90" r="6"/>
+    <circle cx="45" cy="122" r="6"/>
+    <circle cx="71" cy="142" r="6"/>
+    <circle cx="104" cy="143" r="6"/>
+    <circle cx="132" cy="125" r="6"/>
+  </g>
+
+  <!-- B spine nodes (blue — the concept bottleneck) -->
+  <g fill="#0369A1" stroke="#075985" stroke-width="1.5">
+    <circle cx="176" cy="36" r="6"/>
+    <circle cx="176" cy="63" r="6"/>
+    <circle cx="176" cy="90" r="6"/>
+    <circle cx="176" cy="117" r="6"/>
+    <circle cx="176" cy="144" r="6"/>
+  </g>
+
+  <!-- B bump nodes (teal — predictions) -->
+  <g fill="#0D9488" stroke="#0F766E" stroke-width="1.5">
+    <circle cx="208" cy="40" r="6"/>
+    <circle cx="226" cy="63" r="6"/>
+    <circle cx="208" cy="80" r="6"/>
+    <circle cx="208" cy="100" r="6"/>
+    <circle cx="226" cy="117" r="6"/>
+    <circle cx="208" cy="140" r="6"/>
+  </g>
+
+  <!-- Architecture labels -->
+  <text x="83" y="164" text-anchor="middle"
+        font-family="'Helvetica Neue', Helvetica, Arial, sans-serif"
+        font-size="8" font-weight="400" fill="#94A3B8"
+        letter-spacing="1">features</text>
+  <text x="176" y="164" text-anchor="middle"
+        font-family="'Helvetica Neue', Helvetica, Arial, sans-serif"
+        font-size="8" font-weight="400" fill="#6B9CC3"
+        letter-spacing="1">concepts</text>
+
+  <!-- Subtitle -->
+  <text x="130" y="192" text-anchor="middle"
+        font-family="'Helvetica Neue', Helvetica, Arial, sans-serif"
+        font-size="14" font-weight="400" fill="#475569"
+        letter-spacing="3">concept benchmark</text>
+</svg>

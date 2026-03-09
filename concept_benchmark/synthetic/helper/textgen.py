@@ -340,7 +340,8 @@ def _to_label(arr, label_map: dict | None):
 
 def unstructured_caption_via_llm(concepts: dict, *, provider: str = "gemini", model: str = "", api_key: str | None = None, system: str | None = None, user_prompt: str | None = None, n: int = 1, temperature: float = 0.7):
     import os
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types as genai_types
     import openai
     import anthropic
     api_key = api_key or os.getenv("LM_API_KEY")
@@ -379,11 +380,16 @@ def unstructured_caption_via_llm(concepts: dict, *, provider: str = "gemini", mo
         return out
 
     elif prov in ("gemini", "google", "googleai", "google-genai"):
-        genai.configure(api_key=api_key)
-        gm = genai.GenerativeModel(model or "gemini-1.5-flash")
-        gen_cfg = dict(temperature=temperature, max_output_tokens=160)
+        client = genai.Client(api_key=api_key)
+        gen_cfg = genai_types.GenerateContentConfig(
+            temperature=temperature, max_output_tokens=160,
+        )
         for _ in range(max(1, n)):
-            r = gm.generate_content(user_message, generation_config=gen_cfg)
+            r = client.models.generate_content(
+                model=model or "gemini-1.5-flash",
+                contents=user_message,
+                config=gen_cfg,
+            )
             out.append((getattr(r, "text", "") or "").strip())
         return out
     else:

@@ -11,7 +11,15 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
 from tqdm.auto import tqdm
-from typing import Sequence, Tuple, Optional 
+from typing import Sequence
+
+def _get_default_font(size):
+    """Load a default font at the requested size, compatible with Pillow <10 and >=10."""
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
+
 
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.paths import data_dir
@@ -23,11 +31,19 @@ from concept_benchmark.synthetic.helper.sudoku_helper import (
     normalize_digits,
     cell_digit_concept_vector
 )
+from concept_benchmark.synthetic.helper.sudoku_handwriting_helper import (
+    SimpleHandwrittenGenerator,
+    AdvancedHandwrittenGenerator,
+    _build_given_mask,
+    _synthesize_prior_from_neighbors,
+    _render_inline_candidates,
+    _draw_wobbly_circle
+)
 
 SUDOKU_DIR = data_dir / "sudoku"
 
 
-# TODO: label noise, concept noise, concept masking toggles
+# Future: label noise, concept noise, concept masking toggles
 def create_sudoku_dataset(
     *,
     n: int = 3,
@@ -126,7 +142,8 @@ def create_sudoku_dataset(
     # ---- invalid boards
     for i in range(n_invalid):
         num_actions = max(1, int(random.randint(1, max_corrupt)))
-        b = generate_invalid_board(base_board=generate_valid_board(n=n), num_actions=num_actions)
+        inv_seed = random.randint(0, 2**31 - 1)
+        b = generate_invalid_board(base_board=generate_valid_board(n=n), num_actions=num_actions, seed=inv_seed)
         concepts = get_concepts(b, return_label=False)
         c_base = np.array(list(concepts.values()), dtype=np.int32).flatten()
 
@@ -237,64 +254,50 @@ def image_transform(
     board: np.ndarray,
     *,
     cell_px: int = 40,
-    margin_px: int = 3,
+    margin_px: int = 2,
     line_px: int = 1,
-    bold_px: int = 1,
+    bold_px: int = 3,
     font_size: int = 10,
     standardize: bool = True,
     font_path: str | None = None,
-    handwriting: bool = False,
-    radius: float = 0.5,
-    sigma: float = 0.0,
-    angle: float = 98,
+    handwriting: bool = True,
+    # Starters control (printed vs user-filled colors)
+    given_mask: np.ndarray | None = None,
+    starters_ratio: float | None = 0.35,
+    starters_count: int | None = None,
+    starters_seed: int | None = None,
+    given_color: tuple[int,int,int] = (30, 30, 30),     # gray/black (printed)
+    fill_color:  tuple[int,int,int] = (26, 71, 180),    # blue (user ink)
+    # Prior candidates (built from adjacent non-starter pairs/triples)
+    prior_options: dict | None = None,
+    prior_groups_ratio: float = 0.22,
+    prior_groups_seed: int | None = 1337,
+    prior_group_sizes: tuple[int,...] = (2,),
+    prior_allow_diagonal: bool = False,
+    # (compat only, not used directly)
     outfile: str | None = None,
-) -> np.ndarray:
-    """Render an NxN Sudoku board to a grayscale image.
-    Args:
-        board (np.ndarray): NxN array with values in {0, 1..N}. Use 0 for blank
-            cells.
-        cell_px (int, optional): Pixel size of each cell. Defaults to 16.
-        margin_px (int, optional): Outer padding around the grid. Defaults
-            to 3.
-        line_px (int, optional): Width of thin lines. Defaults to 1.
-        bold_px (int, optional): Width of nxn divider lines. Defaults to 1.
-        font_size (int, optional): Digit font size. Defaults to 10.
-        standardize (bool, optional): If True, standardize pixel values to
-            [0, 1]. Defaults to True.
-        font_path (str | None, optional): Path to a .ttf font. If None,
-            use default font. Defaults to None.
-        outfile (str | None, optional): Path to save the image (e.g.,
-            "board.png"). If None, do not write to disk. Defaults to None.
-        handwriting (bool, optional): Makes the numbers look handwritten if True. 
-            Defaults to False.
-        radius (float, optional): size of Gaussian aperture. Defaults to 0.
-            Only used if using handwriting=True
-        sigma (float, optional): Standard deviation of Gaussian operator. Defaults to 12.
-            Only used if using handwriting=True
-        angle (float, optional): Direction of blur. Defults to 140.
-            Only used if using handwriting=True
-
-    Returns:
-        np.ndarray: Grayscale image array of the Sudoku board.
-        Output dimensions = (1, H, W) where H = W = margin_px * 2 + cell_px * N.
+    # NEW: if True, also return (starters, candidates) alongside the image
+    return_meta: bool = False,
+) -> np.ndarray | str | tuple:
+    """Render an NxN Sudoku board to an RGB image with prior-option bubbles (handwritten).
+       Each bubble shows *all* options inline in one row (tight kerning). Starters never get bubbles.
     """
-    assert board.ndim == 2 and board.shape[0] == board.shape[1], "board must be square"
+    import math
     N = board.shape[0]
+    assert board.ndim == 2 and N == board.shape[1], "board must be square"
     n = int(math.isqrt(N)); assert n*n == N, "board size must be n*n"
     W = H = margin_px * 2 + cell_px * N
+
     img = Image.new("RGB", (W, H), "white")
     draw = ImageDraw.Draw(img)
 
+    # Base font for non-handwritten/letters
     try:
-        font = (
-            ImageFont.truetype(font_path, font_size)
-            if font_path
-            else ImageFont.load_default(size=font_size)
-        )
+        font = (ImageFont.truetype(font_path, font_size) if font_path
+                else _get_default_font(font_size))
     except Exception:
-        font = ImageFont.load_default(size=font_size)
+        font = _get_default_font(font_size)
 
-    # Helpers
     def cell_rect(r, c):
         x0 = margin_px + c * cell_px
         y0 = margin_px + r * cell_px
@@ -302,69 +305,217 @@ def image_transform(
         y1 = y0 + cell_px
         return x0, y0, x1, y1
 
-    # Grid lines
-    # Thin lines
+    # Grid
     for i in range(N + 1):
         x = margin_px + i * cell_px
         y = margin_px + i * cell_px
-        width_v = bold_px if i % n == 0 else line_px
-        width_h = bold_px if i % n == 0 else line_px
-        # Vertical
-        draw.line([(x, margin_px), (x, H - margin_px)], fill="black", width=width_v)
-        # Horizontal
-        draw.line([(margin_px, y), (W - margin_px, y)], fill="black", width=width_h)
+        wv = bold_px if i % n == 0 else line_px
+        wh = bold_px if i % n == 0 else line_px
+        draw.line([(x, margin_px), (x, H - margin_px)], fill=(0, 0, 0), width=wv)
+        draw.line([(margin_px, y), (W - margin_px, y)], fill=(0, 0, 0), width=wh)
 
-    # Numbers (centered in each cell)
-    for r in range(N):
-        for c in range(N):
-            val = board[r, c]
-            if val is None or int(val) == 0:
-                continue
-            v = int(val)
-            if v <= 0:
-                continue
-            # Map 1..N to glyphs: 1-9->'1'-'9', 10->'A', 11->'B', ... up to 35->'Z', then 'a'..
-            if v <= 9:
-                text = str(v)
-            else:
-                idx = v - 10
-                alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-                if idx < len(alphabet):
-                    text = alphabet[idx]
-                else:
-                    text = str(v)
-            x0, y0, x1, y1 = cell_rect(r, c)
-            # Centering
-            tw, th = draw.textbbox((0, 0), text, font=font)[2:]
-            tx = x0 + (cell_px - tw) / 2
-            ty = y0 + (cell_px - th) / 2
-            draw.text((tx, ty), text, fill="black", font=font)
+    # ---- build handwritten generator + starters + prior_options ----
+    generator = None
+    if handwriting:
+        from concept_benchmark.paths import pkg_dir
+        _fonts_dir = str(pkg_dir / "data" / "fonts")
+        try:
+            import cv2  # noqa: F401
+            generator = AdvancedHandwrittenGenerator(fonts_dir=_fonts_dir)
+        except Exception:
+            generator = SimpleHandwrittenGenerator(fonts_dir=_fonts_dir)
 
-
-    # Outer bold border (to ensure corners look crisp)
-    draw.rectangle(
-        [margin_px, margin_px, W - margin_px, H - margin_px],
-        outline="black",
-        width=bold_px,
+    # Starters mask (printed vs user-filled)
+    # NOTE: this is now *outside* the except, so it always runs.
+    starters = _build_given_mask(
+        board,
+        given_mask=given_mask,
+        starters_ratio=starters_ratio,
+        starters_count=starters_count,
+        starters_seed=starters_seed,
     )
 
-    final_img = img
-    if handwriting:
-        import io
-        from wand.image import Image as WandImage
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        with WandImage(blob=buf.getvalue()) as wimg:
-            # Sketch modifies in-place
-            wimg.sketch(radius=radius, sigma=sigma, angle=angle)
-            blob = wimg.make_blob(format="PNG")
-        final_img = Image.open(io.BytesIO(blob)).convert("RGB")
+    # Build PRIOR candidates from adjacent non-starter pairs/triples if not provided
+    if prior_options is None:
+        prior_options = _synthesize_prior_from_neighbors(
+            board,
+            starters,
+            groups_count=None,
+            groups_ratio=prior_groups_ratio,
+            group_sizes=prior_group_sizes,
+            allow_diagonal=prior_allow_diagonal,
+            seed=prior_groups_seed,
+        )
 
+    # Simple 9x9 numeric encoding of candidates for downstream use:
+    #   candidates[r, c] = number of candidate digits for that cell.
+    candidates = np.zeros_like(board, dtype=np.int32)
+    for (r, c), opts in prior_options.items():
+        # ignore junk, keep positive ints
+        clean = [
+            int(d) for d in opts
+            if isinstance(d, (int, np.integer)) and int(d) > 0
+        ]
+        candidates[r, c] = len(clean)
+
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+    # ---- FIRST PASS: draw prior-option bubbles for NON-STARTERS (adaptive + clamped)
+    for r in range(N):
+        for c in range(N):
+            if starters[r, c]:
+                continue
+
+            if not prior_options or ((r, c) not in prior_options):
+                continue
+
+            # digits only; ignore junk/zeros — and ALWAYS include the cell's main digit
+            raw = board[r, c]
+            own = int(raw) if raw is not None else 0
+
+            opts = {
+                int(d) for d in prior_options.get((r, c), [])
+                if isinstance(d, (int, np.integer)) and int(d) > 0
+            }
+            if own > 0:
+                opts.add(own)
+
+            opts = sorted(opts)
+            if not opts:
+                continue
+
+            x0, y0, x1, y1 = cell_rect(r, c)
+            cell_w = x1 - x0
+            cell_h = y1 - y0
+
+            # target corner and padding
+            inset = max(2, int(cell_px * 0.06))
+            pad   = max(2, int(cell_px * 0.05))
+
+            # Compute the max bubble box we can afford in the corner
+            max_w = cell_w - 2 * inset
+            max_h = cell_h - 2 * inset
+            if max_w <= 6 or max_h <= 6:
+                continue  # cell is too small (shouldn't happen)
+
+            # Start with a generous mini size, then *shrink* until it fits
+            mini = max(12, int(cell_px * 0.46))
+            fitted = None
+            tries = 0
+            while mini >= 8 and tries < 6:
+                seq_img = _render_inline_candidates(
+                    generator, opts, fill_color,
+                    size=mini, seed_base=(r * N + c) * 997
+                )
+                bubble_w = seq_img.width  + 2 * pad
+                bubble_h = seq_img.height + 2 * pad
+
+                if bubble_w <= max_w and bubble_h <= max_h:
+                    fitted = (mini, seq_img, bubble_w, bubble_h)
+                    break
+
+                # shrink a bit and try again
+                mini = int(mini * 0.88)
+                tries += 1
+
+            if fitted is None:
+                # As a last resort, drop to digits only (no circle) or skip; here we skip
+                continue
+
+            mini, seq_img, bubble_w, bubble_h = fitted
+
+            # Place top-left, fully inside the cell
+            left   = x0 + inset
+            top    = y0 + inset
+            right  = left + bubble_w
+            bottom = top  + bubble_h
+
+            # (safety) clamp within the cell; this preserves size
+            if right > x1 - 1:
+                shift = right - (x1 - 1)
+                left  -= shift; right  -= shift
+            if bottom > y1 - 1:
+                shift = bottom - (y1 - 1)
+                top   -= shift; bottom -= shift
+
+            # Draw the fine, wobbly circle outline
+            _draw_wobbly_circle(
+                draw, (left, top, right, bottom),
+                color=fill_color, width=1,
+                seed=(r * N + c) * 137 + len(opts)
+            )
+
+            # Center the strip inside the circle
+            tx = int(left + (bubble_w - seq_img.width)  / 2)
+            ty = int(top  + (bubble_h - seq_img.height) / 2)
+            img.paste(seq_img, (tx, ty), seq_img)
+
+    # ---- SECOND PASS: draw main digits
+    for r in range(N):
+        for c in range(N):
+            raw = board[r, c]
+            if raw is None or int(raw) == 0:
+                continue
+            v = int(raw)
+            if v <= 0:
+                continue
+
+            x0, y0, x1, y1 = cell_rect(r, c)
+            text = (
+                str(v) if v <= 9
+                else alphabet[v-10] if 0 <= (v-10) < len(alphabet)
+                else str(v)
+            )
+            color = given_color if starters[r, c] else fill_color
+
+            if starters[r, c]:
+                # ALWAYS printed font for starters
+                tb = draw.textbbox((0, 0), text, font=_get_default_font(font_size))
+                tw, th = tb[2] - tb[0], tb[3] - tb[1]
+                tx = x0 + (cell_px - tw) / 2
+                ty = y0 + (cell_px - th) / 2
+                draw.text((tx, ty), text, fill=given_color, font=_get_default_font(font_size))
+            else:
+                # Non-starters: handwritten if possible, otherwise printed
+                if text.isdigit() and (generator is not None):
+                    hand_size_main = max(8, int(cell_px * 0.82))
+                    rng_seed = (r * N + c) * 131 + v
+                    digit_img = generator.generate(
+                        digit=int(text), size=hand_size_main,
+                        color=fill_color, rng_seed=rng_seed
+                    )
+                    arr = np.array(digit_img, dtype=np.uint8)
+                    if arr.shape[-1] == 4:
+                        arr[:, :, 3] = np.clip(
+                            arr[:, :, 3].astype(np.float32) * 1.25,
+                            0, 255
+                        ).astype(np.uint8)
+                    digit_img = Image.fromarray(arr, mode="RGBA")
+                    dw, dh = digit_img.size
+                    tx = x0 + (cell_px - dw) // 2
+                    ty = y0 + (cell_px - dh) // 2
+                    img.paste(digit_img, (int(tx), int(ty)), digit_img)
+
+    # Outer border
+    draw.rectangle(
+        [margin_px, margin_px, W - margin_px, H - margin_px],
+        outline=(0, 0, 0), width=bold_px
+    )
+
+    # ----- returns -----
     if outfile:
-        final_img.save(outfile)
+        img.save(outfile)
+        if return_meta:
+            return str(outfile), starters, candidates
         return str(outfile)
 
-    return sudoku_image_preprocess(final_img, standardize=standardize, to_tensor=True)
+    # keep RGB; tensorize downstream
+    arr = sudoku_image_preprocess(img, standardize=standardize, to_tensor=True)
+    if return_meta:
+        return arr, starters, candidates
+    return arr
+
+
 
 def sudoku_image_preprocess(
     image: Image.Image,
@@ -404,8 +555,7 @@ def sudoku_image_preprocess(
         return torch.from_numpy(arr).contiguous() if to_tensor else arr
 
     # Non-ViT path: grayscale, optional [0,1] standardization, CHW = [1,H,W]
-    gray = image.convert("L")
-    arr = np.asarray(gray, dtype=np.float32)
+    arr = np.asarray(image, dtype=np.float32)
     if standardize:
         arr = arr / 255.0
     arr = np.expand_dims(arr, axis=0)  # [1,H,W]

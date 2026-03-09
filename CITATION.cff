@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Measuring What Matters: Synthetic Benchmarks for Concept Bottleneck Models"
+type: software
+version: 0.0.1
+date-released: 2026-01-01
+url: "https://github.com/ustunb/concept-benchmark"
+repository-code: "https://github.com/ustunb/concept-benchmark"
+license: MIT
+authors:
+  - family-names: Skirzynski
+    given-names: Julian
+    affiliation: "UC San Diego, CSE"
+  - family-names: Cheon
+    given-names: Harry
+    affiliation: "UC San Diego, CSE"
+  - family-names: Kadekodi
+    given-names: Shreyas
+    affiliation: "UC San Diego, CSE"
+  - family-names: Stewart
+    given-names: Meredith
+    affiliation: "UC San Diego, CSE"
+  - family-names: Ustun
+    given-names: Berk
+    affiliation: "UC San Diego, CSE"
+keywords:
+  - Concept Bottleneck Models
+  - Safety
+  - Interpretability
+  - Alignment
+  - Benchmarks

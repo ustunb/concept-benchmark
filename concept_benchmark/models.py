@@ -1,10 +1,27 @@
+from __future__ import annotations
+
+__all__ = [
+    "RobotClassifierCNN",
+    "RobotConceptClassifier",
+    "RobotViTConceptClassifier",
+    "JointConceptModel",
+    "SudokuValidatorCNN",
+    "GroupPoolingConceptSudokuCNN",
+    "ConceptDetector",
+    "FrontEndModel",
+    "ConceptBasedModel",
+]
+
+import copy
 import itertools
+import os
+import warnings
+from typing import Any, Callable, Dict, Optional, Tuple, Union
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import copy
-from typing import Any, Callable, Dict, Optional, Tuple, Union
 from sklearn.linear_model import LogisticRegression
 from tqdm import tqdm
 
@@ -193,7 +210,81 @@ class JointConceptModel(nn.Module):
         return self.head(features)
 
 
-class ConceptDetector(object):
+# ── Sudoku models ────────────────────────────────────────────────────
+
+
+class SudokuValidatorCNN(nn.Module):
+    """End-to-end DNN baseline for sudoku board validation."""
+
+    _NUM_DIGITS = 10
+
+    def __init__(self, embedding_dim=16, hidden_dim=128):
+        super(SudokuValidatorCNN, self).__init__()
+        self.embedding = nn.Linear(self._NUM_DIGITS, embedding_dim, bias=False)
+        self.conv1 = nn.Conv2d(embedding_dim, 64, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(128, 128, kernel_size=3, padding=1)
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.mlp = nn.Sequential(
+            nn.Linear(128, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(self, x):
+        x = F.one_hot(x.long(), self._NUM_DIGITS).float()
+        x = self.embedding(x)
+        x = x.permute(0, 2, 1).view(-1, x.size(2), 9, 9)
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        x = self.pool(x).view(x.size(0), -1)
+        x = self.mlp(x)
+        return torch.sigmoid(x)
+
+
+class GroupPoolingConceptSudokuCNN(nn.Module):
+    """Concept-based sudoku model using group pooling over rows/cols/blocks."""
+
+    _NUM_DIGITS = 10
+
+    def __init__(self, embedding_dim=16, hidden_dim=64):
+        super(GroupPoolingConceptSudokuCNN, self).__init__()
+        self.embedding = nn.Linear(self._NUM_DIGITS, embedding_dim, bias=False)
+        self.head = nn.Sequential(
+            nn.Linear(2 * embedding_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def _pool_groups(self, x, dim):
+        mean = x.mean(dim=dim)
+        maxv = x.amax(dim=dim)
+        return torch.cat([mean, maxv], dim=-1)
+
+    def forward(self, x):
+        x = F.one_hot(x.long(), self._NUM_DIGITS).float()
+        x = self.embedding(x)  # (N, 81, D)
+        x = x.view(x.size(0), 9, 9, -1)  # (N, 9, 9, D)
+
+        row_feats = self._pool_groups(x, dim=2)  # (N, 9, 2D)
+        col_feats = self._pool_groups(x, dim=1)  # (N, 9, 2D)
+
+        blocks = x.view(x.size(0), 3, 3, 3, 3, x.size(-1))
+        blocks = blocks.permute(0, 1, 3, 2, 4, 5).contiguous()
+        block_cells = blocks.view(x.size(0), 9, 9, x.size(-1))
+        block_feats = self._pool_groups(block_cells, dim=2)  # (N, 9, 2D)
+
+        row_logits = self.head(row_feats).squeeze(-1)
+        col_logits = self.head(col_feats).squeeze(-1)
+        block_logits = self.head(block_feats).squeeze(-1)
+
+        logits = torch.cat([row_logits, col_logits, block_logits], dim=1)
+        return logits
+
+
+class ConceptDetector:
     """Concept detector with optional calibration and pluggable trainer."""
 
     def __init__(
@@ -572,7 +663,7 @@ class ConceptDetector(object):
         self.model.cpu()
 
         if calibrate:
-            self.calibrate(valid_dataset, embed_params=embed_params)
+            self.calibrate(valid_dataset)
         else:
             self.calibration_params = None
 
@@ -706,7 +797,7 @@ class ConceptDetector(object):
         return 1.0 / (1.0 + np.exp(-logits))
 
 
-class FrontEndModel(object):
+class FrontEndModel:
     def __init__(self, **kwargs) -> None:
         """
         Initialize the front-end model.
@@ -723,9 +814,7 @@ class FrontEndModel(object):
             "random_state": 42,
             "max_iter": 1000,
             "solver": "lbfgs",
-            "penalty": "l2",
             "C": 1.0,
-            "n_jobs": -1,
         }
 
         if fit_params:
@@ -758,9 +847,8 @@ class FrontEndModel(object):
         return self.model.predict_proba(C)
 
 
-# Consider inheriting BaseEstimator and ClassifierMixin?
-# TODO: add monte carlo sampling propagation
-class ConceptBasedModel(object):
+# Future: add monte carlo sampling propagation
+class ConceptBasedModel:
     """
     A model that uses concept-based predictions.
     """
@@ -887,13 +975,35 @@ class ConceptBasedModel(object):
 
         C_train = train_dataset.C  # independent training
         y_train = train_dataset.y
+        missing_enabled = bool(getattr(train_dataset, "concept_missing", False))
+        missing_mask = getattr(train_dataset, "concept_missing_mask", None)
+        if missing_enabled:
+            if missing_mask is None:
+                fill_value = getattr(train_dataset, "concept_missing_fill_value", np.nan)
+                if isinstance(fill_value, float) and np.isnan(fill_value):
+                    missing_mask = np.isnan(C_train)
+                else:
+                    missing_mask = np.isclose(C_train, fill_value)
+            observed_rows = ~missing_mask.any(axis=1)
+            if not np.all(observed_rows):
+                dropped = int((~observed_rows).sum())
+                warnings.warn(
+                    f"Dropping {dropped} samples with missing concepts for front-end training.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            if not np.any(observed_rows):
+                raise ValueError("No fully-observed concept rows available for front-end training.")
+            C_train = C_train[observed_rows]
+            y_train = y_train[observed_rows]
+
         self.front_end_model.fit(C_train, y_train, fit_params=front_fit_params)
 
         if self.propagate:
             # Only prepare exact propagation tables if we'll use exact mode
             try:
                 n_concepts = self.concept_detector.n_concepts
-            except Exception:
+            except AttributeError:
                 n_concepts = None
             if n_concepts is not None and self._should_use_exact(n_concepts):
                 self._prep_propagation()
@@ -949,9 +1059,7 @@ class ConceptBasedModel(object):
         """
         Predict probabilities using concept propagation.
         """
-        print("Using concept propagation...")
         if self._concept_poss is None or self._y_proba_all_concepts is None:
-            print("Preparing for propagation...")
             self._prep_propagation()
 
         # Vectorized propagation over all samples and concept combinations
@@ -1002,7 +1110,6 @@ class ConceptBasedModel(object):
         Monte Carlo propagation: approximate E_y[ y | concept probabilities ]
         by sampling concept vectors and averaging front-end predictions.
         """
-        print("Using MC concept propagation...")
         P = np.asarray(concept_preds, dtype=np.float64)
         P = np.clip(P, 1e-9, 1.0 - 1e-9)
         N, C = P.shape
@@ -1021,6 +1128,7 @@ class ConceptBasedModel(object):
         max_samples = max(target_samples, self._mc_max_samples)
         chunk_size = max(1, self._mc_chunk_size)
 
+        pbar = tqdm(total=N, desc="MC concept propagation", unit="samples")
         while True:
             active_idx = np.where(~done)[0]
             if active_idx.size == 0:
@@ -1044,8 +1152,8 @@ class ConceptBasedModel(object):
                 uniq, inv = np.unique(Z_flat, axis=0, return_inverse=True)
                 y_uniq = self.front_end_model.predict_proba(uniq)
                 Y_flat = y_uniq[inv]
-            except Exception:
-                # Fallback without deduplication
+            except (TypeError, ValueError):
+                # Fallback without deduplication (e.g. non-sortable dtypes)
                 Y_flat = self.front_end_model.predict_proba(Z_flat)
 
             # Reshape back to (A, s, K)
@@ -1072,14 +1180,21 @@ class ConceptBasedModel(object):
             # This can be swapped out for other strategies if needed.
             se_agg = np.max(se, axis=1)
             conv_mask = (se_agg <= self._mc_tol) & (counts[active_idx] >= target_samples)
-            done[active_idx[conv_mask]] = True
+            newly_done = active_idx[conv_mask]
+            done[newly_done] = True
+            pbar.update(len(newly_done))
 
             # Also stop if everyone has at least target_samples and we've hit that
             if np.all(counts >= target_samples) and done.all():
                 break
 
             # If some have reached max_samples after this update, mark done
-            done |= counts >= max_samples
+            newly_maxed = ~done & (counts >= max_samples)
+            pbar.update(int(newly_maxed.sum()))
+            done |= newly_maxed
+
+        pbar.update(N - pbar.n)  # ensure bar reaches 100%
+        pbar.close()
 
         # Final means as output
         if sum_acc is None:

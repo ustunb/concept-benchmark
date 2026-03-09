@@ -16,7 +16,6 @@ from tqdm import tqdm
 from .robot_draw import (
     ALL_ROBOT_FEATURES,
     COLOR_SCHEMES,
-    ROBOT_TYPES,
     draw_robot,
     blur_parts,
 )
@@ -55,55 +54,28 @@ def collapse_robot_subtypes(
     collapses feature values with subtypes into feature_types
     """
     df_feature_names = [k for k in df.columns if k in robot_features]
-    separate = lambda x: pd.Series(str(x).split(subtype_separator))
     new_features = {}
     for name in df_feature_names:
-        sf = df[name].apply(separate)
-        if sf.shape[1] == 2:  # has subtypes
-            df[name] = sf.loc[:, 0].values
-            df[name + "_subtype"] = sf.loc[:, 1].values
-            if collapse_as_new_feature:
-                # create as many new features as there are subtypes per type
-                subtype_values = sf.loc[:, 1].unique()
-                types = sf.loc[:, 0].unique()
+        # Vectorized split instead of per-row apply
+        str_vals = df[name].astype(str)
+        split_df = str_vals.str.split(subtype_separator, n=1, expand=True)
+        if split_df.shape[1] == 2:  # has subtypes
+            types_col = split_df[0].values
+            subtypes_col = split_df[1].values
+            df[name] = types_col
+            df[name + "_subtype"] = subtypes_col
+            if collapse_as_new_feature and f"{name}_subtype" in collapse_as_new_feature:
+                subtype_values = pd.Series(subtypes_col).unique()
+                types = pd.Series(types_col).unique()
                 for t in types:
-                    if f"{name}_subtype" in collapse_as_new_feature:
-                        for sv in subtype_values:
-                            new_feature_name = f"{name}_{t}_{sv}"
-                            print(f"Creating new feature {new_feature_name}")
-                            if new_feature_name not in df.columns:
-                                df[new_feature_name] = False
-                                new_features[new_feature_name] = [False, True]
-                            df.loc[df[name] == t, new_feature_name] = (sf.loc[:, 1] == sv) & (sf.loc[:, 0] == t) # this call ensures that you only get True if the type matches
-                            df[new_feature_name] = df[new_feature_name].astype(str)
-            try:
-                sf.loc[:, 0].empty or sf.loc[:, 1].empty is False
-            except:
-                Exception()
+                    type_mask = types_col == t
+                    for sv in subtype_values:
+                        new_feature_name = f"{name}_{t}_{sv}"
+                        if new_feature_name not in df.columns:
+                            new_features[new_feature_name] = [False, True]
+                        df[new_feature_name] = ((subtypes_col == sv) & type_mask).astype(str)
     return df, new_features
 
-
-def add_irrelevant_feature(df, feature_name="has_elbows", values=[True, False]):
-    """
-    :param df:
-    :param feature_name:
-    :param values:
-    :return:
-    """
-
-    raise NotImplementedError()
-    # todo berk: only implement this if you have a way of ensuring that the feature does not change
-    assert isinstance(df, pd.DataFrame)
-    assert isinstance(feature_name, str) and len(feature_name) >= 1
-    assert feature_name not in df.columns
-    df[feature_name] = values[0]
-    df_list = [df]
-    for v in values[1:]:
-        df_new = df.copy()
-        df_new[feature_name] = v
-        df_list.append(df)
-
-    return pd.concat(df_list)
 
 def convert_to_grayscale(image_path):
     """Convert saved image to grayscale"""
@@ -158,7 +130,7 @@ def generate_robot_catalog(
         df=catalog_df, robot_features=list(concepts.keys()),
         collapse_as_new_feature=additional_features or [],
     )
-    print(f"After collapse: {new_features}")
+    # new_features dict now contains any subconcept columns created
 
     constant_cols = [
         col
@@ -172,22 +144,22 @@ def generate_robot_catalog(
     output_path = Path(output_directory)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # delete old image files if they exist
-    if draw:
-        for file in output_path.glob("robot_[0-9][0-9][0-9].*"):
-            file.unlink()
-
-        if verbose:
-            print(f"Generating {len(catalog_df)} robot images...")
     png_filenames = []
+    n_skipped = 0
+    n_generated = 0
 
     color_lefts, color_rights = [], []
-    for k, features in tqdm(init_catalog_df.iterrows(), total=len(catalog_df)):
+    for k, features in tqdm(
+        init_catalog_df.iterrows(),
+        total=len(catalog_df),
+        desc="Drawing robots" if draw else "Building catalog",
+        disable=not draw,
+    ):
         png_filename = f"robot_{k:03d}.png"
 
         png_file = output_path / png_filename
 
-        if draw:
+        if draw and not png_file.exists():
             # Generate robot images
             png_robot = draw_robot(
                 filetype="png",
@@ -220,6 +192,9 @@ def generate_robot_catalog(
 
             if color_mode in ["grayscale", "greyscale"]:
                 convert_to_grayscale(str(png_file))
+            n_generated += 1
+        elif draw:
+            n_skipped += 1
 
         png_filenames.append(png_filename)
         color_scheme_id = np.mod(
@@ -228,6 +203,9 @@ def generate_robot_catalog(
         color_left, color_right = COLOR_SCHEMES[color_scheme_id]
         color_lefts.append(color_left)
         color_rights.append(color_right)
+
+    if draw and verbose:
+        print(f"Images: {n_generated} generated, {n_skipped} skipped (already existed)")
 
     # Add filename columns
     catalog_df["png_filename"] = png_filenames
