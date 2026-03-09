@@ -74,6 +74,8 @@ jobs:
         run: uv sync --locked --all-extras --dev
 
       - name: Patch pero invalid escape sequences (upstream bug)
+        env:
+          PYTHONWARNINGS: default
         run: |
           PERO_DIR=$(uv run python -c "import pero, os; print(os.path.dirname(pero.__file__))")
           find "$PERO_DIR" -name '*.py' -exec sed -i 's/re\.compile("/re.compile(r"/g' {} +
