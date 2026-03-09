@@ -6,13 +6,11 @@ training. NOT marked slow — expected wall time ~3s total.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.models import (
     ConceptBasedModel,
     ConceptDetector,
-    FrontEndModel,
 )
 
 

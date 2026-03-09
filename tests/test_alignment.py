@@ -1,8 +1,6 @@
 """Tests for concept_benchmark.alignment module."""
 from __future__ import annotations
 
-import copy
-
 import numpy as np
 import pytest
 

@@ -137,7 +137,7 @@ class TestYAMLSecretExclusion:
         # The exact key "llm_api_key:" should not be a YAML key
         # (llm_api_key_env is fine — it's not the secret)
         lines = content.splitlines()
-        yaml_keys = [l.split(":")[0].strip() for l in lines if ":" in l]
+        yaml_keys = [line.split(":")[0].strip() for line in lines if ":" in line]
         assert "llm_api_key" not in yaml_keys
 
     def test_robot_text_yaml_excludes_llm_api_key(self, tmp_path):
@@ -146,7 +146,7 @@ class TestYAMLSecretExclusion:
         cfg.to_yaml(path)
         content = path.read_text()
         lines = content.splitlines()
-        yaml_keys = [l.split(":")[0].strip() for l in lines if ":" in l]
+        yaml_keys = [line.split(":")[0].strip() for line in lines if ":" in line]
         assert "llm_api_key" not in yaml_keys
 
     def test_sudoku_yaml_includes_all_fields(self, tmp_path):

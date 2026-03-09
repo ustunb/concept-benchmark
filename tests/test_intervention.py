@@ -13,7 +13,6 @@ from concept_benchmark.intervention import (
     OrderedCBMStrategy,
     RandomInterventionStrategy,
     ScoreIntervention,
-    StrategyProposal,
 )
 
 
@@ -30,7 +29,7 @@ def _make_batch(n=10, k=4, *, seed=0):
 
 def _make_cbm(k=4, seed=42):
     """Build a tiny trained ConceptBasedModel on random tabular data."""
-    from concept_benchmark.models import ConceptBasedModel, ConceptDetector, FrontEndModel
+    from concept_benchmark.models import ConceptBasedModel, FrontEndModel
 
     fe = FrontEndModel()
     rng = np.random.default_rng(seed)
