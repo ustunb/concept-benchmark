@@ -1,4 +1,5 @@
 """Tests for concept_benchmark.intervention module."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -17,6 +18,7 @@ from concept_benchmark.intervention import (
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
 
 def _make_batch(n=10, k=4, *, seed=0):
     """Create a tiny InterventionBatch with random data."""
@@ -40,6 +42,7 @@ def _make_cbm(k=4, seed=42):
 
 
 # ── InterventionConfig ───────────────────────────────────────────────
+
 
 class TestInterventionConfig:
     def test_default_values(self):
@@ -85,6 +88,7 @@ class TestInterventionConfig:
 
 # ── InterventionBatch ────────────────────────────────────────────────
 
+
 class TestInterventionBatch:
     def test_shape_validation(self):
         with pytest.raises(ValueError, match="identical shape"):
@@ -114,6 +118,7 @@ class TestInterventionBatch:
 
 # ── OrderedCBMStrategy ───────────────────────────────────────────────
 
+
 class TestOrderedCBMStrategy:
     def test_propose_shape(self):
         k = 4
@@ -139,6 +144,7 @@ class TestOrderedCBMStrategy:
 
 
 # ── RandomInterventionStrategy ───────────────────────────────────────
+
 
 class TestRandomInterventionStrategy:
     def test_valid_mask(self):
@@ -166,6 +172,7 @@ class TestRandomInterventionStrategy:
 
 # ── ConceptualSafeguardsStrategy ─────────────────────────────────────
 
+
 class TestConceptualSafeguardsStrategy:
     def test_requires_tau(self):
         k = 4
@@ -181,17 +188,22 @@ class TestConceptualSafeguardsStrategy:
         model = _make_cbm(k=k)
         # Make predictions very confident (all 0 or 1)
         batch = InterventionBatch(
-            C_pred=np.round(np.random.default_rng(0).random((10, k))).astype(np.float32),
+            C_pred=np.round(np.random.default_rng(0).random((10, k))).astype(
+                np.float32
+            ),
             C_true=np.ones((10, k), dtype=np.float32),
             y_true=np.zeros(10, dtype=np.int32),
         )
-        config = InterventionConfig(tau=0.3, max_concepts_per_instance=2, random_state=0)
+        config = InterventionConfig(
+            tau=0.3, max_concepts_per_instance=2, random_state=0
+        )
         strat = ConceptualSafeguardsStrategy()
         proposal = strat.propose(model, batch, config)
         assert proposal.mask.shape == (10, k)
 
 
 # ── ScoreIntervention ────────────────────────────────────────────────
+
 
 class TestScoreIntervention:
     def test_propose_shape(self):
@@ -212,6 +224,7 @@ class TestScoreIntervention:
 
 
 # ── ConceptInterventionRunner ────────────────────────────────────────
+
 
 class TestRunner:
     def _make_runner_data(self, n=20, k=4, seed=42):

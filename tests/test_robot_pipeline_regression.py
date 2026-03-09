@@ -4,6 +4,7 @@ These tests load saved artifacts (datasets, models, results CSVs) and
 verify that key metrics match the expected values from the paper.
 They serve as a safety net during refactoring.
 """
+
 import pandas as pd
 import pytest
 
@@ -41,6 +42,7 @@ def device():
 
 # ── Dataset shape checks ──────────────────────────────────────────────
 
+
 class TestDatasetShape:
     def test_ideal_dataset_has_training_split(self, dataset):
         assert hasattr(dataset, "training")
@@ -57,6 +59,7 @@ class TestDatasetShape:
 
 # ── CBM accuracy ──────────────────────────────────────────────────────
 
+
 class TestCBMAccuracy:
     def test_ideal_cbm_accuracy(self, ideal_config):
         cbm = load(ideal_config.get_model_path("cbm"))
@@ -66,6 +69,7 @@ class TestCBMAccuracy:
 
 
 # ── DNN accuracy ──────────────────────────────────────────────────────
+
 
 class TestDNNAccuracy:
     def test_ideal_dnn_accuracy(self, ideal_config, dataset, device):
@@ -80,6 +84,7 @@ class TestDNNAccuracy:
 
 # ── Results CSV spot-checks ───────────────────────────────────────────
 
+
 class TestResultsCSV:
     @pytest.fixture(scope="class")
     def results_df(self):
@@ -90,8 +95,7 @@ class TestResultsCSV:
 
     def test_dnn_accuracy_in_csv(self, results_df):
         row = results_df[
-            (results_df["model"] == "dnn")
-            & (results_df["dataset"] == "ideal")
+            (results_df["model"] == "dnn") & (results_df["dataset"] == "ideal")
         ]
         assert len(row) == 1
         assert abs(row.iloc[0]["accuracy"] - 0.8746) < 0.001
@@ -163,6 +167,7 @@ class TestResultsCSV:
 
 # ── Intervention results CSV (per-variant) ────────────────────────────
 
+
 class TestInterventionCSV:
     @pytest.fixture(scope="class")
     def ideal_interv_df(self):
@@ -192,10 +197,12 @@ class TestInterventionCSV:
 
 # ── Alignment regression tests ─────────────────────────────────────
 
+
 class TestAlignment:
     @pytest.fixture(scope="class")
     def ideal_alignment(self):
         import json
+
         path = results_dir / "robot_image_stochastic_ideal_alignment.json"
         if not path.exists():
             pytest.skip("Ideal alignment results not found")
@@ -205,6 +212,7 @@ class TestAlignment:
     @pytest.fixture(scope="class")
     def subconcept_alignment(self):
         import json
+
         path = results_dir / "robot_image_stochastic_subconcept_alignment.json"
         if not path.exists():
             pytest.skip("Subconcept alignment results not found")

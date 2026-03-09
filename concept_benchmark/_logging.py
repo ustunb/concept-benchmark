@@ -3,6 +3,7 @@
 Default format matches the previous print() output so that users see
 identical messages at INFO level.
 """
+
 from __future__ import annotations
 
 import logging

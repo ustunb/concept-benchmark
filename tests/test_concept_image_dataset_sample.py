@@ -27,7 +27,7 @@ def test_transform_to_tensor_and_loader_batching(img_small):
         arr = np.asarray(img, dtype=np.float32) / 255.0
         if arr.ndim == 2:  # grayscale -> [1,H,W]
             arr = arr[None, ...]
-        else:              # HWC->CHW
+        else:  # HWC->CHW
             arr = arr.transpose(2, 0, 1)
         return torch.from_numpy(arr)
 
@@ -58,6 +58,7 @@ def test_missing_image_warns_and_returns_path(img_with_missing):
     with pytest.warns(RuntimeWarning, match="cannot open image, returning path"):
         image, c, y = s[idx_missing]
     from pathlib import Path as _P
+
     assert isinstance(image, (str, _P))
     assert isinstance(c, torch.Tensor) and isinstance(y, torch.Tensor)
 
@@ -66,11 +67,19 @@ def test_equality_checks_base_dir(img_small, tmp_path):
     base1 = tmp_path / "a"
     base2 = tmp_path / "b"
     s1 = ConceptImageDatasetSample(
-        parent=img_small, X=img_small.X, C=img_small.C, y=img_small.y,
-        meta=img_small._full.meta, base_dir=base1,
+        parent=img_small,
+        X=img_small.X,
+        C=img_small.C,
+        y=img_small.y,
+        meta=img_small._full.meta,
+        base_dir=base1,
     )
     s2 = ConceptImageDatasetSample(
-        parent=img_small, X=img_small.X, C=img_small.C, y=img_small.y,
-        meta=img_small._full.meta, base_dir=base2,
+        parent=img_small,
+        X=img_small.X,
+        C=img_small.C,
+        y=img_small.y,
+        meta=img_small._full.meta,
+        base_dir=base2,
     )
     assert s1 != s2  # base_dir differs

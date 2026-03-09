@@ -4,6 +4,7 @@ Generate an image Sudoku dataset plus OCR sidecar JSONL
 for the TinyResNet OCR pipeline. Also save a
 separate tabular ConceptDataset.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -178,14 +179,18 @@ def build_ocr_preprocessing(
       }
     """
     if image_transform_wrapper is None:
-        print("WARNING: build_ocr_preprocessing called without image_transform_wrapper; cannot build OCR JSON.")
+        print(
+            "WARNING: build_ocr_preprocessing called without image_transform_wrapper; cannot build OCR JSON."
+        )
         return
 
     boards_list = getattr(image_transform_wrapper, "boards", None)
     starters_list = getattr(image_transform_wrapper, "starters", None)
 
     if boards_list is None or starters_list is None:
-        print("WARNING: image_transform_wrapper is missing boards/starters; cannot build OCR JSON.")
+        print(
+            "WARNING: image_transform_wrapper is missing boards/starters; cannot build OCR JSON."
+        )
         return
 
     boards = np.asarray(boards_list)
@@ -193,12 +198,16 @@ def build_ocr_preprocessing(
     y = np.asarray(ds.y)
 
     if boards.ndim != 3:
-        print(f"WARNING: boards array has unexpected shape {boards.shape}; cannot build OCR JSON.")
+        print(
+            f"WARNING: boards array has unexpected shape {boards.shape}; cannot build OCR JSON."
+        )
         return
 
     num_samples, N1, N2 = boards.shape
     if N1 != N2:
-        print(f"WARNING: boards are not square: shape={boards.shape}; cannot build OCR JSON.")
+        print(
+            f"WARNING: boards are not square: shape={boards.shape}; cannot build OCR JSON."
+        )
         return
 
     if num_samples != len(y):
@@ -210,7 +219,9 @@ def build_ocr_preprocessing(
 
     N = N1
     if N != 9:
-        print(f"WARNING: expected 9x9 boards, got {N}x{N}; OCR JSON will not be generated.")
+        print(
+            f"WARNING: expected 9x9 boards, got {N}x{N}; OCR JSON will not be generated."
+        )
         return
 
     candidates = (1 - starters).astype(int)
@@ -227,8 +238,8 @@ def build_ocr_preprocessing(
 
             row = {
                 "img": img_name,
-                "starters": starters[i].tolist(),     # 9x9
-                "candidates": candidates[i].tolist(), # 9x9 = inverse of starters
+                "starters": starters[i].tolist(),  # 9x9
+                "candidates": candidates[i].tolist(),  # 9x9 = inverse of starters
                 "board": boards[i].astype(int).tolist(),  # 9x9
             }
             f.write(json.dumps(row) + "\n")
@@ -294,7 +305,9 @@ def ensure_digits_dir(args):
             x = (w - tw) // 2
             y = (h + th) // 2
 
-            cv2.putText(img, text, (x, y), font, font_scale, (0, 0, 0), thickness, cv2.LINE_AA)
+            cv2.putText(
+                img, text, (x, y), font, font_scale, (0, 0, 0), thickness, cv2.LINE_AA
+            )
 
             out_path = label_dir / f"{d}_{i:04d}.png"
             cv2.imwrite(str(out_path), img)
@@ -305,14 +318,18 @@ def ensure_digits_dir(args):
 # ---------------- main ----------------
 def main():
     defaults = SudokuBenchmarkConfig.default()
-    ap = argparse.ArgumentParser(description="Generate a Sudoku OCR dataset (images + sidecar).")
+    ap = argparse.ArgumentParser(
+        description="Generate a Sudoku OCR dataset (images + sidecar)."
+    )
     ap.add_argument("--n", type=int, default=defaults.n)
     ap.add_argument("--n-samples", type=int, default=defaults.n_samples)
     ap.add_argument("--valid-ratio", type=float, default=defaults.valid_ratio)
     ap.add_argument("--max-corrupt", type=int, default=defaults.max_corrupt)
     ap.add_argument("--seed", type=int, default=defaults.seed)
 
-    ap.add_argument("--progress", action="store_true", help="Show a progress bar during generation.")
+    ap.add_argument(
+        "--progress", action="store_true", help="Show a progress bar during generation."
+    )
 
     # image knobs (aligned with run_sudoku defaults)
     ap.add_argument("--cell-px", type=int, default=50)
@@ -328,14 +345,22 @@ def main():
     ap.add_argument("--angle", type=float, default=98)
 
     ap.add_argument("--digits-per-class", type=int, default=64)
-    ap.add_argument("--skip-digits", action="store_true", help="Skip creating data/sudoku/digits samples.")
-    ap.add_argument("--skip-image", action="store_true", help="Skip image dataset generation.")
+    ap.add_argument(
+        "--skip-digits",
+        action="store_true",
+        help="Skip creating data/sudoku/digits samples.",
+    )
+    ap.add_argument(
+        "--skip-image", action="store_true", help="Skip image dataset generation."
+    )
 
     args = ap.parse_args()
 
     cfg = SudokuBenchmarkConfig(
-        n=args.n, n_samples=args.n_samples,
-        max_corrupt=args.max_corrupt, seed=args.seed,
+        n=args.n,
+        n_samples=args.n_samples,
+        max_corrupt=args.max_corrupt,
+        seed=args.seed,
     )
     dataset_dir = cfg.get_dataset_path(data_type="image")
     dataset_name = dataset_dir.name
@@ -346,7 +371,11 @@ def main():
         ds = load_object(image_dataset_path)
         transform = None
         meta = getattr(ds, "meta", {})
-        transform_name = meta.get("transform", "image_transform") if isinstance(meta, dict) else "image_transform"
+        transform_name = (
+            meta.get("transform", "image_transform")
+            if isinstance(meta, dict)
+            else "image_transform"
+        )
     else:
         # wrap image_transform so we can capture boards/starters
         transform = make_image_transform(args)
@@ -395,8 +424,12 @@ def main():
 
     print("=== Dataset Summary ===")
     print(f"data_type: {meta_full.get('data_type')}")
-    print(f"N (board size): {meta_full.get('N')}  |  n (block size): {meta_full.get('n')}")
-    print(f"samples: {len(y)}  |  valid: {int((y == 1).sum())}  |  invalid: {int((y == 0).sum())}")
+    print(
+        f"N (board size): {meta_full.get('N')}  |  n (block size): {meta_full.get('n')}"
+    )
+    print(
+        f"samples: {len(y)}  |  valid: {int((y == 1).sum())}  |  invalid: {int((y == 0).sum())}"
+    )
     print(f"X shape: {shape_of(X)}")
     print(f"C shape: {C.shape}")
     print(f"y shape: {y.shape}")
@@ -439,8 +472,12 @@ def main():
 
     print("=== Tabular Dataset Summary ===")
     print(f"data_type: {tab_meta_full.get('data_type')}")
-    print(f"N (board size): {tab_meta_full.get('N')}  |  n (block size): {tab_meta_full.get('n')}")
-    print(f"samples: {len(tab_ds.y)}  |  valid: {int((tab_ds.y == 1).sum())}  |  invalid: {int((tab_ds.y == 0).sum())}")
+    print(
+        f"N (board size): {tab_meta_full.get('N')}  |  n (block size): {tab_meta_full.get('n')}"
+    )
+    print(
+        f"samples: {len(tab_ds.y)}  |  valid: {int((tab_ds.y == 1).sum())}  |  invalid: {int((tab_ds.y == 0).sum())}"
+    )
     print(f"X shape: {getattr(tab_ds.X, 'shape', '<unknown>')}")
     print(f"C shape: {getattr(tab_ds.C, 'shape', '<unknown>')}")
     print(f"y shape: {getattr(tab_ds.y, 'shape', '<unknown>')}")

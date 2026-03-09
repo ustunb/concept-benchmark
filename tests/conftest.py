@@ -13,7 +13,9 @@ from concept_benchmark.data import ConceptDataset
 
 
 def pytest_addoption(parser):
-    parser.addoption("--run-slow", action="store_true", default=False, help="Run slow tests")
+    parser.addoption(
+        "--run-slow", action="store_true", default=False, help="Run slow tests"
+    )
 
 
 def pytest_configure(config):
@@ -62,13 +64,13 @@ def make_tabular_arrays(
     C = (np.random.rand(n, k) < concept_density).astype(np.int8)
 
     if class_balance == "balanced":
-      reps = int(np.ceil(n / n_classes))
-      y = np.arange(n_classes, dtype=np.int32).repeat(reps)[:n]
-      rng = np.random.default_rng(202)
-      rng.shuffle(y)
-      y = y.astype(np.int32)
+        reps = int(np.ceil(n / n_classes))
+        y = np.arange(n_classes, dtype=np.int32).repeat(reps)[:n]
+        rng = np.random.default_rng(202)
+        rng.shuffle(y)
+        y = y.astype(np.int32)
     else:
-      y = np.random.randint(0, n_classes, size=n).astype(np.int32)
+        y = np.random.randint(0, n_classes, size=n).astype(np.int32)
 
     meta = {
         "classes": [f"c{i}" for i in range(n_classes)],
@@ -153,6 +155,7 @@ def make_tabular_dataset(
 # Image dataset factories
 # -----------------------------
 
+
 def _write_synthetic_images(
     root: Path,
     n: int,
@@ -179,7 +182,9 @@ def _write_synthetic_images(
         arr = (np.arange(w * h).reshape(h, w) + (i * 7)) % 256
         if mode == "RGB":
             # Stack into 3 channels
-            img_arr = np.stack([arr, np.roll(arr, 1, axis=0), np.roll(arr, 1, axis=1)], axis=-1).astype(np.uint8)
+            img_arr = np.stack(
+                [arr, np.roll(arr, 1, axis=0), np.roll(arr, 1, axis=1)], axis=-1
+            ).astype(np.uint8)
         else:
             img_arr = arr.astype(np.uint8)
         img = Image.fromarray(img_arr)
@@ -187,6 +192,7 @@ def _write_synthetic_images(
         img.save(p)
         paths.append(str(p))
     return paths
+
 
 def make_image_arrays(
     n: int,
@@ -246,6 +252,7 @@ def make_image_arrays(
     }
     return X_paths, C, y, meta
 
+
 def make_image_dataset(
     n: int,
     k: int,
@@ -296,6 +303,7 @@ def make_image_dataset(
 
 # Reusable pytest fixtures
 
+
 @pytest.fixture
 def tab_small() -> ConceptDataset:
     """Tiny balanced dataset: n=12, d=3, k=4, classes=2."""
@@ -333,6 +341,7 @@ def img_small(tmp_path: Path) -> ConceptDataset:
     )
     return ds
 
+
 @pytest.fixture
 def img_small_cv(tmp_path: Path) -> Tuple[ConceptDataset, str]:
     """Tiny image dataset with CV indices and a valid fold_id."""
@@ -349,6 +358,7 @@ def img_small_cv(tmp_path: Path) -> Tuple[ConceptDataset, str]:
     fold_id = next(iter(cv.keys()))
     return ds, fold_id
 
+
 @pytest.fixture
 def img_with_missing(tmp_path: Path) -> ConceptDataset:
     """Image dataset that includes one nonexistent path to hit error branches."""
@@ -360,6 +370,7 @@ def img_with_missing(tmp_path: Path) -> ConceptDataset:
         add_missing=True,
     )
     return ds
+
 
 @pytest.fixture
 def tabular_train_valid() -> tuple:

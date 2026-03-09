@@ -64,10 +64,10 @@ class KFlipInterventionStrategy(InterventionStrategy):
 
         # concept probabilities and baseline concept vectors
         P = np.clip(batch.C_pred.astype(np.float64), 1e-9, 1.0 - 1e-9)  # (N,C)
-        base_Z = (P >= 0.5).astype(np.float32)                           # 'hard' mode
+        base_Z = (P >= 0.5).astype(np.float32)  # 'hard' mode
 
         # baseline labels
-        base_probs = model.front_end_model.predict_proba(base_Z)         # (N,K)
+        base_probs = model.front_end_model.predict_proba(base_Z)  # (N,K)
         base_lbl = base_probs.argmax(axis=1)
         n_classes = int(base_probs.shape[1])
 
@@ -76,12 +76,16 @@ class KFlipInterventionStrategy(InterventionStrategy):
             all_subsets = list(itertools.combinations(range(n_concepts), k))
         else:
             all_subsets = []
-            for j in range(1, k+1):
+            for j in range(1, k + 1):
                 all_subsets.extend(itertools.combinations(range(n_concepts), j))
         if self.limit_subsets is not None and self.limit_subsets < len(all_subsets):
             # simple heuristic: closeness to 0.5 weighted by |coef|
             try:
-                coef = getattr(getattr(model.front_end_model, "model", model.front_end_model), "coef_", None)
+                coef = getattr(
+                    getattr(model.front_end_model, "model", model.front_end_model),
+                    "coef_",
+                    None,
+                )
                 if coef is None:
                     w = np.ones((1, n_concepts), dtype=np.float32)
                 else:
@@ -100,7 +104,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
 
             # Take top scoring subsets
             subset_scores.sort(key=lambda x: x[0], reverse=True)
-            all_subsets = [subset for _, subset in subset_scores[:self.limit_subsets]]
+            all_subsets = [subset for _, subset in subset_scores[: self.limit_subsets]]
 
         flip_prob = np.zeros(n_samples, dtype=np.float64)
         best_subset: List[Tuple[int, ...]] = [tuple() for _ in range(n_samples)]
@@ -119,8 +123,10 @@ class KFlipInterventionStrategy(InterventionStrategy):
             _lr = getattr(model.front_end_model, "model", model.front_end_model)
             _coef = getattr(_lr, "coef_", None)
             _inter = getattr(_lr, "intercept_", None)
-            if _coef is not None and _inter is not None and getattr(
-                model.front_end_model, "_kflip_fast_path", True
+            if (
+                _coef is not None
+                and _inter is not None
+                and getattr(model.front_end_model, "_kflip_fast_path", True)
             ):
                 _coef = np.asarray(_coef)
                 if _coef.shape[0] == 1:  # binary classification
@@ -164,7 +170,9 @@ class KFlipInterventionStrategy(InterventionStrategy):
                 # Probability weights: P(assignment | concept probs)
                 pS = P[:, subset_arr]  # (N, ss)
                 w_assign = np.prod(
-                    np.where(assign[None, :, :] == 1.0, pS[:, None, :], 1.0 - pS[:, None, :]),
+                    np.where(
+                        assign[None, :, :] == 1.0, pS[:, None, :], 1.0 - pS[:, None, :]
+                    ),
                     axis=2,
                 )  # (N, A)
 
@@ -204,23 +212,29 @@ class KFlipInterventionStrategy(InterventionStrategy):
                 for s in range(0, n_samples, samples_per_chunk):
                     m = min(samples_per_chunk, n_samples - s)
 
-                    pS = P[s: s + m][:, subset]  # (m, subset_size)
+                    pS = P[s : s + m][:, subset]  # (m, subset_size)
                     w_assign = np.prod(
-                        np.where(assign[None, :, :] == 1.0, pS[:, None, :], 1.0 - pS[:, None, :]),
+                        np.where(
+                            assign[None, :, :] == 1.0,
+                            pS[:, None, :],
+                            1.0 - pS[:, None, :],
+                        ),
                         axis=2,
                     )  # (m, A)
 
-                    Z_chunk = np.repeat(base_Z[s: s + m], A, axis=0)  # (m*A, C)
+                    Z_chunk = np.repeat(base_Z[s : s + m], A, axis=0)  # (m*A, C)
                     AS = np.tile(assign, (m, 1))  # (m*A, subset_size)
                     Z_chunk[:, subset] = AS
 
-                    Y = model.front_end_model.predict_proba(Z_chunk)    # (m*A, j)
-                    Y_lbl = Y.argmax(axis=1).reshape(m, A)              # (m, A)
+                    Y = model.front_end_model.predict_proba(Z_chunk)  # (m*A, j)
+                    Y_lbl = Y.argmax(axis=1).reshape(m, A)  # (m, A)
 
-                    flip_mask = (Y_lbl != base_lbl[s : s + m][:, None])  # (m, A)
-                    mass = (w_assign * flip_mask).sum(axis=1)            # (m,)
+                    flip_mask = Y_lbl != base_lbl[s : s + m][:, None]  # (m, A)
+                    mass = (w_assign * flip_mask).sum(axis=1)  # (m,)
 
-                    cls_mass = (Y.reshape(m, A, n_classes) * (w_assign * flip_mask)[:, :, None]).sum(axis=1)
+                    cls_mass = (
+                        Y.reshape(m, A, n_classes) * (w_assign * flip_mask)[:, :, None]
+                    ).sum(axis=1)
                     lbl_star = cls_mass.argmax(axis=1)
 
                     cur = flip_prob[s : s + m]
@@ -229,7 +243,9 @@ class KFlipInterventionStrategy(InterventionStrategy):
                         flip_prob[s : s + m][improve] = mass[improve]
                         best_label[s : s + m][improve] = lbl_star[improve]
                         for rel in np.nonzero(improve)[0]:
-                            best_subset[s + rel] = tuple(int(x) for x in subset.tolist())
+                            best_subset[s + rel] = tuple(
+                                int(x) for x in subset.tolist()
+                            )
 
         # candidate instances: exceed threshold (+ optional abstention filter)
         y_prob_now = base_probs

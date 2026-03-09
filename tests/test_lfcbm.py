@@ -1,4 +1,5 @@
 """Tests for concept_benchmark.lfcbm module (file parsing, pickle)."""
+
 from __future__ import annotations
 
 import json
@@ -11,6 +12,7 @@ from concept_benchmark.lfcbm import LFConceptSet, LFTrainingConfig, LabelFreeCBM
 
 
 # ── LFConceptSet.from_file ───────────────────────────────────────────
+
 
 class TestLFConceptSetParsing:
     def test_jsonl_parsing(self, tmp_path):
@@ -107,6 +109,7 @@ class TestLFConceptSetInit:
 
 # ── LabelFreeCBM pickle ─────────────────────────────────────────────
 
+
 class TestLabelFreeCBMPickle:
     def test_pickle_round_trip(self):
         cfg = LFTrainingConfig(device="cpu")
@@ -120,7 +123,10 @@ class TestLabelFreeCBMPickle:
         cbm.scaler = StandardScaler()
         cbm.scaler.fit(np.random.default_rng(1).random((20, 5)))
         cbm.classifier = LogisticRegression()
-        cbm.classifier.fit(np.random.default_rng(2).random((20, 5)), np.random.default_rng(2).integers(0, 2, 20))
+        cbm.classifier.fit(
+            np.random.default_rng(2).random((20, 5)),
+            np.random.default_rng(2).integers(0, 2, 20),
+        )
 
         data = pickle.dumps(cbm)
         restored = pickle.loads(data)

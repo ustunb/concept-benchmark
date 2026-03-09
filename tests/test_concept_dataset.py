@@ -26,6 +26,7 @@ def test_constructor_tabular_basics(tab_small):
     assert ds.training.n == ds.n and ds.validation.n == 0 and ds.test.n == 0
     repr(ds)  # smoke
 
+
 def test_copy_equality_and_independence(tab_small):
     ds = tab_small
     cpy = ds.__copy__()
@@ -53,6 +54,7 @@ def test_set_cvindices_and_split(tab_small_cv):
     assert tr.isdisjoint(va) and tr.isdisjoint(te) and va.isdisjoint(te)
     assert len(tr | va | te) == n
 
+
 def test_split_rejects_same_fold(tab_small_cv):
     ds, fid = tab_small_cv
     with pytest.raises(AssertionError):
@@ -66,6 +68,7 @@ def test_equality_changes_with_meta_change(tab_small):
     cpy._full.meta = dict(cpy._full.meta)
     cpy._full.meta["classes"] = cpy._full.meta["classes"] + ["extra"]
     assert cpy != ds
+
 
 def test_equality_changes_with_cvindices_change(tab_small_cv):
     ds, fid = tab_small_cv
@@ -84,8 +87,16 @@ def test_embed_updates_full_and_preserves_splits(tab_medium_cv):
     model = MeanEmbedder()
     embed_ds = ds.embed(model, batch_size=4, shuffle=False, device="cpu", num_workers=0)
     assert ds._full.meta.get("data_type") == "tabular"
-    assert (embed_ds.training.n, embed_ds.validation.n, embed_ds.test.n) == (n_tr, n_va, n_te)
-    assert isinstance(embed_ds.X, np.ndarray) and embed_ds.X.ndim == 2 and embed_ds.X.shape[1] == 2
+    assert (embed_ds.training.n, embed_ds.validation.n, embed_ds.test.n) == (
+        n_tr,
+        n_va,
+        n_te,
+    )
+    assert (
+        isinstance(embed_ds.X, np.ndarray)
+        and embed_ds.X.ndim == 2
+        and embed_ds.X.shape[1] == 2
+    )
 
 
 # ---------- Reset behavior ----------
@@ -142,9 +153,7 @@ def test_sample_concept_missingness_enable_toggle(tab_small_cv):
     assert masks["validation"].shape == ds.validation.base_concepts.shape
     assert masks["test"].shape == ds.test.base_concepts.shape
     assert np.all(ds.training.C[train_mask] == -1.0)
-    np.testing.assert_array_equal(
-        ds.training.C[~train_mask], original[~train_mask]
-    )
+    np.testing.assert_array_equal(ds.training.C[~train_mask], original[~train_mask])
     np.testing.assert_array_equal(ds.training.base_concepts, original)
     ds.concept_missing = False
     np.testing.assert_array_equal(ds.training.C, original)

@@ -4,6 +4,7 @@ Extracted from scripts/utils/lfcbm_text.py with module-level settings and
 argparse removed. All configuration is passed via the settings dict argument
 to LabelFreeDetector.
 """
+
 from __future__ import annotations
 
 import json
@@ -29,7 +30,11 @@ def _read_concepts(csv_path):
             break
     if name_key is None:
         name_key = df.columns[0]
-    aliases_key = cols_lower.get("aliases") or cols_lower.get("alias") or cols_lower.get("synonyms")
+    aliases_key = (
+        cols_lower.get("aliases")
+        or cols_lower.get("alias")
+        or cols_lower.get("synonyms")
+    )
     regex_key = cols_lower.get("regex") or cols_lower.get("pattern")
     names = []
     aliases = []
@@ -39,7 +44,11 @@ def _read_concepts(csv_path):
         n = str(raw).strip() if pd.notna(raw) else ""
         if not n:
             continue
-        if aliases_key is not None and aliases_key in r and isinstance(r[aliases_key], str):
+        if (
+            aliases_key is not None
+            and aliases_key in r
+            and isinstance(r[aliases_key], str)
+        ):
             a = [t.strip() for t in str(r[aliases_key]).split(";") if t.strip()]
         else:
             a = []
@@ -117,15 +126,21 @@ class _Encoder:
             return
         try:
             from sentence_transformers import SentenceTransformer
+
             self._backend = SentenceTransformer(self.model_name, device=self.device)
             self._is_st = True
         except Exception:
             from transformers import AutoTokenizer, AutoModel
             import torch
+
             self._tok = AutoTokenizer.from_pretrained(self.model_name)
             self._mod = AutoModel.from_pretrained(self.model_name)
             self._mod.eval()
-            self._device = torch.device(self.device) if self.device and self.device != "cpu" else torch.device("cpu")
+            self._device = (
+                torch.device(self.device)
+                if self.device and self.device != "cpu"
+                else torch.device("cpu")
+            )
             self._mod.to(self._device)
             self._is_st = False
 
@@ -133,16 +148,19 @@ class _Encoder:
         self._lazy()
         if self._is_st:
             return self._backend.encode(
-                list(texts), batch_size=batch_size,
-                show_progress_bar=False, convert_to_numpy=True,
+                list(texts),
+                batch_size=batch_size,
+                show_progress_bar=False,
+                convert_to_numpy=True,
             )
         import torch
+
         tok = self._tok
         mod = self._mod
         vs = []
         with torch.no_grad():
             for i in range(0, len(texts), batch_size):
-                chunk = texts[i:i + batch_size]
+                chunk = texts[i : i + batch_size]
                 enc = tok(chunk, padding=True, truncation=True, return_tensors="pt")
                 if self._device and self._device.type != "cpu":
                     enc = {k: v.to(self._device) for k, v in enc.items()}
@@ -199,7 +217,9 @@ class LabelFreeDetector:
 
     def _mix(self, H, texts):
         Z_cos = _cosine(H, self._E)
-        Z_lex = _lex_hits(texts, self.concept_names, self._concept_aliases, self._regex_compiled)
+        Z_lex = _lex_hits(
+            texts, self.concept_names, self._concept_aliases, self._regex_compiled
+        )
         a = float(self.settings["lf_alpha"])
         return a * Z_cos + (1.0 - a) * Z_lex
 
@@ -242,7 +262,7 @@ class LabelFreeDetector:
                 scores[g] = abs(float((zg * yb).mean()))
         k = int(self.settings["lf_keep_k"])
         order = np.argsort(-scores)
-        keep = order[:min(k, len(order))].tolist()
+        keep = order[: min(k, len(order))].tolist()
         self._keep_idx = keep
 
     def fit(self, train_texts, y=None):
@@ -266,7 +286,9 @@ class LabelFreeDetector:
         self._build_groups()
         self._rank_groups(Z0, y)
 
-        kept_groups = [self._groups[g] for g in (self._keep_idx or [])] if self._groups else []
+        kept_groups = (
+            [self._groups[g] for g in (self._keep_idx or [])] if self._groups else []
+        )
         if kept_groups:
             rep_idx = [grp[0] for grp in kept_groups]
             self.concept_names = [self.concept_names[i] for i in rep_idx]

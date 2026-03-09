@@ -65,7 +65,7 @@ def create_robot_text_dataset(
 ) -> ConceptDataset:
     if templates is None or text_mode == "structured":
         templates = text_helper.DEFAULT_TEMPLATES
-    templates = [re.sub(r'^[\uFEFF\u200B-\u200D]+', '', t) for t in templates]
+    templates = [re.sub(r"^[\uFEFF\u200B-\u200D]+", "", t) for t in templates]
     templates = [text_helper._rewrite_modifiers(t) for t in templates]
     rng = np.random.default_rng(rng_seed)
     mode = (text_mode or ("llm" if use_llm else "unstructured")).strip().lower()
@@ -79,9 +79,7 @@ def create_robot_text_dataset(
         concept_names = list(
             source.meta.get("concepts", [f"c{i}" for i in range(C.shape[1])])
         )
-        classes = list(
-            source.meta.get("classes", sorted(map(int, np.unique(y))))
-        )
+        classes = list(source.meta.get("classes", sorted(map(int, np.unique(y)))))
     else:
         if not isinstance(source, pd.DataFrame):
             raise TypeError("source must be ConceptDataset or pd.DataFrame")
@@ -93,7 +91,9 @@ def create_robot_text_dataset(
         C, concept_names = text_helper._binarize_concepts(df, concept_cols)
         y = text_helper._to_label(df[label_col].to_numpy(), label_map)
         if label_map is not None:
-            classes = [str(k) for k, v in sorted(label_map.items(), key=lambda kv: kv[1])]
+            classes = [
+                str(k) for k, v in sorted(label_map.items(), key=lambda kv: kv[1])
+            ]
         else:
             raw_uniqs = (
                 pd.Series(df[label_col]).astype(str).str.lower().unique().tolist()
@@ -105,26 +105,22 @@ def create_robot_text_dataset(
             )
 
     X, idxs = [], []
-    tbool = (
-        lambda v: (v.lower() in {"true", "t", "yes", "y", "1"})
-        if isinstance(v, str)
-        else bool(v)
+    tbool = lambda v: (
+        (v.lower() in {"true", "t", "yes", "y", "1"}) if isinstance(v, str) else bool(v)
     )
-    colorish = (
-        lambda d: (
-            "color"
-            if any(
-                c in d.columns
-                for c in (
-                    "color",
-                    "left_color",
-                    "right_color",
-                    "primary_color",
-                    "secondary_color",
-                )
+    colorish = lambda d: (
+        "color"
+        if any(
+            c in d.columns
+            for c in (
+                "color",
+                "left_color",
+                "right_color",
+                "primary_color",
+                "secondary_color",
             )
-            else "greyscale"
         )
+        else "greyscale"
     )
 
     def _colors_for_row(r):
@@ -294,11 +290,17 @@ def create_robot_image_dataset(
         raise ValueError("'concepts' dictionary must be provided and non-empty")
     model_features = extra_params.get("model_features", {})
     if not model and not model_features:
-        raise ValueError("Either 'model' expression or 'model_features' must be provided")
+        raise ValueError(
+            "Either 'model' expression or 'model_features' must be provided"
+        )
 
     num_combinations = int(np.prod([len(v) for v in concepts.values()]))
     total_robots = num_robots or num_combinations * samples_per_instance
-    eff_resolution = resolution if resolution is not None else (600 if size == "large" else 32 if size == "medium" else 8)
+    eff_resolution = (
+        resolution
+        if resolution is not None
+        else (600 if size == "large" else 32 if size == "medium" else 8)
+    )
     _ = (train_concept_detector, epochs)  # parameters accepted for API compatibility
 
     catalog_df, new_concepts = generate_robot_catalog(
@@ -336,10 +338,14 @@ def create_robot_image_dataset(
         if model_type == "deterministic":
             glorp_model_true = lambda row: eval(unlist0(model))
         elif model_type == "stochastic":
-            glorp_model_true = lambda row: eval(model_to_logistic(
-                model, scalar=extra_params.get("scalar", 1.0),
-                weights=extra_params.get('weights', {}),
-                intercept=extra_params.get("intercept", None)))
+            glorp_model_true = lambda row: eval(
+                model_to_logistic(
+                    model,
+                    scalar=extra_params.get("scalar", 1.0),
+                    weights=extra_params.get("weights", {}),
+                    intercept=extra_params.get("intercept", None),
+                )
+            )
         else:
             raise ValueError("Invalid model_type. Use 'deterministic' or 'stochastic'.")
     else:
@@ -374,7 +380,9 @@ def create_robot_image_dataset(
     pos_map = {}
     _binary_cache: dict[str, np.ndarray] = {}
     for feat in copy_features:
-        pos_val = list(dict.fromkeys([str(f).split("_")[0] for f in copy_features[feat]]))[1]
+        pos_val = list(
+            dict.fromkeys([str(f).split("_")[0] for f in copy_features[feat]])
+        )[1]
         pos_map[feat] = pos_val
         _binary_cache[feat] = (
             (catalog_df[feat].astype(str).str.split("_").str[0] == str(pos_val))
@@ -382,17 +390,19 @@ def create_robot_image_dataset(
             .to_numpy()
         )
 
-    UC = np.stack([_binary_cache[feat] for feat in copy_features], axis=1).astype(np.int8)
+    UC = np.stack([_binary_cache[feat] for feat in copy_features], axis=1).astype(
+        np.int8
+    )
 
     # C: Concept matrix — reuse cached binary columns
-    feature_names = [
-        feat for feat in catalog_df.columns if feat in copy_features
-    ]
+    feature_names = [feat for feat in catalog_df.columns if feat in copy_features]
     C_cols = []
     for feat in feature_names:
         col = _binary_cache[feat]
         if verbose:
-            print(f"Feature '{feat}': positive value '{pos_map[feat]}' -> column head {col.tolist()[:10]}")
+            print(
+                f"Feature '{feat}': positive value '{pos_map[feat]}' -> column head {col.tolist()[:10]}"
+            )
         C_cols.append(col)
     C = np.stack(C_cols, axis=1).astype(np.int8)
 
@@ -409,17 +419,20 @@ def create_robot_image_dataset(
             pos_val = pos_map.get(feat)
             meaning_df[feat] = C[:, i].astype(str)
             # AttributeError: 'numpy.ndarray' object has no attribute 'replace'
-            meaning_df[feat] = meaning_df[feat].replace({"1": pos_val, "0": f"not_{pos_val}"})
+            meaning_df[feat] = meaning_df[feat].replace(
+                {"1": pos_val, "0": f"not_{pos_val}"}
+            )
             # make the entry in the dataframe to be "numerical (categorical)"
             meaning_df[feat] = meaning_df[feat] + " (" + C[:, i].astype(str) + ")"
         meaning_df["label"] = pd.Series(y).replace({1: "glorp", 0: "drent"})
-        meaning_df["label"] = meaning_df["label"] + " (" + pd.Series(y).astype(str) + ")"
-        #print(meaning_df.to_string())
-
+        meaning_df["label"] = (
+            meaning_df["label"] + " (" + pd.Series(y).astype(str) + ")"
+        )
+        # print(meaning_df.to_string())
 
     # colors to string (colors don't play well with pickle)
-    catalog_df['color_left'] = catalog_df['color_left'].astype(str)
-    catalog_df['color_right'] = catalog_df['color_right'].astype(str)
+    catalog_df["color_left"] = catalog_df["color_left"].astype(str)
+    catalog_df["color_right"] = catalog_df["color_right"].astype(str)
 
     # Meta: metadata for ConceptDataset
     meta = {
@@ -449,6 +462,7 @@ def create_robot_image_dataset(
     )
 
     return robot_dataset
+
 
 # Sample kwargs:
 

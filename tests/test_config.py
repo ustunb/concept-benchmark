@@ -1,4 +1,5 @@
 """Tests for config validation."""
+
 from __future__ import annotations
 
 from dataclasses import fields
@@ -21,7 +22,9 @@ class TestRobotConfigValidation:
             RobotBenchmarkConfig(seed=-1)
 
     def test_rejects_negative_budget(self):
-        with pytest.raises(ValueError, match="intervention_budgets must be non-negative"):
+        with pytest.raises(
+            ValueError, match="intervention_budgets must be non-negative"
+        ):
             RobotBenchmarkConfig(intervention_budgets=[-2, 3])
 
     def test_rejects_unknown_regime(self):
@@ -34,7 +37,14 @@ class TestRobotConfigValidation:
 
     def test_accepts_all_valid_regimes(self):
         cfg = RobotBenchmarkConfig(
-            intervention_regimes=["baseline", "expert", "subjective", "machine", "llm", "clip"]
+            intervention_regimes=[
+                "baseline",
+                "expert",
+                "subjective",
+                "machine",
+                "llm",
+                "clip",
+            ]
         )
         assert len(cfg.intervention_regimes) == 6
 

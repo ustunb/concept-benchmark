@@ -30,7 +30,9 @@ def load_sidecars(jsonl_path: Path) -> List[Dict[str, Any]]:
     return recs
 
 
-def crop_cell(bgr: np.ndarray, r: int, c: int, *, cell_px: int = 50, margin_px: int = 2) -> np.ndarray:
+def crop_cell(
+    bgr: np.ndarray, r: int, c: int, *, cell_px: int = 50, margin_px: int = 2
+) -> np.ndarray:
     x0 = margin_px + c * cell_px
     y0 = margin_px + r * cell_px
     x1 = x0 + cell_px
@@ -83,7 +85,7 @@ class SudokuCellDataset(Dataset):
 
     def _dump_debug(self, max_debug: int):
         dumped = 0
-        for (img_path, r, c, label) in self.samples:
+        for img_path, r, c, label in self.samples:
             if dumped >= max_debug:
                 break
             bgr = cv2.imread(str(img_path))
@@ -95,7 +97,9 @@ class SudokuCellDataset(Dataset):
             outp = DEBUG_DIR / f"{img_path.stem}_r{r}_c{c}_d{label}.png"
             cv2.imwrite(str(outp), cell28_vis)
             dumped += 1
-        logging.getLogger("sudoku_ocr_demo").info(f"[DEBUG] dumped {dumped} cell crops to {DEBUG_DIR}")
+        logging.getLogger("sudoku_ocr_demo").info(
+            f"[DEBUG] dumped {dumped} cell crops to {DEBUG_DIR}"
+        )
 
     def __len__(self):
         return len(self.samples)
@@ -158,7 +162,9 @@ class TinyResNet(nn.Module):
         return self.head(x)
 
 
-def compute_class_weights(dataset: Dataset, max_samples: int = 8000, device: str = "cpu") -> torch.Tensor:
+def compute_class_weights(
+    dataset: Dataset, max_samples: int = 8000, device: str = "cpu"
+) -> torch.Tensor:
     counts = np.zeros(10, dtype=np.int64)
     take = min(max_samples, len(dataset))
     for i in range(take):

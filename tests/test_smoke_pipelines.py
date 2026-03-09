@@ -4,6 +4,7 @@ Each test creates a tiny (≈10 sample) dataset, trains a model for 1-2 epochs,
 and verifies end-to-end operation. Marked ``@pytest.mark.slow`` — use
 ``--run-slow`` to include them.  Expected wall time: ~30-60s total.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -26,6 +27,7 @@ TINY_CONCEPTS = {
 
 
 # ── Robot image pipeline ─────────────────────────────────────────────
+
 
 @pytest.mark.slow
 def test_robot_image_generation_and_training(tmp_path):
@@ -63,7 +65,7 @@ def test_robot_image_generation_and_training(tmp_path):
     rng = np.random.default_rng(42)
     ds = create_skewed_splits_full(
         dataset=ds,
-        skew_specs=[],     # no skewing for tiny set
+        skew_specs=[],  # no skewing for tiny set
         test_size=4,
         train_skew_size=8,
         val_fraction=0.5,
@@ -107,6 +109,7 @@ def test_robot_image_generation_and_training(tmp_path):
 
 # ── Sudoku pipeline ──────────────────────────────────────────────────
 
+
 @pytest.mark.slow
 def test_sudoku_board_generation():
     """Generate 10 sudoku boards with handwritten digit images."""
@@ -115,18 +118,25 @@ def test_sudoku_board_generation():
 
     cmd = [
         sys.executable,
-        "-m", "concept_benchmark.synthetic.sudoku_ocr.make_ocr_dataset",
-        "--n", "3",
-        "--n-samples", "10",
-        "--valid-ratio", "0.5",
-        "--max-corrupt", "3",
-        "--seed", "42",
+        "-m",
+        "concept_benchmark.synthetic.sudoku_ocr.make_ocr_dataset",
+        "--n",
+        "3",
+        "--n-samples",
+        "10",
+        "--valid-ratio",
+        "0.5",
+        "--max-corrupt",
+        "3",
+        "--seed",
+        "42",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, f"make_ocr_dataset failed:\n{result.stderr}"
 
 
 # ── Robot text pipeline ──────────────────────────────────────────────
+
 
 @pytest.mark.slow
 def test_robot_text_generation_and_training():

@@ -43,8 +43,7 @@ class ConceptTrainer(Protocol):
         *,
         num_concepts: int,
         params: Optional[Dict[str, Any]] = None,
-    ) -> TrainerOutput:
-        ...
+    ) -> TrainerOutput: ...
 
 
 def _prepare_inputs(x: Any, device: torch.device) -> Any:
@@ -72,10 +71,13 @@ def _extract_logits(output: Any) -> torch.Tensor:
         if "logits" in output:
             output = output["logits"]
         else:
-            raise TypeError("Cannot extract logits from dict output without 'logits' key.")
+            raise TypeError(
+                "Cannot extract logits from dict output without 'logits' key."
+            )
     if not isinstance(output, torch.Tensor):
         output = torch.as_tensor(output)
     return output
+
 
 def _build_observation_mask(
     tensor: torch.Tensor,
@@ -170,18 +172,24 @@ class DefaultConceptTrainer:
         loss_fn = cfg["loss_fn"] if cfg["loss_fn"] is not None else default_loss_fn
         use_masked_loss = cfg["loss_fn"] is None
 
-        train_missing_enabled = bool(getattr(train_dataset, "concept_missing", False)) and getattr(
-            train_dataset, "concept_missing_mask", None
-        ) is not None
-        train_fill_value = getattr(train_dataset, "concept_missing_fill_value", float("nan"))
+        train_missing_enabled = (
+            bool(getattr(train_dataset, "concept_missing", False))
+            and getattr(train_dataset, "concept_missing_mask", None) is not None
+        )
+        train_fill_value = getattr(
+            train_dataset, "concept_missing_fill_value", float("nan")
+        )
 
         valid_missing_enabled = False
         valid_fill_value = float("nan")
         if valid_dataset is not None:
-            valid_missing_enabled = bool(getattr(valid_dataset, "concept_missing", False)) and getattr(
-                valid_dataset, "concept_missing_mask", None
-            ) is not None
-            valid_fill_value = getattr(valid_dataset, "concept_missing_fill_value", float("nan"))
+            valid_missing_enabled = (
+                bool(getattr(valid_dataset, "concept_missing", False))
+                and getattr(valid_dataset, "concept_missing_mask", None) is not None
+            )
+            valid_fill_value = getattr(
+                valid_dataset, "concept_missing_fill_value", float("nan")
+            )
 
         if train_missing_enabled and not use_masked_loss:
             raise ValueError(
@@ -320,7 +328,11 @@ class DefaultConceptTrainer:
                 if preds:
                     pred_arr = np.vstack(preds)
                     tgt_arr = np.vstack(targets)
-                    mask_arr = np.vstack(masks).astype(bool) if masks else np.ones_like(tgt_arr, dtype=bool)
+                    mask_arr = (
+                        np.vstack(masks).astype(bool)
+                        if masks
+                        else np.ones_like(tgt_arr, dtype=bool)
+                    )
                     concept_f1s = []
                     for j in range(num_concepts):
                         observed = mask_arr[:, j]
@@ -331,7 +343,9 @@ class DefaultConceptTrainer:
                         if np.unique(y_true).size < 2:
                             continue
                         concept_f1s.append(f1_score(y_true, y_pred))
-                    val_metric = float(np.mean(concept_f1s)) if concept_f1s else float("nan")
+                    val_metric = (
+                        float(np.mean(concept_f1s)) if concept_f1s else float("nan")
+                    )
                 history["val_f1"].append(val_metric)
 
                 improved = val_metric > best_metric + cfg["min_delta"]
@@ -339,7 +353,8 @@ class DefaultConceptTrainer:
                     best_metric = val_metric
                     patience_counter = 0
                     best_state = {
-                        k: v.detach().cpu().clone() for k, v in model.state_dict().items()
+                        k: v.detach().cpu().clone()
+                        for k, v in model.state_dict().items()
                     }
                 else:
                     patience_counter += 1
@@ -355,6 +370,7 @@ class DefaultConceptTrainer:
 
         best_value = None if best_metric == float("-inf") else best_metric
         return TrainerResult(model=model, history=history, best_metric=best_value)
+
 
 def train_concept_heads(
     train_dataset: ConceptDatasetSample,
@@ -416,11 +432,17 @@ def train_concept_heads(
                 out = embedding_model(x)
                 if isinstance(out, (list, tuple)):
                     out = out[0]
-                emb = out if isinstance(out, torch.Tensor) else torch.as_tensor(out, dtype=torch.float32, device=device)
+                emb = (
+                    out
+                    if isinstance(out, torch.Tensor)
+                    else torch.as_tensor(out, dtype=torch.float32, device=device)
+                )
         input_dim = int(emb.shape[1])
 
     class _EmbedAndLinear(nn.Module):
-        def __init__(self, enc: Optional[nn.Module], d_in: int, k: int, freeze_enc: bool):
+        def __init__(
+            self, enc: Optional[nn.Module], d_in: int, k: int, freeze_enc: bool
+        ):
             super().__init__()
             self.enc = enc
             if self.enc is not None:
@@ -441,19 +463,22 @@ def train_concept_heads(
                 h = torch.as_tensor(h, dtype=torch.float32)
             return self.linear(h)
 
-    model = _EmbedAndLinear(embedding_model, int(input_dim), int(num_concepts), bool(freeze))
+    model = _EmbedAndLinear(
+        embedding_model, int(input_dim), int(num_concepts), bool(freeze)
+    )
 
     trainer = DefaultConceptTrainer()
-    res = trainer(model, train_dataset, valid_dataset, num_concepts=num_concepts, params=params)
+    res = trainer(
+        model, train_dataset, valid_dataset, num_concepts=num_concepts, params=params
+    )
     joint = res.model if isinstance(res, TrainerResult) else res
-    W = joint.linear.weight.detach().cpu().clone()    # (k, d)
-    b = joint.linear.bias.detach().cpu().clone()       # (k,)
+    W = joint.linear.weight.detach().cpu().clone()  # (k, d)
+    b = joint.linear.bias.detach().cpu().clone()  # (k,)
     heads = nn.ModuleList([nn.Linear(int(input_dim), 1) for _ in range(num_concepts)])
     for j in range(num_concepts):
-        heads[j].weight.data.copy_(W[j:j+1, :])
-        heads[j].bias.data.copy_(b[j:j+1])
+        heads[j].weight.data.copy_(W[j : j + 1, :])
+        heads[j].bias.data.copy_(b[j : j + 1])
     heads.cpu()
     if embedding_model is not None:
         embedding_model.cpu()
     return heads
-

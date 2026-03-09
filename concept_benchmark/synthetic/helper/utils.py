@@ -21,14 +21,16 @@ def generate_color_schemes(shuffle=True, random_seed=123456, include_flipped=Tru
     """
 
     # use spectral since we can easily drop similar colors
-    pal = StackPalette.load("spectral", palettes_dir=colorir.config.DEFAULT_PALETTES_DIR)
+    pal = StackPalette.load(
+        "spectral", palettes_dir=colorir.config.DEFAULT_PALETTES_DIR
+    )
 
     # add in "dark" colors from paired for extra colors
     qal = StackPalette.load("paired", palettes_dir=colorir.config.DEFAULT_PALETTES_DIR)
     qal = StackPalette([qal[i] for i in range(1, len(qal), 2)])
 
     # we want the color schemes for the robot halves to be distinguishable
-    schemas = [(pal[i], pal[-1 - i]) for i in range(len(pal)//2)]
+    schemas = [(pal[i], pal[-1 - i]) for i in range(len(pal) // 2)]
     schemas += [(s, d) for s in pal for d in qal if colordist(s, d) > 0.175]
 
     if include_flipped:
@@ -93,7 +95,7 @@ def build_model_expression(
         raise ValueError(f"Invalid model_type: {model_type!r}")
 
 
-def model_to_logistic(model: str, weights: dict, scalar = 1.0, intercept = None) -> str:
+def model_to_logistic(model: str, weights: dict, scalar=1.0, intercept=None) -> str:
     """
     Extracts the arithmetic expression inside the first (...) before a comparison operator and the number after the
     comparison operator >= then constructs a new expression that subtracts the number from the arithmetic expression
@@ -112,7 +114,10 @@ def model_to_logistic(model: str, weights: dict, scalar = 1.0, intercept = None)
     for feature, value in matches:
         if feature not in weights:
             import logging
-            logging.getLogger(__name__).warning("Weight for feature '%s' not found in weights dictionary.", feature)
+
+            logging.getLogger(__name__).warning(
+                "Weight for feature '%s' not found in weights dictionary.", feature
+            )
             weight = 1
         else:
             weight = weights[feature]
@@ -121,7 +126,7 @@ def model_to_logistic(model: str, weights: dict, scalar = 1.0, intercept = None)
         expr = expr.replace(old_pattern, new_pattern)
 
     intercept = intercept if intercept is not None else num.group(1)
-    expr += ' - ' + str(intercept)
+    expr += " - " + str(intercept)
 
     if scalar != 1.0:
         expr = f"({expr}) * {scalar}"
@@ -134,7 +139,7 @@ def apply_subjective_noise(C, rate=0.0, seed=0):
     if rate <= 0:
         return X
     M = rng.random(X.shape) < float(rate)
-    X = (X ^ M.astype(np.int32))
+    X = X ^ M.astype(np.int32)
     X[X < 0] = 0
     X[X > 1] = 1
     return X

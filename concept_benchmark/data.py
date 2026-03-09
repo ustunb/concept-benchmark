@@ -23,6 +23,7 @@ from tqdm import tqdm
 # single-process loading so every call site is safe without remembering
 # to pass num_workers=0.
 if platform.system() == "Darwin":
+
     def DataLoader(*args, **kwargs):
         kwargs["num_workers"] = 0
         kwargs["pin_memory"] = False
@@ -213,14 +214,18 @@ class ConceptDataset:
             concepts_to_drop (list of str): List of concept names to drop.
         """
         if not isinstance(concepts_to_drop, (list, tuple, set)):
-            raise ValueError("concepts_to_drop should be a list, tuple, or set of strings")
+            raise ValueError(
+                "concepts_to_drop should be a list, tuple, or set of strings"
+            )
         concepts_to_drop = set(concepts_to_drop)
         existing_concepts = set(self.concepts)
         invalid_concepts = concepts_to_drop - existing_concepts
         if invalid_concepts:
             raise ValueError(f"Concepts not found in dataset: {invalid_concepts}")
 
-        keep_indices = [i for i, c in enumerate(self.concepts) if c not in concepts_to_drop]
+        keep_indices = [
+            i for i, c in enumerate(self.concepts) if c not in concepts_to_drop
+        ]
         if not keep_indices:
             raise ValueError("Cannot drop all concepts; at least one must remain.")
 
@@ -1047,8 +1052,8 @@ class ConceptDatasetSample(Dataset):
         assert np.isin(indices, (0, 1)).all()
 
         filtered_meta = self.meta.copy()
-        if 'UC' in filtered_meta:
-            filtered_meta['UC'] = filtered_meta['UC'][indices]
+        if "UC" in filtered_meta:
+            filtered_meta["UC"] = filtered_meta["UC"][indices]
             filtered_meta["df_indices"] = filtered_meta["df_indices"][indices]
         if "robot_ids" in filtered_meta:
             filtered_meta["robot_ids"] = np.asarray(filtered_meta["robot_ids"])[indices]
@@ -1188,6 +1193,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             img_path = self.base_dir / img_path
         try:
             import io
+
             image = Image.open(io.BytesIO(Path(img_path).read_bytes())).convert("RGB")
             if self.preprocess is not None:
                 image = self.preprocess(image)
@@ -1229,8 +1235,8 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         assert np.isin(indices, (0, 1)).all()
 
         filtered_meta = self.meta.copy()
-        if 'UC' in filtered_meta:
-            filtered_meta['UC'] = filtered_meta['UC'][indices]
+        if "UC" in filtered_meta:
+            filtered_meta["UC"] = filtered_meta["UC"][indices]
             filtered_meta["df_indices"] = filtered_meta["df_indices"][indices]
         if "robot_ids" in filtered_meta:
             filtered_meta["robot_ids"] = np.asarray(filtered_meta["robot_ids"])[indices]

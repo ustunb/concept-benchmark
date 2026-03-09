@@ -1,4 +1,5 @@
 """Tests for concept_benchmark.utils module."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -13,6 +14,7 @@ from concept_benchmark.utils import (
 
 
 # ── set_deterministic_seed ───────────────────────────────────────────
+
 
 class TestSeed:
     def test_numpy_deterministic(self):
@@ -32,6 +34,7 @@ class TestSeed:
 
 # ── determine_device ─────────────────────────────────────────────────
 
+
 class TestDetermineDevice:
     def test_returns_device(self):
         dev = determine_device()
@@ -44,6 +47,7 @@ class TestDetermineDevice:
 
 
 # ── compute_accuracy ─────────────────────────────────────────────────
+
 
 class TestComputeAccuracy:
     def test_perfect(self):
@@ -72,6 +76,7 @@ class TestComputeAccuracy:
 
 # ── get_loader_config ────────────────────────────────────────────────
 
+
 class TestGetLoaderConfig:
     def test_keys(self):
         cfg = get_loader_config()
@@ -93,6 +98,7 @@ class TestGetLoaderConfig:
 
 
 # ── create_skewed_splits_full ────────────────────────────────────────
+
 
 class TestSkewedSplits:
     def _make_dataset(self, n=200, k=3):

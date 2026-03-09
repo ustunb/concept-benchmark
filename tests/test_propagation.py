@@ -4,7 +4,9 @@ import numpy as np
 from concept_benchmark.models import ConceptBasedModel, ConceptDetector
 
 
-def _naive_enumeration_aggregate(model: ConceptBasedModel, concept_probs: np.ndarray) -> np.ndarray:
+def _naive_enumeration_aggregate(
+    model: ConceptBasedModel, concept_probs: np.ndarray
+) -> np.ndarray:
     """Compute aggregated label probabilities by explicit enumeration.
 
     Args:
@@ -25,7 +27,7 @@ def _naive_enumeration_aggregate(model: ConceptBasedModel, concept_probs: np.nda
         p = concept_probs[i]
         agg = np.zeros(y_combo.shape[1], dtype=np.float64)
         for j, c in enumerate(combos_arr):
-            w = np.prod((p ** c) * ((1.0 - p) ** (1 - c)))
+            w = np.prod((p**c) * ((1.0 - p) ** (1 - c)))
             agg += y_combo[j] * w
         out.append(agg)
     return np.vstack(out)
@@ -72,8 +74,8 @@ def test_mc_matches_exact_on_small_k(tabular_train_valid):
     model = ConceptBasedModel(
         concept_detector=ConceptDetector(embedding_model=None),
         propagate=True,
-        mc_mode="exact",           # start with exact
-        mc_exact_threshold=4096,    # default; 2**k will be small here
+        mc_mode="exact",  # start with exact
+        mc_exact_threshold=4096,  # default; 2**k will be small here
     )
 
     # Train concept detector (few epochs) and front-end
@@ -107,4 +109,3 @@ def test_mc_matches_exact_on_small_k(tabular_train_valid):
     # Monte Carlo estimate should be close to exact enumeration
     # Allow small deviation due to sampling variance
     assert np.allclose(proba_mc, proba_exact, atol=2e-2, rtol=0.0)
-

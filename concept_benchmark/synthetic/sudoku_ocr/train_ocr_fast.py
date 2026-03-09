@@ -2,6 +2,7 @@
 """
 Train TinyResNet on the Sudoku OCR demo dataset (fast pipeline only).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -38,16 +39,19 @@ def setup_logging(log_path: Path) -> logging.Logger:
     logger.setLevel(logging.INFO)
 
     have_file = any(
-        isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", "") == str(log_path)
+        isinstance(h, logging.FileHandler)
+        and getattr(h, "baseFilename", "") == str(log_path)
         for h in logger.handlers
     )
     if not have_file:
         fh = logging.FileHandler(str(log_path), mode="a")
         fh.setLevel(logging.INFO)
-        fh.setFormatter(logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        ))
+        fh.setFormatter(
+            logging.Formatter(
+                "%(asctime)s - %(levelname)s - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
         logger.addHandler(fh)
 
     if not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
@@ -125,7 +129,7 @@ def eval_model(model: nn.Module, loader: DataLoader, device: str):
         total_correct += (preds == yb).sum().item()
 
         for cls in range(n_classes):
-            mask = (yb == cls)
+            mask = yb == cls
             total_per_class[cls] += mask.sum().item()
             correct_per_class[cls] += ((preds == yb) & mask).sum().item()
 
@@ -218,7 +222,9 @@ def build_ocr_concept_dataset(
 
 def main():
     defaults = SudokuBenchmarkConfig.default()
-    ap = argparse.ArgumentParser(description="Train TinyResNet on Sudoku OCR sidecar (demo).")
+    ap = argparse.ArgumentParser(
+        description="Train TinyResNet on Sudoku OCR sidecar (demo)."
+    )
     ap.add_argument("--n", type=int, default=defaults.n)
     ap.add_argument("--n-samples", type=int, default=defaults.n_samples)
     ap.add_argument("--max-corrupt", type=int, default=defaults.max_corrupt)
@@ -226,19 +232,35 @@ def main():
     ap.add_argument("--epochs", type=int, default=2)
     ap.add_argument("--batch-size", type=int, default=256)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    ap.add_argument("--val-fraction", type=float, default=0.12, help="Validation split fraction.")
-    ap.add_argument("--min-val", type=int, default=600, help="Minimum validation examples.")
+    ap.add_argument(
+        "--val-fraction", type=float, default=0.12, help="Validation split fraction."
+    )
+    ap.add_argument(
+        "--min-val", type=int, default=600, help="Minimum validation examples."
+    )
     ap.add_argument("--num-workers", type=int, default=0)
-    ap.add_argument("--cell-px", type=int, default=50, help="Must match the render settings.")
-    ap.add_argument("--margin-px", type=int, default=2, help="Must match the render settings.")
-    ap.add_argument("--no-debug-dumps", action="store_true", help="Disable writing sample crops.")
-    ap.add_argument("--skip-training", action="store_true", help="Skip training and use existing model.")
+    ap.add_argument(
+        "--cell-px", type=int, default=50, help="Must match the render settings."
+    )
+    ap.add_argument(
+        "--margin-px", type=int, default=2, help="Must match the render settings."
+    )
+    ap.add_argument(
+        "--no-debug-dumps", action="store_true", help="Disable writing sample crops."
+    )
+    ap.add_argument(
+        "--skip-training",
+        action="store_true",
+        help="Skip training and use existing model.",
+    )
 
     args, _ = ap.parse_known_args()
     set_deterministic_seed(args.seed)
     cfg = SudokuBenchmarkConfig(
-        n=args.n, n_samples=args.n_samples,
-        max_corrupt=args.max_corrupt, seed=args.seed,
+        n=args.n,
+        n_samples=args.n_samples,
+        max_corrupt=args.max_corrupt,
+        seed=args.seed,
     )
 
     dataset_dir = cfg.get_dataset_path(data_type="image")
@@ -267,7 +289,8 @@ def main():
     n_val = min(n_val, n_total // 2) if n_total > 1 else 0
     n_train = n_total - n_val
     train_ds, val_ds = random_split(
-        sudoku_ds, [n_train, n_val],
+        sudoku_ds,
+        [n_train, n_val],
         generator=torch.Generator().manual_seed(args.seed),
     )
     logger.info(f"[INFO] train={len(train_ds)} val={len(val_ds)}")
@@ -289,12 +312,16 @@ def main():
 
     device = args.device
     class_weights = compute_class_weights(train_ds, device=device)
-    logger.info("[INFO] class weights: %s", class_weights.cpu().numpy().round(4).tolist())
+    logger.info(
+        "[INFO] class weights: %s", class_weights.cpu().numpy().round(4).tolist()
+    )
 
     if args.skip_training:
         if not model_out.exists():
             raise FileNotFoundError(f"model not found: {model_out}")
-        logger.info("[INFO] skip training enabled; using existing model at %s", model_out)
+        logger.info(
+            "[INFO] skip training enabled; using existing model at %s", model_out
+        )
     else:
         logger.info("\n==============================")
         logger.info("[INFO] training model: resnet_tiny (fast pipeline)")
@@ -312,7 +339,11 @@ def main():
 
         torch.save(res["best_state"], model_out)
         with meta_out.open("w") as f:
-            json.dump({"name": "resnet_tiny", "val_acc": float(res["best_val_acc"])}, f, indent=2)
+            json.dump(
+                {"name": "resnet_tiny", "val_acc": float(res["best_val_acc"])},
+                f,
+                indent=2,
+            )
 
         logger.info("\n================ BEST MODEL ================")
         logger.info("name: resnet_tiny")

@@ -1,4 +1,5 @@
 """Directory paths used throughout the package."""
+
 from __future__ import annotations
 
 __all__ = [
@@ -26,7 +27,10 @@ else:
         "Running from site-packages install; data_dir=%s, results_dir=%s "
         "default to CWD. Set CONCEPT_BENCHMARK_DATA_DIR / "
         "CONCEPT_BENCHMARK_RESULTS_DIR to override.",
-        Path.cwd() / "data", Path.cwd() / "results",
+        Path.cwd() / "data",
+        Path.cwd() / "results",
     )
     data_dir = Path(os.environ.get("CONCEPT_BENCHMARK_DATA_DIR", Path.cwd() / "data"))
-    results_dir = Path(os.environ.get("CONCEPT_BENCHMARK_RESULTS_DIR", Path.cwd() / "results"))
+    results_dir = Path(
+        os.environ.get("CONCEPT_BENCHMARK_RESULTS_DIR", Path.cwd() / "results")
+    )

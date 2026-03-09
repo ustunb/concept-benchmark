@@ -28,7 +28,13 @@ def test_train_heads_with_encoder_finetunes_encoder_changes(tabular_train_valid)
         input_dim=None,
         l1_size=8,
         freeze=False,
-        fit_params={"epochs": 2, "device": "cpu", "batch_size": 8, "lr_encoder": 1e-2, "lr_heads": 1e-2},
+        fit_params={
+            "epochs": 2,
+            "device": "cpu",
+            "batch_size": 8,
+            "lr_encoder": 1e-2,
+            "lr_heads": 1e-2,
+        },
     )
     after = enc.state_dict()
     assert _any_state_diff(before, after), "Encoder should update when not frozen"
