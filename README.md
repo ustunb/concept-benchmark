@@ -118,6 +118,9 @@ C_test, y_test = dataset.test.C, dataset.test.y
 
 print(f"Train: {C_train.shape}")                # (3800, 7)
 print(f"Concepts: {dataset.training.concepts}")  # ['head_shape', 'body_shape', ...]
+
+# For Sudoku, use SudokuBenchmarkConfig instead:
+# cfg = SudokuBenchmarkConfig(seed=171, max_corrupt=9, data_type="image", target_accuracy=0.9)
 ```
 
 
@@ -159,7 +162,7 @@ The most important parameters are listed below. For the full list, see `RobotBen
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `data_type` | `"image"` | `"image"` (render robot PNGs) or `"tabular"` (feature vectors only). |
+| `data_type` | `"image"` | `"image"` (render robot PNGs) or `"text"` (generate text descriptions). |
 | `model_features` | `{"mouth_type": "closed", "foot_shape": "pointy", "has_knees": "true"}` | Which feature values count toward the label score. |
 | `model_weights` | `{"mouth_type": 5.0, "foot_shape": 8.0, "has_knees": -5.0}` | Concept weights for the labeling function. Score = `Σ wᵢ · 1[fᵢ = vᵢ] + intercept`. |
 | `model_type` | `"stochastic"` | `"deterministic"`: Glorp if score ≥ 0. `"stochastic"`: Glorp ~ Bernoulli(σ(scalar × score)). |
