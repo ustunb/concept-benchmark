@@ -55,67 +55,59 @@ python3 -c "import concept_benchmark; print('OK')"
 
 A CBM predicts concepts from inputs (e.g., "has pointy feet"), then predicts the label from those concepts. At test time, a user can correct mispredicted concepts -- this is called an *intervention*. The package lets you measure whether correcting *k* concepts improves the label prediction, and how that depends on concept quality and annotation noise.
 
-### Running the full pipeline
+### Generating a dataset
 
-Each benchmark has a pipeline script in `scripts/` that runs the full experiment end-to-end:
-
-```bash
-# Robot classification (image, default 7 concepts)
-python scripts/robot_pipeline.py --seed 1014
-
-# Robot classification (subconcept variant, 12 concepts)
-python scripts/robot_pipeline.py --seed 1014 --subconcept
-
-# Sudoku validation
-python scripts/sudoku_pipeline.py --seed 171
-
-# Robot text classification
-python scripts/robot_text_pipeline.py --seed 1337
-```
-
-Each script supports `--help` for the full list of flags. Use `--stages` to run a subset of the pipeline (e.g., `--stages cbm dnn intervene` to retrain models on existing data).
-
-### Running your own experiment
-
-To generate a dataset and use it with your own CBM:
+Each benchmark has a generator class that produces a ready-to-use dataset with train/val/test splits:
 
 ```python
-from concept_benchmark.config import RobotBenchmarkConfig
-from concept_benchmark.synthetic.robot import create_synthetic_dataset
-from concept_benchmark.utils import create_skewed_splits_full, set_deterministic_seed
+from concept_benchmark import RobotDatasetGenerator, SudokuDatasetGenerator
 
-# 1. Define the experiment: labeling function, concept granularity, and noise
-cfg = RobotBenchmarkConfig(
-    seed=1014,
-    data_type="image",
-    model_type="stochastic",
-    model_features={"mouth_type": "closed", "foot_shape": "pointy", "has_knees": "true"},
-    model_weights={"mouth_type": 5.0, "foot_shape": 8.0, "has_knees": -5.0},
-    model_intercept=2.0,
-    drop_concepts=["has_elbows", "hand_shape", "foot_shape_flat_rounded",
-                   "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
-                   "foot_shape_flat_lshaped", "foot_shape_pointy_4sided",
-                   "foot_shape_pointy_square", "foot_shape_pointy_rounded",
-                   "foot_shape_flat_5sided", "foot_shape_flat_square",
-                   "foot_shape_flat_trapezoid"],  # IDEAL_DROP → 7 coarse concepts
-    concept_missing=0.0,            # fraction of concept labels to mask
-    intervention_regimes=["baseline"],
-)
+# Robot classification (image) — like load_dataset() but fully configurable
+dataset = RobotDatasetGenerator(seed=1014, draw=False).generate()
+print(dataset.training.C.shape)  # (3800, 7)
+print(dataset.training.y.shape)  # (3800,)
 
-# 2. Generate the dataset
-set_deterministic_seed(cfg.seed)
-dataset = create_synthetic_dataset(**cfg.to_dict())
+# Sudoku validation (tabular)
+dataset = SudokuDatasetGenerator(seed=171).generate()
+print(dataset.training.C.shape)  # (600, 27)
+```
 
-# 3. Split into train / validation / test
-#    Ensures rare concept combinations are represented (via skew_specs),
-#    then drops excluded concepts from all splits.
-create_skewed_splits_full(dataset, cfg.skew_specs, test_size=cfg.test_size,
-                          train_skew_size=cfg.train_skew_size, drop_concepts=cfg.drop_concepts)
+Both generators accept all parameters from their respective config classes (`RobotBenchmarkConfig`, `SudokuBenchmarkConfig`). Common options:
 
-# 4. Train concept detector (X → C) and front-end model (C → y)
+```python
+# Subconcept variant (12 fine-grained concepts instead of 7)
+dataset = RobotDatasetGenerator(seed=1014, subconcept=True, draw=False).generate()
+print(dataset.training.C.shape)  # (3800, 12)
+
+# Custom labeling rule: score = 1·1[mouth=open] + 1·1[knees=true] - 1.5
+dataset = RobotDatasetGenerator(
+    seed=42,
+    draw=False,
+    model_type="deterministic",
+    label_formula={
+        ("mouth_type", "open"): 1.0,
+        ("has_knees", "true"): 1.0,
+        "intercept": -1.5,
+    },
+).generate()
+
+# Sudoku with more samples and higher corruption
+dataset = SudokuDatasetGenerator(seed=42, n_samples=2000, max_corrupt=5).generate()
+```
+
+### Training your own CBM
+
+Once you have a dataset, you can train a CBM and run interventions:
+
+```python
+from concept_benchmark import RobotDatasetGenerator
 from concept_benchmark.models import (
     ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier,
 )
+
+dataset = RobotDatasetGenerator(seed=1014, draw=False).generate()
+
+# Train concept detector (X → C) and front-end model (C → y)
 n_concepts = dataset.training.C.shape[1]
 cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=n_concepts, input_size=32))
 cd.fit(dataset.training, dataset.validation,
@@ -126,7 +118,7 @@ fe.fit(dataset.training.C, dataset.training.y)
 
 cbm = ConceptBasedModel(concept_detector=cd, front_end_model=fe)
 
-# 5. Run interventions: correct k concepts per sample using ground truth
+# Run interventions: correct k concepts per sample using ground truth
 from concept_benchmark.intervention import ConceptInterventionRunner, InterventionConfig
 from concept_benchmark.kflip import KFlipInterventionStrategy
 
@@ -144,12 +136,27 @@ for k in [1, 3]:
     )
     acc = (result.y_pred_after == dataset.test.y).mean()
     print(f"k={k}: accuracy={acc:.4f}")
-
-# For Sudoku, use SudokuBenchmarkConfig instead:
-# cfg = SudokuBenchmarkConfig(seed=171, max_corrupt=9, data_type="image", target_accuracy=0.9)
 ```
 
-For the full pipeline with all stages, see the scripts in `scripts/`.
+### Running the full pipeline
+
+For the full experiment pipeline (including model training, intervention regimes, alignment, and selective classification), use the CLI scripts:
+
+```bash
+# Robot classification (image, default 7 concepts)
+python scripts/robot_pipeline.py --seed 1014
+
+# Robot classification (subconcept variant, 12 concepts)
+python scripts/robot_pipeline.py --seed 1014 --subconcept
+
+# Sudoku validation
+python scripts/sudoku_pipeline.py --seed 171
+
+# Robot text classification
+python scripts/robot_text_pipeline.py --seed 1337
+```
+
+Each script supports `--help` for the full list of flags. Use `--stages` to run a subset of the pipeline (e.g., `--stages cbm dnn intervene` to retrain models on existing data).
 
 
 ## Benchmarks
@@ -191,8 +198,7 @@ The most important parameters are listed below. For the full list, see `RobotBen
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `data_type` | `"image"` | `"image"` (render robot PNGs) or `"text"` (generate text descriptions). |
-| `model_features` | `{"mouth_type": "closed", "foot_shape": "pointy", "has_knees": "true"}` | Which feature values count toward the label score. |
-| `model_weights` | `{"mouth_type": 5.0, "foot_shape": 8.0, "has_knees": -5.0}` | Concept weights for the labeling function. Score = `Σ wᵢ · 1[fᵢ = vᵢ] + intercept`. |
+| `label_formula` | `{("mouth_type","closed"): 5, ("foot_shape","pointy"): 8, ("has_knees","true"): -5, "intercept": 2}` | Labeling function. Score = `Σ wᵢ · 1[fᵢ = vᵢ] + intercept`. |
 | `model_type` | `"stochastic"` | `"deterministic"`: Glorp if score ≥ 0. `"stochastic"`: Glorp ~ Bernoulli(σ(scalar × score)). |
 | `drop_concepts` | `IDEAL_DROP` | Which concepts to exclude. Two presets: `IDEAL_DROP` for 7 coarse concepts, `SUBCONCEPT_DROP` for 12 fine-grained concepts. |
 | `concept_missing` | `0.0` | Fraction of concept labels masked during training. |
@@ -208,7 +214,6 @@ The most important parameters are listed below. For the full list, see `RobotBen
 | `size` | `"medium"` | Image resolution: `"small"` (8px), `"medium"` (32px), `"large"` (600px). Image only. |
 | `samples_per_instance` | `4` | Number of images per unique robot configuration. Total dataset size = unique configs × this value. |
 | `color_mode` | `"color"` | `"color"` or `"grayscale"`. Image only. |
-| `model_intercept` | `2.0` | Intercept term in the labeling function score. |
 | `model_scalar` | `4.2` | Sigmoid temperature for stochastic labeling (higher = more deterministic) |
 | `skew_specs` | (see config) | List of dicts specifying class-balance constraints for training data (e.g., minimum fraction of specific concept values). |
 | `concept_missing_mech` | `"none"` | Missingness mechanism: `"none"`, `"mcar"`, or `"mnar"` |
