@@ -34,6 +34,7 @@ def create_synthetic_dataset(data_type: str = "image", **kwargs) -> ConceptDatas
     kind = (data_type or "image").strip().lower()
     if kind == "image":
         from torchvision import transforms
+
         dataset = create_robot_image_dataset(**kwargs)
         if dataset.transform is None:
             dataset.transform = transforms.Compose([transforms.ToTensor()])
