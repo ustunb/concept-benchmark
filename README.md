@@ -55,6 +55,8 @@ python3 -c "import concept_benchmark; print('OK')"
 
 A CBM predicts concepts from inputs (e.g., "has pointy feet"), then predicts the label from those concepts. At test time, a user can correct mispredicted concepts -- this is called an *intervention*. The package lets you measure whether correcting *k* concepts improves the label prediction, and how that depends on concept quality and annotation noise.
 
+### Running the full pipeline
+
 Each benchmark has a pipeline script in `scripts/` that runs the full experiment end-to-end:
 
 ```bash
@@ -73,17 +75,49 @@ python scripts/robot_text_pipeline.py --seed 1337
 
 Each script supports `--help` for the full list of flags. Use `--stages` to run a subset of the pipeline (e.g., `--stages cbm dnn intervene` to retrain models on existing data).
 
-The pipeline scripts are also importable for programmatic use:
+### Running your own experiment
+
+To generate a dataset and use it with your own CBM:
 
 ```python
 from concept_benchmark.config import RobotBenchmarkConfig
-from concept_benchmark.models import ConceptBasedModel, ConceptDetector
-from concept_benchmark.utils import create_skewed_splits_full, set_deterministic_seed
 from concept_benchmark.synthetic.robot import create_synthetic_dataset
+from concept_benchmark.utils import create_skewed_splits_full, set_deterministic_seed
 
-cfg = RobotBenchmarkConfig(seed=1014)
+# 1. Define the experiment: labeling function, concept granularity, and noise
+cfg = RobotBenchmarkConfig(
+    seed=1014,
+    data_type="image",
+    model_type="stochastic",
+    model_features={"mouth_type": "closed", "foot_shape": "pointy", "has_knees": "true"},
+    model_weights={"mouth_type": 5.0, "foot_shape": 8.0, "has_knees": -5.0},
+    model_intercept=2.0,
+    drop_concepts=["has_elbows", "hand_shape", "foot_shape_flat_rounded",
+                   "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
+                   "foot_shape_flat_lshaped", "foot_shape_pointy_4sided",
+                   "foot_shape_pointy_square", "foot_shape_pointy_rounded",
+                   "foot_shape_flat_5sided", "foot_shape_flat_square",
+                   "foot_shape_flat_trapezoid"],  # IDEAL_DROP → 7 coarse concepts
+    concept_missing=0.0,            # fraction of concept labels to mask
+    regimes=["baseline"],           # intervention regimes to evaluate
+)
+
+# 2. Generate the dataset
 set_deterministic_seed(cfg.seed)
-data = create_synthetic_dataset(**cfg.to_dict())
+dataset = create_synthetic_dataset(**cfg.to_dict())
+
+# 3. Split into train / validation / test
+#    Ensures rare concept combinations are represented (via skew_specs),
+#    then drops excluded concepts from all splits.
+create_skewed_splits_full(dataset, cfg.skew_specs, test_size=cfg.test_size,
+                          train_skew_size=cfg.train_skew_size, drop_concepts=cfg.drop_concepts)
+
+# 4. Train your own CBM on the concept and label arrays
+C_train, y_train = dataset.training.C, dataset.training.y
+C_test, y_test = dataset.test.C, dataset.test.y
+
+print(f"Train: {C_train.shape}")                # (3800, 7)
+print(f"Concepts: {dataset.training.concepts}")  # ['head_shape', 'body_shape', ...]
 ```
 
 
@@ -93,7 +127,7 @@ The package includes two benchmarks. **Robot classification** is a decision-supp
 
 ### Robot Classification
 
-This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot -- **Glorp** or **Drent** -- from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The default labeling rule is: Glorp if mouth is closed, foot is pointy, and robot has knees (all three); Drent otherwise. Which features matter and which are excluded (via `drop_concepts`) are configurable, mimicking real-world settings where the true relationship between features and labels is unknown. Available as image and text modalities.
+This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot -- **Glorp** or **Drent** -- from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The default labeling rule is: Glorp if mouth is closed, foot is pointy, and robot has knees (all three); Drent otherwise. The labeling function can be deterministic or stochastic (probabilistic), controlled via the `model_type` parameter. Which features matter and which are excluded (via `drop_concepts`) are configurable, mimicking real-world settings where the true relationship between features and labels is unknown. Available as image and text modalities.
 
 <p align="center">
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
@@ -125,10 +159,11 @@ The most important parameters are listed below. For the full list, see `RobotBen
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `drop_concepts` | `IDEAL_DROP` | Which concepts to exclude. Two presets are provided: `IDEAL_DROP` for 7 coarse concepts (binary foot_shape), `SUBCONCEPT_DROP` for 12 concepts (5 fine-grained foot subtypes). |
-| `subconcept` | `False` | Shortcut that switches `drop_concepts` to `SUBCONCEPT_DROP`. |
+| `data_type` | `"image"` | `"image"` (render robot PNGs) or `"tabular"` (feature vectors only). |
 | `model_features` | `{"mouth_type": "closed", "foot_shape": "pointy", "has_knees": "true"}` | Which feature values count toward the label score. |
-| `model_weights` | `{"mouth_type": 5.0, "foot_shape": 8.0, "has_knees": -5.0}` | Concept weights for the labeling function. Score = `Σ w_i · 1[f_i = v_i] + intercept`. |
+| `model_weights` | `{"mouth_type": 5.0, "foot_shape": 8.0, "has_knees": -5.0}` | Concept weights for the labeling function. Score = `Σ wᵢ · 1[fᵢ = vᵢ] + intercept`. |
+| `model_type` | `"stochastic"` | `"deterministic"`: Glorp if score ≥ 0. `"stochastic"`: Glorp ~ Bernoulli(σ(scalar × score)). |
+| `drop_concepts` | `IDEAL_DROP` | Which concepts to exclude. Two presets: `IDEAL_DROP` for 7 coarse concepts, `SUBCONCEPT_DROP` for 12 fine-grained concepts. |
 | `concept_missing` | `0.0` | Fraction of concept labels masked during training. |
 | `regimes` | `["baseline"]` | How interventions are performed: `baseline` (oracle), `expert` (noisy human), `subjective` (noisy concept labels + noisy human), `machine`/`llm`/`clip` (concepts discovered via [Label-Free CBM](https://arxiv.org/abs/2304.06129)). |
 
@@ -137,9 +172,14 @@ The most important parameters are listed below. For the full list, see `RobotBen
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `subconcept` | `False` | Shortcut that switches `drop_concepts` to `SUBCONCEPT_DROP` (12 fine-grained concepts). |
 | `seed` | `1014` / `1337` | Random seed (image / text) |
 | `size` | `"medium"` | Image resolution: `"small"` (8px), `"medium"` (32px), `"large"` (600px). Image only. |
-| `model_type` | `"stochastic"` | Labeling function: `"deterministic"` or `"stochastic"` |
+| `samples_per_instance` | `4` | Number of images per unique robot configuration. Total dataset size = unique configs × this value. |
+| `color_mode` | `"color"` | `"color"` or `"grayscale"`. Image only. |
+| `model_intercept` | `2.0` | Intercept term in the labeling function score. |
+| `model_scalar` | `4.2` | Sigmoid temperature for stochastic labeling (higher = more deterministic) |
+| `skew_specs` | (see config) | List of dicts specifying class-balance constraints for training data (e.g., minimum fraction of specific concept values). |
 | `concept_missing_mech` | `"none"` | Missingness mechanism: `"none"`, `"mcar"`, or `"mnar"` |
 | `intervention_budgets` | `[1, 3]` | Number of concepts to correct per sample |
 | `intervention_thresholds` | `[0.2, 0.4]` | Concepts whose predicted probability is within this distance of 0.5 are candidates for intervention |
