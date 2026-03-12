@@ -33,7 +33,11 @@ def create_synthetic_dataset(data_type: str = "image", **kwargs) -> ConceptDatas
 
     kind = (data_type or "image").strip().lower()
     if kind == "image":
-        return create_robot_image_dataset(**kwargs)
+        from torchvision import transforms
+        dataset = create_robot_image_dataset(**kwargs)
+        if dataset.transform is None:
+            dataset.transform = transforms.Compose([transforms.ToTensor()])
+        return dataset
     if kind == "text":
         return create_robot_text_dataset(**kwargs)
     raise ValueError("data_type must be either 'image' or 'text'")

@@ -23,7 +23,6 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from torchvision import transforms
 from tqdm import tqdm
 
 from concept_benchmark.utils import (
@@ -109,8 +108,6 @@ def setup_dataset(config: RobotBenchmarkConfig):
     settings = config.to_dict()
     logger.info("Generating robot dataset...")
     data = create_synthetic_dataset(**settings)
-    tf = transforms.Compose([transforms.ToTensor()])
-    data.transform = tf
     data.generate_cvindices(seed=config.seed)
 
     rng = np.random.default_rng(config.seed)

@@ -99,7 +99,7 @@ cfg = RobotBenchmarkConfig(
                    "foot_shape_flat_5sided", "foot_shape_flat_square",
                    "foot_shape_flat_trapezoid"],  # IDEAL_DROP → 7 coarse concepts
     concept_missing=0.0,            # fraction of concept labels to mask
-    regimes=["baseline"],           # intervention regimes to evaluate
+    intervention_regimes=["baseline"],
 )
 
 # 2. Generate the dataset
@@ -112,16 +112,44 @@ dataset = create_synthetic_dataset(**cfg.to_dict())
 create_skewed_splits_full(dataset, cfg.skew_specs, test_size=cfg.test_size,
                           train_skew_size=cfg.train_skew_size, drop_concepts=cfg.drop_concepts)
 
-# 4. Train your own CBM on the concept and label arrays
-C_train, y_train = dataset.training.C, dataset.training.y
-C_test, y_test = dataset.test.C, dataset.test.y
+# 4. Train concept detector (X → C) and front-end model (C → y)
+from concept_benchmark.models import (
+    ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier,
+)
+n_concepts = dataset.training.C.shape[1]
+cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=n_concepts, input_size=32))
+cd.fit(dataset.training, dataset.validation,
+       fit_params={"epochs": 50, "lr": 1e-3, "patience": 10, "device": "cpu"})
 
-print(f"Train: {C_train.shape}")                # (3800, 7)
-print(f"Concepts: {dataset.training.concepts}")  # ['head_shape', 'body_shape', ...]
+fe = FrontEndModel()
+fe.fit(dataset.training.C, dataset.training.y)
+
+cbm = ConceptBasedModel(concept_detector=cd, front_end_model=fe)
+
+# 5. Run interventions: correct k concepts per sample using ground truth
+from concept_benchmark.intervention import ConceptInterventionRunner, InterventionConfig
+from concept_benchmark.kflip import KFlipInterventionStrategy
+
+runner = ConceptInterventionRunner(cbm)
+C_test_pred = cd.predict(dataset.test)
+
+for k in [1, 3]:
+    result = runner.run(
+        strategy=KFlipInterventionStrategy(),
+        config=InterventionConfig(max_concepts_per_instance=k, score_threshold=0.2),
+        dataset=dataset.test,
+        concept_proba=C_test_pred,
+        concept_true=dataset.test.C,
+        labels=dataset.test.y,
+    )
+    acc = (result.y_pred_after == dataset.test.y).mean()
+    print(f"k={k}: accuracy={acc:.4f}")
 
 # For Sudoku, use SudokuBenchmarkConfig instead:
 # cfg = SudokuBenchmarkConfig(seed=171, max_corrupt=9, data_type="image", target_accuracy=0.9)
 ```
+
+For the full pipeline with all stages, see the scripts in `scripts/`.
 
 
 ## Benchmarks
