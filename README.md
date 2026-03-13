@@ -37,13 +37,15 @@ Then install the package:
 pip install concept-benchmark
 ```
 
-Or install from source:
+Or install from source (includes training/evaluation code and pipeline scripts):
 
 ```bash
 git clone https://github.com/ustunb/concept-benchmark.git
 cd concept-benchmark
 uv sync
 ```
+
+> **Package vs. repo:** `pip install concept-benchmark` gives you **dataset generation only** (`concept_benchmark/`). To run the full training/evaluation pipelines, clone the repo — the `experiments/` directory contains model training, interventions, alignment, and LFCBM code.
 
 Verify the installation:
 
@@ -95,13 +97,25 @@ dataset = RobotDatasetGenerator(
 dataset = SudokuDatasetGenerator(seed=42, n_samples=2000, max_corrupt=5).generate()
 ```
 
+### Standalone data generation scripts
+
+For command-line usage without writing Python code:
+
+```bash
+# Generate robot data and save to disk
+python scripts/generate_robot_data.py --seed 1014 --no-draw --output data/my_robots
+
+# Generate sudoku data and save to disk
+python scripts/generate_sudoku_data.py --seed 171 --output data/my_sudoku
+```
+
 ### Training your own CBM
 
-Once you have a dataset, you can train a CBM and run interventions:
+Once you have a dataset, you can train a CBM and run interventions (requires cloning the repo):
 
 ```python
 from concept_benchmark import RobotDatasetGenerator
-from concept_benchmark.models import (
+from experiments.models import (                      # repo-only
     ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier,
 )
 
@@ -119,8 +133,8 @@ fe.fit(dataset.training.C, dataset.training.y)
 cbm = ConceptBasedModel(concept_detector=cd, front_end_model=fe)
 
 # Run interventions: correct k concepts per sample using ground truth
-from concept_benchmark.intervention import ConceptInterventionRunner, InterventionConfig
-from concept_benchmark.kflip import KFlipInterventionStrategy
+from experiments.intervention import ConceptInterventionRunner, InterventionConfig
+from experiments.kflip import KFlipInterventionStrategy
 
 runner = ConceptInterventionRunner(cbm)
 C_test_pred = cd.predict(dataset.test)

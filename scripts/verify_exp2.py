@@ -30,13 +30,13 @@ PAPER = {
 
 
 def main():
-    from concept_benchmark.utils import (
+    from experiments.utils import (
         compute_accuracy, determine_device, get_loader_config, patch_macos_dataloader,
     )
     import robot_pipeline as robot
     from concept_benchmark.config import RobotBenchmarkConfig
-    from concept_benchmark.alignment import align_frontend_weights
-    from concept_benchmark.models import RobotClassifierCNN
+    from experiments.alignment import align_frontend_weights
+    from experiments.models import RobotClassifierCNN
 
     patch_macos_dataloader()
     device = determine_device()

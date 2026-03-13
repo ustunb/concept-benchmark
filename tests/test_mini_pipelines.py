@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 
 from concept_benchmark.data import ConceptDataset
-from concept_benchmark.models import (
+from experiments.models import (
     ConceptBasedModel,
     ConceptDetector,
 )
@@ -82,11 +82,11 @@ def test_robot_tabular_end_to_end():
 
 def test_robot_intervention_end_to_end():
     """Train CBM + KFlip k=1 intervention."""
-    from concept_benchmark.intervention import (
+    from experiments.intervention import (
         ConceptInterventionRunner,
         InterventionConfig,
     )
-    from concept_benchmark.kflip import KFlipInterventionStrategy
+    from experiments.kflip import KFlipInterventionStrategy
 
     ds = _tabular_dataset(n=40, k=4)
     cbm = _train_cbm(ds)
@@ -108,7 +108,7 @@ def test_robot_intervention_end_to_end():
 
 def test_robot_alignment_end_to_end():
     """Train CBM + alignment → result dict has expected keys."""
-    from concept_benchmark.alignment import retrain_aligned
+    from experiments.alignment import retrain_aligned
 
     ds = _tabular_dataset(n=50, k=4)
     cbm = _train_cbm(ds)

@@ -108,13 +108,17 @@ class RobotDatasetGenerator:
         ConceptDataset
             Dataset with ``.training``, ``.validation``, and ``.test`` set.
         """
-        set_deterministic_seed(self.config.seed)
-        settings = self.config.to_dict()
-        data = create_synthetic_dataset(**settings)
-        data.generate_cvindices(seed=self.config.seed)
-        rng = np.random.default_rng(self.config.seed)
-        data = create_skewed_splits_full(dataset=data, rng=rng, **settings)
-        return data
+        return generate_robot_dataset(self.config)
+
+
+def generate_robot_dataset(config: RobotBenchmarkConfig):
+    """Generate a robot dataset from a config, with train/val/test splits."""
+    set_deterministic_seed(config.seed)
+    settings = config.to_dict()
+    data = create_synthetic_dataset(**settings)
+    data.generate_cvindices(seed=config.seed)
+    rng = np.random.default_rng(config.seed)
+    return create_skewed_splits_full(dataset=data, rng=rng, **settings)
 
 
 class SudokuDatasetGenerator:

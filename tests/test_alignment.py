@@ -5,13 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from concept_benchmark.alignment import (
+from experiments.alignment import (
     ConstrainedFrontEndModel,
     align_frontend_weights,
     retrain_aligned,
     test_alignment as alignment_test_fn,
 )
-from concept_benchmark.models import FrontEndModel
+from experiments.models import FrontEndModel
 
 
 def _fit_frontend(k=4, n=50, seed=42):

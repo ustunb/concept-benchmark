@@ -5,13 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from concept_benchmark.intervention import (
+from experiments.intervention import (
     InterventionBatch,
     InterventionConfig,
     InterventionError,
 )
-from concept_benchmark.kflip import KFlipInterventionStrategy
-from concept_benchmark.models import ConceptBasedModel, FrontEndModel
+from experiments.kflip import KFlipInterventionStrategy
+from experiments.models import ConceptBasedModel, FrontEndModel
 
 
 def _make_model(k=4, seed=42):

@@ -8,7 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.metrics import roc_auc_score, roc_curve
 from transformers import AutoTokenizer, AutoModel, get_linear_schedule_with_warmup
 from concept_benchmark.data import ConceptDatasetSample
-from concept_benchmark.models import ConceptDetector
+from experiments.models import ConceptDetector
 import os
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"

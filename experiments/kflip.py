@@ -8,8 +8,8 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 from tqdm import tqdm
 
-from concept_benchmark.models import ConceptBasedModel
-from concept_benchmark.intervention import (
+from experiments.models import ConceptBasedModel
+from experiments.intervention import (
     InterventionStrategy,
     InterventionBatch,
     InterventionConfig,

@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 """Quick alignment test — subconcept only, k=0 and k=3."""
 import copy, sys
-from concept_benchmark.utils import patch_macos_dataloader, compute_accuracy, determine_device, get_loader_config
+from experiments.utils import patch_macos_dataloader, compute_accuracy, determine_device, get_loader_config
 import robot_pipeline as robot
 from concept_benchmark.config import RobotBenchmarkConfig
-from concept_benchmark.alignment import align_frontend_weights
+from experiments.alignment import align_frontend_weights
 
 patch_macos_dataloader()
 

@@ -27,7 +27,7 @@ from tqdm import tqdm
 
 from concept_benchmark.data import ConceptDatasetSample
 from concept_benchmark.ext.fileutils import load as load_object, save as save_object
-from concept_benchmark.train import (
+from experiments.train import (
     ConceptTrainer,
     DefaultConceptTrainer,
     TrainerResult,

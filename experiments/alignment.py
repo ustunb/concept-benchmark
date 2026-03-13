@@ -26,7 +26,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from concept_benchmark.models import FrontEndModel
+from experiments.models import FrontEndModel
 
 
 # ── Constrained retraining via CVXPY ─────────────────────────────────

@@ -34,7 +34,7 @@ import warnings
 import numpy as np
 
 from concept_benchmark.data import ConceptDatasetSample
-from concept_benchmark.models import ConceptBasedModel
+from experiments.models import ConceptBasedModel
 
 
 class InterventionError(RuntimeError):

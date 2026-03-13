@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from concept_benchmark.models import ConceptDetector
+from experiments.models import ConceptDetector
 
 
 import pytest
