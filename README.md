@@ -59,20 +59,40 @@ A CBM predicts concepts from inputs (e.g., "has pointy feet"), then predicts the
 
 ### Generating a dataset
 
-Each benchmark has a generator class that produces a ready-to-use dataset with train/val/test splits:
+Each benchmark has a generator class that produces a ready-to-use dataset with train/val/test splits. With default parameters, this works like `load_dataset()`:
 
 ```python
 from concept_benchmark import RobotDatasetGenerator, SudokuDatasetGenerator
 
-# Robot classification (image) — like load_dataset() but fully configurable
-dataset = RobotDatasetGenerator(seed=1014, draw=False).generate()
-print(dataset.training.C.shape)  # (3800, 7)
-print(dataset.training.y.shape)  # (3800,)
+# Load with defaults — like load_dataset("robot") / load_dataset("sudoku")
+robot_data = RobotDatasetGenerator().generate()
+sudoku_data = SudokuDatasetGenerator().generate()
 
-# Sudoku validation (tabular)
-dataset = SudokuDatasetGenerator(seed=171).generate()
-print(dataset.training.C.shape)  # (600, 27)
+print(robot_data.training.C.shape)   # (3800, 7)  — 7 concept annotations per sample
+print(sudoku_data.training.C.shape)  # (600, 27)  — 27 concept annotations per sample
 ```
+
+Unlike HuggingFace, every aspect of the dataset is configurable:
+
+```python
+# Reproducible run with specific seed, skip image rendering
+dataset = RobotDatasetGenerator(seed=1014, draw=False).generate()
+
+# Sudoku with more samples and higher corruption
+dataset = SudokuDatasetGenerator(seed=42, n_samples=2000, max_corrupt=5).generate()
+```
+
+Each split (`training`, `validation`, `test`) is a `ConceptDataset` with these key attributes:
+
+```python
+dataset.training.C          # (3800, 7) concept matrix, binary
+dataset.training.y          # (3800,) class labels
+dataset.training.X          # inputs (images if draw=True, filenames if draw=False)
+dataset.training.concepts   # concept names: ['head_shape', 'body_shape', ...]
+dataset.training.meta['classes']  # class names: ['drent', 'glorp']
+```
+
+> **Note:** `X` always contains filenames. `draw=True` (default) renders images to disk; `draw=False` skips rendering, so the files won't exist. Use `draw=True` when you need actual images (e.g., for training a vision model).
 
 Both generators accept all parameters from their respective config classes (`RobotBenchmarkConfig`, `SudokuBenchmarkConfig`). Common options:
 
@@ -109,9 +129,25 @@ python scripts/generate_robot_data.py --seed 1014 --no-draw --output data/my_rob
 python scripts/generate_sudoku_data.py --seed 171 --output data/my_sudoku
 ```
 
-### Training your own CBM
+### Using the data
 
-Once you have a dataset, you can train a CBM and run interventions (requires cloning the repo):
+The generated data works with any ML library. Here's a minimal example using scikit-learn:
+
+```python
+from concept_benchmark import RobotDatasetGenerator
+from sklearn.linear_model import LogisticRegression
+
+dataset = RobotDatasetGenerator(seed=1014, draw=False).generate()
+
+# Train a concept → label model (the label predictor in a CBM)
+clf = LogisticRegression()
+clf.fit(dataset.training.C, dataset.training.y)
+print(f"Accuracy: {clf.score(dataset.test.C, dataset.test.y):.4f}")  # 0.9999
+```
+
+### Training a CBM with our models (requires cloning the repo)
+
+Once you have a dataset, you can train a full CBM and run interventions using the repo's model code:
 
 ```python
 from concept_benchmark import RobotDatasetGenerator
@@ -152,7 +188,7 @@ for k in [1, 3]:
     print(f"k={k}: accuracy={acc:.4f}")
 ```
 
-### Running the full pipeline
+### Running the full pipeline (requires cloning the repo)
 
 For the full experiment pipeline (including model training, intervention regimes, alignment, and selective classification), use the CLI scripts:
 
