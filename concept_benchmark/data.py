@@ -278,6 +278,54 @@ class ConceptDataset:
             sample.concept_missing = self._concept_missing
             sample.label_noise = self._label_noise
 
+    # -- Dict-style split access --
+
+    _SPLIT_ALIASES = {
+        "train": "training",
+        "training": "training",
+        "val": "validation",
+        "validation": "validation",
+        "test": "test",
+    }
+
+    def __getitem__(self, key: str) -> "ConceptDatasetSample":
+        try:
+            attr = self._SPLIT_ALIASES[key]
+        except KeyError:
+            raise KeyError(
+                f"Unknown split '{key}'. Available: 'train', 'val', 'test'"
+            )
+        return getattr(self, attr)
+
+    def keys(self):
+        return ["train", "val", "test"]
+
+    def __contains__(self, key) -> bool:
+        return key in self._SPLIT_ALIASES
+
+    # -- Aliases --
+
+    @property
+    def train(self) -> "ConceptDatasetSample":
+        return self.training
+
+    @property
+    def val(self) -> "ConceptDatasetSample":
+        return self.validation
+
+    # -- Description --
+
+    @property
+    def description(self) -> str:
+        data_type = self._full.meta.get("data_type", "unknown")
+        lines = [
+            f"{self.__class__.__name__} ({data_type})",
+            f"  Samples: {self.n} (train={self.training.n}, val={self.validation.n}, test={self.test.n})",
+            f"  Concepts ({self.n_concepts}): {self.concepts}",
+            f"  Classes ({self.n_classes}): {self.classes}",
+        ]
+        return "\n".join(lines)
+
     #### built-ins ####
 
     def __check_rep__(self):
@@ -330,7 +378,13 @@ class ConceptDataset:
         return self.n
 
     def __repr__(self):
-        return f"ConceptDataset<n={self.n}, n_concepts={self.n_concepts}, n_classes={self.n_classes}, data_type={self._full.meta.get('data_type')}, splits={{train:{getattr(self, 'training', None).n if hasattr(self, 'training') else 0}, val:{getattr(self, 'validation', None).n if hasattr(self, 'validation') else 0}, test:{getattr(self, 'test', None).n if hasattr(self, 'test') else 0}}}>"
+        data_type = self._full.meta.get("data_type", "unknown")
+        return (
+            f"ConceptDataset({data_type}, n_concepts={self.n_concepts}, n_classes={self.n_classes})\n"
+            f"  train: {self.training.n} samples\n"
+            f"  val:   {self.validation.n} samples\n"
+            f"  test:  {self.test.n} samples"
+        )
 
     def __copy__(self):
         cpy = ConceptDataset(
@@ -1087,6 +1141,20 @@ class ConceptDatasetSample(Dataset):
     def loader(self, batch_size=32, shuffle=False, **kwargs) -> DataLoader:
         loader = DataLoader(self, batch_size=batch_size, shuffle=shuffle, **kwargs)
         return loader
+
+    def to_dataframe(self) -> "pd.DataFrame":
+        """Convert concepts and labels to a pandas DataFrame.
+
+        Returns a DataFrame with one column per concept (named by
+        ``self.concepts``), a ``label`` column with integer class indices,
+        and a ``class`` column with the corresponding class name.
+        Feature matrix ``X`` is not included (images/large tensors
+        cannot be represented in a tabular format).
+        """
+        df = pd.DataFrame(self.C, columns=self.concepts)
+        df["label"] = self.y
+        df["class"] = [self.classes[int(i)] for i in self.y]
+        return df
 
     def embed(
         self, model, batch_size=32, shuffle=False, device="cpu", **kwargs

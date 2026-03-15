@@ -335,3 +335,71 @@ def test_split_specific_label_noise_toggle(tab_small_cv):
     assert ds.test.label_noise is False
     assert np.any(ds.training.y != ds.training.base_labels)
     assert np.all(ds.validation.y == ds.validation.base_labels)
+
+
+# ---------- Dict-style split access ----------
+def test_getitem_train_returns_training(tab_small_cv):
+    ds, fid = tab_small_cv
+    ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
+    assert ds["train"] is ds.training
+    assert ds["training"] is ds.training
+
+
+def test_getitem_val_returns_validation(tab_small_cv):
+    ds, fid = tab_small_cv
+    ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
+    assert ds["val"] is ds.validation
+    assert ds["validation"] is ds.validation
+
+
+def test_getitem_test_returns_test(tab_small_cv):
+    ds, fid = tab_small_cv
+    ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
+    assert ds["test"] is ds.test
+
+
+def test_getitem_invalid_raises_keyerror(tab_small):
+    with pytest.raises(KeyError, match="Unknown split"):
+        tab_small["invalid"]
+
+
+def test_keys(tab_small):
+    assert tab_small.keys() == ["train", "val", "test"]
+
+
+def test_contains(tab_small):
+    assert "train" in tab_small
+    assert "training" in tab_small
+    assert "val" in tab_small
+    assert "validation" in tab_small
+    assert "test" in tab_small
+    assert "invalid" not in tab_small
+
+
+# ---------- Aliases ----------
+def test_train_alias(tab_small):
+    assert tab_small.train is tab_small.training
+
+
+def test_val_alias(tab_small):
+    assert tab_small.val is tab_small.validation
+
+
+# ---------- Description ----------
+def test_description(tab_small):
+    desc = tab_small.description
+    assert isinstance(desc, str)
+    assert len(desc) > 0
+    assert "ConceptDataset" in desc
+    for concept in tab_small.concepts:
+        assert concept in desc
+    for cls in tab_small.classes:
+        assert cls in desc
+
+
+def test_repr_multiline(tab_small):
+    r = repr(tab_small)
+    assert "ConceptDataset(" in r
+    assert "train:" in r
+    assert "val:" in r
+    assert "test:" in r
