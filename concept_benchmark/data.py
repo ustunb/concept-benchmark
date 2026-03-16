@@ -104,6 +104,53 @@ def _deep_equal(a, b) -> bool:
 
 
 class ConceptDataset:
+    """Container for concept-annotated datasets with train/val/test splits.
+
+    Wraps a feature matrix *X*, a binary concept matrix *C*, and a label
+    vector *y* together with metadata, cross-validation indices, and optional
+    noise/missingness overlays.  Splits are created via :meth:`split` and
+    accessed as ``dataset.training``, ``dataset.validation``, ``dataset.test``
+    (or dict-style: ``dataset["train"]``).
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Feature matrix.  For image data, an array of image file paths.
+    C : np.ndarray
+        Concept matrix of shape ``(n_samples, n_concepts)`` with binary
+        values (0 or 1).
+    y : np.ndarray
+        Label vector of shape ``(n_samples,)`` with integer class labels.
+    meta : dict
+        Metadata dictionary.  Must contain keys ``'classes'`` (list of
+        class names), ``'concepts'`` (list of concept names), and
+        ``'data_type'`` (``'image'``, ``'tabular'``, or ``'text'``).
+    cvindices : dict, optional
+        Pre-computed cross-validation fold indices.
+    transform : callable, optional
+        Transformation applied to features in ``__getitem__``.
+    concept_transform : callable, optional
+        Transformation applied to concepts in ``__getitem__``.
+    target_transform : callable, optional
+        Transformation applied to labels in ``__getitem__``.
+    concept_noise : bool, optional
+        Whether concept noise is enabled by default (default ``False``).
+    concept_missing : bool, optional
+        Whether concept missingness is enabled by default (default ``False``).
+    label_noise : bool, optional
+        Whether label noise is enabled by default (default ``False``).
+    **kwargs
+        Extra keyword arguments forwarded to the underlying
+        :class:`ConceptDatasetSample`.
+
+    Examples
+    --------
+    >>> ds = ConceptDataset(X, C, y, meta)
+    >>> ds.generate_cvindices(strata=ds.y, total_folds_for_cv=[5])
+    >>> ds.split("K05N01", fold_num_validation=4, fold_num_test=5)
+    >>> print(ds.training.n, ds.validation.n, ds.test.n)
+    """
+
     SAMPLE_TYPES = ("training", "validation", "test")
 
     def __init__(
@@ -121,32 +168,6 @@ class ConceptDataset:
         label_noise: bool = False,
         **kwargs,
     ) -> None:
-        """ConceptDataset
-
-        Args:
-            X (np.ndarray): Feature matrix. \
-                For image data, this should be an array of image file paths.
-            C (np.ndarray): Concept matrix. \
-                Should be of shape (n_samples, n_concepts) with binary values (0 or 1).
-            y (np.ndarray): Label vector. \
-                Should be of shape (n_samples,) with integer class labels.
-            meta (dict): Metadata dictionary containing:
-                - 'classes': List of class names (in order of labels in y).
-                - 'concepts': List of concept names (in order of columns in C).
-                - 'data_type': Type of data ('image', 'tabular', etc.).
-            cvindices (dict, optional): Cross-validation indices. \
-                Defaults to None.
-            transform (Callable, optional): Transformation function for features. \
-                Defaults to None.
-            concept_transform (Callable, optional): Transformation function for concepts. \
-                Defaults to None.
-            target_transform (Callable, optional): Transformation function for labels. \
-                Defaults to None.
-            concept_noise (bool, optional): Whether concept noise is enabled by default.
-            concept_missing (bool, optional): Whether concept missingness is enabled by default.
-            label_noise (bool, optional): Whether label noise is enabled by default.
-            **kwargs: Additional keyword arguments.
-        """
         self._init_kwargs = dict(kwargs)
         self._concept_noise = bool(concept_noise)
         self._concept_missing = bool(concept_missing)
@@ -207,11 +228,12 @@ class ConceptDataset:
         self.reset()
 
     def drop_concepts(self, concepts_to_drop):
-        """
-        Drop specified concepts from the dataset.
+        """Remove concepts from the dataset by name.
 
-        Args:
-            concepts_to_drop (list of str): List of concept names to drop.
+        Parameters
+        ----------
+        concepts_to_drop : list of str
+            Concept names to drop.  At least one concept must remain.
         """
         if not isinstance(concepts_to_drop, (list, tuple, set)):
             raise ValueError(
@@ -241,10 +263,7 @@ class ConceptDataset:
         assert self.__check_rep__()
 
     def reset(self):
-        """
-        initialize data object to a state before CV
-        :return:
-        """
+        """Reset to the pre-split state (all data in training, empty val/test)."""
         self._fold_id = None
         self._fold_number_range = []
         self._fold_num_test = 0
@@ -289,6 +308,7 @@ class ConceptDataset:
     }
 
     def __getitem__(self, key: str) -> "ConceptDatasetSample":
+        """Access a split by name (``"train"``, ``"val"``, or ``"test"``)."""
         try:
             attr = self._SPLIT_ALIASES[key]
         except KeyError:
@@ -298,25 +318,30 @@ class ConceptDataset:
         return getattr(self, attr)
 
     def keys(self):
+        """Available split names: ``['train', 'val', 'test']``."""
         return ["train", "val", "test"]
 
     def __contains__(self, key) -> bool:
+        """Check whether *key* is a valid split name."""
         return key in self._SPLIT_ALIASES
 
     # -- Aliases --
 
     @property
     def train(self) -> "ConceptDatasetSample":
+        """Alias for :attr:`training`."""
         return self.training
 
     @property
     def val(self) -> "ConceptDatasetSample":
+        """Alias for :attr:`validation`."""
         return self.validation
 
     # -- Description --
 
     @property
     def description(self) -> str:
+        """Human-readable summary of the dataset."""
         data_type = self._full.meta.get("data_type", "unknown")
         lines = [
             f"{self.__class__.__name__} ({data_type})",
@@ -404,53 +429,62 @@ class ConceptDataset:
     #### INSTANCE VARIABLES
     @property
     def classes(self):
+        """List of class names, ordered by label index."""
         return self._full.classes
 
     @property
     def concepts(self):
+        """List of concept names, ordered by column index in *C*."""
         return self._full.concepts
 
     @property
     def n(self):
-        """number of examples in full dataset"""
+        """Total number of samples in the full (unsplit) dataset."""
         return self._full.n
 
     @property
     def n_concepts(self):
+        """Number of concepts."""
         return self._full.n_concepts
 
     @property
     def n_classes(self):
+        """Number of classes."""
         return self._full.n_classes
 
     @property
     def X(self):
-        """feature matrix"""
+        """Feature matrix of the full dataset."""
         return self._full.X
 
     @property
     def C(self):
+        """Concept matrix of the full dataset (with noise/missingness applied)."""
         return self._full.C
 
     @property
     def y(self):
-        """label vector"""
+        """Label vector of the full dataset (with label noise applied)."""
         return self._full.y
 
     @property
     def meta(self):
+        """Metadata dictionary (classes, concepts, data_type, ...)."""
         return self._full.meta
 
     @property
     def transform(self):
+        """Feature transform applied in ``__getitem__``."""
         return self._full.transform
 
     @property
     def concept_transform(self):
+        """Concept transform applied in ``__getitem__``."""
         return self._full.concept_transform
 
     @property
     def target_transform(self):
+        """Target transform applied in ``__getitem__``."""
         return self._full.target_transform
 
     @transform.setter
@@ -467,6 +501,7 @@ class ConceptDataset:
 
     @property
     def concept_noise(self) -> bool:
+        """Whether concept noise is applied when reading *C*."""
         return self._concept_noise
 
     @concept_noise.setter
@@ -476,6 +511,7 @@ class ConceptDataset:
 
     @property
     def concept_missing(self) -> bool:
+        """Whether concept missingness is applied when reading *C*."""
         return self._concept_missing
 
     @concept_missing.setter
@@ -485,6 +521,7 @@ class ConceptDataset:
 
     @property
     def label_noise(self) -> bool:
+        """Whether label noise is applied when reading *y*."""
         return self._label_noise
 
     @label_noise.setter
@@ -495,6 +532,7 @@ class ConceptDataset:
     #### cross validation ####
     @property
     def cvindices(self):
+        """Cross-validation fold index dictionary, or ``None``."""
         return self._cvindices
 
     @cvindices.setter
@@ -503,10 +541,10 @@ class ConceptDataset:
 
     @property
     def fold_id(self):
-        """string representing the indices of cross-validation folds
-        K05N01 = 5-fold CV – 1st replicate
-        K05N02 = 5-fold CV – 2nd replicate (in case you want to run 5-fold CV one more time)
-        K10N01 = 10-fold CV – 1st replicate
+        """Active cross-validation fold identifier.
+
+        Format: ``"K{folds}N{replicate}"`` — e.g. ``"K05N01"`` for 5-fold
+        CV, 1st replicate.
         """
         return self._fold_id
 
@@ -543,11 +581,16 @@ class ConceptDataset:
         return self._fold_num_test
 
     def split(self, fold_id, fold_num_validation=None, fold_num_test=None):
-        """
-        :param fold_id:
-        :param fold_num_validation: fold to use as a validation set
-        :param fold_num_test: fold to use as a hold-out test set
-        :return:
+        """Split into training, validation, and test sets using CV folds.
+
+        Parameters
+        ----------
+        fold_id : str
+            Cross-validation fold identifier (e.g., ``"K05N01"``).
+        fold_num_validation : int, optional
+            Fold number to use as validation set.
+        fold_num_test : int, optional
+            Fold number to use as hold-out test set.
         """
 
         if fold_id is not None:
@@ -590,13 +633,20 @@ class ConceptDataset:
         replicates=3,
         seed=None,
     ):
-        """
-        :param strata:
-        :param total_folds_for_cv:
-        :param total_folds_for_inner_cv:
-        :param replicates:
-        :param seed:
-        :return:
+        """Generate and store cross-validation fold indices.
+
+        Parameters
+        ----------
+        strata : array-like, optional
+            Stratification labels (typically ``y``) for balanced splits.
+        total_folds_for_cv : list of int
+            Number of folds for each CV scheme (e.g., ``[5]`` for 5-fold).
+        total_folds_for_inner_cv : list of int
+            Fold counts for nested (inner) CV.
+        replicates : int
+            Number of independent CV replicates.
+        seed : int, optional
+            Random seed for reproducibility.
         """
         indices = generate_cvindices(
             n_samples=self.n if strata is None else None,
@@ -609,16 +659,28 @@ class ConceptDataset:
         self.cvindices = indices
 
     def embed(self, model, batch_size=32, shuffle=False, device="cpu", **kwargs):
-        """
-        Embed the dataset using a given model and return a new dataset
-        instance without modifying the current one.
+        """Embed features with *model* and return a new tabular dataset.
 
-        Parameters:
-        - model: A model that can embed the dataset.
+        The original dataset is not modified.  Cross-validation splits and
+        noise/missingness settings are preserved in the returned copy.
 
-        Returns:
-        - ConceptDataset: a new dataset whose features are the embedded
-          representations. Cross-validation splits are preserved if present.
+        Parameters
+        ----------
+        model : torch.nn.Module
+            Encoder that maps input batches to feature vectors.
+        batch_size : int
+            Batch size for the embedding pass.
+        shuffle : bool
+            Whether to shuffle the data loader.
+        device : str
+            Device to run the model on (e.g. ``"cpu"``, ``"cuda"``).
+        **kwargs
+            Extra arguments forwarded to the data loader.
+
+        Returns
+        -------
+        ConceptDataset
+            New dataset with embedded features and ``data_type='tabular'``.
         """
         # Compute embedded representation for the full dataset sample
         embedded_full = self._full.embed(
@@ -658,25 +720,32 @@ class ConceptDataset:
     ) -> dict[str, np.ndarray]:
         """Sample concept-level missingness masks.
 
-        Args:
-            p: Baseline prevalence of missingness.
-            mechanism: Missingness mechanism, either ``"mcar"`` or ``"mnar"``.
-            rng: Optional ``np.random.Generator`` or int seed for reproducibility.
-            mnar_config: Optional configuration dict used when ``mechanism="mnar"``.
-                Accepted keys:
-                    - ``present_prob`` / ``absent_prob``: scalar or per-concept
-                      probabilities (length ``n_concepts``) applied when the
-                      observed concept value is 1 or 0 respectively.
-                    - ``prob_matrix``: full matrix of probabilities overriding the
-                      per-concept values. Shape must match the concept matrix.
-            fill_value: Value used when applying the mask (via the
-                ``concept_missing`` toggle).
-            enable: If provided, sets ``self.concept_missing`` to the boolean value
-                after sampling. Defaults to ``None`` (no change).
+        Parameters
+        ----------
+        p : float
+            Baseline prevalence of missingness.
+        mechanism : ``"mcar"`` or ``"mnar"``
+            Missingness mechanism.
+        rng : np.random.Generator or int, optional
+            Random generator or seed for reproducibility.
+        mnar_config : dict, optional
+            Configuration for MNAR missingness.  Accepted keys:
 
-        Returns:
-            A dictionary mapping split name (``"training"``, ``"validation"``,
-            ``"test"``) to the sampled boolean mask for that split.
+            - ``present_prob`` / ``absent_prob``: scalar or per-concept
+              probabilities (length ``n_concepts``) applied when the
+              observed concept value is 1 or 0 respectively.
+            - ``prob_matrix``: full probability matrix overriding
+              per-concept values (shape must match the concept matrix).
+        fill_value : float
+            Value used to replace missing concepts (default ``NaN``).
+        enable : bool, optional
+            If provided, sets :attr:`concept_missing` after sampling.
+
+        Returns
+        -------
+        dict[str, np.ndarray]
+            Mapping from split name (``"training"``, ``"validation"``,
+            ``"test"``) to the sampled boolean mask.
         """
 
         mechanism_key = mechanism.lower()
@@ -725,20 +794,27 @@ class ConceptDataset:
     ) -> dict[str, np.ndarray]:
         """Sample concept-level noise masks (bit flips).
 
-        Args:
-            p: Baseline probability of flipping each concept bit.
-            rng: Optional ``np.random.Generator`` or int seed for reproducibility.
-            config: Optional configuration dict with keys:
-                - ``flip_prob``: symmetric flip probability per concept.
-                - ``p01``: probability of flipping 0→1 (scalar or per-concept array).
-                - ``p10``: probability of flipping 1→0 (scalar or per-concept array).
-                - ``prob_matrix``: full matrix of flip probabilities overriding the
-                  above options.
-            enable: If provided, sets ``self.concept_noise`` to the boolean value
-                after sampling.
+        Parameters
+        ----------
+        p : float
+            Baseline probability of flipping each concept bit.
+        rng : np.random.Generator or int, optional
+            Random generator or seed for reproducibility.
+        config : dict, optional
+            Fine-grained noise configuration.  Accepted keys:
 
-        Returns:
-            Dictionary mapping split name to the boolean flip mask for that split.
+            - ``flip_prob``: symmetric flip probability per concept.
+            - ``p01``: probability of flipping 0 → 1 (scalar or per-concept).
+            - ``p10``: probability of flipping 1 → 0 (scalar or per-concept).
+            - ``prob_matrix``: full flip-probability matrix overriding the
+              above options.
+        enable : bool, optional
+            If provided, sets :attr:`concept_noise` after sampling.
+
+        Returns
+        -------
+        dict[str, np.ndarray]
+            Mapping from split name to the boolean flip mask.
         """
 
         if enable is not None:
@@ -779,7 +855,24 @@ class ConceptDataset:
         label_noise_config: Mapping[str, object] | None = None,
         enable: bool | None = None,
     ) -> dict[str, np.ndarray]:
-        """Sample label noise for each split and optionally enable the view."""
+        """Sample label noise for each split.
+
+        Parameters
+        ----------
+        p : float
+            Probability of flipping each label to a random other class.
+        rng : np.random.Generator or int, optional
+            Random generator or seed for reproducibility.
+        label_noise_config : dict, optional
+            Fine-grained noise configuration forwarded to the sampler.
+        enable : bool, optional
+            If provided, sets :attr:`label_noise` after sampling.
+
+        Returns
+        -------
+        dict[str, np.ndarray]
+            Mapping from split name to the noisy label array.
+        """
 
         if enable is not None:
             self.label_noise = bool(enable)
@@ -824,6 +917,43 @@ class ConceptDataset:
 
 
 class ConceptDatasetSample(Dataset):
+    """A single split (train/val/test) of a :class:`ConceptDataset`.
+
+    Implements the PyTorch :class:`~torch.utils.data.Dataset` interface so it
+    can be passed directly to a :class:`~torch.utils.data.DataLoader`.
+    Concept noise, concept missingness, and label noise are applied lazily
+    when accessing :attr:`C` or :attr:`y`.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Feature matrix (or array of file paths for image data).
+    C : np.ndarray
+        Binary concept matrix of shape ``(n_samples, n_concepts)``.
+    y : np.ndarray
+        Integer label vector of shape ``(n_samples,)``.
+    meta : dict
+        Metadata dict with keys ``'classes'``, ``'concepts'``, ``'data_type'``.
+    parent : ConceptDataset, optional
+        Back-reference to the owning :class:`ConceptDataset`.
+    indices : np.ndarray, optional
+        Boolean mask indicating which rows of the parent were selected.
+    transform : callable, optional
+        Feature transform applied in ``__getitem__``.
+    concept_transform : callable, optional
+        Concept transform applied in ``__getitem__``.
+    target_transform : callable, optional
+        Target transform applied in ``__getitem__``.
+    concept_noise : bool
+        Whether to apply the concept noise mask (default ``False``).
+    concept_missing : bool
+        Whether to apply the concept missingness mask (default ``False``).
+    label_noise : bool
+        Whether to return noisy labels (default ``False``).
+    **kwargs
+        Extra keyword arguments stored for :meth:`filter` round-tripping.
+    """
+
     def __init__(
         self,
         X: np.ndarray,
@@ -882,6 +1012,7 @@ class ConceptDatasetSample(Dataset):
 
     @property
     def meta(self) -> dict:
+        """Metadata dictionary (classes, concepts, data_type, ...)."""
         return self._meta
 
     @meta.setter
@@ -896,6 +1027,7 @@ class ConceptDatasetSample(Dataset):
 
     @property
     def X(self) -> np.ndarray:
+        """Feature matrix (or path array for image data)."""
         return self._X
 
     @X.setter
@@ -905,6 +1037,7 @@ class ConceptDatasetSample(Dataset):
 
     @property
     def y(self) -> np.ndarray:
+        """Label vector, with label noise applied when enabled."""
         apply_noise = self._label_noise_enabled and (
             self._label_noise_labels is not None
         )
@@ -922,6 +1055,7 @@ class ConceptDatasetSample(Dataset):
 
     @property
     def C(self) -> np.ndarray:
+        """Concept matrix, with noise and missingness applied when enabled."""
         base = self._C_base
         noise_mask = self._concept_noise_mask
         missing_mask = self._concept_missing_mask
@@ -956,13 +1090,24 @@ class ConceptDatasetSample(Dataset):
 
     @property
     def base_concepts(self) -> np.ndarray:
+        """Clean concept matrix before noise/missingness."""
         return self._C_base
 
     @property
     def base_labels(self) -> np.ndarray:
+        """Clean label vector before noise."""
         return self._y_base
 
     def set_concept_noise_mask(self, mask: np.ndarray | None) -> None:
+        """Set (or clear) the boolean concept noise mask.
+
+        Parameters
+        ----------
+        mask : np.ndarray or None
+            Boolean array matching ``base_concepts.shape``.  ``True``
+            entries will have their concept value flipped.  Pass ``None``
+            to clear.
+        """
         if mask is None:
             self._concept_noise_mask = None
             return
@@ -973,11 +1118,23 @@ class ConceptDatasetSample(Dataset):
 
     @property
     def concept_noise_mask(self) -> np.ndarray | None:
+        """Boolean mask of concept noise flips, or ``None``."""
         return self._concept_noise_mask
 
     def set_concept_missing_mask(
         self, mask: np.ndarray | None, *, fill_value: float = np.nan
     ) -> None:
+        """Set (or clear) the concept missingness mask.
+
+        Parameters
+        ----------
+        mask : np.ndarray or None
+            Boolean array matching ``base_concepts.shape``.  ``True``
+            entries will be replaced with *fill_value*.  Pass ``None``
+            to clear.
+        fill_value : float
+            Value to substitute for missing concepts (default ``NaN``).
+        """
         if mask is None:
             self._concept_missing_mask = None
             self._concept_missing_fill_value = fill_value
@@ -990,14 +1147,17 @@ class ConceptDatasetSample(Dataset):
 
     @property
     def concept_missing_mask(self) -> np.ndarray | None:
+        """Boolean mask of missing concepts, or ``None``."""
         return self._concept_missing_mask
 
     @property
     def concept_missing_fill_value(self):
+        """Fill value used for missing concepts (default ``NaN``)."""
         return self._concept_missing_fill_value
 
     @property
     def concept_noise(self) -> bool:
+        """Whether concept noise is applied when reading :attr:`C`."""
         return self._concept_noise_enabled
 
     @concept_noise.setter
@@ -1006,6 +1166,7 @@ class ConceptDatasetSample(Dataset):
 
     @property
     def concept_missing(self) -> bool:
+        """Whether concept missingness is applied when reading :attr:`C`."""
         return self._concept_missing_enabled
 
     @concept_missing.setter
@@ -1014,6 +1175,7 @@ class ConceptDatasetSample(Dataset):
 
     @property
     def label_noise(self) -> bool:
+        """Whether label noise is applied when reading :attr:`y`."""
         return self._label_noise_enabled
 
     @label_noise.setter
@@ -1021,6 +1183,14 @@ class ConceptDatasetSample(Dataset):
         self._label_noise_enabled = bool(value)
 
     def set_label_noise_labels(self, labels: np.ndarray | None) -> None:
+        """Set (or clear) the noisy label vector.
+
+        Parameters
+        ----------
+        labels : np.ndarray or None
+            Integer array of the same length as the sample, or ``None``
+            to clear.
+        """
         if labels is None:
             self._label_noise_labels = None
             return
@@ -1033,6 +1203,7 @@ class ConceptDatasetSample(Dataset):
 
     @property
     def label_noise_labels(self) -> np.ndarray | None:
+        """Noisy label vector, or ``None`` if not sampled."""
         return self._label_noise_labels
 
     def __len__(self):
@@ -1061,6 +1232,7 @@ class ConceptDatasetSample(Dataset):
         return True
 
     def __getitem__(self, idx):
+        """Return ``(x, c, y)`` for the given index, with transforms applied."""
         x = self.X[idx]
         c = self.C[idx]
         y = self.y[idx]
@@ -1094,13 +1266,28 @@ class ConceptDatasetSample(Dataset):
 
     @property
     def n_concepts(self):
+        """Number of concepts."""
         return len(self.concepts)
 
     @property
     def n_classes(self):
+        """Number of classes."""
         return len(self.classes)
 
     def filter(self, indices):
+        """Return a new sample containing only the selected rows.
+
+        Parameters
+        ----------
+        indices : np.ndarray
+            Boolean mask of length ``n``.  Noise/missingness masks are
+            sliced accordingly.
+
+        Returns
+        -------
+        ConceptDatasetSample
+            Filtered copy (same class as ``self``).
+        """
         assert isinstance(indices, np.ndarray)
         assert indices.ndim == 1 and indices.shape[0] == self.n
         assert np.isin(indices, (0, 1)).all()
@@ -1139,26 +1326,109 @@ class ConceptDatasetSample(Dataset):
         return new_sample
 
     def loader(self, batch_size=32, shuffle=False, **kwargs) -> DataLoader:
+        """Create a PyTorch :class:`DataLoader` for this sample.
+
+        Parameters
+        ----------
+        batch_size : int
+            Batch size (default 32).
+        shuffle : bool
+            Whether to shuffle (default ``False``).
+        **kwargs
+            Extra arguments forwarded to :class:`DataLoader`.
+
+        Returns
+        -------
+        DataLoader
+        """
         loader = DataLoader(self, batch_size=batch_size, shuffle=shuffle, **kwargs)
         return loader
 
-    def to_dataframe(self) -> "pd.DataFrame":
+    def to_dataframe(self, include_X: bool = False) -> "pd.DataFrame":
         """Convert concepts and labels to a pandas DataFrame.
 
-        Returns a DataFrame with one column per concept (named by
-        ``self.concepts``), a ``label`` column with integer class indices,
-        and a ``class`` column with the corresponding class name.
-        Feature matrix ``X`` is not included (images/large tensors
-        cannot be represented in a tabular format).
+        Parameters
+        ----------
+        include_X : bool
+            If ``True``, prepend feature columns.  For tabular data these are
+            named ``x_0, x_1, …``; for text data a single ``text`` column is
+            used.  Image data is handled by the
+            :class:`ConceptImageDatasetSample` override.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with concept columns (named by ``self.concepts``),
+            a ``label`` column, and a ``class`` column.
         """
-        df = pd.DataFrame(self.C, columns=self.concepts)
+        parts: list[pd.DataFrame] = []
+        if include_X:
+            data_type = self.meta.get("data_type", "tabular")
+            if data_type == "text":
+                parts.append(pd.DataFrame({"text": list(self.X)}))
+            else:
+                # Tabular / fallback: one column per feature dimension
+                X_arr = np.asarray(self.X)
+                if X_arr.ndim == 1:
+                    X_arr = X_arr.reshape(-1, 1)
+                x_cols = {f"x_{j}": X_arr[:, j] for j in range(X_arr.shape[1])}
+                parts.append(pd.DataFrame(x_cols))
+        parts.append(pd.DataFrame(self.C, columns=self.concepts))
+        df = pd.concat(parts, axis=1)
         df["label"] = self.y
         df["class"] = [self.classes[int(i)] for i in self.y]
         return df
 
+    def explore(self, **kwargs):
+        """Open an interactive data browser with `Renumics Spotlight`_.
+
+        Requires the ``explore`` extra::
+
+            pip install concept-benchmark[explore]
+            # or: uv sync --group explore
+
+        All keyword arguments are forwarded to :func:`spotlight.show`.
+
+        .. _Renumics Spotlight: https://github.com/Renumics/spotlight
+        """
+        try:
+            from renumics import spotlight
+        except ImportError:
+            raise ImportError(
+                "The explore() method requires Renumics Spotlight.\n"
+                "Install it with:  pip install concept-benchmark[explore]\n"
+                "            or:  uv sync --group explore"
+            ) from None
+
+        df = self.to_dataframe(include_X=True)
+        dtype = {}
+        if "image" in df.columns:
+            dtype["image"] = spotlight.Image
+        spotlight.show(df, dtype=dtype, **kwargs)
+
     def embed(
         self, model, batch_size=32, shuffle=False, device="cpu", **kwargs
     ) -> "ConceptDatasetSample":
+        """Embed features with *model* and return a new tabular sample.
+
+        Parameters
+        ----------
+        model : torch.nn.Module
+            Encoder that maps input batches to feature vectors.
+        batch_size : int
+            Batch size for the embedding pass.
+        shuffle : bool
+            Whether to shuffle the data loader.
+        device : str
+            Device to run the model on.
+        **kwargs
+            Extra arguments (``num_workers``, ``pin_memory``).
+
+        Returns
+        -------
+        ConceptDatasetSample
+            New sample with embedded features and ``data_type='tabular'``.
+        """
         model = model.to(device)
         model.eval()
         loader = self.loader(
@@ -1217,6 +1487,40 @@ class ConceptDatasetSample(Dataset):
 
 
 class ConceptImageDatasetSample(ConceptDatasetSample):
+    """Image-backed variant of :class:`ConceptDatasetSample`.
+
+    ``X`` stores file paths rather than pixel arrays.  ``__getitem__``
+    loads each image from disk, applies *preprocess* (e.g. resize/normalize),
+    then *transform*.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Array of image file paths (relative to *base_dir*).
+    C : np.ndarray
+        Binary concept matrix.
+    y : np.ndarray
+        Integer label vector.
+    meta : dict
+        Metadata dictionary.
+    parent : ConceptDataset, optional
+        Back-reference to the owning dataset.
+    indices : np.ndarray, optional
+        Boolean selection mask.
+    transform : callable, optional
+        Transform applied after *preprocess*.
+    concept_transform : callable, optional
+        Concept transform applied in ``__getitem__``.
+    target_transform : callable, optional
+        Target transform applied in ``__getitem__``.
+    preprocess : callable, optional
+        Image preprocessing (e.g. ``torchvision.transforms``).
+    base_dir : Path or str, optional
+        Root directory for resolving image paths (default ``"."``).
+    **kwargs
+        Extra keyword arguments forwarded to the parent class.
+    """
+
     def __init__(
         self,
         X: np.ndarray,
@@ -1252,6 +1556,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             self.base_dir = Path(base_dir)
 
     def __getitem__(self, idx):
+        """Load image from disk and return ``(image, c, y)``."""
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
@@ -1281,6 +1586,22 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
 
         return image, c, y
 
+    def to_dataframe(self, include_X: bool = False) -> "pd.DataFrame":
+        """Convert to DataFrame, resolving image paths when *include_X* is set.
+
+        When ``include_X=True``, an ``image`` column with absolute paths is
+        prepended (resolving filenames via ``self.base_dir``).
+        """
+        parts: list[pd.DataFrame] = []
+        if include_X:
+            resolved = [str(self.base_dir / p) for p in self.X]
+            parts.append(pd.DataFrame({"image": resolved}))
+        parts.append(pd.DataFrame(self.C, columns=self.concepts))
+        df = pd.concat(parts, axis=1)
+        df["label"] = self.y
+        df["class"] = [self.classes[int(i)] for i in self.y]
+        return df
+
     def __eq__(self, other):
         chk = super().__eq__(other) and (self.base_dir == other.base_dir)
         return chk
@@ -1298,6 +1619,17 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         )
 
     def filter(self, indices):
+        """Return a filtered copy, preserving *preprocess* and *base_dir*.
+
+        Parameters
+        ----------
+        indices : np.ndarray
+            Boolean mask of length ``n``.
+
+        Returns
+        -------
+        ConceptImageDatasetSample
+        """
         assert isinstance(indices, np.ndarray)
         assert indices.ndim == 1 and indices.shape[0] == self.n
         assert np.isin(indices, (0, 1)).all()

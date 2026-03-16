@@ -44,7 +44,11 @@ dependencies = [
 [project.urls]
 Repository = "https://github.com/ustunb/concept-benchmark"
 
+[project.optional-dependencies]
+explore = ["renumics-spotlight>=1.6.0"]
+
 [dependency-groups]
+explore = ["renumics-spotlight>=1.6.0"]
 experiments = [
     "transformers>=4.55.2",
     "cvxpy>=1.4.0",
@@ -56,6 +60,12 @@ dev = [
     "jupyter",
     "ipykernel",
     "rich",
+]
+docs = [
+    "sphinx>=7.0",
+    "furo",
+    "sphinx-copybutton",
+    "myst-parser",
 ]
 
 [tool.uv]

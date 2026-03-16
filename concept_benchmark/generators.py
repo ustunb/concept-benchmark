@@ -152,6 +152,13 @@ class SudokuDatasetGenerator:
     """
 
     def __init__(self, **kwargs):
+        """Create a generator with the given benchmark configuration.
+
+        Parameters
+        ----------
+        **kwargs
+            Passed directly to :class:`SudokuBenchmarkConfig`.
+        """
         self.config = SudokuBenchmarkConfig(**kwargs)
 
     def generate(self):
