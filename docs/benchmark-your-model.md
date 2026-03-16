@@ -61,10 +61,24 @@ class MyConceptDetector(ConceptDetector):
 
 **Key point:** `predict()` receives a `ConceptDatasetSample`, not raw arrays. Access inputs via `dataset.X`.
 
-If your model is already a PyTorch `nn.Module`, you can pass it directly:
+### Using a PyTorch module directly
+
+If your model is already a PyTorch `nn.Module`, you can pass it directly instead of subclassing. Your module's `forward()` must:
+
+- Accept a batched input tensor (e.g. `(B, 3, 32, 32)` for images)
+- Return `(B, n_concepts)` **raw logits** (pre-sigmoid) — sigmoid is applied internally by `predict()`
+
+The return value can also be a tuple (first element is used) or a dict with a `"logits"` key.
 
 ```python
 cd = ConceptDetector(model=my_pytorch_module)
+cd.fit(train, val, fit_params={"epochs": 50, "lr": 1e-3, "device": "cpu"})
+```
+
+You can also split your model into a backbone + concept head using the `embedding_model` parameter. The detector will probe the backbone's output shape and attach an MLP head automatically:
+
+```python
+cd = ConceptDetector(embedding_model=my_backbone)
 cd.fit(train, val, fit_params={"epochs": 50, "lr": 1e-3, "device": "cpu"})
 ```
 

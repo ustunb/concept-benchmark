@@ -162,7 +162,7 @@ class MyStrategy(InterventionStrategy):
         self._state["concept_order"] = compute_importance(model, batch)
 
     def propose(self, model, batch, config):
-        order = self.state["concept_order"]
+        order = self._state["concept_order"]
         # ... use precomputed order
 ```
 

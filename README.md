@@ -35,10 +35,12 @@ Or install from source (includes training/evaluation code and pipeline scripts):
 ```bash
 git clone https://github.com/ustunb/concept-benchmark.git
 cd concept-benchmark
-uv sync
+pip install -e ".[experiments]"
 ```
 
-> **Package vs. repo:** `pip install concept-benchmark` gives you dataset generation and exploration (`concept_benchmark/`). To train models, run interventions, and use the full evaluation pipelines, clone the repo and run `uv sync` — the `experiments/` package is then importable directly (no `PYTHONPATH` needed).
+If you use [uv](https://docs.astral.sh/uv/), `uv sync` works too and also installs dev/docs dependencies.
+
+> **Package vs. repo:** `pip install concept-benchmark` gives you dataset generation and exploration (`concept_benchmark/`). To train models, run interventions, and use the full evaluation pipelines, clone the repo and install with `.[experiments]` — the `experiments/` package is then importable directly (no `PYTHONPATH` needed).
 
 > **Device support:** The package auto-detects the best available device (CUDA → MPS → CPU). Apple Silicon (MPS) is fully supported. Override with `export PYTORCH_DEVICE=cpu`.
 
