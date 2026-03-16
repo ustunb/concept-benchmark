@@ -7,9 +7,11 @@ This example walks through the complete concept bottleneck model workflow:
   2. Train a ConceptDetector (images → concept probabilities)
   3. Train a FrontEndModel (concepts → label)
   4. Combine into a ConceptBasedModel and evaluate
-  5. Run oracle interventions — correct the k most uncertain concepts
+  5. Run interventions using ConceptInterventionRunner + KFlipInterventionStrategy
   6. Train a DNN baseline for comparison
   7. Run alignment — retrain with sign constraints
+
+Timing: ~3 min on MPS (Apple Silicon), ~5–10 min on CPU.
 
 Usage:
     ./venv/bin/python examples/robot_pipeline_example.py
@@ -18,11 +20,11 @@ Note: ``uv sync`` makes ``experiments/`` importable automatically.
 """
 
 import numpy as np
-import torch
-import torch.nn as nn
 
 from concept_benchmark import RobotDatasetGenerator
 from concept_benchmark.utils import set_deterministic_seed
+from experiments.intervention import ConceptInterventionRunner, InterventionConfig
+from experiments.kflip import KFlipInterventionStrategy
 from experiments.models import (
     ConceptBasedModel,
     ConceptDetector,
@@ -31,11 +33,11 @@ from experiments.models import (
     RobotConceptClassifier,
 )
 from experiments.utils import (
-    compute_accuracy,
     determine_device,
     get_loader_config,
     patch_macos_dataloader,
     run_alignment,
+    train_dnn,
 )
 
 SEED = 1014
@@ -103,14 +105,17 @@ baseline_acc = np.mean(predictions == test.y)
 print(f"\nCBM accuracy (k=0, no interventions): {baseline_acc:.4f}")
 
 # ---------------------------------------------------------------------------
-# 5. Oracle interventions — correct the k most uncertain concepts
+# 5. Interventions using ConceptInterventionRunner + KFlipInterventionStrategy
 # ---------------------------------------------------------------------------
-# KEY: cd.predict() returns concept probabilities in [0, 1], NOT binary
-# predictions. This is different from the sklearn convention where predict()
-# returns class labels. Use (probs > 0.5) to get binary predictions.
+# The KFlip strategy evaluates all subsets of up to k concepts per sample,
+# computing the probability that flipping each subset changes the prediction.
+# This matches the paper's intervention protocol exactly.
+# Replace KFlipInterventionStrategy() with your own InterventionStrategy
+# subclass to benchmark custom intervention policies (see docs/interventions.md).
+runner = ConceptInterventionRunner(model=cbm)
 concept_probs = cd.predict(test)
 
-print("\nOracle interventions (correct k most uncertain concepts per sample):")
+print("\nKFlip interventions (correct k most impactful concepts per sample):")
 print(f"  {'k':>3s}   {'accuracy':>8s}   {'gain':>8s}")
 print(f"  {'---':>3s}   {'--------':>8s}   {'--------':>8s}")
 
@@ -119,29 +124,23 @@ for k in budgets:
     if k == 0:
         acc = baseline_acc
     else:
-        # Copy predicted probabilities
-        C_intervened = concept_probs.copy()
-
-        # Uncertainty = distance from decision boundary (0.5)
-        uncertainty = np.abs(concept_probs - 0.5)
-
-        # For each sample, replace the k most uncertain concepts with
-        # ground-truth values
-        for i in range(len(test)):
-            most_uncertain = np.argsort(uncertainty[i])[:k]
-            C_intervened[i, most_uncertain] = test.C[i, most_uncertain]
-
-        # Threshold to binary and predict with the label predictor
-        C_binary = (C_intervened > 0.5).astype(np.float32)
-        preds = fe.predict(C_binary)
-        acc = np.mean(preds == test.y)
+        result = runner.run(
+            strategy=KFlipInterventionStrategy(),
+            config=InterventionConfig(
+                max_concepts_per_instance=k,
+                score_threshold=0.2,
+            ),
+            dataset=test,
+            concept_proba=concept_probs,
+        )
+        acc = np.mean(result.y_pred_after == test.y)
 
     gain = acc - baseline_acc
     k_str = str(k) if k != n_concepts else f"{k} (max)"
     print(f"  {k_str:>8s}   {acc:>8.4f}   {gain:>+8.4f}")
 
-# Expected results (seed=1014, subconcept, simple oracle):
-#   k=0: 0.7812  |  k=1: 0.9206  |  k=3: 0.9487  |  k=12 (max): 0.9487
+# Expected results (seed=1014, subconcept, KFlip with threshold=0.2):
+#   k=0: 0.7812  |  k=1: 0.9212  |  k=3: 0.9439  |  k=12 (max): 0.9439
 
 # ---------------------------------------------------------------------------
 # 6. DNN baseline — end-to-end image classifier (no concepts)
@@ -149,52 +148,7 @@ for k in budgets:
 print("\nTraining DNN baseline (images → label, no concepts)...")
 set_deterministic_seed(SEED)
 dnn = RobotClassifierCNN(input_size=32)
-dnn.to(device)
-
-criterion = nn.BCELoss()
-optimizer = torch.optim.Adam(dnn.parameters(), lr=1e-3)
-
-train_loader = train.loader(shuffle=True, **loader_config)
-val_loader = val.loader(shuffle=False, **loader_config)
-test_loader = test.loader(shuffle=False, **loader_config)
-
-best_val_loss = float("inf")
-best_state_dict = None
-epochs_no_improve = 0
-
-for epoch in range(50):
-    dnn.train()
-    for X, _, y in train_loader:
-        optimizer.zero_grad()
-        X, y = X.to(device), y.to(device)
-        outputs = dnn(X)
-        loss = criterion(outputs.squeeze(), y.float())
-        loss.backward()
-        optimizer.step()
-
-    dnn.eval()
-    val_loss_sum = 0.0
-    val_batches = 0
-    with torch.no_grad():
-        for X, _, y in val_loader:
-            X, y = X.to(device), y.to(device)
-            outputs = dnn(X)
-            batch_loss = criterion(outputs.squeeze(), y.float())
-            val_loss_sum += batch_loss.item()
-            val_batches += 1
-
-    val_loss = val_loss_sum / val_batches
-    if val_loss < best_val_loss:
-        best_val_loss = val_loss
-        best_state_dict = {k: v.clone() for k, v in dnn.state_dict().items()}
-        epochs_no_improve = 0
-    else:
-        epochs_no_improve += 1
-        if epochs_no_improve >= 10:
-            break
-
-dnn.load_state_dict(best_state_dict)
-dnn_acc = compute_accuracy(dnn, test_loader, device)
+dnn_acc = train_dnn(dnn, train, val, test, device, loader_config=loader_config)
 print(f"  DNN accuracy: {dnn_acc:.4f}")
 # Expected: 0.8746
 

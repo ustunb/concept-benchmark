@@ -577,34 +577,44 @@ class ConceptDetector:
     ) -> None:
         """Train the detector and optionally calibrate the resulting logits.
 
-        Args:
-            train_dataset: Dataset providing supervised concept labels for
-                optimisation.
-            valid_dataset: Held-out dataset used for early stopping and
-                calibration.
-            freeze: When ``True`` the detector disables gradient updates on the
-                backbone parameters.
-            embed_params: Unused in the joint setup; accepted for parity with
-                older call sites.
-            fit_params: Keyword overrides passed to the trainer. Recognised keys
-                include ``epochs``, ``batch_size``, ``device``,
-                ``lr_encoder``, ``lr_heads``, and ``optimizer_factory``.
-            l1_size: Hidden width for the default MLP head when a custom model is
-                not supplied.
-            n_jobs: Present for API compatibility; ignored.
-            calibrate: When ``True`` runs ``calibrate`` on the validation split
-                after training completes.
-            log_training: Convenience flag that sets ``fit_params['verbose']``.
-            log_interval: How often (in steps) to emit training loss when verbose
-                logging is active.
-            model: Optional joint model to train instead of constructing the
-                default.
-            trainer: Custom trainer overriding ``self.trainer`` for this call.
+        Parameters
+        ----------
+        train_dataset : ConceptDatasetSample
+            Dataset providing supervised concept labels for optimisation.
+        valid_dataset : ConceptDatasetSample
+            Held-out dataset used for early stopping and calibration.
+        freeze : bool
+            When ``True`` the detector disables gradient updates on the
+            backbone parameters.
+        embed_params : dict, optional
+            Unused in the joint setup; accepted for parity with older call
+            sites.
+        fit_params : dict, optional
+            Keyword overrides passed to the trainer. Recognised keys include
+            ``epochs``, ``batch_size``, ``device``, ``lr_encoder``,
+            ``lr_heads``, and ``optimizer_factory``.
+        l1_size : int, optional
+            Hidden width for the default MLP head when a custom model is not
+            supplied.
+        calibrate : bool
+            When ``True`` runs ``calibrate`` on the validation split after
+            training completes.
+        log_training : bool
+            Convenience flag that sets ``fit_params['verbose']``.
+        log_interval : int, optional
+            How often (in steps) to emit training loss when verbose logging
+            is active.
+        model : nn.Module, optional
+            Optional joint model to train instead of constructing the default.
+        trainer : ConceptTrainer, optional
+            Custom trainer overriding ``self.trainer`` for this call.
 
-        Raises:
-            ValueError: If the training dataset is empty when constructing a
-                default model.
-            TypeError: If the trainer returns an unexpected object.
+        Raises
+        ------
+        ValueError
+            If the training dataset is empty when constructing a default model.
+        TypeError
+            If the trainer returns an unexpected object.
         """
         if fit_params is None:
             fit_params = {}
@@ -813,7 +823,18 @@ class ConceptDetector:
         embed_params: Optional[dict] = None,
         calibrate: Optional[bool] = None,
     ) -> np.ndarray:
-        """Return per-concept probabilities, optionally applying calibration."""
+        """Predict concept probabilities for each sample.
+
+        Returns an ``(N, n_concepts)`` array of probabilities in ``[0, 1]``,
+        **not** binary predictions.  This differs from the sklearn convention
+        where ``predict()`` returns class labels.
+
+        To get binary concept predictions, threshold at 0.5::
+
+            binary = (cd.predict(dataset) > 0.5).astype(int)
+
+        If calibration was fitted during :meth:`fit`, it is applied by default.
+        """
         if self.model is None:
             raise RuntimeError(
                 "Model has not been fitted yet. Please call fit() first."
@@ -879,8 +900,14 @@ class FrontEndModel:
         self.model.fit(C, y)
 
     def predict(self, C: np.ndarray) -> np.ndarray:
-        """
-        Predict label given concepts.
+        """Predict labels from concept values.
+
+        Args:
+            C: Binary concept array of shape ``(N, n_concepts)``.  Values
+                should be 0/1 (thresholded), not raw probabilities.
+
+        Returns:
+            Integer label array of shape ``(N,)``.
         """
         if self.model is None:
             raise RuntimeError(
@@ -890,8 +917,13 @@ class FrontEndModel:
         return self.model.predict(C)
 
     def predict_proba(self, C: np.ndarray) -> np.ndarray:
-        """
-        Predict label probabilities given concepts.
+        """Predict label probabilities from concept values.
+
+        Args:
+            C: Binary concept array of shape ``(N, n_concepts)``.
+
+        Returns:
+            Probability array of shape ``(N, n_classes)``.
         """
         if self.model is None:
             raise RuntimeError(

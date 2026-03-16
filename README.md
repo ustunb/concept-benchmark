@@ -54,7 +54,7 @@ A concept bottleneck model (CBM) first predicts interpretable *concepts* from in
 
 ### Robot Classification
 
-The robot benchmark classifies fictional robots — **Glorps** vs. **Drents** — from their body features. Generate a dataset with configurable parameters:
+The robot benchmark classifies fictional robots — **Glorps** vs. **Drents** — from their body features. Generate a dataset with rendered images and concept annotations:
 
 ```python
 from concept_benchmark import RobotDatasetGenerator
@@ -63,15 +63,21 @@ dataset = RobotDatasetGenerator(
     seed=1014,                # reproducibility
     subconcept=True,          # 12 fine-grained concepts (default: 7 coarse)
     model_type="stochastic",  # probabilistic labeling (or "deterministic")
-    size="medium",            # image resolution: "small", "medium", "large"
-    draw=False,               # skip image rendering for quick exploration
+    size="medium",            # image resolution: "small" (8px), "medium" (32px), "large" (600px)
+    draw=True,                # render robot images (default) — set False to skip for quick exploration
 ).generate()
 
 print(dataset.training.C.shape)   # (3800, 12) — concept annotations
-print(dataset.training.concepts)  # ['head_shape', 'body_shape', 'has_knees', ...]
+print(dataset.training.concepts)
+# ['head_shape', 'body_shape', 'has_knees', 'has_antennae', 'ears_shape',
+#  'mouth_type', 'foot_shape_flat_trapezoid', 'foot_shape_flat_square',
+#  'foot_shape_flat_5sided', 'foot_shape_pointy_rounded',
+#  'foot_shape_pointy_square', 'foot_shape_pointy_4sided']
 ```
 
-Each split (`training`, `validation`, `test`) is a `ConceptDataset` with attributes `X` (inputs), `C` (concept matrix), and `y` (labels). Convert to a DataFrame to see what the data looks like:
+With `subconcept=True`, the 9 raw body features are expanded into 12 binary concepts — for example, `foot_shape` (6 values) becomes 6 one-hot columns. With `subconcept=False` (default), you get 7 coarse concepts instead. The `draw=True` flag renders each robot as a 32×32 PNG image stored in `dataset.training.X`.
+
+Each split (`training`, `validation`, `test`) is a `ConceptDataset` with attributes `X` (images), `C` (concept matrix), and `y` (labels). Convert to a DataFrame to see what the data looks like:
 
 ```python
 dataset.training.to_dataframe().head(2)
@@ -90,7 +96,7 @@ dataset.training.explore()  # opens in the browser
   <img src="docs/assets/robot_samples.png" width="600" alt="Sample Glorps and Drents with concept annotations">
 </p>
 
-**Train a CBM.** The repo includes the building blocks for a full concept bottleneck model — a concept detector (images → concepts) and a label predictor (concepts → label). To train on images, regenerate the dataset with `draw=True`:
+**Train a CBM.** The repo includes the building blocks for a full concept bottleneck model — a concept detector (images → concepts) and a label predictor (concepts → label):
 
 ```python
 import numpy as np
@@ -106,7 +112,7 @@ patch_macos_dataloader()
 device = determine_device()
 loader_config = get_loader_config(device)
 
-dataset = RobotDatasetGenerator(seed=1014, subconcept=True).generate()  # renders images
+dataset = RobotDatasetGenerator(seed=1014, subconcept=True, draw=True).generate()
 
 # Step 1: train concept detector (images → concepts)
 n_concepts = dataset.training.n_concepts
@@ -165,9 +171,83 @@ print(df[show_cols])
 For a quick exploration using only the pip package, see [`examples/sudoku_quickstart.py`](examples/sudoku_quickstart.py). For the full neural CS model pipeline with selective classification and interventions (requires cloning the repo), see [`examples/sudoku_pipeline_example.py`](examples/sudoku_pipeline_example.py).
 
 
-## Benchmarks
+### Benchmark Your Own Model
 
-The package includes two benchmarks. **Robot classification** is a decision-support task where a human corrects the model's concept predictions to improve accuracy. **Sudoku validation** is an automation task where the system handles routine cases and defers uncertain ones to a human.
+Have your own concept detector or label predictor? Wrap them to plug into the evaluation pipeline:
+
+```python
+from experiments.models import ConceptDetector, FrontEndModel, ConceptBasedModel
+
+# Wrap your concept detector — predict() receives a ConceptDatasetSample
+class MyConceptDetector(ConceptDetector):
+    def __init__(self, my_model):
+        super().__init__()
+        self._model = my_model
+
+    def predict(self, dataset, **kwargs):
+        """Return (N, n_concepts) float array in [0, 1]."""
+        return self._model.predict_concept_probs(dataset.X)
+
+# Wrap your label predictor — C is binary (0/1), not probabilities
+class MyFrontEnd(FrontEndModel):
+    def __init__(self, my_clf):
+        super().__init__()
+        self._clf = my_clf
+
+    def predict(self, C):
+        return self._clf.predict(C)
+
+    def predict_proba(self, C):
+        return self._clf.predict_proba(C)
+
+# Assemble, evaluate, and run interventions
+cbm = ConceptBasedModel(
+    concept_detector=MyConceptDetector(my_concept_model),
+    front_end_model=MyFrontEnd(my_classifier),
+)
+predictions = cbm.predict(test)
+accuracy = np.mean(predictions == test.y)
+# Expected: compare against built-in CBM accuracy (0.7812 for subconcept)
+```
+
+For the full guide — including running interventions, alignment, bypassing the concept detector, and baseline comparisons — see [`docs/benchmark-your-model.md`](docs/benchmark-your-model.md).
+
+## Evaluation
+
+The repo includes tools for evaluating CBMs beyond raw accuracy — interventions, alignment constraints, and selective classification. These require cloning the repo and running `uv sync`.
+
+### Interventions
+
+Interventions correct the model's concept predictions at test time. The `ConceptInterventionRunner` + `KFlipInterventionStrategy` evaluates subsets of up to *k* concepts per sample and selects the most impactful correction. Expected results (seed=1014):
+
+| budget (k) | DNN | ideal (7 concepts) | subconcept (12 concepts) |
+|------------|------|---------------------|--------------------------|
+| 0 | 0.8746 | 0.8673 | 0.7812 |
+| 1 | — | 0.9736 | 0.9212 |
+| 3 | — | 0.9769 | 0.9439 |
+
+The package supports six intervention regimes that simulate different annotation scenarios: `baseline` (oracle), `expert` (noisy human), `subjective` (noisy labels + noisy human), `machine`/`llm`/`clip` (machine-discovered concepts via [Label-Free CBM](https://arxiv.org/abs/2304.06129)). See [`docs/interventions.md`](docs/interventions.md) for details.
+
+### Alignment
+
+Alignment constraints force concept weights to match expected directions (e.g., `has_knees` → positive). The paper shows this preserves training accuracy but **destroys** intervention benefit — aligned subconcept CBM drops from +16% gain to -8% at k=3.
+
+### Selective Classification
+
+For Sudoku, the key metric is selective classification: the model abstains on uncertain predictions to achieve high accuracy on kept samples. The CS model is very stable across seeds (sel_acc ~0.97, coverage ~99%). The DNN is highly variable — about 40% of seeds produce random-chance performance.
+
+### Reproducing Paper Results
+
+```bash
+python scripts/robot_pipeline.py --seed 1014 --subconcept   # see --help for all flags
+python scripts/sudoku_pipeline.py --seed 171
+```
+
+Results are fully deterministic for a given seed when using `set_deterministic_seed()`. Training takes ~3 min per model on MPS (Apple Silicon), ~5–10 min on CPU. The pipeline supports flags for intervention regimes (`--regimes expert subjective machine`), concept missingness (`--concept-missing 0.2`), running specific stages (`--stages cbm dnn intervene`), and more.
+
+For complete end-to-end examples, see [`examples/robot_pipeline_example.py`](examples/robot_pipeline_example.py) and [`examples/sudoku_pipeline_example.py`](examples/sudoku_pipeline_example.py).
+
+## Benchmarks
 
 ### Robot Classification
 
@@ -177,64 +257,7 @@ This benchmark targets decision-support settings where a human uses the model's 
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
 </p>
 
-**Setup and evaluation.** Generate a dataset with the subconcept variant (12 fine-grained concepts instead of 7), train a CBM, and run oracle interventions that correct the *k* most uncertain concepts per sample:
-
-```python
-import numpy as np
-from concept_benchmark import RobotDatasetGenerator
-from concept_benchmark.utils import set_deterministic_seed
-from experiments.models import (
-    ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier,
-)
-from experiments.utils import determine_device, get_loader_config, patch_macos_dataloader
-
-set_deterministic_seed(1014)
-patch_macos_dataloader()
-device = determine_device()
-loader_config = get_loader_config(device)
-
-# Generate dataset — subconcept uses 12 fine-grained concepts
-dataset = RobotDatasetGenerator(
-    seed=1014,
-    subconcept=True,          # 12 concepts (default: 7 coarse)
-    model_type="stochastic",  # probabilistic labeling
-).generate()
-
-# Train concept detector (images → concepts)
-n_concepts = dataset.training.n_concepts
-cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=n_concepts, input_size=32))
-cd.fit(dataset.training, dataset.validation,
-       fit_params={"epochs": 50, "lr": 1e-3, "patience": 10, "device": str(device), **loader_config})
-
-# Train label predictor (concepts → label) and combine into a CBM
-fe = FrontEndModel()
-fe.fit(dataset.training.C, dataset.training.y)
-cbm = ConceptBasedModel(concept_detector=cd, front_end_model=fe)
-
-# Evaluate
-predictions = cbm.predict(dataset.test)
-print(f"CBM accuracy (k=0): {np.mean(predictions == dataset.test.y):.4f}")
-```
-
 > **Note:** `cd.predict()` returns concept **probabilities** in [0, 1], not binary predictions. `ConceptBasedModel.predict()` handles thresholding internally. For manual interventions, see [`docs/interventions.md`](docs/interventions.md).
-
-After training, the pipeline evaluates oracle interventions — correcting the *k* concepts whose predicted probability is closest to 0.5 (i.e., most uncertain). Expected results (seed=1014):
-
-| budget (k) | DNN | ideal (7 concepts) | subconcept (12 concepts) |
-|------------|------|---------------------|--------------------------|
-| 0 | 0.8746 | 0.8673 | 0.7812 |
-| 1 | — | 0.9736 | 0.9212 |
-| 3 | — | 0.9769 | 0.9439 |
-
-Results are fully deterministic for a given seed when using `set_deterministic_seed()`. To run a multi-seed study, change the `seed` parameter. Data generation, model training, and interventions are all deterministic for a given seed.
-
-Or run the entire pipeline — including interventions, alignment, and regime comparisons — from the command line:
-
-```bash
-python scripts/robot_pipeline.py --seed 1014 --subconcept
-```
-
-The pipeline supports additional flags for intervention regimes (`--regimes expert subjective machine`), concept missingness (`--concept-missing 0.2`), running specific stages (`--stages cbm dnn intervene`), and more. Run `--help` for the full list.
 
 All parameters below can be passed directly to `RobotDatasetGenerator()` or as CLI flags to `robot_pipeline.py`. For the full list, see [`concept_benchmark/config.py`](concept_benchmark/config.py).
 
@@ -245,7 +268,7 @@ All parameters below can be passed directly to `RobotDatasetGenerator()` or as C
 | `model_type` | `"stochastic"` | `"deterministic"`: Glorp if score ≥ 0. `"stochastic"`: Glorp ~ Bernoulli(σ(scalar × score)). |
 | `drop_concepts` | `IDEAL_DROP` | Which concepts to exclude. Two presets: `IDEAL_DROP` for 7 coarse concepts, `SUBCONCEPT_DROP` for 12 fine-grained concepts. |
 | `concept_missing` | `0.0` | Fraction of concept labels masked during training. |
-| `regimes` | `["baseline"]` | How interventions are performed: `baseline` (oracle), `expert` (noisy human), `subjective` (noisy concept labels + noisy human), `machine`/`llm`/`clip` (concepts discovered via [Label-Free CBM](https://arxiv.org/abs/2304.06129)). |
+| `regimes` | `["baseline"]` | How interventions are performed: `baseline` (oracle), `expert` (noisy human), `subjective` (noisy concept labels + noisy human), `machine`/`llm`/`clip` (Label-Free CBM). |
 
 <details>
 <summary>Remaining parameters</summary>
@@ -281,55 +304,6 @@ This benchmark targets automation settings where the system handles routine case
 <p align="center">
   <img src="docs/assets/sudoku_handwritten.png" width="400" alt="Sudoku board with handwritten digits and concept annotations">
 </p>
-
-**Setup and evaluation.** Generate a dataset, train a concept-supervised (CS) model — the Sudoku equivalent of a CBM — and evaluate selective classification. The CS model predicts 27 concepts, then a label predictor determines board validity. The selective classification stage finds a confidence threshold so that kept predictions achieve at least the target accuracy:
-
-```python
-import numpy as np
-from concept_benchmark import SudokuDatasetGenerator
-from concept_benchmark.utils import set_deterministic_seed
-from experiments.models import (
-    ConceptDetector, FrontEndModel, ConceptBasedModel, GroupPoolingConceptSudokuCNN,
-)
-from experiments.utils import determine_device, get_loader_config, patch_macos_dataloader
-
-set_deterministic_seed(171)
-patch_macos_dataloader()
-device = determine_device()
-loader_config = get_loader_config(device)
-
-# Generate dataset — max_corrupt controls how subtle invalid boards are
-dataset = SudokuDatasetGenerator(
-    seed=171,
-    n_samples=1000,       # number of boards
-    max_corrupt=9,        # cells swapped in invalid boards
-    valid_ratio=0.5,      # fraction of valid boards
-).generate()
-
-# Train concept detector (board digits → 27 validity concepts)
-cd = ConceptDetector(model=GroupPoolingConceptSudokuCNN())
-cd.fit(dataset.training, dataset.validation,
-       fit_params={"epochs": 100, "lr": 1e-3, "patience": 20, "device": str(device), **loader_config})
-
-# Train label predictor and combine into a CBM
-fe = FrontEndModel()
-fe.fit(dataset.training.C, dataset.training.y)
-cbm = ConceptBasedModel(concept_detector=cd, front_end_model=fe)
-
-# Evaluate
-predictions = cbm.predict(dataset.test)
-print(f"CS accuracy: {np.mean(predictions == dataset.test.y):.4f}")
-```
-
-The pipeline also evaluates selective classification — the model abstains on uncertain predictions to achieve a minimum accuracy on kept samples (`target_accuracy`). The CS model is very stable across seeds (sel_acc ~0.97, coverage ~99%). The DNN is highly variable — about 40% of seeds produce random-chance performance.
-
-Or run the entire pipeline from the command line:
-
-```bash
-python scripts/sudoku_pipeline.py --seed 171
-```
-
-To skip data regeneration and only retrain models, use `--stages cs dnn selective intervene align collect`. Run `--help` for the full list of flags.
 
 All parameters below can be passed directly to `SudokuDatasetGenerator()` or as CLI flags to `sudoku_pipeline.py`. For the full list, see [`concept_benchmark/config.py`](concept_benchmark/config.py).
 

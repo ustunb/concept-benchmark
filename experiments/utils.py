@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -12,6 +13,8 @@ from typing import Dict, Optional
 import numpy as np
 import torch
 import torch.nn as nn
+
+from concept_benchmark.data import ConceptDatasetSample
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +93,102 @@ def patch_macos_dataloader() -> None:
     _cb_data.DataLoader = _SafeDataLoader
 
 
+# ── DNN training ─────────────────────────────────────────────────────
+
+
+def train_dnn(
+    model: nn.Module,
+    train_dataset: ConceptDatasetSample,
+    val_dataset: ConceptDatasetSample,
+    test_dataset: ConceptDatasetSample,
+    device: torch.device,
+    *,
+    epochs: int = 50,
+    lr: float = 1e-3,
+    patience: int = 10,
+    loader_config: Optional[dict] = None,
+) -> float:
+    """Train a binary classifier with early stopping. Returns test accuracy.
+
+    Parameters
+    ----------
+    model : nn.Module
+        A PyTorch module that outputs a single sigmoid probability per sample.
+    train_dataset : ConceptDatasetSample
+        Training split.
+    val_dataset : ConceptDatasetSample
+        Validation split (for early stopping).
+    test_dataset : ConceptDatasetSample
+        Test split (for final evaluation).
+    device : torch.device
+        Torch device to use.
+    epochs : int
+        Maximum training epochs.
+    lr : float
+        Learning rate for Adam.
+    patience : int
+        Early stopping patience (0 disables).
+    loader_config : dict, optional
+        Extra kwargs forwarded to ``dataset.loader()``
+        (e.g. ``batch_size``, ``num_workers``).
+
+    Returns
+    -------
+    float
+        Test accuracy in [0, 1].
+    """
+    if loader_config is None:
+        loader_config = get_loader_config(device)
+
+    model.to(device)
+    criterion = nn.BCELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    train_loader = train_dataset.loader(shuffle=True, **loader_config)
+    val_loader = val_dataset.loader(shuffle=False, **loader_config)
+    test_loader = test_dataset.loader(shuffle=False, **loader_config)
+
+    best_val_loss = float("inf")
+    best_state_dict = None
+    epochs_no_improve = 0
+
+    for epoch in range(epochs):
+        model.train()
+        for X, _, y in train_loader:
+            optimizer.zero_grad()
+            X, y = X.to(device), y.to(device)
+            outputs = model(X)
+            loss = criterion(outputs.squeeze(), y.float())
+            loss.backward()
+            optimizer.step()
+
+        model.eval()
+        val_loss_sum = 0.0
+        val_batches = 0
+        with torch.no_grad():
+            for X, _, y in val_loader:
+                X, y = X.to(device), y.to(device)
+                outputs = model(X)
+                batch_loss = criterion(outputs.squeeze(), y.float())
+                val_loss_sum += batch_loss.item()
+                val_batches += 1
+
+        val_loss = val_loss_sum / max(val_batches, 1)
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_state_dict = copy.deepcopy(model.state_dict())
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+            if patience > 0 and epochs_no_improve >= patience:
+                break
+
+    if best_state_dict is not None:
+        model.load_state_dict(best_state_dict)
+
+    return compute_accuracy(model, test_loader, device)
+
+
 # ── Alignment ────────────────────────────────────────────────────────
 
 
@@ -102,17 +201,25 @@ def run_alignment(
 ) -> dict:
     """Run alignment: retrain frontend with sign constraints, compare to original.
 
-    Args:
-        cbm: Trained ConceptBasedModel.
-        train_dataset: Training split (for retraining the frontend).
-        test_dataset: Test split (for evaluation).
-        monotonicity_constraints: ``{concept_name: sign}`` where sign is
-            +1 (positive weight) or -1 (negative weight).
-        save_path: Optional path to save results as JSON.
+    Parameters
+    ----------
+    cbm : ConceptBasedModel
+        Trained ConceptBasedModel.
+    train_dataset : ConceptDatasetSample
+        Training split (for retraining the frontend).
+    test_dataset : ConceptDatasetSample
+        Test split (for evaluation).
+    monotonicity_constraints : dict
+        ``{concept_name: sign}`` where sign is +1 (positive weight) or
+        -1 (negative weight).
+    save_path : Path, optional
+        Optional path to save results as JSON.
 
-    Returns:
-        Dict with original_accuracy, aligned_accuracy, accuracy_change,
-        predictions_changed, aligned_weights.
+    Returns
+    -------
+    dict
+        Dict with ``original_accuracy``, ``aligned_accuracy``,
+        ``accuracy_change``, ``predictions_changed``, ``aligned_weights``.
     """
     from experiments.alignment import retrain_aligned
 

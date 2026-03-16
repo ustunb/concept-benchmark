@@ -80,6 +80,99 @@ print(f"Concepts corrected: {result.mask.sum()}")
 - **`KFlipInterventionStrategy`** — the default strategy: evaluates all subsets of up to *k* concepts per sample and selects the intervention that maximizes predicted confidence
 - **`ConceptInterventionRunner`** — coordinates intervention execution and before/after evaluation
 
+## Writing a custom strategy
+
+You can implement your own intervention strategy by subclassing `InterventionStrategy` and implementing the `propose()` method.
+
+### The intervention flow
+
+When `ConceptInterventionRunner.run()` is called, it:
+
+1. Builds an `InterventionBatch` from the dataset (concept predictions + ground truth)
+2. Calls `strategy.propose(model, batch, config)` → returns a `StrategyProposal`
+3. Applies the proposal's `mask` to replace predicted concepts with ground truth
+4. Re-predicts labels with the corrected concepts
+5. Returns an `InterventionResult` with before/after predictions
+
+### Key data classes
+
+**`InterventionBatch`** — the input your strategy receives:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `C_pred` | `(N, C) float` | Predicted concept probabilities |
+| `C_true` | `(N, C) float` | Ground-truth concept values |
+| `y_true` | `(N,) int` or `None` | True labels (optional) |
+| `n_samples` | `int` | Number of samples |
+| `n_concepts` | `int` | Number of concepts |
+
+**`StrategyProposal`** — what your strategy returns:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `mask` | `(N, C) bool` | `True` = replace prediction with ground truth |
+| `ordering_used` | array or `None` | Concept order applied (optional) |
+| `selected_instances` | array or `None` | Instance indices that received interventions |
+| `details` | `dict` | Additional metadata |
+
+### Minimal example
+
+Here's a strategy that intervenes on concepts closest to the 0.5 decision boundary:
+
+```python
+import numpy as np
+from experiments.intervention import InterventionStrategy, StrategyProposal
+
+class UncertaintyStrategy(InterventionStrategy):
+    def __init__(self):
+        super().__init__(name="uncertainty")
+
+    def propose(self, model, batch, config):
+        k = config.per_instance_limit(batch.n_concepts)
+        mask = np.zeros((batch.n_samples, batch.n_concepts), dtype=bool)
+
+        # Rank concepts by uncertainty (closeness to 0.5)
+        uncertainty = 0.5 - np.abs(batch.C_pred - 0.5)
+        for i in range(batch.n_samples):
+            top_k = np.argsort(uncertainty[i])[-k:]
+            mask[i, top_k] = True
+
+        return StrategyProposal(mask=mask)
+```
+
+Use it with the runner:
+
+```python
+result = runner.run(
+    strategy=UncertaintyStrategy(),
+    config=InterventionConfig(max_concepts_per_instance=3, score_threshold=0.2),
+    dataset=test,
+)
+```
+
+### The `prepare()` hook
+
+Override `prepare()` if your strategy needs a validation pass before inference — for example, to precompute a global concept ordering:
+
+```python
+class MyStrategy(InterventionStrategy):
+    def prepare(self, model, batch, config):
+        """Called once on the validation set before run()."""
+        # Compute concept importance from validation data
+        self._state["concept_order"] = compute_importance(model, batch)
+
+    def propose(self, model, batch, config):
+        order = self.state["concept_order"]
+        # ... use precomputed order
+```
+
+Call `runner.prepare()` before `runner.run()` to trigger the hook:
+
+```python
+runner.prepare(strategy, config, validation_dataset=val)
+result = runner.run(strategy, config, dataset=test)
+```
+
 ## Intervention regimes
 
 The package supports six intervention regimes that simulate different real-world annotation scenarios. Each regime varies the concept source (how concepts are predicted) and the intervention source (who corrects them):
@@ -101,3 +194,5 @@ python scripts/robot_pipeline.py --seed 1014 --subconcept \
 ```
 
 For details on each regime, see the [Robot benchmark documentation](robot.md).
+
+For a complete end-to-end example using `ConceptInterventionRunner` with training, interventions, and alignment, see [`examples/robot_pipeline_example.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/robot_pipeline_example.py).

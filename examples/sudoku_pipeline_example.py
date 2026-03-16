@@ -9,6 +9,8 @@ This example walks through the complete concept-supervised (CS) workflow:
   4. Evaluate selective classification (abstain on uncertain predictions)
   5. Run oracle interventions and observe AND-fragility
 
+Timing: Data generation ~5 min, model training ~30 s, evaluation ~2 min.
+
 Usage:
     ./venv/bin/python examples/sudoku_pipeline_example.py
 
@@ -20,6 +22,8 @@ from sklearn.metrics import accuracy_score
 
 from concept_benchmark import SudokuDatasetGenerator
 from concept_benchmark.utils import set_deterministic_seed
+from experiments.intervention import ConceptInterventionRunner, InterventionConfig
+from experiments.kflip import KFlipInterventionStrategy
 from experiments.models import (
     ConceptBasedModel,
     ConceptDetector,
@@ -137,20 +141,22 @@ print(f"  {'---':>8s}   {'--------':>8s}   {'--------':>8s}")
 
 baseline_acc = np.mean(y_pred == test.y)
 n_concepts = test.n_concepts
+runner = ConceptInterventionRunner(model=cbm)
 
 for k in [0, 1, 3, n_concepts]:
     if k == 0:
         acc = baseline_acc
     else:
-        C_intervened = concept_probs.copy()
-        uncertainty = np.abs(concept_probs - 0.5)
-        for i in range(len(test)):
-            most_uncertain = np.argsort(uncertainty[i])[:k]
-            C_intervened[i, most_uncertain] = test.C[i, most_uncertain]
-
-        C_binary_int = (C_intervened > 0.5).astype(np.float32)
-        preds = fe.predict(C_binary_int)
-        acc = np.mean(preds == test.y)
+        result = runner.run(
+            strategy=KFlipInterventionStrategy(),
+            config=InterventionConfig(
+                max_concepts_per_instance=k,
+                score_threshold=0.2,
+            ),
+            dataset=test,
+            concept_proba=concept_probs,
+        )
+        acc = np.mean(result.y_pred_after == test.y)
 
     gain = acc - baseline_acc
     k_str = str(k) if k != n_concepts else f"{k} (max)"
