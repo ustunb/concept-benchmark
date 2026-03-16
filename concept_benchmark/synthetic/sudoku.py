@@ -312,7 +312,7 @@ def image_transform(
             if font_path
             else _get_default_font(font_size)
         )
-    except Exception:
+    except (OSError, IOError):
         font = _get_default_font(font_size)
 
     def cell_rect(r, c):
@@ -341,7 +341,7 @@ def image_transform(
             import cv2  # noqa: F401
 
             generator = AdvancedHandwrittenGenerator(fonts_dir=_fonts_dir)
-        except Exception:
+        except (ImportError, OSError):
             generator = SimpleHandwrittenGenerator(fonts_dir=_fonts_dir)
 
     # Starters mask (printed vs user-filled)

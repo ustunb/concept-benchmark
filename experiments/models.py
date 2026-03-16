@@ -873,17 +873,31 @@ class ConceptDetector:
 
 
 class FrontEndModel:
+    """Logistic-regression classifier mapping binary concepts to labels.
+
+    This is the "downstream classifier" in the CBM architecture: it takes
+    thresholded concept predictions (0/1) and produces a final label.  The
+    default back-end is :class:`sklearn.linear_model.LogisticRegression`.
+    """
+
     def __init__(self, **kwargs) -> None:
-        """
-        Initialize the front-end model.
-        """
         self.model = None
 
     def fit(
         self, C: np.ndarray, y: np.ndarray, fit_params: Optional[dict] = None
     ) -> None:
-        """
-        Fit the front-end model to the dataset.
+        """Fit the logistic-regression back-end.
+
+        Parameters
+        ----------
+        C : np.ndarray
+            Binary concept array of shape ``(N, n_concepts)``.
+        y : np.ndarray
+            Label array of shape ``(N,)``.
+        fit_params : dict, optional
+            Keyword arguments forwarded to
+            :class:`~sklearn.linear_model.LogisticRegression`.  Defaults:
+            ``solver="lbfgs"``, ``max_iter=1000``, ``C=1.0``.
         """
         lr_params = {
             "random_state": 42,
@@ -933,10 +947,30 @@ class FrontEndModel:
         return self.model.predict_proba(C)
 
 
-# Future: add monte carlo sampling propagation
 class ConceptBasedModel:
-    """
-    A model that uses concept-based predictions.
+    """Two-stage concept bottleneck model.
+
+    Composes a :class:`ConceptDetector` (X → concept probabilities) with a
+    :class:`FrontEndModel` (binary concepts → labels).  When ``propagate``
+    is ``True``, concept uncertainty is propagated to the label prediction
+    via Monte Carlo sampling instead of hard-thresholding at 0.5.
+
+    Parameters
+    ----------
+    concept_detector : ConceptDetector, optional
+        First stage that maps raw inputs to concept probabilities.
+    front_end_model : FrontEndModel, optional
+        Second stage that maps binary concepts to labels.
+    propagate : bool
+        If ``True``, use MC sampling to propagate concept uncertainty
+        through the downstream classifier.
+    mc_mode : ``{"auto", "mc", "exact"}``
+        ``"auto"`` selects exact enumeration when feasible (≤
+        ``mc_exact_threshold`` binary assignments), otherwise MC sampling.
+    mc_samples, mc_max_samples, mc_chunk_size, mc_tol, mc_exact_threshold
+        Control the MC sampling budget and convergence tolerance.
+    random_state : int, optional
+        Seed for reproducible MC sampling.
     """
 
     def __init__(
@@ -944,8 +978,7 @@ class ConceptBasedModel:
         concept_detector: Optional[ConceptDetector] = None,
         front_end_model: Optional[FrontEndModel] = None,
         propagate: bool = False,
-        # Monte Carlo propagation configuration
-        mc_mode: str = "auto",  # 'auto' | 'mc' | 'exact'
+        mc_mode: str = "auto",
         mc_samples: int = 1024,
         mc_max_samples: int = 16384,
         mc_chunk_size: int = 2048,

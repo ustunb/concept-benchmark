@@ -973,7 +973,7 @@ class ConceptDatasetSample(Dataset):
     ) -> None:
         if not {"classes", "concepts", "data_type"}.issubset(meta.keys()):
             raise ValueError(
-                "metedata dict must contain keys 'classes', 'concepts', and 'data_type'"
+                "metadata dict must contain keys 'classes', 'concepts', and 'data_type'"
             )
 
         self.parent = parent
@@ -1019,7 +1019,7 @@ class ConceptDatasetSample(Dataset):
     def meta(self, value: dict) -> None:
         if not {"classes", "concepts", "data_type"}.issubset(value.keys()):
             raise ValueError(
-                "metedata dict must contain keys 'classes', 'concepts', and 'data_type'"
+                "metadata dict must contain keys 'classes', 'concepts', and 'data_type'"
             )
         self._meta = value
         self.classes, self.concepts = value["classes"], value["concepts"]

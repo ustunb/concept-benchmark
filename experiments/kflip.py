@@ -19,19 +19,40 @@ from experiments.intervention import (
 
 
 class KFlipInterventionStrategy(InterventionStrategy):
-    """
-    K-flip probability strategy.
+    """Intervention strategy based on concept-flip probability.
 
-    Config mapping:
-      - k is taken from config.max_concepts_per_instance (must be > 0).
-      - flip threshold uses config.score_threshold in [0,1].
-      - Budgets and selection use the standard helper:
-          * instance filtering: _select_instances(...)
-          * concept and per-instance caps: _apply_ordering(...)
+    For each instance the strategy enumerates candidate subsets of up to
+    *k* concepts (from ``config.max_concepts_per_instance``).  For every
+    subset it computes the probability that replacing those concepts with
+    their ground-truth values would change the downstream label.  The
+    subset with the highest flip probability is selected, and instances
+    whose best flip probability exceeds ``config.score_threshold`` become
+    intervention candidates.
 
-    Notes:
-      - Uses 'hard' others mode: non-intervened concepts are binarized (p>=0.5).
-        This matches the runner's path for non-safeguard strategies.
+    Parameters
+    ----------
+    batch_size : int
+        Chunk size for the general-path matrix operations (controls peak
+        memory in the non-fast-path branch).
+    limit_subsets : int, optional
+        When set, caps the number of candidate subsets evaluated per
+        instance.  Subsets are ranked by a heuristic that weights concept
+        closeness to 0.5 by the absolute logistic-regression coefficient.
+    exact_k : bool
+        If ``True``, only evaluate subsets of exactly size *k*.  If
+        ``False`` (default), evaluate all subsets of sizes 1 through *k*.
+
+    Config mapping
+    --------------
+    - ``config.max_concepts_per_instance`` → *k* (must be > 0)
+    - ``config.score_threshold`` → minimum flip probability to intervene
+    - Budgets and instance selection use the standard
+      ``_select_instances`` / ``_apply_ordering`` helpers.
+
+    Notes
+    -----
+    Non-intervened concepts are binarized at 0.5 ("hard" mode), matching
+    the runner's path for non-safeguard strategies.
     """
 
     def __init__(

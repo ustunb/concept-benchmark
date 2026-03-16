@@ -35,10 +35,19 @@ INNER_CV_PARSER = re.compile(INNER_CV_PATTERN)
 
 
 def parse_fold_id(fold_id):
-    """
-    #todo add spec
-    :param fold_id:
-    :return:
+    """Parse a fold ID string into its components.
+
+    Parameters
+    ----------
+    fold_id : str
+        Fold identifier, e.g. ``"K05N01"`` (outer) or
+        ``"K05N01_F02K03"`` (inner).
+
+    Returns
+    -------
+    tuple
+        ``(total_folds, replicate_idx, inner_fold_idx, inner_total_folds)``
+        where the inner fields are ``None`` for outer fold IDs.
     """
     fold_id_elements = fold_id.split(INNER_CV_SEPARATOR)
     outer_fold_id = fold_id_elements[0]
@@ -62,10 +71,22 @@ def parse_fold_id(fold_id):
 
 
 def validate_fold_id(fold_id):
-    """
-    #todo add spec
-    :param fold_id:
-    :return:
+    """Validate and normalize a fold ID string.
+
+    Parameters
+    ----------
+    fold_id : str
+        Fold identifier to validate (case-insensitive).
+
+    Returns
+    -------
+    str
+        Uppercase, validated fold ID.
+
+    Raises
+    ------
+    AssertionError
+        If ``fold_id`` does not match outer or inner CV patterns.
     """
 
     fold_id = fold_id.strip().upper()
@@ -82,10 +103,12 @@ def validate_fold_id(fold_id):
 
 
 def is_inner_fold_id(fold_id):
-    """
-    #todo add spec
-    :param fold_id:
-    :return:
+    """Return ``True`` if *fold_id* represents an inner cross-validation fold.
+
+    Parameters
+    ----------
+    fold_id : str
+        Fold identifier to check.
     """
     parsed = INNER_CV_PARSER.match(fold_id)
     return parsed is not None

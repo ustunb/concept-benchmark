@@ -74,6 +74,18 @@ class InterventionBatch:
 class InterventionConfig:
     """Configuration shared by all strategies.
 
+    Different strategies use different subsets of these fields:
+
+    * **KFlipInterventionStrategy** — ``max_concepts_per_instance`` (the *k*
+      budget) and ``score_threshold`` (minimum flip probability).
+    * **ConceptualSafeguardsStrategy** — ``tau`` (abstention margin),
+      ``concept_order``, and budget fields.
+    * **OrderedCBMStrategy** — ``concept_order`` (or learns one via
+      ``prepare``), budget fields, and ``tau`` when
+      ``select_only_abstained`` is set.
+    * **RandomInterventionStrategy** — budget fields and
+      ``per_instance_ordering``.
+
     Attributes:
         tau: Confidence margin used by conceptual safeguards to detect
             abstentions.  Interventions trigger when the predicted class
@@ -106,6 +118,11 @@ class InterventionConfig:
         allow_repeated: Permit multiple interventions on the same concept within
             repeated calls.  The current implementations ignore this flag but it
             is kept for forward compatibility.
+        score_threshold: Minimum score required for an instance to be considered
+            for intervention.  Used by KFlip (flip probability) and
+            ScoreIntervention.
+        noise: Fraction of concept ground-truth values to flip before
+            overwriting, simulating noisy interventions.
     """
 
     tau: Optional[float] = None
