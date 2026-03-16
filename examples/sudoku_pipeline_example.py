@@ -56,6 +56,7 @@ dataset = SudokuDatasetGenerator(
     n_samples=1000,
     max_corrupt=9,     # cells swapped in invalid boards (higher = subtler)
     valid_ratio=0.5,   # 50% valid, 50% invalid
+    data_type="tabular",  # use "image" to render board PNGs for explore()
 ).generate()
 
 train, val, test = dataset.training, dataset.validation, dataset.test

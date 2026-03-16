@@ -205,7 +205,7 @@ def create_sudoku_dataset(
         "classes": [0, 1],
         "concepts": concept_names,
         "data_type": data_type,
-        "transform": transform.__name__ if transform else "default",
+        "transform": getattr(transform, "__name__", getattr(transform, "func", transform).__name__ if transform else "default"),
         "max_corrupt": max_corrupt,
         "seed": seed,
         "n": n,

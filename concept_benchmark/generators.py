@@ -124,8 +124,11 @@ def generate_robot_dataset(config: RobotBenchmarkConfig):
 class SudokuDatasetGenerator:
     """Generate a Sudoku validation dataset with train/val/test splits.
 
-    Wraps :class:`SudokuBenchmarkConfig` and tabular data generation into a
-    single ``generate()`` call.
+    Wraps :class:`SudokuBenchmarkConfig` and data generation into a single
+    ``generate()`` call.  By default ``data_type="image"`` renders boards
+    as PNG images so that ``.explore()`` shows the actual images the model
+    sees.  Use ``data_type="tabular"`` for a lightweight representation
+    where ``X`` contains flattened digit vectors (much faster).
 
     Parameters
     ----------
@@ -142,6 +145,9 @@ class SudokuDatasetGenerator:
             Maximum number of cell swaps for invalid boards (default ``9``).
         valid_ratio : float
             Fraction of valid boards (default ``0.5``).
+        data_type : str
+            ``"image"`` (default) renders board PNGs; ``"tabular"`` stores
+            flattened digit vectors (much faster).
 
     Examples
     --------
@@ -168,19 +174,38 @@ class SudokuDatasetGenerator:
         -------
         ConceptDataset
             Dataset with ``.training``, ``.validation``, and ``.test`` set.
-            Uses tabular representation (X = flattened board digits).
         """
+        from functools import partial
+
         set_deterministic_seed(self.config.seed)
+        cfg = self.config
+
+        data_type = cfg.data_type
+        kwargs = {}
+        if data_type == "image":
+            from concept_benchmark.synthetic.sudoku import image_transform
+
+            kwargs["transform"] = partial(
+                image_transform,
+                cell_px=cfg.cell_px,
+                margin_px=cfg.margin_px,
+                line_px=cfg.line_px,
+                bold_px=cfg.bold_px,
+                font_size=cfg.font_size,
+                handwriting=cfg.handwriting,
+            )
+
         data = create_sudoku_dataset(
-            n=self.config.n,
-            n_samples=self.config.n_samples,
-            valid_ratio=self.config.valid_ratio,
-            max_corrupt=self.config.max_corrupt,
-            seed=self.config.seed,
-            data_type="tabular",
+            n=cfg.n,
+            n_samples=cfg.n_samples,
+            valid_ratio=cfg.valid_ratio,
+            max_corrupt=cfg.max_corrupt,
+            seed=cfg.seed,
+            data_type=data_type,
+            **kwargs,
         )
         data.generate_cvindices(
-            strata=data.y, total_folds_for_cv=[5], seed=self.config.seed
+            strata=data.y, total_folds_for_cv=[5], seed=cfg.seed
         )
         data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
         return data

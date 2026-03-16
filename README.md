@@ -145,12 +145,13 @@ from concept_benchmark import SudokuDatasetGenerator
 
 dataset = SudokuDatasetGenerator(
     seed=171,             # reproducibility
-    n_samples=1000,       # number of boards
+    n_samples=100,        # number of boards (renders images, ~35 s)
     max_corrupt=9,        # cells swapped in invalid boards (higher = subtler errors)
     valid_ratio=0.5,      # fraction of valid boards
 ).generate()
 
-print(dataset.training.C.shape)   # (600, 27) — 27 concept annotations
+dataset.training.explore()        # interactive viewer with board images
+print(dataset.training.C.shape)   # (60, 27) — 27 concept annotations
 print(dataset.training.concepts)  # ['row_valid_1', 'row_valid_2', ..., 'block_valid_9']
 ```
 
