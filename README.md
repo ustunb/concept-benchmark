@@ -168,7 +168,7 @@ print(df[show_cols])
 ```
 
 <p align="center">
-  <img src="docs/assets/sudoku_concepts.png" width="600" alt="Sudoku concept matrix heatmap showing row, column, and block validity">
+  <img src="docs/assets/sudoku_samples.png" width="600" alt="Sample valid and invalid Sudoku boards with handwritten digits">
 </p>
 
 For a quick exploration using only the pip package, see [`examples/sudoku_quickstart.py`](examples/sudoku_quickstart.py). For the full neural CS model pipeline with selective classification and interventions (requires cloning the repo), see [`examples/sudoku_pipeline_example.py`](examples/sudoku_pipeline_example.py).
