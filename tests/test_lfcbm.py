@@ -8,7 +8,7 @@ import pickle
 import numpy as np
 import pytest
 
-from experiments.lfcbm import LFConceptSet, LFTrainingConfig, LabelFreeCBM
+from concept_benchmark.lfcbm import LFConceptSet, LFTrainingConfig, LabelFreeCBM
 
 
 # ── LFConceptSet.from_file ───────────────────────────────────────────

@@ -25,25 +25,26 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-from concept_benchmark.utils import set_deterministic_seed
-from concept_benchmark.config import RobotBenchmarkConfig
-from concept_benchmark.ext.fileutils import load, save
-from concept_benchmark.generators import generate_robot_dataset
-from concept_benchmark.paths import results_dir
-from experiments.utils import (
+from concept_benchmark.utils import (
     compute_accuracy,
+    create_skewed_splits_full,
     determine_device,
     get_loader_config,
     patch_macos_dataloader,
     run_alignment,
+    set_deterministic_seed,
 )
-from experiments.models import (
+from concept_benchmark.config import RobotBenchmarkConfig
+from concept_benchmark.ext.fileutils import load, save
+from concept_benchmark.models import (
     ConceptBasedModel,
     ConceptDetector,
     FrontEndModel,
     RobotClassifierCNN,
     RobotConceptClassifier,
 )
+from concept_benchmark.paths import results_dir
+from concept_benchmark.synthetic.robot import create_synthetic_dataset
 
 @dataclass
 class InterventionSettings:
@@ -88,11 +89,11 @@ def _ensure_intervention_imports():
     global _intervention_imported
     if not _intervention_imported:
         global ConceptInterventionRunner, InterventionConfig, KFlipInterventionStrategy
-        from experiments.intervention import (
+        from concept_benchmark.intervention import (
             ConceptInterventionRunner,
             InterventionConfig,
         )
-        from experiments.kflip import KFlipInterventionStrategy
+        from concept_benchmark.kflip import KFlipInterventionStrategy
 
         _intervention_imported = True
 
@@ -104,10 +105,15 @@ def setup_dataset(config: RobotBenchmarkConfig):
 
     Returns the saved ConceptDataset.
     """
+    settings = config.to_dict()
     logger.info("Generating robot dataset...")
-    data = generate_robot_dataset(config)
-    save(data, config.get_dataset_path(), overwrite=True)
-    return data
+    data = create_synthetic_dataset(**settings)
+    data.generate_cvindices(seed=config.seed)
+
+    rng = np.random.default_rng(config.seed)
+    sk_data = create_skewed_splits_full(dataset=data, rng=rng, **settings)
+    save(sk_data, config.get_dataset_path(), overwrite=True)
+    return sk_data
 
 
 # ── Stage: train_cbm ──────────────────────────────────────────────────
@@ -305,7 +311,7 @@ def train_lfcbm(
     Requires ``open-clip-torch`` and a concepts JSONL file.
     Saves to ``config.get_model_path("lfcbm")``.
     """
-    from experiments.lfcbm import LabelFreeCBM, LFConceptSet, LFTrainingConfig
+    from concept_benchmark.lfcbm import LabelFreeCBM, LFConceptSet, LFTrainingConfig
 
     _set_deterministic_seed(config.seed)
 
@@ -529,7 +535,7 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
             except ImportError:
                 ResourceExhausted = None
 
-            from experiments.llm_client import make_llm_client
+            from concept_benchmark.llm_client import make_llm_client
 
             llm_cfg = settings.intervention_llm or {}
             provider = str(llm_cfg.get("provider", "gemini"))
@@ -954,7 +960,7 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
     from pathlib import Path
 
     _ensure_intervention_imports()
-    from experiments.lfcbm import LabelFreeCBM, LFConceptSet, LFTrainingConfig
+    from concept_benchmark.lfcbm import LabelFreeCBM, LFConceptSet, LFTrainingConfig
 
     # Load concept descriptions for this regime
     from concept_benchmark.paths import pkg_dir
@@ -1372,7 +1378,7 @@ def collect_results(
                 # Aligned CBM with intervention at k=3
                 aligned_weights = align_data.get("aligned_weights")
                 if aligned_weights is not None:
-                    from experiments.alignment import align_frontend_weights
+                    from concept_benchmark.alignment import align_frontend_weights
                     import copy as _copy
 
                     # Load the config's own dataset so concept shapes match
@@ -1434,7 +1440,7 @@ def run(
         stages: List of stages to run. Default: all.
         force_setup: If True, delete cached images/data before regenerating.
     """
-    from experiments._logging import setup_logging
+    from concept_benchmark._logging import setup_logging
     setup_logging()
     patch_macos_dataloader()
 

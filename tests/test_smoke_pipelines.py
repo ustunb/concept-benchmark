@@ -36,7 +36,7 @@ def test_robot_image_generation_and_training(tmp_path):
 
     from concept_benchmark.synthetic.robot import create_robot_image_dataset
     from concept_benchmark.utils import create_skewed_splits_full
-    from experiments.models import (
+    from concept_benchmark.models import (
         ConceptBasedModel,
         ConceptDetector,
         RobotConceptClassifier,

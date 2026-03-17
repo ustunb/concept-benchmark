@@ -549,11 +549,11 @@ class ConceptDataset:
     @fold_id.setter
     def fold_id(self, fold_id):
         assert self._cvindices is not None, (
-            "cannot set fold_id on a BinaryClassificationDataset without cvindices"
+            "cannot set fold_id on a ConceptDataset without cvindices"
         )
         assert isinstance(fold_id, str), f"fold_id={fold_id} should be string"
         assert fold_id in self.cvindices, (
-            f"cvindices does not contain fols for fold_id=`{fold_id}`"
+            f"cvindices does not contain folds for fold_id=`{fold_id}`"
         )
         self._fold_id = str(fold_id)
         self._fold_number_range = np.unique(self.folds).tolist()

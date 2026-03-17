@@ -8,11 +8,11 @@ They serve as a safety net during refactoring.
 import pandas as pd
 import pytest
 
+from concept_benchmark.utils import compute_accuracy, determine_device
 from concept_benchmark.config import RobotBenchmarkConfig
 from concept_benchmark.ext.fileutils import load
+from concept_benchmark.models import RobotClassifierCNN
 from concept_benchmark.paths import results_dir
-from experiments.utils import compute_accuracy, determine_device
-from experiments.models import RobotClassifierCNN
 
 
 # Skip entire module if artifacts are not present

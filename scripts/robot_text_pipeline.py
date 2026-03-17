@@ -22,13 +22,16 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 
+from concept_benchmark.utils import (
+    determine_device,
+    run_alignment,
+)
 from concept_benchmark.config import RobotTextBenchmarkConfig
 from concept_benchmark.data import ConceptDatasetSample
 from concept_benchmark.ext.fileutils import load, save
+from concept_benchmark.models import ConceptBasedModel, FrontEndModel
 from concept_benchmark.paths import pkg_dir, results_dir
-from experiments.utils import determine_device, run_alignment
-from experiments.models import ConceptBasedModel, FrontEndModel
-from experiments.text_concept_detector import TextConceptDetector
+from concept_benchmark.synthetic.helper.text_concept_detector import TextConceptDetector
 from concept_benchmark.synthetic.robot_text.catalog import (
     TEXT_CONCEPTS,
     compute_label,
@@ -49,11 +52,11 @@ def _ensure_intervention_imports():
     global _intervention_imported
     if not _intervention_imported:
         global ConceptInterventionRunner, InterventionConfig, KFlipInterventionStrategy
-        from experiments.intervention import (
+        from concept_benchmark.intervention import (
             ConceptInterventionRunner,
             InterventionConfig,
         )
-        from experiments.kflip import KFlipInterventionStrategy
+        from concept_benchmark.kflip import KFlipInterventionStrategy
 
         _intervention_imported = True
 
@@ -391,7 +394,7 @@ def train_lfcbm(
 
     Returns a ConceptBasedModel with LabelFreeDetector as concept source.
     """
-    from experiments.text_lfcbm import LabelFreeDetector
+    from concept_benchmark.synthetic.robot_text.lfcbm import LabelFreeDetector
 
     _set_seed(config.seed)
 
@@ -707,7 +710,7 @@ def run(
         stages: List of stages to run. Default: all.
         force_setup: If True, delete cached data before regenerating.
     """
-    from experiments._logging import setup_logging
+    from concept_benchmark._logging import setup_logging
     setup_logging()
     if config is None:
         config = RobotTextBenchmarkConfig()

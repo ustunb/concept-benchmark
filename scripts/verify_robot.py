@@ -59,17 +59,17 @@ logger = logging.getLogger("verify_robot")
 
 
 def main():
-    from concept_benchmark.utils import set_deterministic_seed
-    from experiments.utils import (
+    from concept_benchmark.utils import (
         compute_accuracy,
         determine_device,
         get_loader_config,
         patch_macos_dataloader,
+        set_deterministic_seed,
     )
     import robot_pipeline as robot
     from concept_benchmark.config import RobotBenchmarkConfig
     from concept_benchmark.ext.fileutils import load
-    from experiments.models import RobotClassifierCNN
+    from concept_benchmark.models import RobotClassifierCNN
 
     patch_macos_dataloader()
     device = determine_device()
@@ -191,7 +191,7 @@ def main():
         logger.info("=" * 60)
         t0 = time.time()
 
-        from experiments.alignment import align_frontend_weights
+        from concept_benchmark.alignment import align_frontend_weights
 
         align_ideal = robot.align(cfg_ideal, cbm_ideal, data_ideal)
         align_sub = robot.align(cfg_sub, cbm_sub, data_sub)

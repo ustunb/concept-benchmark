@@ -20,20 +20,20 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-from concept_benchmark.utils import set_deterministic_seed
-from concept_benchmark.config import SudokuBenchmarkConfig
-from concept_benchmark.ext.fileutils import load, save
-from experiments.utils import (
+from concept_benchmark.utils import (
     compute_accuracy,
     determine_device,
     get_loader_config,
     patch_macos_dataloader,
+    set_deterministic_seed,
 )
-from experiments.models import (
+from concept_benchmark.config import SudokuBenchmarkConfig
+from concept_benchmark.ext.fileutils import load, save
+from concept_benchmark.models import (
     ConceptBasedModel,
     ConceptDetector,
 )
-from experiments.intervention import (
+from concept_benchmark.intervention import (
     ConceptInterventionRunner,
     ConceptualSafeguardsStrategy,
     InterventionConfig,
@@ -44,7 +44,7 @@ from experiments.intervention import (
 import sys as _sys
 import types as _types
 if "scripts.sudoku_demo.sudoku_models" not in _sys.modules:
-    import experiments.models as _compat_models
+    import concept_benchmark.models as _compat_models
     if "scripts" not in _sys.modules:
         _sys.modules["scripts"] = _types.ModuleType("scripts")
     if "scripts.sudoku_demo" not in _sys.modules:
@@ -132,7 +132,7 @@ def train_cs(
         "pin_memory": not _macos,
     }
 
-    from experiments.models import (
+    from concept_benchmark.models import (
         GroupPoolingConceptSudokuCNN as SudokuConceptModel,
     )
 
@@ -179,7 +179,7 @@ def train_dnn(
         data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=config.seed)
         data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
 
-    from experiments.models import SudokuValidatorCNN as DNNSudokuModel
+    from concept_benchmark.models import SudokuValidatorCNN as DNNSudokuModel
 
     model = DNNSudokuModel()
     criterion = nn.BCELoss()
@@ -373,7 +373,7 @@ def align(
     if cs_model is None:
         cs_model = load(config.get_model_path("cs", data_type="tabular"))
 
-    from experiments.alignment import test_alignment
+    from concept_benchmark.alignment import test_alignment
 
     # Threshold at 0.5 to match cbm.predict() binarisation
     h_test = (cs_model.concept_detector.predict(data.test) > 0.5).astype(np.float32)
@@ -424,6 +424,8 @@ def collect_results(
     Reads saved artifacts only — no model retraining.
     """
     import json
+
+    from concept_benchmark.paths import results_dir
 
     if configs is None:
         configs = [SudokuBenchmarkConfig.default()]
@@ -537,7 +539,7 @@ def run(
         stages: List of stages to run. Default: all.
         force_setup: If True, delete cached data before regenerating.
     """
-    from experiments._logging import setup_logging
+    from concept_benchmark._logging import setup_logging
     setup_logging()
     patch_macos_dataloader()
 
@@ -813,7 +815,7 @@ def compute_selective_results(
     if dnn_weights is None:
         dnn_weights = load(config.get_model_path("dnn", data_type="tabular"))
 
-    from experiments.models import SudokuValidatorCNN
+    from concept_benchmark.models import SudokuValidatorCNN
 
     dnn = SudokuValidatorCNN()
     dnn.load_state_dict(dnn_weights)

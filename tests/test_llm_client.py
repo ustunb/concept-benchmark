@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from experiments.llm_client import (
+from concept_benchmark.llm_client import (
     _LLMBase,
     _LLMRegistry,
     judge_concept,

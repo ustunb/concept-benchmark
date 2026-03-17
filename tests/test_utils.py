@@ -5,11 +5,11 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from concept_benchmark.utils import set_deterministic_seed
-from experiments.utils import (
+from concept_benchmark.utils import (
     compute_accuracy,
     determine_device,
     get_loader_config,
+    set_deterministic_seed,
 )
 
 
@@ -85,13 +85,13 @@ class TestGetLoaderConfig:
         assert "pin_memory" in cfg
 
     def test_macos(self, monkeypatch):
-        monkeypatch.setattr("experiments.utils.platform.system", lambda: "Darwin")
+        monkeypatch.setattr("concept_benchmark.utils.platform.system", lambda: "Darwin")
         cfg = get_loader_config()
         assert cfg["num_workers"] == 0
         assert cfg["pin_memory"] is False
 
     def test_linux(self, monkeypatch):
-        monkeypatch.setattr("experiments.utils.platform.system", lambda: "Linux")
+        monkeypatch.setattr("concept_benchmark.utils.platform.system", lambda: "Linux")
         cfg = get_loader_config()
         assert cfg["num_workers"] > 0
         assert cfg["pin_memory"] is True

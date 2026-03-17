@@ -91,6 +91,16 @@ class RobotDatasetGenerator:
 
     def __init__(self, *, label_formula=None, **kwargs):
         if label_formula is not None:
+            conflicting = {
+                "model_features",
+                "model_weights",
+                "model_intercept",
+            } & kwargs.keys()
+            if conflicting:
+                raise ValueError(
+                    f"Cannot pass both label_formula and {conflicting}. "
+                    "Use one or the other."
+                )
             model_features = {}
             model_weights = {}
             intercept = 0.0
@@ -109,6 +119,12 @@ class RobotDatasetGenerator:
                         raise ValueError(
                             f"Unknown feature {feature!r} in label_formula. "
                             f"Valid features: {sorted(self._VALID_FEATURES)}"
+                        )
+                    valid_values = ROBOT_CONCEPTS[feature]
+                    if value not in valid_values:
+                        raise ValueError(
+                            f"Invalid value {value!r} for feature {feature!r}. "
+                            f"Valid values: {valid_values}"
                         )
                     model_features[feature] = value
                     model_weights[feature] = weight

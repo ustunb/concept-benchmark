@@ -24,13 +24,11 @@ Or install from source (includes training/evaluation code and pipeline scripts):
 ```bash
 git clone https://github.com/ustunb/concept-benchmark.git
 cd concept-benchmark
-pip install -e ".[experiments]"
+uv sync
 ```
 
-If you use [uv](https://docs.astral.sh/uv/), `uv sync` works too and also installs dev/docs dependencies.
-
 ```{note}
-`pip install concept-benchmark` gives you **dataset generation only** (`concept_benchmark/`). To run the full training/evaluation pipelines, clone the repo and install with `.[experiments]` — the `experiments/` directory contains model training, interventions, alignment, and LFCBM code.
+`pip install concept-benchmark` gives you **dataset generation only** (`concept_benchmark/`). To run the full training/evaluation pipelines, clone the repo and use `uv sync` — this installs all dependencies including dev tools and pipeline scripts.
 ```
 
 Verify the installation:

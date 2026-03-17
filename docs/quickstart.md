@@ -27,7 +27,7 @@ print(dataset.training.concepts)
 
 With `subconcept=True`, the 9 raw body features are expanded into 12 binary concepts — for example, `foot_shape` (6 values) becomes 6 one-hot columns. With `subconcept=False` (default), you get 7 coarse concepts instead. The `draw=True` flag renders each robot as a 32×32 PNG image stored in `dataset.training.X`.
 
-Each split (`training`, `validation`, `test`) is a `ConceptDataset` with attributes `X` (images), `C` (concept matrix), and `y` (labels). Convert to a DataFrame to see what the data looks like:
+Each split (`training`, `validation`, `test`) is a `ConceptDatasetSample` with attributes `X` (images), `C` (concept matrix), and `y` (labels). Convert to a DataFrame to see what the data looks like:
 
 ```python
 dataset.training.to_dataframe().head(2)

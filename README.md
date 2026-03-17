@@ -9,6 +9,13 @@
 
 **Concept Benchmark** is a Python package for benchmarking [concept bottleneck models](https://arxiv.org/abs/2007.04612) (CBMs). It provides synthetic datasets with ground-truth concept labels, allowing users to vary concept granularity, annotation quality, and the labeling rule, and measure how each factor affects model performance and the value of interventions. The package includes two benchmarks -- robot classification (decision support) and Sudoku validation (automation) -- across image, text, and tabular modalities.
 
+## Table of Contents
+
+1. [Installation](#installation)
+2. [Quick Start](#quick-start)
+3. [Benchmarks](#benchmarks)
+4. [Citation](#citation)
+
 ## Installation
 
 The package requires the **cairo** graphics library. Install it first:
@@ -30,19 +37,13 @@ Then install the package:
 pip install concept-benchmark
 ```
 
-Or install from source (includes training/evaluation code and pipeline scripts):
+Or install from source:
 
 ```bash
 git clone https://github.com/ustunb/concept-benchmark.git
 cd concept-benchmark
-pip install -e ".[experiments]"
+uv sync
 ```
-
-If you use [uv](https://docs.astral.sh/uv/), `uv sync` works too and also installs dev/docs dependencies.
-
-> **Package vs. repo:** `pip install concept-benchmark` gives you dataset generation and exploration (`concept_benchmark/`). To train models, run interventions, and use the full evaluation pipelines, clone the repo and install with `.[experiments]` — the `experiments/` package is then importable directly (no `PYTHONPATH` needed).
-
-> **Device support:** The package auto-detects the best available device (CUDA → MPS → CPU). Apple Silicon (MPS) is fully supported. Override with `export PYTORCH_DEVICE=cpu`.
 
 Verify the installation:
 
@@ -52,206 +53,108 @@ python3 -c "import concept_benchmark; print('OK')"
 
 ## Quick Start
 
-A concept bottleneck model (CBM) first predicts interpretable *concepts* from inputs (e.g., "has pointy feet"), then uses those concepts to predict the final label. This two-stage design lets users inspect and correct the model's reasoning at test time — an operation called an *intervention*. This package gives you synthetic datasets where the ground-truth concepts are known, so you can measure exactly how much interventions help under different conditions.
+A CBM predicts concepts from inputs (e.g., "has pointy feet"), then predicts the label from those concepts. At test time, a user can correct mispredicted concepts -- this is called an *intervention*. The package lets you measure whether correcting *k* concepts improves the label prediction, and how that depends on concept quality and annotation noise.
 
-### Robot Classification
+### Running the full pipeline
 
-The robot benchmark classifies fictional robots — **Glorps** vs. **Drents** — from their body features. Generate a dataset with rendered images and concept annotations:
+Each benchmark has a pipeline script in `scripts/` that runs the full experiment end-to-end:
 
-```python
-from concept_benchmark import RobotDatasetGenerator
+```bash
+# Robot classification (image, default 7 concepts)
+python scripts/robot_pipeline.py --seed 1014
 
-dataset = RobotDatasetGenerator(
-    seed=1014,                # reproducibility
-    subconcept=True,          # 12 fine-grained concepts (default: 7 coarse)
-    model_type="stochastic",  # probabilistic labeling (or "deterministic")
-    size="medium",            # image resolution: "small" (8px), "medium" (32px), "large" (600px)
-    draw=True,                # render robot images (default) — set False to skip for quick exploration
-).generate()
+# Robot classification (subconcept variant, 12 concepts)
+python scripts/robot_pipeline.py --seed 1014 --subconcept
 
-print(dataset.training.C.shape)   # (3800, 12) — concept annotations
-print(dataset.training.concepts)
-# ['head_shape', 'body_shape', 'has_knees', 'has_antennae', 'ears_shape',
-#  'mouth_type', 'foot_shape_flat_trapezoid', 'foot_shape_flat_square',
-#  'foot_shape_flat_5sided', 'foot_shape_pointy_rounded',
-#  'foot_shape_pointy_square', 'foot_shape_pointy_4sided']
+# Sudoku validation
+python scripts/sudoku_pipeline.py --seed 171
+
+# Robot text classification
+python scripts/robot_text_pipeline.py --seed 1337
 ```
 
-With `subconcept=True`, the 9 raw body features are expanded into 12 binary concepts — for example, `foot_shape` (6 values) becomes 6 one-hot columns. With `subconcept=False` (default), you get 7 coarse concepts instead. The `draw=True` flag renders each robot as a 32×32 PNG image stored in `dataset.training.X`.
+Each script supports `--help` for the full list of flags. Use `--stages` to run a subset of the pipeline (e.g., `--stages cbm dnn intervene` to retrain models on existing data).
 
-Each split (`training`, `validation`, `test`) is a `ConceptDataset` with attributes `X` (images), `C` (concept matrix), and `y` (labels). Convert to a DataFrame to see what the data looks like:
+### Running your own experiment
 
-```python
-dataset.training.to_dataframe().head(2)
-#    head_shape  body_shape  has_knees  ...  foot_shape_pointy_4sided  label  class
-# 0           0           0          0  ...                         0      1  glorp
-# 1           0           0          0  ...                         1      1  glorp
-```
-
-For interactive browsing with [Renumics Spotlight](https://github.com/Renumics/spotlight) (`pip install concept-benchmark[explore]`):
+To generate a dataset and use it with your own CBM:
 
 ```python
-dataset.training.explore()  # opens in the browser
-```
+from concept_benchmark.config import RobotBenchmarkConfig
+from concept_benchmark.synthetic.robot import create_synthetic_dataset
+from concept_benchmark.utils import create_skewed_splits_full, set_deterministic_seed
 
-<p align="center">
-  <img src="docs/assets/robot_samples.png" width="600" alt="Sample Glorps and Drents with concept annotations">
-</p>
+# 1. Define the experiment: labeling function, concept granularity, and noise
+cfg = RobotBenchmarkConfig(
+    seed=1014,
+    data_type="image",
+    model_type="stochastic",
+    model_features={"mouth_type": "closed", "foot_shape": "pointy", "has_knees": "true"},
+    model_weights={"mouth_type": 5.0, "foot_shape": 8.0, "has_knees": -5.0},
+    model_intercept=2.0,
+    drop_concepts=["has_elbows", "hand_shape", "foot_shape_flat_rounded",
+                   "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
+                   "foot_shape_flat_lshaped", "foot_shape_pointy_4sided",
+                   "foot_shape_pointy_square", "foot_shape_pointy_rounded",
+                   "foot_shape_flat_5sided", "foot_shape_flat_square",
+                   "foot_shape_flat_trapezoid"],  # IDEAL_DROP → 7 coarse concepts
+    concept_missing=0.0,            # fraction of concept labels to mask
+    intervention_regimes=["baseline"],
+)
 
-**Train a CBM.** The repo includes the building blocks for a full concept bottleneck model — a concept detector (images → concepts) and a label predictor (concepts → label):
+# 2. Generate the dataset
+set_deterministic_seed(cfg.seed)
+dataset = create_synthetic_dataset(**cfg.to_dict())
 
-```python
-import numpy as np
-from concept_benchmark import RobotDatasetGenerator
-from concept_benchmark.utils import set_deterministic_seed
-from experiments.models import (
+# 3. Split into train / validation / test
+#    Ensures rare concept combinations are represented (via skew_specs),
+#    then drops excluded concepts from all splits.
+create_skewed_splits_full(dataset, cfg.skew_specs, test_size=cfg.test_size,
+                          train_skew_size=cfg.train_skew_size, drop_concepts=cfg.drop_concepts)
+
+# 4. Train concept detector (X → C) and front-end model (C → y)
+from concept_benchmark.models import (
     ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier,
 )
-from experiments.utils import determine_device, get_loader_config, patch_macos_dataloader
-
-set_deterministic_seed(1014)
-patch_macos_dataloader()
-device = determine_device()
-loader_config = get_loader_config(device)
-
-dataset = RobotDatasetGenerator(seed=1014, subconcept=True, draw=True).generate()
-
-# Step 1: train concept detector (images → concepts)
-n_concepts = dataset.training.n_concepts
+n_concepts = dataset.training.C.shape[1]
 cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=n_concepts, input_size=32))
 cd.fit(dataset.training, dataset.validation,
-       fit_params={"epochs": 50, "lr": 1e-3, "patience": 10, "device": str(device), **loader_config})
+       fit_params={"epochs": 50, "lr": 1e-3, "patience": 10, "device": "cpu"})
 
-# Step 2: train label predictor (concepts → label)
 fe = FrontEndModel()
 fe.fit(dataset.training.C, dataset.training.y)
 
-# Step 3: combine into a CBM and evaluate
 cbm = ConceptBasedModel(concept_detector=cd, front_end_model=fe)
-predictions = cbm.predict(dataset.test)
-accuracy = np.mean(predictions == dataset.test.y)
-print(f"CBM accuracy: {accuracy:.4f}")
-# CBM accuracy: 0.7812
+
+# 5. Run interventions: correct k concepts per sample using ground truth
+from concept_benchmark.intervention import ConceptInterventionRunner, InterventionConfig
+from concept_benchmark.kflip import KFlipInterventionStrategy
+
+runner = ConceptInterventionRunner(cbm)
+C_test_pred = cd.predict(dataset.test)
+
+for k in [1, 3]:
+    result = runner.run(
+        strategy=KFlipInterventionStrategy(),
+        config=InterventionConfig(max_concepts_per_instance=k, score_threshold=0.2),
+        dataset=dataset.test,
+        concept_proba=C_test_pred,
+        concept_true=dataset.test.C,
+        labels=dataset.test.y,
+    )
+    acc = (result.y_pred_after == dataset.test.y).mean()
+    print(f"k={k}: accuracy={acc:.4f}")
+
+# For Sudoku, use SudokuBenchmarkConfig instead:
+# cfg = SudokuBenchmarkConfig(seed=171, max_corrupt=9, data_type="image", target_accuracy=0.9)
 ```
 
-For a quick exploration using only the pip package, see [`examples/robot_quickstart.py`](examples/robot_quickstart.py). For the full neural CBM pipeline with interventions (requires cloning the repo), see [`examples/robot_pipeline_example.py`](examples/robot_pipeline_example.py).
+For the full pipeline with all stages, see the scripts in `scripts/`.
 
-### Sudoku Validation
-
-The Sudoku benchmark determines whether a 9×9 board is valid. The 27 concepts correspond to the validity of each row, column, and 3×3 block — a board is valid if and only if *all* 27 are true:
-
-```python
-from concept_benchmark import SudokuDatasetGenerator
-
-dataset = SudokuDatasetGenerator(
-    seed=171,             # reproducibility
-    n_samples=100,        # number of boards (renders images, ~35 s)
-    max_corrupt=9,        # cells swapped in invalid boards (higher = subtler errors)
-    valid_ratio=0.5,      # fraction of valid boards
-).generate()
-
-dataset.training.explore()        # interactive viewer with board images
-print(dataset.training.C.shape)   # (60, 27) — 27 concept annotations
-print(dataset.training.concepts)  # ['row_valid_1', 'row_valid_2', ..., 'block_valid_9']
-```
-
-Inspect the data — each row is one board, with a binary flag for each of the 27 structural checks:
-
-```python
-df = dataset.training.to_dataframe()
-show_cols = list(dataset.training.concepts[:5]) + ["label"]
-print(df[show_cols])
-#      row_valid_1  row_valid_2  row_valid_3  row_valid_4  row_valid_5  label
-# 0              1            1            1            1            1      1
-# ..           ...          ...          ...          ...          ...    ...
-# 301            1            0            0            1            1      0
-```
-
-<p align="center">
-  <img src="docs/assets/sudoku_samples.png" width="600" alt="Sample valid and invalid Sudoku boards with handwritten digits">
-</p>
-
-For a quick exploration using only the pip package, see [`examples/sudoku_quickstart.py`](examples/sudoku_quickstart.py). For the full neural CS model pipeline with selective classification and interventions (requires cloning the repo), see [`examples/sudoku_pipeline_example.py`](examples/sudoku_pipeline_example.py).
-
-
-### Benchmark Your Own Model
-
-Have your own concept detector or label predictor? Wrap them to plug into the evaluation pipeline:
-
-```python
-import numpy as np
-from experiments.models import ConceptDetector, FrontEndModel, ConceptBasedModel
-
-# Wrap your concept detector — predict() receives a ConceptDatasetSample
-class MyConceptDetector(ConceptDetector):
-    def __init__(self, my_model):
-        super().__init__()
-        self._model = my_model
-
-    def predict(self, dataset, **kwargs):
-        """Return (N, n_concepts) float array in [0, 1]."""
-        return self._model.predict_concept_probs(dataset.X)
-
-# Wrap your label predictor — C is binary (0/1), not probabilities
-class MyFrontEnd(FrontEndModel):
-    def __init__(self, my_clf):
-        super().__init__()
-        self._clf = my_clf
-
-    def predict(self, C):
-        return self._clf.predict(C)
-
-    def predict_proba(self, C):
-        return self._clf.predict_proba(C)
-
-# Assemble, evaluate, and run interventions
-cbm = ConceptBasedModel(
-    concept_detector=MyConceptDetector(my_concept_model),
-    front_end_model=MyFrontEnd(my_classifier),
-)
-predictions = cbm.predict(test)
-accuracy = np.mean(predictions == test.y)
-# Expected: compare against built-in CBM accuracy (0.7812 for subconcept)
-```
-
-For the full guide — including running interventions, alignment, bypassing the concept detector, and baseline comparisons — see [`docs/benchmark-your-model.md`](docs/benchmark-your-model.md).
-
-## Evaluation
-
-The repo includes tools for evaluating CBMs beyond raw accuracy — interventions, alignment constraints, and selective classification. These require cloning the repo and running `uv sync`.
-
-### Interventions
-
-Interventions correct the model's concept predictions at test time. The `ConceptInterventionRunner` + `KFlipInterventionStrategy` evaluates subsets of up to *k* concepts per sample and selects the most impactful correction. Expected results (seed=1014):
-
-| budget (k) | DNN | ideal (7 concepts) | subconcept (12 concepts) |
-|------------|------|---------------------|--------------------------|
-| 0 | 0.8746 | 0.8673 | 0.7812 |
-| 1 | — | 0.9736 | 0.9212 |
-| 3 | — | 0.9769 | 0.9439 |
-
-The package supports six intervention regimes that simulate different annotation scenarios: `baseline` (oracle), `expert` (noisy human), `subjective` (noisy labels + noisy human), `machine`/`llm`/`clip` (machine-discovered concepts via [Label-Free CBM](https://arxiv.org/abs/2304.06129)). See [`docs/interventions.md`](docs/interventions.md) for details.
-
-### Alignment
-
-Alignment constraints force concept weights to match expected directions (e.g., `has_knees` → positive). The paper shows this preserves training accuracy but **destroys** intervention benefit — aligned subconcept CBM drops from +16% gain to -8% at k=3.
-
-### Selective Classification
-
-For Sudoku, the key metric is selective classification: the model abstains on uncertain predictions to achieve high accuracy on kept samples. The CS model is very stable across seeds (sel_acc ~0.97, coverage ~99%). The DNN is highly variable — about 40% of seeds produce random-chance performance.
-
-### Reproducing Paper Results
-
-```bash
-python scripts/robot_pipeline.py --seed 1014 --subconcept   # see --help for all flags
-python scripts/sudoku_pipeline.py --seed 171
-```
-
-Results are fully deterministic for a given seed when using `set_deterministic_seed()`. Training takes ~3 min per model on MPS (Apple Silicon), ~5–10 min on CPU. The pipeline supports flags for intervention regimes (`--regimes expert subjective machine`), concept missingness (`--concept-missing 0.2`), running specific stages (`--stages cbm dnn intervene`), and more.
-
-For complete end-to-end examples, see [`examples/robot_pipeline_example.py`](examples/robot_pipeline_example.py) and [`examples/sudoku_pipeline_example.py`](examples/sudoku_pipeline_example.py).
 
 ## Benchmarks
+
+The package includes two benchmarks. **Robot classification** is a decision-support task where a human corrects the model's concept predictions to improve accuracy. **Sudoku validation** is an automation task where the system handles routine cases and defers uncertain ones to a human.
 
 ### Robot Classification
 
@@ -261,18 +164,39 @@ This benchmark targets decision-support settings where a human uses the model's 
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
 </p>
 
-> **Note:** `cd.predict()` returns concept **probabilities** in [0, 1], not binary predictions. `ConceptBasedModel.predict()` handles thresholding internally. For manual interventions, see [`docs/interventions.md`](docs/interventions.md).
+The following example uses the subconcept variant (12 concepts instead of the default 7) with intervention regimes:
 
-All parameters below can be passed directly to `RobotDatasetGenerator()` or as CLI flags to `robot_pipeline.py`. For the full list, see [`concept_benchmark/config.py`](concept_benchmark/config.py).
+```bash
+# Run the full pipeline with subconcepts and expert interventions
+python scripts/robot_pipeline.py --seed 1014 --subconcept --regimes baseline expert
+
+# Run specific stages only (e.g., retrain and re-evaluate on existing data)
+python scripts/robot_pipeline.py --seed 1014 --subconcept --stages cbm dnn intervene collect
+
+# Test concept missingness (MCAR, 20% of labels masked)
+python scripts/robot_pipeline.py --seed 1014 --subconcept --concept-missing 0.2
+```
+
+Expected results (subconcept, seed=1014, threshold=0.2):
+```
+CBM (k=0): 0.7812
+ budget  accuracy
+      0    0.7812
+      1    0.9212
+      3    0.9439
+```
+
+The most important parameters are listed below. For the full list, see `RobotBenchmarkConfig` in [`concept_benchmark/config.py`](concept_benchmark/config.py) or run `python scripts/robot_pipeline.py --help`.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `data_type` | `"image"` | `"image"` (render robot PNGs) or `"text"` (generate text descriptions). |
-| `label_formula` | `{("mouth_type","closed"): 5, ("foot_shape","pointy"): 8, ("has_knees","true"): -5, "intercept": 2}` | Labeling function. Score = `Σ wᵢ · 1[fᵢ = vᵢ] + intercept`. |
+| `model_features` | `{"mouth_type": "closed", "foot_shape": "pointy", "has_knees": "true"}` | Which feature values count toward the label score. |
+| `model_weights` | `{"mouth_type": 5.0, "foot_shape": 8.0, "has_knees": -5.0}` | Concept weights for the labeling function. Score = `Σ wᵢ · 1[fᵢ = vᵢ] + intercept`. |
 | `model_type` | `"stochastic"` | `"deterministic"`: Glorp if score ≥ 0. `"stochastic"`: Glorp ~ Bernoulli(σ(scalar × score)). |
 | `drop_concepts` | `IDEAL_DROP` | Which concepts to exclude. Two presets: `IDEAL_DROP` for 7 coarse concepts, `SUBCONCEPT_DROP` for 12 fine-grained concepts. |
 | `concept_missing` | `0.0` | Fraction of concept labels masked during training. |
-| `regimes` | `["baseline"]` | How interventions are performed: `baseline` (oracle), `expert` (noisy human), `subjective` (noisy concept labels + noisy human), `machine`/`llm`/`clip` (Label-Free CBM). |
+| `regimes` | `["baseline"]` | How interventions are performed: `baseline` (oracle), `expert` (noisy human), `subjective` (noisy concept labels + noisy human), `machine`/`llm`/`clip` (concepts discovered via [Label-Free CBM](https://arxiv.org/abs/2304.06129)). |
 
 <details>
 <summary>Remaining parameters</summary>
@@ -284,6 +208,7 @@ All parameters below can be passed directly to `RobotDatasetGenerator()` or as C
 | `size` | `"medium"` | Image resolution: `"small"` (8px), `"medium"` (32px), `"large"` (600px). Image only. |
 | `samples_per_instance` | `4` | Number of images per unique robot configuration. Total dataset size = unique configs × this value. |
 | `color_mode` | `"color"` | `"color"` or `"grayscale"`. Image only. |
+| `model_intercept` | `2.0` | Intercept term in the labeling function score. |
 | `model_scalar` | `4.2` | Sigmoid temperature for stochastic labeling (higher = more deterministic) |
 | `skew_specs` | (see config) | List of dicts specifying class-balance constraints for training data (e.g., minimum fraction of specific concept values). |
 | `concept_missing_mech` | `"none"` | Missingness mechanism: `"none"`, `"mcar"`, or `"mnar"` |
@@ -309,7 +234,24 @@ This benchmark targets automation settings where the system handles routine case
   <img src="docs/assets/sudoku_handwritten.png" width="400" alt="Sudoku board with handwritten digits and concept annotations">
 </p>
 
-All parameters below can be passed directly to `SudokuDatasetGenerator()` or as CLI flags to `sudoku_pipeline.py`. For the full list, see [`concept_benchmark/config.py`](concept_benchmark/config.py).
+The concept-supervised (CS) model -- the Sudoku equivalent of a CBM -- predicts 27 binary concepts, then a label predictor determines board validity. The selective classification stage finds a confidence threshold that achieves at least 95% accuracy on kept predictions.
+
+```bash
+# Run the full pipeline (generates boards, trains OCR + models, evaluates)
+python scripts/sudoku_pipeline.py --seed 171
+
+# Skip data regeneration (reuse existing boards), only retrain models
+python scripts/sudoku_pipeline.py --seed 171 --stages cs dnn selective intervene align collect
+```
+
+Expected results (seed=171, target_accuracy=0.95):
+```
+model  selective_acc  selective_cov
+  dnn          0.875           0.04
+   cs          0.915           1.00
+```
+
+The most important parameters are listed below. For the full list, see `SudokuBenchmarkConfig` in [`concept_benchmark/config.py`](concept_benchmark/config.py) or run `python scripts/sudoku_pipeline.py --help`.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|

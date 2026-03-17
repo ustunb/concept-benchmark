@@ -52,17 +52,21 @@ class TestRobotDatasetGenerator:
         assert gen.config.model_intercept == 0.0
 
     def test_label_formula_matches_explicit_params(self):
+        formula = {
+            ("mouth_type", "closed"): 5.0,
+            ("has_knees", "true"): -5.0,
+            "intercept": 2.0,
+        }
         ds_formula = RobotDatasetGenerator(
+            seed=1014, draw=False, label_formula=formula
+        ).generate()
+        ds_explicit = RobotDatasetGenerator(
             seed=1014,
             draw=False,
-            label_formula={
-                ("mouth_type", "closed"): 5.0,
-                ("foot_shape", "pointy"): 8.0,
-                ("has_knees", "true"): -5.0,
-                "intercept": 2.0,
-            },
+            model_features={"mouth_type": "closed", "has_knees": "true"},
+            model_weights={"mouth_type": 5.0, "has_knees": -5.0},
+            model_intercept=2.0,
         ).generate()
-        ds_explicit = RobotDatasetGenerator(seed=1014, draw=False).generate()
         np.testing.assert_array_equal(ds_formula.training.y, ds_explicit.training.y)
         np.testing.assert_array_equal(ds_formula.training.C, ds_explicit.training.C)
 
@@ -94,6 +98,21 @@ class TestRobotDatasetGenerator:
             RobotDatasetGenerator(
                 draw=False,
                 label_formula={("nonexistent", "x"): 1.0},
+            )
+
+    def test_label_formula_rejects_invalid_value(self):
+        with pytest.raises(ValueError, match="Invalid value 'nonexistent'"):
+            RobotDatasetGenerator(
+                draw=False,
+                label_formula={("mouth_type", "nonexistent"): 1.0},
+            )
+
+    def test_label_formula_rejects_conflict_with_explicit_kwargs(self):
+        with pytest.raises(ValueError, match="Cannot pass both label_formula and"):
+            RobotDatasetGenerator(
+                draw=False,
+                label_formula={("mouth_type", "closed"): 5.0},
+                model_features={"mouth_type": "closed"},
             )
 
     def test_imports_from_top_level(self):
