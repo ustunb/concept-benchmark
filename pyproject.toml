@@ -46,11 +46,6 @@ Repository = "https://github.com/ustunb/concept-benchmark"
 
 [project.optional-dependencies]
 explore = ["renumics-spotlight>=1.6.0"]
-experiments = [
-    "transformers>=4.55.2",
-    "cvxpy>=1.4.0",
-    "open-clip-torch>=2.20.0",
-]
 
 [dependency-groups]
 explore = ["renumics-spotlight>=1.6.0"]

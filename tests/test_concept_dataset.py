@@ -391,6 +391,8 @@ def test_description(tab_small):
     assert isinstance(desc, str)
     assert len(desc) > 0
     assert "ConceptDataset" in desc
+    assert str(tab_small.n) in desc
+    assert tab_small._full.meta.get("data_type", "unknown") in desc
     for concept in tab_small.concepts:
         assert concept in desc
     for cls in tab_small.classes:

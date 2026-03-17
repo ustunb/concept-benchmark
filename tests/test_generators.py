@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.generators import RobotDatasetGenerator, SudokuDatasetGenerator
@@ -80,6 +81,20 @@ class TestRobotDatasetGenerator:
         gen = RobotDatasetGenerator(seed=99, draw=False)
         assert gen.config.seed == 99
         assert gen.config.draw is False
+
+    def test_label_formula_rejects_non_tuple_key(self):
+        with pytest.raises(ValueError, match="must be 'intercept' or a .* tuple"):
+            RobotDatasetGenerator(
+                draw=False,
+                label_formula={"mouth_type": 5.0},
+            )
+
+    def test_label_formula_rejects_unknown_feature(self):
+        with pytest.raises(ValueError, match="Unknown feature 'nonexistent'"):
+            RobotDatasetGenerator(
+                draw=False,
+                label_formula={("nonexistent", "x"): 1.0},
+            )
 
     def test_imports_from_top_level(self):
         from concept_benchmark import RobotDatasetGenerator as RDG

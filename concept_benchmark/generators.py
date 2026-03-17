@@ -18,7 +18,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from concept_benchmark.config import RobotBenchmarkConfig, SudokuBenchmarkConfig
+from concept_benchmark.config import (
+    ROBOT_CONCEPTS,
+    RobotBenchmarkConfig,
+    SudokuBenchmarkConfig,
+)
 from concept_benchmark.synthetic.robot import create_synthetic_dataset
 from concept_benchmark.synthetic.sudoku import create_sudoku_dataset
 from concept_benchmark.utils import create_skewed_splits_full, set_deterministic_seed
@@ -83,6 +87,8 @@ class RobotDatasetGenerator:
     ... )
     """
 
+    _VALID_FEATURES = frozenset(ROBOT_CONCEPTS.keys())
+
     def __init__(self, *, label_formula=None, **kwargs):
         if label_formula is not None:
             model_features = {}
@@ -92,7 +98,18 @@ class RobotDatasetGenerator:
                 if key == "intercept":
                     intercept = weight
                 else:
+                    if not (isinstance(key, tuple) and len(key) == 2):
+                        raise ValueError(
+                            f"label_formula key must be 'intercept' or a "
+                            f"(feature, value) tuple, got {key!r}. "
+                            f"Valid features: {sorted(self._VALID_FEATURES)}"
+                        )
                     feature, value = key
+                    if feature not in self._VALID_FEATURES:
+                        raise ValueError(
+                            f"Unknown feature {feature!r} in label_formula. "
+                            f"Valid features: {sorted(self._VALID_FEATURES)}"
+                        )
                     model_features[feature] = value
                     model_weights[feature] = weight
             kwargs.setdefault("model_features", model_features)

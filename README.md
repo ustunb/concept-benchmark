@@ -179,6 +179,7 @@ For a quick exploration using only the pip package, see [`examples/sudoku_quicks
 Have your own concept detector or label predictor? Wrap them to plug into the evaluation pipeline:
 
 ```python
+import numpy as np
 from experiments.models import ConceptDetector, FrontEndModel, ConceptBasedModel
 
 # Wrap your concept detector — predict() receives a ConceptDatasetSample
