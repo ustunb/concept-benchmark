@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.generators import RobotDatasetGenerator, SudokuDatasetGenerator

@@ -425,8 +425,6 @@ def collect_results(
     """
     import json
 
-    from concept_benchmark.paths import results_dir
-
     if configs is None:
         configs = [SudokuBenchmarkConfig.default()]
 
