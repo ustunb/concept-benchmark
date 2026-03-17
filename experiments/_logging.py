@@ -28,9 +28,12 @@ def setup_logging(level: int = logging.INFO, verbose_format: bool = False) -> No
     Called once at CLI entry.  Idempotent — second calls are no-ops unless
     the handler list is empty.
 
-    Args:
-        level: Logging level (e.g. logging.DEBUG, logging.INFO, logging.WARNING).
-        verbose_format: If True, include level name and logger name in output.
+    Parameters
+    ----------
+    level : int
+        Logging level (e.g. ``logging.DEBUG``, ``logging.INFO``).
+    verbose_format : bool
+        If True, include level name and logger name in output.
     """
     global _configured
     if _configured:

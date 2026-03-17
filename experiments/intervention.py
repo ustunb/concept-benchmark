@@ -738,8 +738,9 @@ class ConceptInterventionRunner:
         instance_ids: Optional[np.ndarray] = None,
     ) -> InterventionResult:
 
-        # Future: sample noise if config.noise > 0.0 (call parent)
-        if concept_true is None and config.noise <= 0.0:
+        # NOTE: config.noise is not consumed here — intervention noise is applied
+        # post-hoc by the pipeline (see _test_interventions in robot_pipeline.py).
+        if concept_true is None:
             concept_true = dataset.base_concepts
 
         batch = self._build_batch(

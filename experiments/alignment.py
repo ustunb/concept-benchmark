@@ -43,10 +43,13 @@ class _MockModel:
 class ConstrainedFrontEndModel(FrontEndModel):
     """Frontend that fits logistic regression with sign constraints via CVXPY.
 
-    Args:
-        concept_names: List of concept name strings.
-        monotonicity_constraints: ``{concept_name: sign}`` where *sign* is
-            ``+1`` (weight must be >= 0) or ``-1`` (weight must be <= 0).
+    Parameters
+    ----------
+    concept_names : list[str]
+        List of concept name strings.
+    monotonicity_constraints : dict[str, int], optional
+        ``{concept_name: sign}`` where *sign* is ``+1`` (weight must be >= 0)
+        or ``-1`` (weight must be <= 0).
     """
 
     def __init__(
@@ -90,9 +93,7 @@ class ConstrainedFrontEndModel(FrontEndModel):
         problem = cp.Problem(cp.Minimize(loss), constraints)
         problem.solve()
 
-        if problem.status in ("infeasible", "unbounded"):
-            import logging
-
+        if problem.status not in ("optimal", "optimal_inaccurate"):
             logging.getLogger(__name__).warning(
                 "CVXPY %s, falling back to unconstrained", problem.status
             )
@@ -135,16 +136,26 @@ def retrain_aligned(
     constraints (e.g. ``{"has_knees": 1}`` means has_knees must have a
     positive weight).
 
-    Args:
-        h_train: Concept predictions on training set.
-        y_train: Training labels.
-        h_test: Concept predictions on test set.
-        y_test: Test labels.
-        concept_names: List of concept names.
-        original_frontend: The original (unconstrained) trained frontend.
-        monotonicity_constraints: ``{concept_name: sign}`` dict.
+    Parameters
+    ----------
+    h_train : np.ndarray
+        Concept predictions on training set.
+    y_train : np.ndarray
+        Training labels.
+    h_test : np.ndarray
+        Concept predictions on test set.
+    y_test : np.ndarray
+        Test labels.
+    concept_names : list[str]
+        List of concept names.
+    original_frontend : FrontEndModel
+        The original (unconstrained) trained frontend.
+    monotonicity_constraints : dict[str, int]
+        ``{concept_name: sign}`` dict.
 
-    Returns:
+    Returns
+    -------
+    dict
         Dict with original_accuracy, aligned_accuracy, accuracy_change,
         predictions_changed, aligned_weights.
     """
@@ -190,12 +201,18 @@ def retrain_aligned(
 def align_frontend_weights(frontend_model, concept_names, weight_dict):
     """Directly set frontend model weights for alignment.
 
-    Args:
-        frontend_model: Trained FrontEndModel instance.
-        concept_names: List of concept names (in training order).
-        weight_dict: Dict mapping concept names to weights, plus 'bias' key.
+    Parameters
+    ----------
+    frontend_model : FrontEndModel
+        Trained FrontEndModel instance.
+    concept_names : list[str]
+        List of concept names (in training order).
+    weight_dict : dict
+        Dict mapping concept names to weights, plus ``'bias'`` key.
 
-    Returns:
+    Returns
+    -------
+    FrontEndModel
         Modified frontend model.
     """
     lr_model = frontend_model.model
@@ -219,13 +236,20 @@ def align_frontend_weights(frontend_model, concept_names, weight_dict):
 def test_alignment(h_test, align_params, fe, test):
     """Test alignment by replacing frontend weights with specified values.
 
-    Args:
-        h_test: Concept predictions on test set.
-        align_params: Dict of alignment weights.
-        fe: Original frontend model.
-        test: Test dataset split.
+    Parameters
+    ----------
+    h_test : np.ndarray
+        Concept predictions on test set.
+    align_params : dict
+        Dict of alignment weights.
+    fe : FrontEndModel
+        Original frontend model.
+    test : ConceptDataset
+        Test dataset split.
 
-    Returns:
+    Returns
+    -------
+    dict
         Dict with alignment statistics.
     """
     test_labels = test.y.astype(int)

@@ -2,8 +2,8 @@
 
 Tier 1: works with ``pip install concept-benchmark`` (no repo clone needed).
 
-Generates a Sudoku dataset with board images, inspects its structure, trains
-a label predictor on perfect concepts, and demonstrates selective
+Generates a small Sudoku dataset with board images, inspects its structure,
+trains a label predictor on perfect concepts, and demonstrates selective
 classification and how concept noise degrades predictions.
 
 For the full neural CS model pipeline (digit recognition + selective
@@ -23,8 +23,8 @@ from concept_benchmark import SudokuDatasetGenerator
 # ---------------------------------------------------------------------------
 # 1. Generate dataset (renders board images by default, ~35 s for 100 boards)
 # ---------------------------------------------------------------------------
-print("Generating Sudoku dataset (100 boards with handwritten digit images)...")
-dataset = SudokuDatasetGenerator(seed=171, n_samples=100).generate()
+print("Generating Sudoku dataset (50 boards with handwritten digit images)...")
+dataset = SudokuDatasetGenerator(seed=171, n_samples=50).generate()
 
 train, test = dataset.training, dataset.test
 print(f"  Training:  {train.n} samples, {train.n_concepts} concepts")

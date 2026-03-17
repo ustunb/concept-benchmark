@@ -68,6 +68,9 @@ class RobotDatasetGenerator:
             ``"stochastic"`` (default) or ``"deterministic"``.
         drop_concepts : list[str]
             Concepts to exclude from the concept matrix.
+        size : str
+            Image resolution: ``"small"`` (8px), ``"medium"`` (32px),
+            ``"large"`` (600px).  Default ``"medium"``.
 
     Examples
     --------
