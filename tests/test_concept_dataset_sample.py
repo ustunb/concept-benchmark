@@ -161,3 +161,31 @@ def test_sample_transform_identity_matters(tab_small):
 
     s3 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=s.meta, transform=g)
     assert s1 != s3  # different function object
+
+
+# ---------- to_dataframe ----------
+def test_to_dataframe_returns_dataframe(tab_small):
+    sample = tab_small.training
+    df = sample.to_dataframe()
+    assert isinstance(df, pd.DataFrame)
+
+
+def test_to_dataframe_columns(tab_small):
+    sample = tab_small.training
+    df = sample.to_dataframe()
+    expected_cols = list(sample.concepts) + ["label", "class"]
+    assert list(df.columns) == expected_cols
+
+
+def test_to_dataframe_row_count(tab_small):
+    sample = tab_small.training
+    df = sample.to_dataframe()
+    assert len(df) == sample.n
+
+
+def test_to_dataframe_concept_values_match(tab_small):
+    sample = tab_small.training
+    df = sample.to_dataframe()
+    np.testing.assert_array_equal(
+        df[sample.concepts].values.astype(sample.C.dtype), sample.C
+    )

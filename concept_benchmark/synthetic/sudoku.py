@@ -205,7 +205,11 @@ def create_sudoku_dataset(
         "classes": [0, 1],
         "concepts": concept_names,
         "data_type": data_type,
-        "transform": transform.__name__ if transform else "default",
+        "transform": getattr(
+            transform,
+            "__name__",
+            getattr(transform, "func", transform).__name__ if transform else "default",
+        ),
         "max_corrupt": max_corrupt,
         "seed": seed,
         "n": n,
@@ -312,7 +316,7 @@ def image_transform(
             if font_path
             else _get_default_font(font_size)
         )
-    except Exception:
+    except (OSError, IOError):
         font = _get_default_font(font_size)
 
     def cell_rect(r, c):
@@ -341,7 +345,7 @@ def image_transform(
             import cv2  # noqa: F401
 
             generator = AdvancedHandwrittenGenerator(fonts_dir=_fonts_dir)
-        except Exception:
+        except (ImportError, OSError):
             generator = SimpleHandwrittenGenerator(fonts_dir=_fonts_dir)
 
     # Starters mask (printed vs user-filled)
