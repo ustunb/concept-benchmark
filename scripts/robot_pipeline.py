@@ -43,7 +43,7 @@ from concept_benchmark.models import (
     RobotClassifierCNN,
     RobotConceptClassifier,
 )
-from concept_benchmark.paths import results_dir
+from concept_benchmark.paths import data_dir, results_dir
 from concept_benchmark.synthetic.robot import create_synthetic_dataset
 
 @dataclass
@@ -340,9 +340,11 @@ def train_lfcbm(
     )
     lfcbm = LabelFreeCBM(cfg)
 
-    # Extract image paths from dataset
-    train_paths = [str(p) for p in data.training.X]
-    valid_paths = [str(p) for p in data.validation.X]
+    # Extract image paths from dataset — X contains bare filenames like
+    # "robot_003.png", so we prepend the image directory.
+    image_dir = data_dir / "robot_images"
+    train_paths = [str(image_dir / p) for p in data.training.X]
+    valid_paths = [str(image_dir / p) for p in data.validation.X]
 
     stats = lfcbm.fit(
         train_X=train_paths,
@@ -571,9 +573,9 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
 
             def _resolve_img_path(i: int) -> str:
                 p = Path(str(test.X[i]))
-                base = getattr(test, "base_dir", Path("."))
-                q = p if p.is_absolute() else (base / p)
-                return str(q.resolve())
+                if p.is_absolute():
+                    return str(p)
+                return str((data_dir / "robot_images" / p).resolve())
 
             def _llm_judge(image_path: str, names: list) -> dict:
                 prompt = (
@@ -999,9 +1001,9 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
         )
         lf = LabelFreeCBM(cfg)
 
-        base_dir = getattr(data.training, "base_dir", Path("."))
-        train_paths = [str((base_dir / Path(p)).resolve()) for p in data.training.X]
-        valid_paths = [str((base_dir / Path(p)).resolve()) for p in data.validation.X]
+        image_dir = data_dir / "robot_images"
+        train_paths = [str(image_dir / p) for p in data.training.X]
+        valid_paths = [str(image_dir / p) for p in data.validation.X]
 
         stats = lf.fit(
             train_X=train_paths,
@@ -1015,8 +1017,8 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
         save(lf, lfcbm_path, overwrite=True)
 
     # Get concept probabilities from LFCBM
-    base_dir = getattr(data.test, "base_dir", Path("."))
-    test_paths = [str((base_dir / Path(p)).resolve()) for p in data.test.X]
+    image_dir = data_dir / "robot_images"
+    test_paths = [str(image_dir / p) for p in data.test.X]
     P_te = lf.concept_proba(test_paths)
 
     # Create FEOnProbs frontend (matching original)
@@ -1114,12 +1116,8 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
         lfcbm_bundle = load(config.get_model_path("lfcbm"))
         lfcbm_obj = lfcbm_bundle["lfcbm"]
         fe_machine = lfcbm_bundle["frontend"]
-        import os
-        base = getattr(data.test, "base_dir", None)
-        test_paths = [
-            os.path.join(str(base), str(p)) if base else str(p)
-            for p in data.test.X
-        ]
+        image_dir = data_dir / "robot_images"
+        test_paths = [str(image_dir / p) for p in data.test.X]
         c_preds = lfcbm_obj.concept_proba(test_paths)
         regime_concept_names = list(lfcbm_obj.concept_set.keys)
         regime_model = ConceptBasedModel(concept_detector=None, front_end_model=fe_machine)
