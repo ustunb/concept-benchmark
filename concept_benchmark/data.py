@@ -312,9 +312,7 @@ class ConceptDataset:
         try:
             attr = self._SPLIT_ALIASES[key]
         except KeyError:
-            raise KeyError(
-                f"Unknown split '{key}'. Available: 'train', 'val', 'test'"
-            )
+            raise KeyError(f"Unknown split '{key}'. Available: 'train', 'val', 'test'")
         return getattr(self, attr)
 
     def keys(self):

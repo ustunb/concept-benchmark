@@ -111,8 +111,12 @@ class TestSudokuDatasetGenerator:
         np.testing.assert_array_equal(ds1.training.C, ds2.training.C)
 
     def test_different_seeds_differ(self):
-        ds1 = SudokuDatasetGenerator(seed=1, n_samples=200, data_type="tabular").generate()
-        ds2 = SudokuDatasetGenerator(seed=2, n_samples=200, data_type="tabular").generate()
+        ds1 = SudokuDatasetGenerator(
+            seed=1, n_samples=200, data_type="tabular"
+        ).generate()
+        ds2 = SudokuDatasetGenerator(
+            seed=2, n_samples=200, data_type="tabular"
+        ).generate()
         # y is stratified 50/50, so compare concepts (actual board content)
         assert not np.array_equal(ds1.training.C, ds2.training.C)
 
@@ -123,9 +127,7 @@ class TestSudokuDatasetGenerator:
         assert len(ds.training.y) + len(ds.validation.y) + len(ds.test.y) == 50
 
     def test_image_generates_png_boards(self):
-        ds = SudokuDatasetGenerator(
-            seed=42, n_samples=10, data_type="image"
-        ).generate()
+        ds = SudokuDatasetGenerator(seed=42, n_samples=10, data_type="image").generate()
         assert isinstance(ds, ConceptDataset)
         assert ds.training.C.shape[1] == 27
         # Image data: X should contain image arrays (H, W, C) or paths

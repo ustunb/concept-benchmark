@@ -204,8 +204,6 @@ class SudokuDatasetGenerator:
             data_type=data_type,
             **kwargs,
         )
-        data.generate_cvindices(
-            strata=data.y, total_folds_for_cv=[5], seed=cfg.seed
-        )
+        data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=cfg.seed)
         data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
         return data

@@ -94,7 +94,9 @@ def test_explore_raises_import_error(tab_small, monkeypatch):
     import concept_benchmark.data as data_module  # noqa: F401 — ensures module is loaded before monkeypatching __import__
 
     # Patch the import to fail
-    original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+    original_import = (
+        __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
+    )
 
     def mock_import(name, *args, **kwargs):
         if name == "renumics" or name.startswith("renumics."):
