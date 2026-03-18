@@ -31,18 +31,18 @@ from concept_benchmark.utils import (
     determine_device,
     get_loader_config,
     patch_macos_dataloader,
-    run_alignment,
     set_deterministic_seed,
 )
 from concept_benchmark.config import RobotBenchmarkConfig
 from concept_benchmark.ext.fileutils import load, save
-from concept_benchmark.models import (
+from experiments.models import (
     ConceptBasedModel,
     ConceptDetector,
     FrontEndModel,
     RobotClassifierCNN,
     RobotConceptClassifier,
 )
+from experiments.utils import run_alignment
 from concept_benchmark.paths import data_dir, results_dir
 from concept_benchmark.synthetic.robot import create_synthetic_dataset
 
@@ -89,11 +89,11 @@ def _ensure_intervention_imports():
     global _intervention_imported
     if not _intervention_imported:
         global ConceptInterventionRunner, InterventionConfig, KFlipInterventionStrategy
-        from concept_benchmark.intervention import (
+        from experiments.intervention import (
             ConceptInterventionRunner,
             InterventionConfig,
         )
-        from concept_benchmark.kflip import KFlipInterventionStrategy
+        from experiments.kflip import KFlipInterventionStrategy
 
         _intervention_imported = True
 
@@ -311,7 +311,7 @@ def train_lfcbm(
     Requires ``open-clip-torch`` and a concepts JSONL file.
     Saves to ``config.get_model_path("lfcbm")``.
     """
-    from concept_benchmark.lfcbm import LabelFreeCBM, LFConceptSet, LFTrainingConfig
+    from experiments.lfcbm import LabelFreeCBM, LFConceptSet, LFTrainingConfig
 
     _set_deterministic_seed(config.seed)
 
@@ -537,7 +537,7 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
             except ImportError:
                 ResourceExhausted = None
 
-            from concept_benchmark.llm_client import make_llm_client
+            from experiments.llm_client import make_llm_client
 
             llm_cfg = settings.intervention_llm or {}
             provider = str(llm_cfg.get("provider", "gemini"))
@@ -962,7 +962,7 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
     from pathlib import Path
 
     _ensure_intervention_imports()
-    from concept_benchmark.lfcbm import LabelFreeCBM, LFConceptSet, LFTrainingConfig
+    from experiments.lfcbm import LabelFreeCBM, LFConceptSet, LFTrainingConfig
 
     # Load concept descriptions for this regime
     from concept_benchmark.paths import pkg_dir
@@ -1376,7 +1376,7 @@ def collect_results(
                 # Aligned CBM with intervention at k=3
                 aligned_weights = align_data.get("aligned_weights")
                 if aligned_weights is not None:
-                    from concept_benchmark.alignment import align_frontend_weights
+                    from experiments.alignment import align_frontend_weights
                     import copy as _copy
 
                     # Load the config's own dataset so concept shapes match

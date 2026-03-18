@@ -2,7 +2,7 @@ import copy
 import torch
 import torch.nn as nn
 
-from concept_benchmark.train import (
+from experiments.train import (
     train_concept_heads,
 )
 

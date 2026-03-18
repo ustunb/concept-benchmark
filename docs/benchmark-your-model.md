@@ -2,7 +2,7 @@
 
 This guide shows how to evaluate your own concept bottleneck model on the benchmarks provided by this package. All examples below use the robot benchmark, but the same approach works for sudoku.
 
-> **Prerequisite:** You need the full repository (not just `pip install concept-benchmark`) because the evaluation code lives in `experiments/`.
+> **Prerequisite:** You need the full repository (not just `pip install concept-benchmark`) to run the pipeline scripts and examples.
 
 ## Getting data for your model
 

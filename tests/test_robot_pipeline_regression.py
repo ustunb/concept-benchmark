@@ -5,14 +5,25 @@ verify that key metrics match the expected values from the paper.
 They serve as a safety net during refactoring.
 """
 
+import sys
 import pandas as pd
 import pytest
 
 from concept_benchmark.utils import compute_accuracy, determine_device
 from concept_benchmark.config import RobotBenchmarkConfig
 from concept_benchmark.ext.fileutils import load
-from concept_benchmark.models import RobotClassifierCNN
+import experiments.models as _exp_models
+import experiments.train as _exp_train
+from experiments.models import RobotClassifierCNN
 from concept_benchmark.paths import results_dir
+
+# Backward compatibility: allow unpickling models saved under old module paths.
+for _old, _new in [
+    ("concept_benchmark.models", _exp_models),
+    ("concept_benchmark.train", _exp_train),
+]:
+    if _old not in sys.modules:
+        sys.modules[_old] = _new
 
 
 # Skip entire module if artifacts are not present

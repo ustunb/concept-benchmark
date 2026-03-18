@@ -1,7 +1,7 @@
 import itertools
 import numpy as np
 
-from concept_benchmark.models import ConceptBasedModel, ConceptDetector
+from experiments.models import ConceptBasedModel, ConceptDetector
 
 
 def _naive_enumeration_aggregate(

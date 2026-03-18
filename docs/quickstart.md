@@ -57,7 +57,7 @@ from concept_benchmark.utils import set_deterministic_seed
 from experiments.models import (
     ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier,
 )
-from experiments.utils import determine_device, get_loader_config, patch_macos_dataloader
+from concept_benchmark.utils import determine_device, get_loader_config, patch_macos_dataloader
 
 set_deterministic_seed(1014)
 patch_macos_dataloader()

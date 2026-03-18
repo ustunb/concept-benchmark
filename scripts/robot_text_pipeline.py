@@ -22,16 +22,14 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 
-from concept_benchmark.utils import (
-    determine_device,
-    run_alignment,
-)
+from concept_benchmark.utils import determine_device
 from concept_benchmark.config import RobotTextBenchmarkConfig
 from concept_benchmark.data import ConceptDatasetSample
 from concept_benchmark.ext.fileutils import load, save
-from concept_benchmark.models import ConceptBasedModel, FrontEndModel
+from experiments.models import ConceptBasedModel, FrontEndModel
 from concept_benchmark.paths import pkg_dir, results_dir
-from concept_benchmark.synthetic.helper.text_concept_detector import TextConceptDetector
+from experiments.text_concept_detector import TextConceptDetector
+from experiments.utils import run_alignment
 from concept_benchmark.synthetic.robot_text.catalog import (
     TEXT_CONCEPTS,
     compute_label,
@@ -52,11 +50,11 @@ def _ensure_intervention_imports():
     global _intervention_imported
     if not _intervention_imported:
         global ConceptInterventionRunner, InterventionConfig, KFlipInterventionStrategy
-        from concept_benchmark.intervention import (
+        from experiments.intervention import (
             ConceptInterventionRunner,
             InterventionConfig,
         )
-        from concept_benchmark.kflip import KFlipInterventionStrategy
+        from experiments.kflip import KFlipInterventionStrategy
 
         _intervention_imported = True
 

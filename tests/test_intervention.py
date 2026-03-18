@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from concept_benchmark.intervention import (
+from experiments.intervention import (
     ConceptInterventionRunner,
     ConceptualSafeguardsStrategy,
     InterventionBatch,
@@ -31,7 +31,7 @@ def _make_batch(n=10, k=4, *, seed=0):
 
 def _make_cbm(k=4, seed=42):
     """Build a tiny trained ConceptBasedModel on random tabular data."""
-    from concept_benchmark.models import ConceptBasedModel, FrontEndModel
+    from experiments.models import ConceptBasedModel, FrontEndModel
 
     fe = FrontEndModel()
     rng = np.random.default_rng(seed)
@@ -230,7 +230,7 @@ class TestRunner:
     def _make_runner_data(self, n=20, k=4, seed=42):
         """Build model + ConceptDatasetSample for runner tests."""
         from concept_benchmark.data import ConceptDatasetSample
-        from concept_benchmark.models import ConceptBasedModel, FrontEndModel
+        from experiments.models import ConceptBasedModel, FrontEndModel
 
         rng = np.random.default_rng(seed)
         X = rng.random((n, 8)).astype(np.float32)
