@@ -35,17 +35,12 @@ dataset = RobotDatasetGenerator(
 ).generate()
 ```
 
-Run the full pipeline (interventions, alignment, regime comparisons) from the CLI:
+## Pipeline
+
+To train models and run the full evaluation (interventions, alignment, etc.) without writing Python, use the pipeline script:
 
 ```bash
-python scripts/robot_pipeline.py --seed 1014 --subconcept                        # basic run
-python scripts/robot_pipeline.py --seed 1014 --subconcept \
-    --regimes baseline expert subjective machine                                  # intervention regimes
-python scripts/robot_pipeline.py --seed 1014 --subconcept --concept-missing 0.2  # concept noise
-python scripts/robot_pipeline.py --seed 1014 --subconcept --stages cbm dnn intervene  # specific stages
-# run --help for all flags
+python scripts/robot_pipeline.py --seed 1014 --subconcept
 ```
 
-```{note}
-The `llm` and `clip` regimes call the Gemini API at intervention time. Set `GEMINI_API_KEY` before running.
-```
+Run `python scripts/robot_pipeline.py --help` for the full list of options.

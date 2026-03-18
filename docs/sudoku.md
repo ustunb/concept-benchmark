@@ -27,10 +27,12 @@ dataset = SudokuDatasetGenerator(
 ).generate()
 ```
 
-Run the full pipeline from the CLI:
+## Pipeline
+
+To train models and run the full evaluation (selective classification, interventions, alignment) without writing Python, use the pipeline script:
 
 ```bash
 python scripts/sudoku_pipeline.py --seed 171
-python scripts/sudoku_pipeline.py --seed 171 --stages cs dnn selective intervene align collect  # skip data regen
-# run --help for all flags
 ```
+
+Run `python scripts/sudoku_pipeline.py --help` for the full list of options.
