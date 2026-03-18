@@ -8,48 +8,21 @@ This benchmark targets decision-support settings where a human uses the model's 
 :alt: Robot with annotated concepts
 ```
 
-## Setup and Evaluation
+## Expected Results
 
-Generate a dataset with the subconcept variant (12 fine-grained concepts instead of 7), train a CBM, and run oracle interventions that correct the *k* most uncertain concepts per sample:
+Generate the paper dataset and train a CBM (see {doc}`quickstart` for the full training code):
 
 ```python
-import numpy as np
 from concept_benchmark import RobotDatasetGenerator
-from concept_benchmark.utils import set_deterministic_seed
-from experiments.models import (
-    ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier,
-)
-from concept_benchmark.utils import determine_device, get_loader_config, patch_macos_dataloader
 
-set_deterministic_seed(1014)
-patch_macos_dataloader()
-device = determine_device()
-loader_config = get_loader_config(device)
-
-# Generate dataset — subconcept uses 12 fine-grained concepts
 dataset = RobotDatasetGenerator(
     seed=1014,
     subconcept=True,          # 12 concepts (default: 7 coarse)
     model_type="stochastic",  # probabilistic labeling
 ).generate()
-
-# Train concept detector (images → concepts)
-n_concepts = dataset.training.n_concepts
-cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=n_concepts, input_size=32))
-cd.fit(dataset.training, dataset.validation,
-       fit_params={"epochs": 50, "lr": 1e-3, "patience": 10, "device": str(device), **loader_config})
-
-# Train label predictor (concepts → label) and combine into a CBM
-fe = FrontEndModel()
-fe.fit(dataset.training.C, dataset.training.y)
-cbm = ConceptBasedModel(concept_detector=cd, front_end_model=fe)
-
-# Evaluate
-predictions = cbm.predict(dataset.test)
-print(f"CBM accuracy (k=0): {np.mean(predictions == dataset.test.y):.4f}")
 ```
 
-After training, the pipeline evaluates oracle interventions — correcting the *k* concepts whose predicted probability is closest to 0.5 (i.e., most uncertain). Expected results (seed=1014, subconcept):
+Expected results with oracle interventions (seed=1014, subconcept):
 
 | budget (k) | accuracy |
 |------------|----------|

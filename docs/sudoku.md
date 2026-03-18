@@ -8,48 +8,22 @@ This benchmark targets automation settings where the system handles routine case
 :alt: Sudoku board with handwritten digits and concept annotations
 ```
 
-## Setup and Evaluation
+## Expected Results
 
-Generate a dataset, train a concept-supervised (CS) model — the Sudoku equivalent of a CBM — and evaluate selective classification. The CS model predicts 27 concepts, then a label predictor determines board validity. The selective classification stage finds a confidence threshold so that kept predictions achieve at least the target accuracy:
+Generate the paper dataset (see {doc}`quickstart` for the full training code):
 
 ```python
-import numpy as np
 from concept_benchmark import SudokuDatasetGenerator
-from concept_benchmark.utils import set_deterministic_seed
-from experiments.models import (
-    ConceptDetector, FrontEndModel, ConceptBasedModel, GroupPoolingConceptSudokuCNN,
-)
-from concept_benchmark.utils import determine_device, get_loader_config, patch_macos_dataloader
 
-set_deterministic_seed(171)
-patch_macos_dataloader()
-device = determine_device()
-loader_config = get_loader_config(device)
-
-# Generate dataset — max_corrupt controls how subtle invalid boards are
 dataset = SudokuDatasetGenerator(
     seed=171,
     n_samples=1000,       # number of boards
     max_corrupt=9,        # cells swapped in invalid boards
     valid_ratio=0.5,      # fraction of valid boards
 ).generate()
-
-# Train concept detector (board digits → 27 validity concepts)
-cd = ConceptDetector(model=GroupPoolingConceptSudokuCNN())
-cd.fit(dataset.training, dataset.validation,
-       fit_params={"epochs": 100, "lr": 1e-3, "patience": 20, "device": str(device), **loader_config})
-
-# Train label predictor and combine into a CBM
-fe = FrontEndModel()
-fe.fit(dataset.training.C, dataset.training.y)
-cbm = ConceptBasedModel(concept_detector=cd, front_end_model=fe)
-
-# Evaluate
-predictions = cbm.predict(dataset.test)
-print(f"CS accuracy: {np.mean(predictions == dataset.test.y):.4f}")
 ```
 
-The pipeline also evaluates selective classification — the model abstains on uncertain predictions to achieve a minimum accuracy on kept samples (`target_accuracy`). Expected results (seed=171, target_accuracy=0.95):
+Selective classification results — the model abstains on uncertain predictions to meet a target accuracy (seed=171, target_accuracy=0.95):
 
 | model | selective accuracy | coverage |
 |-------|-------------------|----------|
