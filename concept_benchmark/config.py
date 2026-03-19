@@ -180,8 +180,7 @@ class _BenchmarkConfigBase:
     def _scoped_field_names(self, scope: str) -> frozenset[str]:
         """Field names tagged with the given scope in their metadata."""
         return frozenset(
-            f.name for f in fields(self)
-            if f.metadata.get("scope") == scope
+            f.name for f in fields(self) if f.metadata.get("scope") == scope
         )
 
     def to_yaml(self, path: str | Path) -> Path:
@@ -397,7 +396,9 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             )
         # If foot_subtypes but excluded_concepts still has the ground_truth default,
         # automatically switch to SUBCONCEPT_EXCLUDED_CONCEPTS so the flag alone is sufficient.
-        if self.concept_preset == "foot_subtypes" and self.excluded_concepts == list(IDEAL_EXCLUDED_CONCEPTS):
+        if self.concept_preset == "foot_subtypes" and self.excluded_concepts == list(
+            IDEAL_EXCLUDED_CONCEPTS
+        ):
             self.excluded_concepts = list(SUBCONCEPT_EXCLUDED_CONCEPTS)
         if self.image_size not in IMAGE_SIZE_TO_PIXELS:
             raise ValueError(
@@ -451,12 +452,16 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     @property
     def label_features(self) -> Dict[str, str]:
         """Feature→value mapping extracted from label_formula."""
-        return {feat: spec["value"] for feat, spec in self.label_formula["terms"].items()}
+        return {
+            feat: spec["value"] for feat, spec in self.label_formula["terms"].items()
+        }
 
     @property
     def label_weights(self) -> Dict[str, float]:
         """Feature→weight mapping extracted from label_formula."""
-        return {feat: spec["weight"] for feat, spec in self.label_formula["terms"].items()}
+        return {
+            feat: spec["weight"] for feat, spec in self.label_formula["terms"].items()
+        }
 
     @property
     def label_intercept(self) -> float:
@@ -525,18 +530,22 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         if self.data_type == "text":
             d = self._prepare_asdict()
             # Remove non-data params and image-only fields
-            for k in (
-                self._scoped_field_names("image")
-                | {
-                    "llm_api_key", "llm_api_key_env", "force_retrain",
-                    "use_label_free_concepts", "label_free_encoder",
-                    "label_free_concepts_csv", "alignment_constraints",
-                    "intervention_budgets", "intervention_strategy",
-                    "intervention_regimes", "intervention_accuracy",
-                    "expert_intervention_accuracy",
-                    "subjective_noise_rate", "subjective_intervention_accuracy",
-                }
-            ):
+            for k in self._scoped_field_names("image") | {
+                "llm_api_key",
+                "llm_api_key_env",
+                "force_retrain",
+                "use_label_free_concepts",
+                "label_free_encoder",
+                "label_free_concepts_csv",
+                "alignment_constraints",
+                "intervention_budgets",
+                "intervention_strategy",
+                "intervention_regimes",
+                "intervention_accuracy",
+                "expert_intervention_accuracy",
+                "subjective_noise_rate",
+                "subjective_intervention_accuracy",
+            }:
                 d.pop(k, None)
             return _dict_sha256(d)
 
@@ -585,7 +594,9 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         """Return the path where the dataset file is saved."""
         if self.data_type == "text":
             return results_dir / f"robot_text_seed{self.seed}.data"
-        filename = f"robot_{self.data_type}_{self.renders_per_robot}{self._preset_suffix}"
+        filename = (
+            f"robot_{self.data_type}_{self.renders_per_robot}{self._preset_suffix}"
+        )
         return results_dir / f"{filename}.data"
 
     def get_model_path(self, model_class: str) -> Path:
@@ -772,7 +783,9 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     def get_model_path(self, model_class: str, data_type: Optional[str] = None) -> Path:
         """Return the path where a trained model is saved."""
         dt = data_type or self.data_type
-        filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}"
+        filename = (
+            f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}"
+        )
         if self.missing_fraction > 0.0:
             filename += f"_cm{self.missing_mechanism}{self.missing_fraction}"
         return results_dir / f"{filename}.model"
@@ -782,7 +795,9 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     ) -> Path:
         """Return the path where results are saved."""
         dt = data_type or self.data_type
-        filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}"
+        filename = (
+            f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}"
+        )
         if self.missing_fraction > 0.0:
             filename += f"_cm{self.missing_mechanism}{self.missing_fraction}"
         return results_dir / f"{filename}.results"

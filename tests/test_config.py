@@ -100,9 +100,7 @@ class TestRobotConfigValidation:
 
     def test_label_formula_rejects_missing_terms(self):
         with pytest.raises(ValueError, match='"terms" key'):
-            RobotBenchmarkConfig(
-                label_formula={"mouth_type": 5.0}
-            )
+            RobotBenchmarkConfig(label_formula={"mouth_type": 5.0})
 
     def test_label_formula_rejects_bad_term_structure(self):
         with pytest.raises(ValueError, match="'value' and 'weight' keys"):
@@ -155,6 +153,7 @@ class TestRobotTextConfigValidation:
 
     def test_auto_switches_concepts_to_text(self):
         from concept_benchmark.config import TEXT_CONCEPTS
+
         cfg = RobotBenchmarkConfig(data_type="text")
         assert cfg.concepts == TEXT_CONCEPTS
 

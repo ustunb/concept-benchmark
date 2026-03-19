@@ -22,7 +22,9 @@ class TestDatasetGeneratorMeta:
             DatasetGenerator("nonexistent")
 
     def test_wrong_param_raises_with_message(self):
-        with pytest.raises(ValueError, match="Invalid parameter.*'sudoku'.*concept_preset"):
+        with pytest.raises(
+            ValueError, match="Invalid parameter.*'sudoku'.*concept_preset"
+        ):
             DatasetGenerator("sudoku", concept_preset="foot_subtypes")
 
     def test_wrong_param_for_robot_raises(self):
@@ -59,7 +61,9 @@ class TestRobotDatasetGenerator:
         assert ds.validation is not None
 
     def test_subconcept_generates_12_concepts(self):
-        ds = DatasetGenerator("robot", render_images=False, concept_preset="foot_subtypes").generate()
+        ds = DatasetGenerator(
+            "robot", render_images=False, concept_preset="foot_subtypes"
+        ).generate()
         assert ds.training.C.shape == (3800, 12)
 
     def test_label_formula_decomposes_correctly(self):
@@ -186,7 +190,6 @@ class TestRobotDatasetGenerator:
         assert gen.config.label_weights == {"foot_shape": 8.0}
 
 
-
 # ── Sudoku via DatasetGenerator ──────────────────────────────────────
 
 
@@ -211,8 +214,12 @@ class TestSudokuDatasetGenerator:
         np.testing.assert_array_equal(ds1.training.C, ds2.training.C)
 
     def test_different_seeds_differ(self):
-        ds1 = DatasetGenerator("sudoku", seed=1, n_boards=200, data_type="tabular").generate()
-        ds2 = DatasetGenerator("sudoku", seed=2, n_boards=200, data_type="tabular").generate()
+        ds1 = DatasetGenerator(
+            "sudoku", seed=1, n_boards=200, data_type="tabular"
+        ).generate()
+        ds2 = DatasetGenerator(
+            "sudoku", seed=2, n_boards=200, data_type="tabular"
+        ).generate()
         # y is stratified 50/50, so compare concepts (actual board content)
         assert not np.array_equal(ds1.training.C, ds2.training.C)
 
@@ -223,7 +230,9 @@ class TestSudokuDatasetGenerator:
         assert len(ds.training.y) + len(ds.validation.y) + len(ds.test.y) == 50
 
     def test_image_generates_png_boards(self):
-        ds = DatasetGenerator("sudoku", seed=42, n_boards=10, data_type="image").generate()
+        ds = DatasetGenerator(
+            "sudoku", seed=42, n_boards=10, data_type="image"
+        ).generate()
         assert isinstance(ds, ConceptDataset)
         assert ds.training.C.shape[1] == 27
         # Image data: X should contain image arrays (H, W, C) or paths
@@ -231,7 +240,9 @@ class TestSudokuDatasetGenerator:
         assert len(ds.training.y) + len(ds.validation.y) + len(ds.test.y) == 10
 
     def test_boards_stored_in_meta(self):
-        ds = DatasetGenerator("sudoku", seed=42, n_boards=20, data_type="tabular").generate()
+        ds = DatasetGenerator(
+            "sudoku", seed=42, n_boards=20, data_type="tabular"
+        ).generate()
         boards = ds.meta.get("boards")
         assert boards is not None
         assert boards.shape == (20, 9, 9)

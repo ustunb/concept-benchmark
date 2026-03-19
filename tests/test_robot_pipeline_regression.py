@@ -124,7 +124,9 @@ class TestResultsCSV:
         # Subconcept results live in a separate collect CSV
         candidates = sorted(results_dir.glob("robot_subconcept_seed1014_*_results.csv"))
         if not candidates:
-            pytest.skip("subconcept collect CSV not found (run pipeline with --concept-preset foot_subtypes)")
+            pytest.skip(
+                "subconcept collect CSV not found (run pipeline with --concept-preset foot_subtypes)"
+            )
         sub_df = pd.read_csv(candidates[-1])
         row = sub_df[
             (sub_df["model"] == "cbm")

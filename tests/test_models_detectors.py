@@ -31,7 +31,9 @@ def test_detector_fit_predict_with_encoder_freeze_variants(tabular_train_valid):
     # freeze_backbone=True keeps encoder unchanged
     det_frozen = ConceptDetector(embedding_model=copy.deepcopy(enc))
     before = copy.deepcopy(det_frozen.embedding_model.state_dict())
-    det_frozen.fit(train, valid, freeze_backbone=True, fit_params={"epochs": 1, "device": "cpu"})
+    det_frozen.fit(
+        train, valid, freeze_backbone=True, fit_params={"epochs": 1, "device": "cpu"}
+    )
     after = det_frozen.embedding_model.state_dict()
     assert not _any_state_diff(before, after)
     pr = det_frozen.predict(valid, should_calibrate=False)
@@ -63,7 +65,9 @@ def test_detector_predict_raises_when_calibrate_requested_but_not_fitted(
 ):
     train, valid, d, k = tabular_train_valid
     det = ConceptDetector(embedding_model=None)
-    det.fit(train, valid, freeze_backbone=True, fit_params={"epochs": 1, "device": "cpu"})
+    det.fit(
+        train, valid, freeze_backbone=True, fit_params={"epochs": 1, "device": "cpu"}
+    )
     # Calibration requested but not fitted should raise
     with pytest.raises(RuntimeError):
         det.predict(valid, should_calibrate=True)

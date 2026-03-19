@@ -114,7 +114,9 @@ def test_robot_alignment_end_to_end():
     cbm = _train_cbm(ds)
 
     concept_preds_train = ds.training.C.astype(np.float32)
-    concept_preds_test = (cbm.concept_detector.predict(ds.test) > 0.5).astype(np.float32)
+    concept_preds_test = (cbm.concept_detector.predict(ds.test) > 0.5).astype(
+        np.float32
+    )
 
     result = retrain_aligned(
         concept_preds_train=concept_preds_train,

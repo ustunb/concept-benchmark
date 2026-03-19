@@ -335,6 +335,7 @@ def generate_sudoku_pipeline_data(
         skip_image: If True, load existing image dataset instead of regenerating.
         skip_digits: If True, skip creating example digit images for OCR.
     """
+
     # Build an args-like namespace from config for helper functions that expect it
     class _Args:
         cell_px = config.cell_px

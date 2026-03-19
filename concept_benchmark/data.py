@@ -1050,9 +1050,7 @@ class ConceptDatasetSample(Dataset):
     @property
     def y(self) -> np.ndarray:
         """Label vector, with label noise applied when enabled."""
-        apply_noise = self._has_label_noise and (
-            self._label_noise_labels is not None
-        )
+        apply_noise = self._has_label_noise and (self._label_noise_labels is not None)
         return self._label_noise_labels if apply_noise else self._y_base
 
     @y.setter

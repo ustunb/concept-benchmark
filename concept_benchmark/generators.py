@@ -109,6 +109,7 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
     from concept_benchmark.synthetic.helper.utils import build_model_expression
 
     from concept_benchmark.utils import set_deterministic_seed
+
     set_deterministic_seed(config.seed)
 
     # Enumerate all robot concept combinations
@@ -116,7 +117,9 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
 
     # Collapse subtypes for label computation only
     catalog_for_labels = catalog_df.copy()
-    collapse_robot_subtypes(catalog_for_labels, robot_features=list(config.concepts.keys()))
+    collapse_robot_subtypes(
+        catalog_for_labels, robot_features=list(config.concepts.keys())
+    )
 
     # Build expression from structured params (same as image pipeline)
     expr = build_model_expression(
@@ -142,13 +145,19 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
 
     # Determine per-row variant counts
     row_variants = [
-        config.minority_text_variants if lab == minority_label else config.majority_text_variants
+        config.minority_text_variants
+        if lab == minority_label
+        else config.majority_text_variants
         for lab in _lbl
     ]
 
     # Find corpus paths
     corpus_path = get_corpus_path(config)
-    generic_path = get_generic_corpus_path(config, corpus_path) if config.use_generic_text else None
+    generic_path = (
+        get_generic_corpus_path(config, corpus_path)
+        if config.use_generic_text
+        else None
+    )
 
     # Build dataset
     ds = build_text_dataset(
@@ -182,10 +191,12 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
 
 # ── Benchmark registry ───────────────────────────────────────────────
 
-_BENCHMARKS = MappingProxyType({
-    "robot": (RobotBenchmarkConfig, generate_robot_dataset),
-    "sudoku": (SudokuBenchmarkConfig, generate_sudoku_dataset),
-})
+_BENCHMARKS = MappingProxyType(
+    {
+        "robot": (RobotBenchmarkConfig, generate_robot_dataset),
+        "sudoku": (SudokuBenchmarkConfig, generate_sudoku_dataset),
+    }
+)
 
 
 # ── Unified DatasetGenerator ─────────────────────────────────────────
@@ -262,8 +273,7 @@ class DatasetGenerator:
             config_class, self._generate_fn = _BENCHMARKS[benchmark]
         else:
             raise ValueError(
-                f"Unknown benchmark {benchmark!r}. "
-                f"Available: {sorted(_BENCHMARKS)}"
+                f"Unknown benchmark {benchmark!r}. Available: {sorted(_BENCHMARKS)}"
             )
 
         # Text modality routes to text generator

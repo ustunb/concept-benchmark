@@ -287,10 +287,21 @@ def get_corpus_path(config: RobotBenchmarkConfig) -> Path:
     from concept_benchmark.paths import package_dir
 
     if config.template_complexity == "high":
-        p = package_dir / "synthetic" / "helper" / "static" / "text_templates" / "hard_corpus.jsonl"
+        p = (
+            package_dir
+            / "synthetic"
+            / "helper"
+            / "static"
+            / "text_templates"
+            / "hard_corpus.jsonl"
+        )
         if p.is_file():
             return p
-    name = "templates.txt" if config.template_complexity == "medium" else "templates_simple.txt"
+    name = (
+        "templates.txt"
+        if config.template_complexity == "medium"
+        else "templates_simple.txt"
+    )
     return package_dir / "synthetic" / "helper" / "static" / "text_templates" / name
 
 
