@@ -115,26 +115,19 @@ def nat_from_tokens(row: dict, seed: int) -> dict:
             "circular hands",
             "rounded mitts",
         ],
-        "wide_oval": [
+        "round_oval": [
             "wide ovals",
             "broad ovals",
             "oval hands",
             "broad-oval hands",
             "wide-oval hands",
         ],
-        "tall_oval": [
+        "round_oval2": [
             "tall ovals",
             "long ovals",
             "elongated ovals",
             "oval grips",
             "oval mitts",
-        ],
-        "edgy_square": [
-            "square-edged grippers",
-            "square claws",
-            "right-angled grippers",
-            "angular grippers",
-            "square clamps",
         ],
         "edgy_triangle": [
             "triangular grippers",
@@ -142,6 +135,13 @@ def nat_from_tokens(row: dict, seed: int) -> dict:
             "three-angled grippers",
             "tri-point grippers",
             "tapered grippers",
+        ],
+        "edgy_square": [
+            "square-edged grippers",
+            "square claws",
+            "right-angled grippers",
+            "angular grippers",
+            "square clamps",
         ],
         "edgy_trapezoid": [
             "trapezoid grippers",
@@ -152,12 +152,26 @@ def nat_from_tokens(row: dict, seed: int) -> dict:
         ],
     }
     feet_map = {
-        "flat_4sided": [
-            "flat four-sided pads",
-            "flat four-sided feet",
+        "flat_trapezoid": [
+            "flat trapezoid pads",
+            "flat trapezoid feet",
+            "trapezoidal pads",
+            "trapezoidal feet",
+            "flat angled pads",
+        ],
+        "flat_rounded": [
+            "flat rounded pads",
+            "flat rounded feet",
+            "rounded flat pads",
+            "smooth flat feet",
+            "curved flat pads",
+        ],
+        "flat_square": [
+            "flat square pads",
+            "flat square feet",
             "flat quad pads",
             "flat quad feet",
-            "flat square pads",
+            "flat four-sided pads",
         ],
         "flat_5sided": [
             "flat five-sided pads",
@@ -173,6 +187,27 @@ def nat_from_tokens(row: dict, seed: int) -> dict:
             "ell-shaped pads",
             "right-angle feet",
         ],
+        "pointy_trapezoid": [
+            "pointed trapezoid feet",
+            "pointy trapezoid pads",
+            "tapered trapezoid feet",
+            "sharp trapezoid pads",
+            "angled point feet",
+        ],
+        "pointy_rounded": [
+            "pointed rounded feet",
+            "pointy rounded pads",
+            "rounded point feet",
+            "curved point pads",
+            "round-tipped feet",
+        ],
+        "pointy_square": [
+            "pointed square feet",
+            "pointy square pads",
+            "square point feet",
+            "angular point pads",
+            "square-tipped feet",
+        ],
         "pointy_3sided": [
             "three-point feet",
             "triangular points",
@@ -186,13 +221,6 @@ def nat_from_tokens(row: dict, seed: int) -> dict:
             "four-tipped feet",
             "quad-tipped feet",
             "pointed four-sided feet",
-        ],
-        "pointy_6sided": [
-            "six-point feet",
-            "hex-point feet",
-            "six-tipped feet",
-            "hex-tipped feet",
-            "pointed hex feet",
         ],
     }
 
@@ -289,32 +317,22 @@ _BINARY_CONCEPT_MAP: dict[str, tuple[str, callable]] = {
     ),
 }
 
-# Maps fine_grained_concepts entries to the feature they expand
-_SUBTYPE_FEATURE_MAP = {
-    "foot_shape_subtype": "foot_shape",
-    "hand_shape_subtype": "hand_shape",
-}
-
-
 def compute_text_concept_names(
     concepts: dict[str, list],
-    fine_grained: list[str] | None = None,
+    expand: list[str] | None = None,
 ) -> list[str]:
     """Build concept column names based on which features are expanded.
 
     Args:
-        concepts: Feature name → list of values (e.g. TEXT_CONCEPTS).
-        fine_grained: Which features to expand into one-hot subtypes
-            (e.g. ``["foot_shape_subtype"]``). If None, all features are
+        concepts: Feature name → list of values (e.g. ROBOT_CONCEPTS).
+        expand: Which features to expand into one-hot subtypes
+            (e.g. ``["foot_shape"]``). If None, all features are
             collapsed to binary.
 
     Returns:
         List of concept names in a stable order.
     """
-    fine_grained = fine_grained or []
-    expanded_features = {
-        _SUBTYPE_FEATURE_MAP[fg] for fg in fine_grained if fg in _SUBTYPE_FEATURE_MAP
-    }
+    expanded_features = set(expand or [])
 
     names: list[str] = []
     for feat in concepts:

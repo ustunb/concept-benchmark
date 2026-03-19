@@ -116,7 +116,7 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
 
     # 1. Compute concept names from config
     all_concept_names = compute_text_concept_names(
-        config.concepts, config.fine_grained_concepts
+        config.concepts, config.expand_concepts
     )
 
     # Enumerate all robot concept combinations
@@ -252,7 +252,7 @@ class DatasetGenerator:
         missing_fraction: float = ...,
         missing_mechanism: str = ...,
         concept_preset: str = ...,
-        fine_grained_concepts: list[str] | None = ...,
+        expand_concepts: list[str] | None = ...,
         sampling_constraints: list[dict] | None = ...,
         excluded_concepts: list[str] | None = ...,
         renders_per_robot: int = ...,

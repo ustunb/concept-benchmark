@@ -8,7 +8,7 @@ from itertools import product
 import numpy as np
 import pandas as pd
 
-from concept_benchmark.config import TEXT_CONCEPTS
+from concept_benchmark.config import ROBOT_CONCEPTS
 
 CORE_CONCEPT_NAMES = [
     "head_is_square",
@@ -33,7 +33,7 @@ def enumerate_robot_concepts(
     Returns a DataFrame with one row per unique robot identity.
     """
     if concepts is None:
-        concepts = TEXT_CONCEPTS
+        concepts = ROBOT_CONCEPTS
     cols = list(concepts.keys())
     grids = [concepts[c] for c in cols]
     combos = list(product(*grids))

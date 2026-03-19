@@ -151,11 +151,11 @@ class TestRobotTextConfigValidation:
         with pytest.raises(ValueError, match="intervention_strategy must be one of"):
             RobotBenchmarkConfig(data_type="text", intervention_strategy="random")
 
-    def test_auto_switches_concepts_to_text(self):
-        from concept_benchmark.config import TEXT_CONCEPTS
+    def test_text_uses_same_concepts_as_image(self):
+        from concept_benchmark.config import ROBOT_CONCEPTS
 
         cfg = RobotBenchmarkConfig(data_type="text")
-        assert cfg.concepts == TEXT_CONCEPTS
+        assert cfg.concepts == ROBOT_CONCEPTS
 
     def test_clears_sampling_constraints(self):
         cfg = RobotBenchmarkConfig(data_type="text")

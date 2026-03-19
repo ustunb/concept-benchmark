@@ -1,7 +1,6 @@
 """Robot text data generation utilities."""
 
 from concept_benchmark.synthetic.robot_text.catalog import (
-    TEXT_CONCEPTS,
     CORE_CONCEPT_NAMES,
     enumerate_robot_concepts,
     compute_label,
@@ -19,7 +18,6 @@ from concept_benchmark.synthetic.robot_text.dataset import (
 )
 
 __all__ = [
-    "TEXT_CONCEPTS",
     "CORE_CONCEPT_NAMES",
     "enumerate_robot_concepts",
     "compute_label",

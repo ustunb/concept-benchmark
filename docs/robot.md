@@ -20,6 +20,23 @@ dataset = DatasetGenerator(
     # ── Common (image + text) ──
     seed=1014,                       # random seed (default: 1014 for image, 1337 for text)
     data_type="image",               # "image" (default) or "text"
+    concepts={                           # 9 features (default: ROBOT_CONCEPTS)
+        "head_shape": ["square", "round"],
+        "body_shape": ["square", "round"],
+        "has_knees": ["false", "true"],
+        "has_elbows": ["false", "true"],
+        "has_antennae": ["false", "true"],
+        "ears_shape": ["square", "triangle"],
+        "mouth_type": ["closed", "open"],
+        "hand_shape": ["round", "edgy"],       # collapsed to binary by default
+        "foot_shape": ["flat", "pointy"],      # collapsed to binary by default
+        # Subconcepts (use expand_concepts to expose individual subtypes):
+        #   hand_shape: round_circle, round_oval, round_oval2,
+        #               edgy_triangle, edgy_square, edgy_trapezoid
+        #   foot_shape: flat_trapezoid, flat_rounded, flat_square, flat_5sided,
+        #               flat_lshaped, pointy_trapezoid, pointy_rounded,
+        #               pointy_square, pointy_3sided, pointy_4sided
+    },
     use_stochastic_labels=True,      # True (probabilistic) or False (deterministic threshold)
     train_size=3800,                 # number of training samples
     test_size=10000,                 # number of test samples
@@ -41,7 +58,7 @@ dataset = DatasetGenerator(
         # ...
     ],
     excluded_concepts=None,          # features to exclude (auto-set by concept_preset)
-    fine_grained_concepts=["foot_shape_subtype"],  # which features expand into subconcepts
+    expand_concepts=["foot_shape"],                 # which features expand into subconcepts
     # ── Image-only (data_type="image") ──
     image_size="medium",             # "small" (8px), "medium" (32px), or "large" (600px)
     color_mode="color",              # "color" or "grayscale"

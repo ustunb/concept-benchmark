@@ -89,31 +89,6 @@ ROBOT_CONCEPTS = {
     ],
 }
 
-TEXT_CONCEPTS = {
-    "head_shape": ["square", "round"],
-    "body_shape": ["square", "round"],
-    "has_knees": ["false", "true"],
-    "has_elbows": ["false", "true"],
-    "foot_shape": [
-        "flat_4sided",
-        "flat_5sided",
-        "flat_lshaped",
-        "pointy_3sided",
-        "pointy_4sided",
-        "pointy_6sided",
-    ],
-    "has_antennae": ["false", "true"],
-    "ears_shape": ["square", "triangle"],
-    "mouth_type": ["closed", "open"],
-    "hand_shape": [
-        "round_circle",
-        "wide_oval",
-        "tall_oval",
-        "edgy_square",
-        "edgy_triangle",
-        "edgy_trapezoid",
-    ],
-}
 
 ROBOT_SAMPLING_CONSTRAINTS = [
     {"concepts": {"foot_shape_pointy_square": 1}, "min_fraction": 0.005},
@@ -263,8 +238,8 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     excluded_concepts: List[str] = field(
         default_factory=lambda: list(IDEAL_EXCLUDED_CONCEPTS),
     )
-    fine_grained_concepts: List[str] = field(
-        default_factory=lambda: ["foot_shape_subtype"],
+    expand_concepts: List[str] = field(
+        default_factory=lambda: ["foot_shape"],
     )
     color_mode: str = field(default="color", metadata={"scope": "image"})
 
@@ -352,8 +327,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
 
     def _auto_configure_text(self):
         """Auto-switch defaults for text modality."""
-        if self.concepts == ROBOT_CONCEPTS:
-            self.concepts = copy.deepcopy(TEXT_CONCEPTS)
         # Clear image-default sampling constraints (text doesn't need them)
         if self.sampling_constraints == ROBOT_SAMPLING_CONSTRAINTS:
             self.sampling_constraints = []
@@ -362,12 +335,12 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             self.excluded_concepts = list(TEXT_IDEAL_EXCLUDED_CONCEPTS)
         elif self.excluded_concepts == list(SUBCONCEPT_EXCLUDED_CONCEPTS):
             self.excluded_concepts = list(TEXT_SUBCONCEPT_EXCLUDED_CONCEPTS)
-        # For ground_truth preset, clear image-default fine_grained_concepts
+        # For ground_truth preset, clear image-default expand_concepts
         # so text uses collapsed binary features (9 concepts like the original)
-        if self.concept_preset == "ground_truth" and self.fine_grained_concepts == [
-            "foot_shape_subtype"
+        if self.concept_preset == "ground_truth" and self.expand_concepts == [
+            "foot_shape"
         ]:
-            self.fine_grained_concepts = []
+            self.expand_concepts = []
         # Text-appropriate renders_per_robot default
         if self.renders_per_robot == 4:
             self.renders_per_robot = 1
@@ -533,7 +506,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             "test_size": self.test_size,
             "train_skew_size": self.train_size,
             "concepts": copy.deepcopy(self.concepts),
-            "additional_features": list(self.fine_grained_concepts),
+            "additional_features": list(self.expand_concepts),
             "subconcept": self.concept_preset == "foot_subtypes",
             "drop_concepts": list(self.excluded_concepts),
             "model_type": self._labeling_tag,

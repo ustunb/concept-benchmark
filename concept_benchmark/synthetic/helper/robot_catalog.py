@@ -68,7 +68,7 @@ def collapse_robot_subtypes(
             subtypes_col = split_df[1].values
             df[name] = types_col
             df[name + "_subtype"] = subtypes_col
-            if collapse_as_new_feature and f"{name}_subtype" in collapse_as_new_feature:
+            if collapse_as_new_feature and name in collapse_as_new_feature:
                 subtype_values = pd.Series(subtypes_col).unique()
                 types = pd.Series(types_col).unique()
                 for t in types:
