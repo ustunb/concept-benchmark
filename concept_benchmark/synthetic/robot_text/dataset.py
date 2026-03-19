@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
 import numpy as np
@@ -11,7 +10,7 @@ import pandas as pd
 from concept_benchmark.data import ConceptDatasetSample
 from concept_benchmark.synthetic.robot_text.catalog import CORE_CONCEPT_NAMES
 from concept_benchmark.synthetic.robot_text.corpus import (
-    core_vector_from_row,
+    concept_vector_from_row,
     load_jsonl,
     render_from_corpus,
 )
@@ -22,10 +21,8 @@ def build_text_dataset(
     corpus_path: Path,
     variants_per_row: int,
     seed: int,
+    concept_names: list[str] | None = None,
     row_variants: list[int] | None = None,
-    generic_path: Path | None = None,
-    generic_rate: float = 0.0,
-    generic_target: str = "foot",
 ) -> ConceptDatasetSample:
     """Build a text dataset from a concept catalog and JSONL corpus.
 
@@ -34,28 +31,21 @@ def build_text_dataset(
         corpus_path: Path to the main JSONL corpus.
         variants_per_row: Default number of text variants per catalog row.
         seed: Random seed for reproducibility.
+        concept_names: List of concept column names. Defaults to CORE_CONCEPT_NAMES.
         row_variants: Optional per-row variant counts (overrides variants_per_row).
-        generic_path: Optional path to a generic (concept-ambiguous) corpus.
-        generic_rate: Fraction of samples to render from generic corpus.
-        generic_target: Which concept the generic corpus makes ambiguous.
 
     Returns:
         ConceptDatasetSample with text X, binary concepts C, and integer labels y.
     """
     corpus_spec = load_jsonl(corpus_path)
-    corpus_gen = (
-        load_jsonl(generic_path)
-        if generic_path is not None and Path(generic_path).is_file()
-        else []
-    )
-
     concepts = catalog_df.columns.drop("label", errors="ignore").tolist()
-    names = list(CORE_CONCEPT_NAMES)
+    names = (
+        list(concept_names) if concept_names is not None else list(CORE_CONCEPT_NAMES)
+    )
     X: list[str] = []
     C: list[np.ndarray] = []
     y: list[int] = []
     row_index: list[int] = []
-    generic_mask: list[bool] = []
 
     for i, sr in catalog_df.iterrows():
         row = {k: sr[k] for k in concepts}
@@ -63,19 +53,11 @@ def build_text_dataset(
             int(row_variants[i]) if row_variants is not None else int(variants_per_row)
         )
         for v in range(repeats):
-            # Decide whether to use generic corpus
-            key = f"{seed}:{i}:{v}:{generic_target}_generic"
-            h = int(hashlib.sha256(key.encode()).hexdigest(), 16)
-            use_gen = len(corpus_gen) > 0 and (h % 1_000_000) < int(
-                max(0.0, min(1.0, float(generic_rate))) * 1_000_000
-            )
-            corpus = corpus_gen if use_gen else corpus_spec
-            text = render_from_corpus(row, corpus, seed + v)
+            text = render_from_corpus(row, corpus_spec, seed + v)
             X.append(text)
-            C.append(core_vector_from_row(row))
+            C.append(concept_vector_from_row(row, names))
             y.append(1 if str(sr["label"]) == "glorp" else 0)
             row_index.append(int(i))
-            generic_mask.append(bool(use_gen))
 
     C_arr = np.stack(C, axis=0).astype(np.float32)
     y_arr = np.asarray(y, dtype=int)
@@ -86,7 +68,6 @@ def build_text_dataset(
         meta={"concepts": tuple(names), "classes": (0, 1), "data_type": "text"},
     )
     ds._row_index = np.asarray(row_index, dtype=int)
-    ds._generic_mask = np.asarray(generic_mask, dtype=bool)
     return ds
 
 
@@ -97,11 +78,9 @@ def kfold_by_robot_identity(
     dev_per_fold: int = 1000,
     deployment_size: int = 10000,
     seed: int = 0,
-    generic_target: str = "foot",
     corpus_path: Path | None = None,
     catalog_df: pd.DataFrame | None = None,
-    generic_path: Path | None = None,
-    generic_rate: float = 0.0,
+    concept_names: list[str] | None = None,
 ) -> ConceptDatasetSample:
     """Split dataset into train/validation/test by robot identity.
 
@@ -116,11 +95,9 @@ def kfold_by_robot_identity(
         dev_per_fold: Max samples per development fold.
         deployment_size: Size of the deployment/test set.
         seed: Random seed.
-        generic_target: Which concept generic corpus targets.
         corpus_path: Path to main corpus (for generating shared test set).
         catalog_df: Catalog DataFrame (for generating shared test set).
-        generic_path: Path to generic corpus (for shared test set).
-        generic_rate: Generic rate for test set.
+        concept_names: Concept column names (passed through to test set builder).
     """
     seed_cv = seed + 1
     row_index = getattr(ds, "_row_index", np.arange(len(ds.y)))
@@ -179,16 +156,12 @@ def kfold_by_robot_identity(
         X_sub = [ds.X[i] for i in idx]
         C_sub = ds.C[idx]
         y_sub = ds.y[idx]
-        sub = ConceptDatasetSample(
+        return ConceptDatasetSample(
             X=X_sub,
             C=C_sub,
             y=y_sub,
             meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text"},
         )
-        gm = getattr(ds, "_generic_mask", None)
-        if gm is not None:
-            sub._generic_mask = np.asarray(gm)[idx]
-        return sub
 
     val_mask = fold_arr == val_fold
     test_mask = fold_arr == 0
@@ -207,9 +180,7 @@ def kfold_by_robot_identity(
             corpus_path=corpus_path,
             variants_per_row=vpr_t,
             seed=seed,
-            generic_path=generic_path,
-            generic_rate=generic_rate,
-            generic_target=generic_target,
+            concept_names=concept_names,
         )
         rng_dep = np.random.default_rng(seed + 1234)
         pool = np.arange(len(test_ds.y), dtype=int)
@@ -228,9 +199,6 @@ def kfold_by_robot_identity(
                 "data_type": "text",
             },
         )
-        gm = getattr(test_ds, "_generic_mask", None)
-        if gm is not None:
-            dep._generic_mask = np.asarray(gm)[idx_dep]
         ds.test = dep
     else:
         ds.test = _subset(test_mask)

@@ -92,14 +92,16 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
 
     Uses the robot text catalog to enumerate concept combinations, generates
     text descriptions from corpus templates, and splits by robot identity.
+    Applies ``excluded_concepts``, ``missing_fraction``, and
+    ``sampling_constraints`` using the same mechanisms as the image pipeline.
     """
     from concept_benchmark.synthetic.robot_text.catalog import (
         compute_label,
         enumerate_robot_concepts,
     )
     from concept_benchmark.synthetic.robot_text.corpus import (
+        compute_text_concept_names,
         get_corpus_path,
-        get_generic_corpus_path,
     )
     from concept_benchmark.synthetic.robot_text.dataset import (
         build_text_dataset,
@@ -111,6 +113,11 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
     from concept_benchmark.utils import set_deterministic_seed
 
     set_deterministic_seed(config.seed)
+
+    # 1. Compute concept names from config
+    all_concept_names = compute_text_concept_names(
+        config.concepts, config.fine_grained_concepts
+    )
 
     # Enumerate all robot concept combinations
     catalog_df = enumerate_robot_concepts(concepts=config.concepts, seed=config.seed)
@@ -138,53 +145,60 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
         seed=config.seed,
     )
 
-    _lbl = catalog_df["label"].astype(str)
-    n_pos = int((_lbl == "glorp").sum())
-    n_neg = int((_lbl == "drent").sum())
-    minority_label = "glorp" if n_pos < n_neg else "drent"
-
-    # Determine per-row variant counts
-    row_variants = [
-        config.minority_text_variants
-        if lab == minority_label
-        else config.majority_text_variants
-        for lab in _lbl
-    ]
-
-    # Find corpus paths
+    # 2. Build dataset with uniform renders_per_robot variants
     corpus_path = get_corpus_path(config)
-    generic_path = (
-        get_generic_corpus_path(config, corpus_path)
-        if config.use_generic_text
-        else None
-    )
-
-    # Build dataset
     ds = build_text_dataset(
         catalog_df=catalog_df,
         corpus_path=corpus_path,
-        variants_per_row=1,
+        variants_per_row=config.renders_per_robot,
         seed=config.seed,
-        row_variants=row_variants,
-        generic_path=generic_path,
-        generic_rate=config.generic_text_rate if config.use_generic_text else 0.0,
-        generic_target=config.generic_text_concept,
+        concept_names=all_concept_names,
     )
 
-    # Split by robot identity
+    # 3. Split by robot identity (hardcoded sensible defaults)
     ds = kfold_by_robot_identity(
         ds,
-        cv_k=config.cv_k,
-        cv_fold=config.cv_fold,
-        dev_per_fold=config.validation_size_per_fold,
+        cv_k=5,
+        cv_fold=0,
+        dev_per_fold=1000,
         deployment_size=config.test_size,
         seed=config.seed,
-        generic_target=config.generic_text_concept,
         corpus_path=corpus_path,
         catalog_df=catalog_df,
-        generic_path=generic_path,
-        generic_rate=config.generic_text_rate if config.use_generic_text else 0.0,
+        concept_names=all_concept_names,
     )
+
+    # 4. Apply excluded_concepts — filter C matrix columns on all splits
+    if config.excluded_concepts:
+        _drop = set(config.excluded_concepts)
+        keep_idx = [i for i, n in enumerate(all_concept_names) if n not in _drop]
+        kept_names = tuple(all_concept_names[i] for i in keep_idx)
+        for split in (ds, ds.training, ds.validation, ds.test):
+            if split is not None and hasattr(split, "C"):
+                split.C = split.C[:, keep_idx]
+                new_meta = dict(split.meta)
+                new_meta["concepts"] = kept_names
+                split.meta = new_meta
+
+    # 5. Apply missing_fraction / missing_mechanism on training split
+    if config.missing_fraction > 0 and ds.training is not None:
+        from concept_benchmark.helper.data_utils import (
+            sample_mcar_mask,
+            sample_mnar_mask,
+        )
+
+        rng = np.random.default_rng(config.seed + 999)
+        if config.missing_mechanism == "mcar":
+            mask = sample_mcar_mask(rng, ds.training.C.shape, config.missing_fraction)
+        else:
+            mask = sample_mnar_mask(
+                rng,
+                ds.training.C,
+                base_p=config.missing_fraction,
+                config=None,
+            )
+        ds.training.set_concept_missing_mask(mask)
+        ds.training.has_concept_missing = True
 
     return ds
 
@@ -227,23 +241,29 @@ class DatasetGenerator:
         self,
         benchmark: Literal["robot"],
         *,
+        # ── Common (image + text) ──
         seed: int = ...,
         data_type: str = ...,
-        render_images: bool = ...,
         concepts: dict[str, list] | None = ...,
-        concept_preset: str = ...,
-        fine_grained_concepts: list[str] | None = ...,
         label_formula: dict | None = ...,
         use_stochastic_labels: bool = ...,
-        sampling_constraints: list[dict] | None = ...,
-        image_size: str = ...,
-        color_mode: str = ...,
-        renders_per_robot: int = ...,
         train_size: int = ...,
         test_size: int = ...,
-        excluded_concepts: list[str] | None = ...,
         missing_fraction: float = ...,
         missing_mechanism: str = ...,
+        concept_preset: str = ...,
+        fine_grained_concepts: list[str] | None = ...,
+        sampling_constraints: list[dict] | None = ...,
+        excluded_concepts: list[str] | None = ...,
+        renders_per_robot: int = ...,
+        # ── Image-only ──
+        render_images: bool = ...,
+        image_size: str = ...,
+        color_mode: str = ...,
+        # ── Text-only ──
+        template_complexity: str = ...,
+        # ── Additional config fields (training, intervention, etc.) ──
+        **kwargs,
     ) -> None: ...
 
     @overload
@@ -258,14 +278,17 @@ class DatasetGenerator:
         n_boards: int = ...,
         valid_board_ratio: float = ...,
         max_cell_swaps: int = ...,
+        missing_fraction: float = ...,
+        missing_mechanism: str = ...,
+        # OCR rendering (image only)
         cell_px: int = ...,
         cell_margin_px: int = ...,
         gridline_px: int = ...,
         block_border_px: int = ...,
         font_size: int = ...,
         font_style: str = ...,
-        missing_fraction: float = ...,
-        missing_mechanism: str = ...,
+        # ── Additional config fields (training, intervention, etc.) ──
+        **kwargs,
     ) -> None: ...
 
     def __init__(self, benchmark: str, **kwargs):

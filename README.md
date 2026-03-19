@@ -339,7 +339,7 @@ For running interventions and alignment on your model, see the [Evaluation](#eva
 
 ### Robot Classification
 
-This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot — **Glorp** or **Drent** — from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The default labeling rule is: Glorp if mouth is closed, foot is pointy, and robot has knees (all three); Drent otherwise. The labeling function can be deterministic or stochastic (probabilistic), controlled via the `labeling_mode` parameter. Which features matter and which are excluded (via `drop_concepts`) are configurable, mimicking real-world settings where the true relationship between features and labels is unknown. Available as image and text modalities.
+This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot — **Glorp** or **Drent** — from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The default labeling rule is: Glorp if mouth is closed, foot is pointy, and robot has knees (all three); Drent otherwise. The labeling function can be deterministic or stochastic (probabilistic), controlled via the `use_stochastic_labels` parameter. Which features matter and which are excluded (via `excluded_concepts`) are configurable, mimicking real-world settings where the true relationship between features and labels is unknown. Available as image and text modalities.
 
 <p align="center">
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
@@ -347,22 +347,19 @@ This benchmark targets decision-support settings where a human uses the model's 
 
 #### Parameters
 
-All parameters can be passed to `DatasetGenerator(
-    "robot",)` or as CLI flags to `robot_pipeline.py`:
+All parameters below can be passed to `DatasetGenerator("robot", ...)`. Common parameters apply to both image and text modalities; scope-specific parameters are ignored when the other modality is selected.
 
 ```python
 from concept_benchmark import DatasetGenerator
 
 dataset = DatasetGenerator(
     "robot",
+    # ── Common (image + text) ──
     seed=1014,                       # random seed (default: 1014 for image, 1337 for text)
-    concept_preset="foot_subtypes",  # "foot_subtypes": 12 fine-grained; "ground_truth": 7 (default)
+    data_type="image",               # "image" (default) or "text"
     use_stochastic_labels=True,      # True (probabilistic) or False (deterministic threshold)
-    image_size="medium",             # "small" (8px), "medium" (32px, default), or "large" (600px)
-    color_mode="color",              # "color" or "grayscale" (image only)
-    renders_per_robot=4,             # images per unique robot config (total = configs × this)
-    missing_fraction=0.0,            # fraction of concept labels masked during training
-    missing_mechanism="mcar",        # missingness mechanism: "mcar" or "mnar"
+    train_size=3800,                 # number of training samples
+    test_size=10000,                 # number of test samples
     label_formula={                  # scoring rule for class assignment
         "terms": {
             "mouth_type": {"value": "closed", "weight": 5.0},
@@ -372,19 +369,32 @@ dataset = DatasetGenerator(
         "intercept": 2.0,
         "temperature": 4.2,
     },
-    # excluded_concepts: which features to exclude (preset via concept_preset)
+    missing_fraction=0.0,            # fraction of concept labels masked during training
+    missing_mechanism="mcar",        # missingness mechanism: "mcar" or "mnar"
+    concept_preset="foot_subtypes",  # "ground_truth" (7 concepts) or "foot_subtypes" (12)
+    renders_per_robot=4,             # samples per unique robot config (image: 4, text: 1)
+    sampling_constraints=[           # min-fraction constraints for skewed splits
+        {"concepts": {"foot_shape_pointy_4sided": 1}, "min_fraction": 0.49},
+        # ...
+    ],
+    excluded_concepts=None,          # features to exclude (auto-set by concept_preset)
+    fine_grained_concepts=["foot_shape_subtype"],  # which features expand into subconcepts
+    # ── Image-only (data_type="image") ──
+    image_size="medium",             # "small" (8px), "medium" (32px), or "large" (600px)
+    color_mode="color",              # "color" or "grayscale"
+    render_images=True,              # set False to skip rendering PNGs (faster)
+    # ── Text-only (data_type="text") ──
+    template_complexity="high",      # template complexity level
 ).generate()
 ```
 
 #### Pipeline
 
-To train models and run the full evaluation (interventions, alignment, etc.) without writing Python, use the pipeline script:
-
 ```bash
 python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes
 ```
 
-Run `python scripts/robot_pipeline.py --help` for the full list of options.
+Run `python scripts/robot_pipeline.py --help` for the full list of options (including training, intervention, and regime parameters).
 
 ### Sudoku Validation
 
@@ -396,32 +406,37 @@ This benchmark targets automation settings where the system handles routine case
 
 #### Parameters
 
-All parameters can be passed to `DatasetGenerator("sudoku", ...)` or as CLI flags to `sudoku_pipeline.py`:
-
 ```python
 from concept_benchmark import DatasetGenerator
 
 dataset = DatasetGenerator(
     "sudoku",
-    seed=171,                # random seed
-    n_boards=1000,           # number of boards to generate
-    max_cell_swaps=9,        # cells swapped in invalid boards (higher = subtler errors)
-    valid_board_ratio=0.5,   # fraction of valid boards
-    data_type="image",       # "image" (renders board PNGs) or "tabular" (ground-truth values)
-    font_style="handwritten",  # "handwritten" or "printed" (image only)
-    # target_accuracy=0.9    # minimum accuracy (selective classification, pipeline only)
+    seed=171,                  # random seed
+    data_type="image",         # "image" (renders board PNGs) or "tabular" (digit vectors)
+    render_images=True,        # set False to skip rendering PNGs (faster, image only)
+    block_size=3,              # block size (3 = standard 9×9 board)
+    n_boards=1000,             # number of boards to generate
+    max_cell_swaps=9,          # cells swapped in invalid boards (higher = subtler errors)
+    valid_board_ratio=0.5,     # fraction of valid boards
+    missing_fraction=0.0,      # fraction of concept labels masked during training
+    missing_mechanism="mcar",  # missingness mechanism: "mcar" or "mnar"
+    # ── Rendering (image only) ──
+    font_style="handwritten",  # "handwritten" or "printed"
+    font_size=25,              # digit font size in pixels
+    cell_px=50,                # cell size in pixels
+    cell_margin_px=2,          # cell margin in pixels
+    gridline_px=2,             # grid line width in pixels
+    block_border_px=5,         # block border width in pixels
 ).generate()
 ```
 
 #### Pipeline
 
-To train models and run the full evaluation (selective classification, interventions, alignment) without writing Python, use the pipeline script:
-
 ```bash
 python scripts/sudoku_pipeline.py --seed 171
 ```
 
-Run `python scripts/sudoku_pipeline.py --help` for the full list of options.
+Run `python scripts/sudoku_pipeline.py --help` for the full list of options (including training, intervention, and evaluation parameters).
 
 <details>
 <summary><h2 style="display:inline">Evaluation</h2></summary>

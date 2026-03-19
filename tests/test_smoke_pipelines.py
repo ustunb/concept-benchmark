@@ -87,7 +87,7 @@ def test_robot_image_generation_and_training(tmp_path):
         valid_dataset=ds.validation,
         freeze_backbone=False,
         concept_embed_params={"device": "cpu", "batch_size": 4, "num_workers": 0},
-        fit_params={
+        concept_fit_params={
             "epochs": 1,
             "lr": 1e-3,
             "patience": 1,

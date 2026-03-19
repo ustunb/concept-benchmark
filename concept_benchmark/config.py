@@ -10,6 +10,8 @@ from __future__ import annotations
 __all__ = [
     "RobotBenchmarkConfig",
     "SudokuBenchmarkConfig",
+    "TEXT_IDEAL_EXCLUDED_CONCEPTS",
+    "TEXT_SUBCONCEPT_EXCLUDED_CONCEPTS",
 ]
 
 import copy
@@ -53,6 +55,9 @@ SUBCONCEPT_EXCLUDED_CONCEPTS = [
     "foot_shape_flat_lshaped",
     "foot_shape",
 ]
+
+TEXT_IDEAL_EXCLUDED_CONCEPTS: List[str] = []
+TEXT_SUBCONCEPT_EXCLUDED_CONCEPTS = ["has_elbows", "hands_are_pointy"]
 
 ROBOT_CONCEPTS = {
     "head_shape": ["square", "round"],
@@ -227,7 +232,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     # Data generation
     data_type: str = "image"
     image_size: str = field(default="medium", metadata={"scope": "image"})
-    renders_per_robot: int = field(default=4, metadata={"scope": "image"})
+    renders_per_robot: int = 4
     render_images: bool = field(default=True, metadata={"scope": "image"})
     seed: int = 1014
     concepts: Dict[str, list] = field(
@@ -254,15 +259,12 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     train_size: int = 3800
     sampling_constraints: List[Dict] = field(
         default_factory=lambda: copy.deepcopy(ROBOT_SAMPLING_CONSTRAINTS),
-        metadata={"scope": "image"},
     )
     excluded_concepts: List[str] = field(
         default_factory=lambda: list(IDEAL_EXCLUDED_CONCEPTS),
-        metadata={"scope": "image"},
     )
     fine_grained_concepts: List[str] = field(
         default_factory=lambda: ["foot_shape_subtype"],
-        metadata={"scope": "image"},
     )
     color_mode: str = field(default="color", metadata={"scope": "image"})
 
@@ -296,27 +298,17 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     force_retrain: bool = False  # force retrain LFCBM/subjective models
 
     # Missingness
-    missing_fraction: float = field(default=0.0, metadata={"scope": "image"})
-    missing_mechanism: str = field(default="mcar", metadata={"scope": "image"})
+    missing_fraction: float = 0.0
+    missing_mechanism: str = "mcar"
 
     # Alignment (sign constraints for constrained retraining)
     alignment_constraints: Optional[Dict[str, int]] = None
 
     # Variant
-    concept_preset: str = field(default="ground_truth", metadata={"scope": "image"})
+    concept_preset: str = "ground_truth"
 
     # ── Text generation (data_type="text" only) ──────────────────────
     template_complexity: str = field(default="high", metadata={"scope": "text"})
-    minority_text_variants: int = field(default=3, metadata={"scope": "text"})
-    majority_text_variants: int = field(default=1, metadata={"scope": "text"})
-    use_generic_text: bool = field(default=True, metadata={"scope": "text"})
-    generic_text_rate: float = field(default=0.7, metadata={"scope": "text"})
-    generic_text_concept: str = field(default="foot", metadata={"scope": "text"})
-
-    # ── Text splitting ───────────────────────────────────────────────
-    cv_k: int = field(default=5, metadata={"scope": "text"})
-    cv_fold: int = field(default=0, metadata={"scope": "text"})
-    validation_size_per_fold: int = field(default=1000, metadata={"scope": "text"})
 
     # ── Text CBM training ────────────────────────────────────────────
     detector_epochs: int = field(default=6, metadata={"scope": "text"})
@@ -362,10 +354,31 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         """Auto-switch defaults for text modality."""
         if self.concepts == ROBOT_CONCEPTS:
             self.concepts = copy.deepcopy(TEXT_CONCEPTS)
-        self.sampling_constraints = []
+        # Clear image-default sampling constraints (text doesn't need them)
+        if self.sampling_constraints == ROBOT_SAMPLING_CONSTRAINTS:
+            self.sampling_constraints = []
+        # Auto-set text-appropriate excluded_concepts based on concept_preset
+        if self.excluded_concepts == list(IDEAL_EXCLUDED_CONCEPTS):
+            self.excluded_concepts = list(TEXT_IDEAL_EXCLUDED_CONCEPTS)
+        elif self.excluded_concepts == list(SUBCONCEPT_EXCLUDED_CONCEPTS):
+            self.excluded_concepts = list(TEXT_SUBCONCEPT_EXCLUDED_CONCEPTS)
+        # For ground_truth preset, clear image-default fine_grained_concepts
+        # so text uses collapsed binary features (9 concepts like the original)
+        if self.concept_preset == "ground_truth" and self.fine_grained_concepts == [
+            "foot_shape_subtype"
+        ]:
+            self.fine_grained_concepts = []
+        # Text-appropriate renders_per_robot default
+        if self.renders_per_robot == 4:
+            self.renders_per_robot = 1
 
     def _validate_common(self):
         """Validate parameters shared across data types."""
+        if self.concept_preset not in ("ground_truth", "foot_subtypes"):
+            raise ValueError(
+                f"concept_preset must be 'ground_truth' or 'foot_subtypes', "
+                f"got {self.concept_preset!r}"
+            )
         _valid_features = frozenset(self.concepts.keys())
         for feature, spec in self.label_formula["terms"].items():
             if feature not in _valid_features:
@@ -397,11 +410,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
 
     def _validate_image(self):
         """Validate image-specific parameters."""
-        if self.concept_preset not in ("ground_truth", "foot_subtypes"):
-            raise ValueError(
-                f"concept_preset must be 'ground_truth' or 'foot_subtypes', "
-                f"got {self.concept_preset!r}"
-            )
         # If foot_subtypes but excluded_concepts still has the ground_truth default,
         # automatically switch to SUBCONCEPT_EXCLUDED_CONCEPTS so the flag alone is sufficient.
         if self.concept_preset == "foot_subtypes" and self.excluded_concepts == list(
@@ -427,6 +435,11 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 f"template_complexity must be 'high', 'medium', or 'low', "
                 f"got {self.template_complexity!r}"
             )
+        # Auto-switch excluded_concepts for foot_subtypes in text mode
+        if self.concept_preset == "foot_subtypes" and self.excluded_concepts == list(
+            TEXT_IDEAL_EXCLUDED_CONCEPTS
+        ):
+            self.excluded_concepts = list(TEXT_SUBCONCEPT_EXCLUDED_CONCEPTS)
         unknown = set(self.intervention_regimes) - ROBOT_TEXT_VALID_REGIMES
         if unknown:
             raise ValueError(
@@ -538,7 +551,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         if self.data_type == "text":
             d = self._prepare_asdict()
             # Remove non-data params and image-only fields
-            for k in self._scoped_field_names("image") | {
+            _exclude = self._scoped_field_names("image") | {
                 "llm_api_key",
                 "llm_api_key_env",
                 "force_retrain",
@@ -550,10 +563,17 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 "intervention_strategy",
                 "intervention_regimes",
                 "intervention_accuracy",
+                "intervention_thresholds",
                 "expert_intervention_accuracy",
                 "subjective_noise_rate",
                 "subjective_intervention_accuracy",
-            }:
+                "label_free_concepts_file",
+                "llm_concepts_file",
+                "clip_concepts_file",
+                "llm_provider",
+                "llm_model",
+            }
+            for k in _exclude:
                 d.pop(k, None)
             return _dict_sha256(d)
 

@@ -10,21 +10,19 @@ This benchmark targets decision-support settings where a human uses the model's 
 
 ## Parameters
 
-All parameters can be passed to `DatasetGenerator("robot", ...)` or as CLI flags to `robot_pipeline.py`:
+All parameters below can be passed to `DatasetGenerator("robot", ...)`. Common parameters apply to both image and text modalities; scope-specific parameters are ignored when the other modality is selected.
 
 ```python
 from concept_benchmark import DatasetGenerator
 
 dataset = DatasetGenerator(
     "robot",
+    # ── Common (image + text) ──
     seed=1014,                       # random seed (default: 1014 for image, 1337 for text)
-    concept_preset="foot_subtypes",  # "foot_subtypes": 12 fine-grained; "ground_truth": 7 (default)
+    data_type="image",               # "image" (default) or "text"
     use_stochastic_labels=True,      # True (probabilistic) or False (deterministic threshold)
-    image_size="medium",             # "small" (8px), "medium" (32px, default), or "large" (600px)
-    color_mode="color",              # "color" or "grayscale" (image only)
-    renders_per_robot=4,             # images per unique robot config (total = configs × this)
-    missing_fraction=0.0,            # fraction of concept labels masked during training
-    missing_mechanism="mcar",        # missingness mechanism: "mcar" or "mnar"
+    train_size=3800,                 # number of training samples
+    test_size=10000,                 # number of test samples
     label_formula={                  # scoring rule for class assignment
         "terms": {
             "mouth_type": {"value": "closed", "weight": 5.0},
@@ -34,13 +32,26 @@ dataset = DatasetGenerator(
         "intercept": 2.0,
         "temperature": 4.2,
     },
-    # excluded_concepts: which features to exclude (preset via concept_preset)
+    missing_fraction=0.0,            # fraction of concept labels masked during training
+    missing_mechanism="mcar",        # missingness mechanism: "mcar" or "mnar"
+    concept_preset="foot_subtypes",  # "ground_truth" (7 concepts) or "foot_subtypes" (12)
+    renders_per_robot=4,             # samples per unique robot config (image: 4, text: 1)
+    sampling_constraints=[           # min-fraction constraints for skewed splits
+        {"concepts": {"foot_shape_pointy_4sided": 1}, "min_fraction": 0.49},
+        # ...
+    ],
+    excluded_concepts=None,          # features to exclude (auto-set by concept_preset)
+    fine_grained_concepts=["foot_shape_subtype"],  # which features expand into subconcepts
+    # ── Image-only (data_type="image") ──
+    image_size="medium",             # "small" (8px), "medium" (32px), or "large" (600px)
+    color_mode="color",              # "color" or "grayscale"
+    render_images=True,              # set False to skip rendering PNGs (faster)
+    # ── Text-only (data_type="text") ──
+    template_complexity="high",      # template complexity level
 ).generate()
 ```
 
 ## Pipeline
-
-To train models and run the full evaluation (interventions, alignment, etc.) without writing Python, use the pipeline script:
 
 ```bash
 python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes

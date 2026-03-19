@@ -161,6 +161,34 @@ class TestRobotTextConfigValidation:
         cfg = RobotBenchmarkConfig(data_type="text")
         assert cfg.sampling_constraints == []
 
+    def test_auto_switches_renders_per_robot(self):
+        cfg = RobotBenchmarkConfig(data_type="text")
+        assert cfg.renders_per_robot == 1
+
+    def test_auto_clears_excluded_concepts_for_text(self):
+        cfg = RobotBenchmarkConfig(data_type="text")
+        assert cfg.excluded_concepts == []
+
+    def test_concept_preset_ground_truth_for_text(self):
+        cfg = RobotBenchmarkConfig(data_type="text")
+        assert cfg.concept_preset == "ground_truth"
+
+    def test_concept_preset_foot_subtypes_for_text(self):
+        from concept_benchmark.config import TEXT_SUBCONCEPT_EXCLUDED_CONCEPTS
+
+        cfg = RobotBenchmarkConfig(data_type="text", concept_preset="foot_subtypes")
+        assert cfg.concept_preset == "foot_subtypes"
+        assert cfg.excluded_concepts == list(TEXT_SUBCONCEPT_EXCLUDED_CONCEPTS)
+
+    def test_rejects_bad_concept_preset_for_text(self):
+        with pytest.raises(ValueError, match="concept_preset must be"):
+            RobotBenchmarkConfig(data_type="text", concept_preset="invalid")
+
+    def test_missing_fraction_for_text(self):
+        cfg = RobotBenchmarkConfig(data_type="text", missing_fraction=0.2)
+        assert cfg.missing_fraction == 0.2
+        assert cfg.missing_mechanism == "mcar"
+
     def test_label_formula_with_prefix_value(self):
         cfg = RobotBenchmarkConfig(
             data_type="text",
@@ -214,6 +242,8 @@ class TestYAMLRoundTrip:
             data_type="text",
             seed=7,
             template_complexity="medium",
+            concept_preset="foot_subtypes",
+            missing_fraction=0.1,
             intervention_regimes=["baseline", "subjective"],
         )
         self._assert_roundtrip(cfg, RobotBenchmarkConfig, tmp_path)

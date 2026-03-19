@@ -132,7 +132,7 @@ def train_cs(
         valid_dataset=data.validation,
         freeze_backbone=False,
         concept_embed_params={"shuffle": False, **loader_config},
-        fit_params={
+        concept_fit_params={
             "epochs": config.cs_epochs,
             "lr": 1e-3,
             "patience": config.cs_patience,

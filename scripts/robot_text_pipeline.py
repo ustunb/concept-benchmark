@@ -9,12 +9,11 @@ Usage:
     python scripts/robot_text_pipeline.py --regimes baseline expert
     python scripts/robot_text_pipeline.py --config my_config.yaml
 """
+
 from __future__ import annotations
 
 import json
 import logging
-import random
-from pathlib import Path
 from typing import List, Optional
 
 import numpy as np
@@ -36,7 +35,9 @@ logger = logging.getLogger(__name__)
 
 def _internal_output_mode(concept_output_type: str) -> str:
     """Translate public config value to internal detector/LFCBM mode string."""
-    return {"binary": "hard", "continuous": "soft"}.get(concept_output_type, concept_output_type)
+    return {"binary": "hard", "continuous": "soft"}.get(
+        concept_output_type, concept_output_type
+    )
 
 
 # Lazy imports for intervention modules
@@ -62,6 +63,7 @@ def _set_seed(s: int) -> None:
 
 # ── Stage: setup_dataset ─────────────────────────────────────────────
 
+
 def setup_dataset(
     config: RobotBenchmarkConfig,
 ) -> ConceptDatasetSample:
@@ -73,12 +75,18 @@ def setup_dataset(
 
     ds = DatasetGenerator.from_config(config).generate()
 
-    logger.info("Split sizes — train: %d, val: %d, test: %d", ds.training.n, ds.validation.n, ds.test.n)
+    logger.info(
+        "Split sizes — train: %d, val: %d, test: %d",
+        ds.training.n,
+        ds.validation.n,
+        ds.test.n,
+    )
     save(ds, config.get_dataset_path(), overwrite=True)
     return ds
 
 
 # ── Stage: train_cbm ─────────────────────────────────────────────────
+
 
 def train_cbm(
     config: RobotBenchmarkConfig,
@@ -182,6 +190,7 @@ def train_cbm_subjective(
 
 # ── Stage: train_dnn ─────────────────────────────────────────────────
 
+
 class _TextDS(Dataset):
     """Simple text dataset for DistilBERT fine-tuning."""
 
@@ -196,8 +205,11 @@ class _TextDS(Dataset):
 
     def __getitem__(self, i):
         enc = self.tok(
-            self.X[i], truncation=True, max_length=self.max_length,
-            padding="max_length", return_tensors="pt",
+            self.X[i],
+            truncation=True,
+            max_length=self.max_length,
+            padding="max_length",
+            return_tensors="pt",
         )
         enc = {k: v.squeeze(0) for k, v in enc.items()}
         y = torch.tensor(self.y[i], dtype=torch.long)
@@ -308,6 +320,7 @@ def train_dnn(
 
 # ── Stage: train_lfcbm ──────────────────────────────────────────────
 
+
 def train_lfcbm(
     config: RobotBenchmarkConfig,
     data: Optional[ConceptDatasetSample] = None,
@@ -326,7 +339,14 @@ def train_lfcbm(
     # Determine concepts CSV path
     concepts_csv = config.label_free_concepts_csv
     if not concepts_csv:
-        default = package_dir / "synthetic" / "helper" / "static" / "text_templates" / "concepts.csv"
+        default = (
+            package_dir
+            / "synthetic"
+            / "helper"
+            / "static"
+            / "text_templates"
+            / "concepts.csv"
+        )
         if default.is_file():
             concepts_csv = str(default)
 
@@ -384,6 +404,7 @@ def train_lfcbm(
 
 # ── Regime dispatch (text) ────────────────────────────────────────────
 
+
 def _run_text_regime(config, regime, model, data, budgets, threshold):
     """Run one intervention regime for the text benchmark.
 
@@ -416,15 +437,17 @@ def _run_text_regime(config, regime, model, data, budgets, threshold):
 
     rows = []
     # k=0 baseline
-    rows.append({
-        "budget": 0,
-        "threshold": threshold,
-        "accuracy": base_acc,
-        "predictions_intervened_on": 0,
-        "predictions_changed": 0,
-        "total_concept_confirmations": 0,
-        "total_concept_edits_made": 0,
-    })
+    rows.append(
+        {
+            "budget": 0,
+            "threshold": threshold,
+            "accuracy": base_acc,
+            "predictions_intervened_on": 0,
+            "predictions_changed": 0,
+            "total_concept_confirmations": 0,
+            "total_concept_edits_made": 0,
+        }
+    )
 
     rng = np.random.default_rng(config.seed)
     err_prob = 1.0 - human_acc
@@ -468,15 +491,17 @@ def _run_text_regime(config, regime, model, data, budgets, threshold):
         acc_intervened = float(np.mean(result.y_pred_after == data.test.y.astype(int)))
         n_intervened = int(np.sum(mask))
 
-        rows.append({
-            "budget": budget,
-            "threshold": threshold,
-            "accuracy": acc_intervened,
-            "predictions_intervened_on": int(np.sum(np.any(mask, axis=1))),
-            "predictions_changed": num_preds_change,
-            "total_concept_confirmations": n_intervened,
-            "total_concept_edits_made": int(np.sum(actual_edits_mask)),
-        })
+        rows.append(
+            {
+                "budget": budget,
+                "threshold": threshold,
+                "accuracy": acc_intervened,
+                "predictions_intervened_on": int(np.sum(np.any(mask, axis=1))),
+                "predictions_changed": num_preds_change,
+                "total_concept_confirmations": n_intervened,
+                "total_concept_edits_made": int(np.sum(actual_edits_mask)),
+            }
+        )
 
     regime_df = pd.DataFrame(rows)
     regime_df["regime"] = regime
@@ -484,6 +509,7 @@ def _run_text_regime(config, regime, model, data, budgets, threshold):
 
 
 # ── Stage: run_interventions ─────────────────────────────────────────
+
 
 def run_interventions(
     config: RobotBenchmarkConfig,
@@ -509,7 +535,9 @@ def run_interventions(
     all_dfs = []
     for regime in config.intervention_regimes:
         try:
-            regime_df = _run_text_regime(config, regime, model, data, budgets, threshold)
+            regime_df = _run_text_regime(
+                config, regime, model, data, budgets, threshold
+            )
             all_dfs.append(regime_df)
         except (FileNotFoundError, NotImplementedError) as e:
             logger.warning("Skipping regime %r: %s", regime, e)
@@ -527,6 +555,7 @@ def run_interventions(
 
 
 # ── Stage: align ─────────────────────────────────────────────────────
+
 
 def align(
     config: RobotBenchmarkConfig,
@@ -554,6 +583,7 @@ def align(
 
 # ── Stage: collect_results ───────────────────────────────────────────
 
+
 def collect_results(
     configs: Optional[List[RobotBenchmarkConfig]] = None,
 ) -> pd.DataFrame:
@@ -570,45 +600,53 @@ def collect_results(
         if results_path.exists():
             df = pd.read_csv(results_path)
             for _, r in df.iterrows():
-                rows.append({
-                    "seed": cfg.seed,
-                    "model": "cbm",
-                    "budget": int(r["budget"]),
-                    "threshold": float(r["threshold"]),
-                    "accuracy": float(r["accuracy"]),
-                    "predictions_intervened_on": int(r["predictions_intervened_on"]),
-                    "predictions_changed": int(r["predictions_changed"]),
-                })
+                rows.append(
+                    {
+                        "seed": cfg.seed,
+                        "model": "cbm",
+                        "budget": int(r["budget"]),
+                        "threshold": float(r["threshold"]),
+                        "accuracy": float(r["accuracy"]),
+                        "predictions_intervened_on": int(
+                            r["predictions_intervened_on"]
+                        ),
+                        "predictions_changed": int(r["predictions_changed"]),
+                    }
+                )
 
         # DNN metrics
         dnn_path = cfg.get_model_path("dnn")
         if dnn_path.exists():
             dnn_data = load(dnn_path)
             if isinstance(dnn_data, dict) and "metrics" in dnn_data:
-                rows.append({
-                    "seed": cfg.seed,
-                    "model": "dnn",
-                    "budget": "",
-                    "threshold": "",
-                    "accuracy": dnn_data["metrics"].get("accuracy", ""),
-                    "predictions_intervened_on": "",
-                    "predictions_changed": "",
-                })
+                rows.append(
+                    {
+                        "seed": cfg.seed,
+                        "model": "dnn",
+                        "budget": "",
+                        "threshold": "",
+                        "accuracy": dnn_data["metrics"].get("accuracy", ""),
+                        "predictions_intervened_on": "",
+                        "predictions_changed": "",
+                    }
+                )
 
         # Alignment
         align_path = cfg.get_alignment_results_path()
         if align_path.exists():
             with open(align_path) as f:
                 align_data = json.load(f)
-            rows.append({
-                "seed": cfg.seed,
-                "model": "aligned_cbm",
-                "budget": 0,
-                "threshold": "",
-                "accuracy": float(align_data["aligned_accuracy"]),
-                "predictions_intervened_on": "",
-                "predictions_changed": align_data.get("predictions_changed", ""),
-            })
+            rows.append(
+                {
+                    "seed": cfg.seed,
+                    "model": "aligned_cbm",
+                    "budget": 0,
+                    "threshold": "",
+                    "accuracy": float(align_data["aligned_accuracy"]),
+                    "predictions_intervened_on": "",
+                    "predictions_changed": align_data.get("predictions_changed", ""),
+                }
+            )
 
     final_df = pd.DataFrame(rows)
     out_path = results_dir / "robot_text_results.csv"
@@ -619,6 +657,7 @@ def collect_results(
 
 
 # ── Stage: run (orchestrator) ────────────────────────────────────────
+
 
 def run(
     config: Optional[RobotBenchmarkConfig] = None,
@@ -633,6 +672,7 @@ def run(
         force_setup: If True, delete cached data before regenerating.
     """
     from concept_benchmark._logging import setup_logging
+
     setup_logging()
     if config is None:
         config = RobotBenchmarkConfig(data_type="text")
@@ -654,7 +694,9 @@ def run(
     _si = {s: i for i, s in enumerate(stages, 1)}
     logger.info(
         "=== Robot Text Benchmark === seed=%d, stages=%s, device=%s",
-        config.seed, stages, device,
+        config.seed,
+        stages,
+        device,
     )
 
     if "setup" in stages:
@@ -682,26 +724,40 @@ def run(
     # Model fingerprint: retrain if config changed since last training
     model_fp_path = config.get_model_path("cbm").with_suffix(".fingerprint")
     current_model_fp = config.model_fingerprint()
-    cached_model_fp = model_fp_path.read_text().strip() if model_fp_path.exists() else None
+    cached_model_fp = (
+        model_fp_path.read_text().strip() if model_fp_path.exists() else None
+    )
     model_stale = cached_model_fp != current_model_fp
 
     if "cbm" in stages:
         logger.info("=== [%d/%d] Train CBM ===", _si["cbm"], n_stages)
-        if model_stale or config.force_retrain or not config.get_model_path("cbm").exists():
+        if (
+            model_stale
+            or config.force_retrain
+            or not config.get_model_path("cbm").exists()
+        ):
             train_cbm(config)
         else:
             logger.info("Using existing CBM: %s", config.get_model_path("cbm"))
 
     if "dnn" in stages:
         logger.info("=== [%d/%d] Train DNN ===", _si["dnn"], n_stages)
-        if model_stale or config.force_retrain or not config.get_model_path("dnn").exists():
+        if (
+            model_stale
+            or config.force_retrain
+            or not config.get_model_path("dnn").exists()
+        ):
             train_dnn(config)
         else:
             logger.info("Using existing DNN: %s", config.get_model_path("dnn"))
 
     if "lfcbm" in stages and config.use_label_free_concepts:
         logger.info("=== [%d/%d] Train LFCBM ===", _si["lfcbm"], n_stages)
-        if model_stale or config.force_retrain or not config.get_model_path("lfcbm").exists():
+        if (
+            model_stale
+            or config.force_retrain
+            or not config.get_model_path("lfcbm").exists()
+        ):
             train_lfcbm(config)
         else:
             logger.info("Using existing LFCBM: %s", config.get_model_path("lfcbm"))
@@ -739,18 +795,50 @@ def _parse_args(argv=None):
     )
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument(
-        "--stages", nargs="+", default=list(ROBOT_TEXT_STAGES),
+        "--stages",
+        nargs="+",
+        default=list(ROBOT_TEXT_STAGES),
         help=f"Pipeline stages to run (default: all). Valid: {' -> '.join(ROBOT_TEXT_STAGES)}",
     )
-    parser.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
-    parser.add_argument("--budgets", nargs="+", default=None,
-                        help="Intervention budgets (e.g. 1 2 5 max).")
-    parser.add_argument("--regimes", nargs="+", default=None,
-                        help="Intervention regimes (e.g. baseline expert subjective).")
-    parser.add_argument("--strategy", type=str, default=None,
-                        choices=["up_to_k", "exactly_k"])
-    parser.add_argument("--lfcbm", action="store_true",
-                        help="Also run LFCBM variant.")
+    parser.add_argument(
+        "--config", type=str, default=None, help="Path to YAML config file."
+    )
+    parser.add_argument(
+        "--budgets",
+        nargs="+",
+        default=None,
+        help="Intervention budgets (e.g. 1 2 5 max).",
+    )
+    parser.add_argument(
+        "--regimes",
+        nargs="+",
+        default=None,
+        help="Intervention regimes (e.g. baseline expert subjective).",
+    )
+    parser.add_argument(
+        "--strategy", type=str, default=None, choices=["up_to_k", "exactly_k"]
+    )
+    parser.add_argument(
+        "--concept-preset",
+        type=str,
+        default=None,
+        choices=["ground_truth", "foot_subtypes"],
+        help="Concept granularity preset (default: ground_truth).",
+    )
+    parser.add_argument(
+        "--missing-fraction",
+        type=float,
+        default=None,
+        help="Fraction of concept labels to mask in training set.",
+    )
+    parser.add_argument(
+        "--missing-mechanism",
+        type=str,
+        default=None,
+        choices=["mcar", "mnar"],
+        help="Missingness mechanism (default: mcar).",
+    )
+    parser.add_argument("--lfcbm", action="store_true", help="Also run LFCBM variant.")
     parser.add_argument("--force-setup", action="store_true")
     return parser.parse_args(argv)
 
@@ -767,12 +855,21 @@ def main(argv=None):
 
     unknown = set(args.stages) - set(ROBOT_TEXT_STAGES)
     if unknown:
-        raise ValueError(f"unknown stages: {sorted(unknown)}. Valid: {list(ROBOT_TEXT_STAGES)}")
+        raise ValueError(
+            f"unknown stages: {sorted(unknown)}. Valid: {list(ROBOT_TEXT_STAGES)}"
+        )
 
     if args.config:
         config = RobotBenchmarkConfig.from_yaml(args.config)
     else:
-        config = RobotBenchmarkConfig(data_type="text", seed=args.seed)
+        init_kwargs = {"data_type": "text", "seed": args.seed}
+        if args.concept_preset:
+            init_kwargs["concept_preset"] = args.concept_preset
+        if args.missing_fraction is not None:
+            init_kwargs["missing_fraction"] = args.missing_fraction
+        if args.missing_mechanism is not None:
+            init_kwargs["missing_mechanism"] = args.missing_mechanism
+        config = RobotBenchmarkConfig(**init_kwargs)
 
     if args.budgets:
         config.intervention_budgets = _parse_budgets(args.budgets)

@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from concept_benchmark.synthetic.robot_text.catalog import CORE_CONCEPT_NAMES
+
 if TYPE_CHECKING:
     from concept_benchmark.config import RobotBenchmarkConfig
 
@@ -258,25 +260,102 @@ def render_from_corpus(row: dict, corpus: list[dict], seed: int) -> str:
 
 
 def core_vector_from_row(row: dict) -> np.ndarray:
-    """Convert a concept row to a 9-element binary vector."""
+    """Convert a concept row to a 9-element binary vector (original fixed layout)."""
+    return concept_vector_from_row(row, CORE_CONCEPT_NAMES)
 
-    def b(x):
-        return str(x).lower()
 
-    return np.array(
-        [
-            1.0 if str(row["head_shape"]) == "square" else 0.0,
-            1.0 if str(row["body_shape"]) == "square" else 0.0,
-            1.0 if b(row["has_knees"]) == "true" else 0.0,
-            1.0 if b(row["has_elbows"]) == "true" else 0.0,
-            1.0 if str(row["foot_shape"]).startswith("pointy_") else 0.0,
-            1.0 if b(row["has_antennae"]) == "true" else 0.0,
-            1.0 if str(row["ears_shape"]) == "triangle" else 0.0,
-            1.0 if str(row["mouth_type"]) == "open" else 0.0,
-            1.0 if str(row["hand_shape"]).startswith("edgy_") else 0.0,
-        ],
-        dtype=np.float32,
-    )
+# ── Dynamic concept vector builder ────────────────────────────────────
+
+# Maps each feature to (binary concept name, test function).
+# The test function takes a row value and returns 1.0 or 0.0.
+_BINARY_CONCEPT_MAP: dict[str, tuple[str, callable]] = {
+    "head_shape": ("head_is_square", lambda v: 1.0 if str(v) == "square" else 0.0),
+    "body_shape": ("body_is_square", lambda v: 1.0 if str(v) == "square" else 0.0),
+    "has_knees": ("has_knees", lambda v: 1.0 if str(v).lower() == "true" else 0.0),
+    "has_elbows": ("has_elbows", lambda v: 1.0 if str(v).lower() == "true" else 0.0),
+    "foot_shape": (
+        "foot_is_pointy",
+        lambda v: 1.0 if str(v).startswith("pointy_") else 0.0,
+    ),
+    "has_antennae": (
+        "has_antennae",
+        lambda v: 1.0 if str(v).lower() == "true" else 0.0,
+    ),
+    "ears_shape": ("ears_is_triangle", lambda v: 1.0 if str(v) == "triangle" else 0.0),
+    "mouth_type": ("mouth_is_open", lambda v: 1.0 if str(v) == "open" else 0.0),
+    "hand_shape": (
+        "hands_are_pointy",
+        lambda v: 1.0 if str(v).startswith("edgy_") else 0.0,
+    ),
+}
+
+# Maps fine_grained_concepts entries to the feature they expand
+_SUBTYPE_FEATURE_MAP = {
+    "foot_shape_subtype": "foot_shape",
+    "hand_shape_subtype": "hand_shape",
+}
+
+
+def compute_text_concept_names(
+    concepts: dict[str, list],
+    fine_grained: list[str] | None = None,
+) -> list[str]:
+    """Build concept column names based on which features are expanded.
+
+    Args:
+        concepts: Feature name → list of values (e.g. TEXT_CONCEPTS).
+        fine_grained: Which features to expand into one-hot subtypes
+            (e.g. ``["foot_shape_subtype"]``). If None, all features are
+            collapsed to binary.
+
+    Returns:
+        List of concept names in a stable order.
+    """
+    fine_grained = fine_grained or []
+    expanded_features = {
+        _SUBTYPE_FEATURE_MAP[fg] for fg in fine_grained if fg in _SUBTYPE_FEATURE_MAP
+    }
+
+    names: list[str] = []
+    for feat in concepts:
+        if feat in expanded_features:
+            # One-hot: one column per subtype value
+            for val in concepts[feat]:
+                names.append(f"{feat}_{val}")
+        elif feat in _BINARY_CONCEPT_MAP:
+            names.append(_BINARY_CONCEPT_MAP[feat][0])
+    return names
+
+
+def concept_vector_from_row(
+    row: dict,
+    concept_names: list[str],
+) -> np.ndarray:
+    """Build a binary concept vector for the given concept names.
+
+    Handles both collapsed features (binary test) and expanded subtypes
+    (exact match on ``feat_val``).
+    """
+    vec = np.zeros(len(concept_names), dtype=np.float32)
+    for i, name in enumerate(concept_names):
+        # Check if it's a collapsed binary concept
+        found = False
+        for feat, (cname, test_fn) in _BINARY_CONCEPT_MAP.items():
+            if name == cname:
+                vec[i] = test_fn(row[feat])
+                found = True
+                break
+        if found:
+            continue
+        # Must be an expanded subtype: name = "{feature}_{value}"
+        # Find the feature by checking which feature name is a prefix
+        for feat in row:
+            prefix = f"{feat}_"
+            if name.startswith(prefix):
+                val = name[len(prefix) :]
+                vec[i] = 1.0 if str(row[feat]) == val else 0.0
+                break
+    return vec
 
 
 # ── Corpus path resolution ────────────────────────────────────────────
@@ -303,13 +382,3 @@ def get_corpus_path(config: RobotBenchmarkConfig) -> Path:
         else "templates_simple.txt"
     )
     return package_dir / "synthetic" / "helper" / "static" / "text_templates" / name
-
-
-def get_generic_corpus_path(
-    config: RobotBenchmarkConfig,
-    corpus_path: Path,
-) -> Path | None:
-    """Resolve the generic corpus path for a given target concept."""
-    target = config.generic_text_concept.lower()
-    gen = corpus_path.with_name(f"hard_corpus_{target}_generic.jsonl")
-    return gen if gen.is_file() else None

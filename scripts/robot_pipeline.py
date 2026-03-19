@@ -161,7 +161,7 @@ def train_cbm(
         valid_dataset=data.validation,
         freeze_backbone=False,
         concept_embed_params={"shuffle": False, **loader_config},
-        fit_params={
+        concept_fit_params={
             "epochs": config.epochs,
             "lr": config.learning_rate,
             "patience": config.patience,

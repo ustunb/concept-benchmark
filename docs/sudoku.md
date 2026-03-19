@@ -17,13 +17,22 @@ from concept_benchmark import DatasetGenerator
 
 dataset = DatasetGenerator(
     "sudoku",
-    seed=171,                # random seed
-    n_boards=1000,           # number of boards to generate
-    max_cell_swaps=9,        # cells swapped in invalid boards (higher = subtler errors)
-    valid_board_ratio=0.5,   # fraction of valid boards
-    data_type="image",       # "image" (renders board PNGs) or "tabular" (ground-truth values)
-    font_style="handwritten",  # "handwritten" or "printed" (image only)
-    # target_accuracy=0.9    # minimum accuracy (selective classification, pipeline only)
+    seed=171,                  # random seed
+    data_type="image",         # "image" (renders board PNGs) or "tabular" (digit vectors)
+    render_images=True,        # set False to skip rendering PNGs (faster, image only)
+    block_size=3,              # block size (3 = standard 9×9 board)
+    n_boards=1000,             # number of boards to generate
+    max_cell_swaps=9,          # cells swapped in invalid boards (higher = subtler errors)
+    valid_board_ratio=0.5,     # fraction of valid boards
+    # ── Rendering (image only) ──
+    font_style="handwritten",  # "handwritten" or "printed"
+    font_size=25,              # digit font size in pixels
+    cell_px=50,                # cell size in pixels
+    cell_margin_px=2,          # cell margin in pixels
+    gridline_px=2,             # grid line width in pixels
+    block_border_px=5,         # block border width in pixels
+    missing_fraction=0.0,      # fraction of concept labels masked during training
+    missing_mechanism="mcar",  # missingness mechanism: "mcar" or "mnar"
 ).generate()
 ```
 
