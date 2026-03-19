@@ -151,6 +151,14 @@ def _validate_label_formula(d: Dict) -> None:
                 f"label_formula terms[{feat!r}] must have 'value' and 'weight' keys, "
                 f"got {spec!r}"
             )
+    for key in ("intercept", "temperature"):
+        if key in d:
+            try:
+                float(d[key])
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"label_formula[{key!r}] must be numeric, got {d[key]!r}"
+                )
 
 
 # ── Shared utilities ──────────────────────────────────────────────────

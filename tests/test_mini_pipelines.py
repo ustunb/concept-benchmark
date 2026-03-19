@@ -52,7 +52,7 @@ def _train_cbm(ds, epochs=1):
         valid_dataset=ds.validation,
         freeze_backbone=False,
         concept_embed_params={"device": "cpu", "batch_size": 8, "num_workers": 0},
-        fit_params={
+        concept_fit_params={
             "epochs": epochs,
             "lr": 1e-3,
             "patience": 1,

@@ -419,12 +419,12 @@ class ConceptDetector:
         self,
         path: Union[str, "os.PathLike"],
         *,
-        should_overwrite: bool = False,
+        overwrite: bool = False,
         msg: bool = True,
     ) -> "os.PathLike":
         """Persist the detector using concept_benchmark.ext.fileutils.save."""
         payload = {"version": 1, "state": self.state_dict()}
-        return save_object(payload, path, overwrite=should_overwrite, msg=msg)
+        return save_object(payload, path, overwrite=overwrite, msg=msg)
 
     @classmethod
     def load(
@@ -548,7 +548,9 @@ class ConceptDetector:
             # absorb flatten into head for raw features
             head = nn.Sequential(nn.Flatten(), head)
 
-        return JointConceptModel(self.embedding_model, head, should_flatten=not flatten_inputs)
+        return JointConceptModel(
+            self.embedding_model, head, should_flatten=not flatten_inputs
+        )
 
     def _set_trainable(self, freeze_backbone: bool) -> None:
         """Freeze or unfreeze the backbone parameters depending on user request."""
@@ -1020,8 +1022,8 @@ class ConceptBasedModel:
         """Support unpickling objects saved with old attribute names."""
         if "front_end_model" in state and "label_predictor" not in state:
             state["label_predictor"] = state.pop("front_end_model")
-        if "concept_poss" in state and "_concept_possibilities" not in state:
-            state["_concept_possibilities"] = state.pop("concept_poss")
+        if "_concept_poss" in state and "_concept_possibilities" not in state:
+            state["_concept_possibilities"] = state.pop("_concept_poss")
         self.__dict__.update(state)
 
     @property
@@ -1054,7 +1056,6 @@ class ConceptBasedModel:
         should_calibrate: bool = False,
         should_log_training: bool = False,
         log_interval: Optional[int] = None,
-        **kwargs,
     ) -> None:
         """
         Fit the concept detector and front-end model.
@@ -1067,20 +1068,7 @@ class ConceptBasedModel:
             concept_embed_params: Dict forwarded to dataset.embed(...); passed via ConceptDetector.fit(..., embedding_params=...).
             front_fit_params: Dict forwarded to FrontEndModel.fit(..., fit_params=...).
             should_calibrate: If True, perform per-concept calibration after training detector.
-
-        Backward compatibility:
-            - If kwargs contains 'fit_params', it is treated as concept_fit_params.
-            - If kwargs contains 'embedding_params', it is treated as concept_embed_params.
-            - If kwargs contains 'should_calibrate', it overrides the should_calibrate flag.
         """
-        # Backward-compat: map legacy kwargs
-        if concept_fit_params is None and "fit_params" in kwargs:
-            concept_fit_params = kwargs.pop("fit_params")
-        if concept_embed_params is None and "embedding_params" in kwargs:
-            concept_embed_params = kwargs.pop("embedding_params")
-        if "should_calibrate" in kwargs:
-            should_calibrate = kwargs.pop("should_calibrate")
-
         # Ensure concept_fit_params dict exists and inject logging toggles if set
         if concept_fit_params is None:
             concept_fit_params = {}
@@ -1167,7 +1155,9 @@ class ConceptBasedModel:
         concept_preds = self.concept_detector.predict(dataset)
 
         # Override object's should_propagate if specified
-        should_propagate = self.should_propagate if should_propagate is None else should_propagate
+        should_propagate = (
+            self.should_propagate if should_propagate is None else should_propagate
+        )
 
         if should_propagate:
             n_concepts = concept_preds.shape[1]

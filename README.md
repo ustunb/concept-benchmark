@@ -359,7 +359,7 @@ dataset = DatasetGenerator(
     concept_preset="foot_subtypes",  # "foot_subtypes": 12 fine-grained; "ground_truth": 7 (default)
     use_stochastic_labels=True,      # True (probabilistic) or False (deterministic threshold)
     image_size="medium",             # "small" (8px), "medium" (32px, default), or "large" (600px)
-    color_mode="color",              # "color" or "greyscale" (image only)
+    color_mode="color",              # "color" or "grayscale" (image only)
     renders_per_robot=4,             # images per unique robot config (total = configs × this)
     missing_fraction=0.0,            # fraction of concept labels masked during training
     missing_mechanism="mcar",        # missingness mechanism: "mcar" or "mnar"
