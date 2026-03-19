@@ -10,7 +10,7 @@ def _naive_enumeration_aggregate(
     """Compute aggregated label probabilities by explicit enumeration.
 
     Args:
-        model: Trained ConceptBasedModel (front_end_model used here).
+        model: Trained ConceptBasedModel (label_predictor used here).
         concept_probs: Array of shape (N, C) with concept probabilities.
 
     Returns:
@@ -21,7 +21,7 @@ def _naive_enumeration_aggregate(
     combos = list(itertools.product([0, 1], repeat=C))
     # Precompute front-end probabilities per combo for reuse
     combos_arr = np.array(combos, dtype=np.int32)
-    y_combo = model.front_end_model.predict_proba(combos_arr)  # (M, K)
+    y_combo = model.label_predictor.predict_proba(combos_arr)  # (M, K)
 
     for i in range(N):
         p = concept_probs[i]
@@ -39,7 +39,7 @@ def test_exact_matches_naive_on_small_k(tabular_train_valid):
 
     model = ConceptBasedModel(
         concept_detector=ConceptDetector(embedding_model=None),
-        propagate=True,
+        should_propagate=True,
         mc_mode="exact",
         mc_exact_threshold=4096,
     )
@@ -47,19 +47,19 @@ def test_exact_matches_naive_on_small_k(tabular_train_valid):
     model.fit(
         train_dataset=train,
         valid_dataset=valid,
-        freeze=False,
+        freeze_backbone=False,
         concept_fit_params={"epochs": 1, "device": "cpu", "batch_size": 16},
         front_fit_params={"max_iter": 200},
-        calibrate=False,
+        should_calibrate=False,
     )
 
     # Exact propagation via model
-    proba_exact = model.predict_proba(valid, propagate=True)
+    proba_exact = model.predict_proba(valid, should_propagate=True)
     assert proba_exact.shape[0] == len(valid)
     assert np.all(np.isfinite(proba_exact))
 
     # Naive explicit enumeration aggregation
-    concept_probs = model.concept_detector.predict(valid, calibrate=False)
+    concept_probs = model.concept_detector.predict(valid, should_calibrate=False)
     proba_naive = _naive_enumeration_aggregate(model, concept_probs)
 
     # Should match very closely (up to tiny numeric differences)
@@ -73,7 +73,7 @@ def test_mc_matches_exact_on_small_k(tabular_train_valid):
     # Build model with propagation enabled; no embedding model for speed
     model = ConceptBasedModel(
         concept_detector=ConceptDetector(embedding_model=None),
-        propagate=True,
+        should_propagate=True,
         mc_mode="exact",  # start with exact
         mc_exact_threshold=4096,  # default; 2**k will be small here
     )
@@ -82,14 +82,14 @@ def test_mc_matches_exact_on_small_k(tabular_train_valid):
     model.fit(
         train_dataset=train,
         valid_dataset=valid,
-        freeze=False,
+        freeze_backbone=False,
         concept_fit_params={"epochs": 1, "device": "cpu", "batch_size": 16},
         front_fit_params={"max_iter": 200},
-        calibrate=False,
+        should_calibrate=False,
     )
 
     # Exact propagation probabilities
-    proba_exact = model.predict_proba(valid, propagate=True)
+    proba_exact = model.predict_proba(valid, should_propagate=True)
     assert proba_exact.shape[0] == len(valid)
     assert np.all(np.isfinite(proba_exact))
 
@@ -101,7 +101,7 @@ def test_mc_matches_exact_on_small_k(tabular_train_valid):
     model._mc_chunk_size = 1024
     model._mc_tol = 0.0  # force using full sample budget
 
-    proba_mc = model.predict_proba(valid, propagate=True)
+    proba_mc = model.predict_proba(valid, should_propagate=True)
 
     assert proba_mc.shape == proba_exact.shape
     assert np.all(np.isfinite(proba_mc))

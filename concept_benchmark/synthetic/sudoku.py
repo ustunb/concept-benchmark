@@ -24,7 +24,7 @@ def _get_default_font(size):
 
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.paths import data_dir
-from concept_benchmark.synthetic.helper.sudoku_helper import (
+from concept_benchmark.synthetic.helper.sudoku_utils import (
     generate_invalid_board,
     generate_valid_board,
     get_concepts,
@@ -32,7 +32,7 @@ from concept_benchmark.synthetic.helper.sudoku_helper import (
     normalize_digits,
     cell_digit_concept_vector,
 )
-from concept_benchmark.synthetic.helper.sudoku_handwriting_helper import (
+from concept_benchmark.synthetic.helper.sudoku_handwriting import (
     SimpleHandwrittenGenerator,
     AdvancedHandwrittenGenerator,
     _build_given_mask,
@@ -113,7 +113,7 @@ def create_sudoku_dataset(
     n_valid = int(round(n_samples * float(valid_ratio)))
     n_invalid = n_samples - n_valid
 
-    X_list, C_list, y_list = [], [], []
+    X_list, C_list, y_list, board_list = [], [], [], []
 
     pbar = (
         tqdm(total=n_valid + n_invalid, desc="Generating Sudoku dataset")
@@ -124,6 +124,7 @@ def create_sudoku_dataset(
     # ---- valid boards
     for i in range(n_valid):
         b = generate_valid_board(n=n)
+        board_list.append(b.copy())
         if data_type == "image":
             img_path = ds_path / f"valid_{i}.png"
             transform(b, outfile=img_path)
@@ -153,6 +154,7 @@ def create_sudoku_dataset(
         b = generate_invalid_board(
             base_board=generate_valid_board(n=n), num_actions=num_actions, seed=inv_seed
         )
+        board_list.append(b.copy())
         concepts = get_concepts(b, return_label=False)
         c_base = np.array(list(concepts.values()), dtype=np.int32).flatten()
 
@@ -204,6 +206,7 @@ def create_sudoku_dataset(
     meta = {
         "classes": [0, 1],
         "concepts": concept_names,
+        "boards": np.array(board_list),
         "data_type": data_type,
         "transform": getattr(
             transform,
@@ -338,9 +341,9 @@ def image_transform(
     # ---- build handwritten generator + starters + prior_options ----
     generator = None
     if handwriting:
-        from concept_benchmark.paths import pkg_dir
+        from concept_benchmark.paths import package_dir
 
-        _fonts_dir = str(pkg_dir / "data" / "fonts")
+        _fonts_dir = str(package_dir / "data" / "fonts")
         try:
             import cv2  # noqa: F401
 

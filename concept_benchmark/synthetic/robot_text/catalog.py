@@ -8,32 +8,7 @@ from itertools import product
 import numpy as np
 import pandas as pd
 
-# 9 robot concepts with their text-domain values
-TEXT_CONCEPTS = {
-    "head_shape": ["square", "round"],
-    "body_shape": ["square", "round"],
-    "has_knees": ["false", "true"],
-    "has_elbows": ["false", "true"],
-    "foot_shape": [
-        "flat_4sided",
-        "flat_5sided",
-        "flat_lshaped",
-        "pointy_3sided",
-        "pointy_4sided",
-        "pointy_6sided",
-    ],
-    "has_antennae": ["false", "true"],
-    "ears_shape": ["square", "triangle"],
-    "mouth_type": ["closed", "open"],
-    "hand_shape": [
-        "round_circle",
-        "wide_oval",
-        "tall_oval",
-        "edgy_square",
-        "edgy_triangle",
-        "edgy_trapezoid",
-    ],
-}
+from concept_benchmark.config import TEXT_CONCEPTS
 
 CORE_CONCEPT_NAMES = [
     "head_is_square",
@@ -46,12 +21,6 @@ CORE_CONCEPT_NAMES = [
     "mouth_is_open",
     "hands_are_pointy",
 ]
-
-DEFAULT_LABEL_EXPR = (
-    '\'glorp\' if (min(int(row["mouth_type"]=="open"), '
-    'int(str(row["foot_shape"]).startswith("pointy_"))) >= 1) '
-    "else 'drent'"
-)
 
 
 def enumerate_robot_concepts(

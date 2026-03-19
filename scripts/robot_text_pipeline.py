@@ -22,25 +22,22 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 
-from concept_benchmark.utils import determine_device
-from concept_benchmark.config import RobotTextBenchmarkConfig
+from concept_benchmark.utils import determine_device, set_deterministic_seed
+from concept_benchmark.config import RobotBenchmarkConfig
 from concept_benchmark.data import ConceptDatasetSample
 from concept_benchmark.ext.fileutils import load, save
 from experiments.models import ConceptBasedModel, FrontEndModel
-from concept_benchmark.paths import pkg_dir, results_dir
+from concept_benchmark.paths import package_dir, results_dir
 from experiments.text_concept_detector import TextConceptDetector
 from experiments.utils import run_alignment
-from concept_benchmark.synthetic.robot_text.catalog import (
-    TEXT_CONCEPTS,
-    compute_label,
-    enumerate_robot_concepts,
-)
-from concept_benchmark.synthetic.robot_text.dataset import (
-    build_text_dataset,
-    kfold_by_robot_identity,
-)
 
 logger = logging.getLogger(__name__)
+
+
+def _internal_output_mode(concept_output_type: str) -> str:
+    """Translate public config value to internal detector/LFCBM mode string."""
+    return {"binary": "hard", "continuous": "soft"}.get(concept_output_type, concept_output_type)
+
 
 # Lazy imports for intervention modules
 _intervention_imported = False
@@ -60,104 +57,31 @@ def _ensure_intervention_imports():
 
 
 def _set_seed(s: int) -> None:
-    random.seed(s)
-    np.random.seed(s)
-    torch.manual_seed(s)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(s)
+    set_deterministic_seed(s)
 
 
 # ── Stage: setup_dataset ─────────────────────────────────────────────
 
 def setup_dataset(
-    config: RobotTextBenchmarkConfig,
+    config: RobotBenchmarkConfig,
 ) -> ConceptDatasetSample:
     """Generate robot text dataset and split by robot identity.
 
     Returns the dataset with training/validation/test splits set.
     """
-    _set_seed(config.seed)
+    from concept_benchmark.generators import DatasetGenerator
 
-    # Enumerate all robot concept combinations
-    catalog_df = enumerate_robot_concepts(concepts=TEXT_CONCEPTS, seed=config.seed)
-
-    # Compute labels
-    catalog_df["label"] = compute_label(
-        catalog_df, config.label_expr, seed=config.seed,
-    )
-
-    _lbl = catalog_df["label"].astype(str)
-    n_pos = int((_lbl == "glorp").sum())
-    n_neg = int((_lbl == "drent").sum())
-    minority_label = "glorp" if n_pos < n_neg else "drent"
-    logger.info("Catalog: %d glorp, %d drent (minority=%s)", n_pos, n_neg, minority_label)
-
-    # Determine per-row variant counts
-    row_variants = [
-        config.variants_per_row_minority if lab == minority_label else config.variants_per_row_majority
-        for lab in _lbl
-    ]
-
-    # Find corpus paths
-    corpus_path = _get_corpus_path(config)
-    generic_path = _get_generic_corpus_path(config, corpus_path) if config.generic_enable else None
-
-    # Build dataset
-    ds = build_text_dataset(
-        catalog_df=catalog_df,
-        corpus_path=corpus_path,
-        variants_per_row=1,
-        seed=config.seed,
-        row_variants=row_variants,
-        generic_path=generic_path,
-        generic_rate=config.generic_rate if config.generic_enable else 0.0,
-        generic_target=config.generic_target,
-    )
-
-    # Split by robot identity
-    ds = kfold_by_robot_identity(
-        ds,
-        cv_k=config.cv_k,
-        cv_fold=config.cv_fold,
-        dev_per_fold=config.dev_per_fold,
-        deployment_size=config.deployment_size,
-        seed=config.seed,
-        generic_target=config.generic_target,
-        corpus_path=corpus_path,
-        catalog_df=catalog_df,
-        generic_path=generic_path,
-        generic_rate=config.generic_rate if config.generic_enable else 0.0,
-    )
+    ds = DatasetGenerator.from_config(config).generate()
 
     logger.info("Split sizes — train: %d, val: %d, test: %d", ds.training.n, ds.validation.n, ds.test.n)
     save(ds, config.get_dataset_path(), overwrite=True)
     return ds
 
 
-def _get_corpus_path(config: RobotTextBenchmarkConfig) -> Path:
-    """Resolve the corpus path based on difficulty setting."""
-    if config.difficulty == "hard":
-        p = pkg_dir / "synthetic" / "helper" / "static" / "text_templates" / "HardCorpus.jsonl"
-        if p.is_file():
-            return p
-    name = "Templates.txt" if config.difficulty == "medium" else "Templates_simple.txt"
-    return pkg_dir / "synthetic" / "helper" / "static" / "text_templates" / name
-
-
-def _get_generic_corpus_path(
-    config: RobotTextBenchmarkConfig,
-    corpus_path: Path,
-) -> Path | None:
-    """Resolve the generic corpus path for a given target concept."""
-    target = config.generic_target.capitalize()
-    gen = corpus_path.with_name(f"HardCorpus_{target}Generic.jsonl")
-    return gen if gen.is_file() else None
-
-
 # ── Stage: train_cbm ─────────────────────────────────────────────────
 
 def train_cbm(
-    config: RobotTextBenchmarkConfig,
+    config: RobotBenchmarkConfig,
     data: Optional[ConceptDatasetSample] = None,
 ) -> ConceptBasedModel:
     """Train TextConceptDetector + FrontEndModel.
@@ -178,7 +102,7 @@ def train_cbm(
         use_bigrams=True,
         dropout=0.1,
         pos_weight="auto",
-        output_mode=config.concept_mode,
+        output_mode=_internal_output_mode(config.concept_output_type),
         threshold_mode="auto",
         pooling="attn",
         group_unknown_threshold=0.50,
@@ -189,12 +113,12 @@ def train_cbm(
 
     cbm = ConceptBasedModel(
         concept_detector=detector,
-        front_end_model=FrontEndModel(),
-        propagate=(config.concept_mode == "soft"),
+        label_predictor=FrontEndModel(),
+        should_propagate=(config.concept_output_type == "continuous"),
     )
 
     # Train frontend on ground-truth concepts
-    cbm.front_end_model.fit(data.training.C, data.training.y)
+    cbm.label_predictor.fit(data.training.C, data.training.y)
 
     test_pred = cbm.predict(data.test)
     acc = float(np.mean(test_pred == data.test.y))
@@ -205,7 +129,7 @@ def train_cbm(
 
 
 def train_cbm_subjective(
-    config: RobotTextBenchmarkConfig,
+    config: RobotBenchmarkConfig,
     data: Optional[ConceptDatasetSample] = None,
 ) -> ConceptBasedModel:
     """Train a CBM on noisy (subjective) concept labels.
@@ -234,7 +158,7 @@ def train_cbm_subjective(
         use_bigrams=True,
         dropout=0.1,
         pos_weight="auto",
-        output_mode=config.concept_mode,
+        output_mode=_internal_output_mode(config.concept_output_type),
         threshold_mode="auto",
         pooling="attn",
         group_unknown_threshold=0.50,
@@ -243,10 +167,10 @@ def train_cbm_subjective(
     detector.fit(noisy_data.training, noisy_data.validation)
     cbm = ConceptBasedModel(
         concept_detector=detector,
-        front_end_model=FrontEndModel(),
-        propagate=(config.concept_mode == "soft"),
+        label_predictor=FrontEndModel(),
+        should_propagate=(config.concept_output_type == "continuous"),
     )
-    cbm.front_end_model.fit(noisy_data.training.C, noisy_data.training.y)
+    cbm.label_predictor.fit(noisy_data.training.C, noisy_data.training.y)
 
     test_pred = cbm.predict(data.test)
     acc = float(np.mean(test_pred == data.test.y))
@@ -341,7 +265,7 @@ def _fit_platt(X, y, tok, model, device):
 
 
 def train_dnn(
-    config: RobotTextBenchmarkConfig,
+    config: RobotBenchmarkConfig,
     data: Optional[ConceptDatasetSample] = None,
 ) -> dict:
     """Fine-tune DistilBERT on text -> label (bypasses concepts).
@@ -385,7 +309,7 @@ def train_dnn(
 # ── Stage: train_lfcbm ──────────────────────────────────────────────
 
 def train_lfcbm(
-    config: RobotTextBenchmarkConfig,
+    config: RobotBenchmarkConfig,
     data: Optional[ConceptDatasetSample] = None,
 ) -> ConceptBasedModel:
     """Train label-free CBM using sentence embeddings + concepts CSV.
@@ -400,9 +324,9 @@ def train_lfcbm(
         data = load(config.get_dataset_path())
 
     # Determine concepts CSV path
-    concepts_csv = config.lfcbm_concepts_csv
+    concepts_csv = config.label_free_concepts_csv
     if not concepts_csv:
-        default = pkg_dir / "synthetic" / "helper" / "static" / "text_templates" / "concepts.csv"
+        default = package_dir / "synthetic" / "helper" / "static" / "text_templates" / "concepts.csv"
         if default.is_file():
             concepts_csv = str(default)
 
@@ -411,10 +335,10 @@ def train_lfcbm(
         "concepts_csv": concepts_csv,
         "lf_alpha": 0.5,
         "lf_threshold": 0.5,
-        "lf_mode": config.concept_mode,
+        "lf_mode": _internal_output_mode(config.concept_output_type),
         "lf_ridge": False,
         "lf_ridge_alpha": 1.0,
-        "lf_encoder": config.lfcbm_encoder,
+        "lf_encoder": config.label_free_encoder,
         "lf_device": lf_device,
         "lf_batch_size": 64,
         "lf_keep_k": 9,
@@ -425,7 +349,7 @@ def train_lfcbm(
     det_lf.fit([str(x) for x in data.training.X], y=data.training.y.astype(int))
 
     # Use LFCBM predictions as concept features to train a student detector
-    if config.concept_mode == "hard":
+    if config.concept_output_type == "binary":
         det_lf.settings["lf_mode"] = "hard"
     C_train = det_lf.predict([str(x) for x in data.training.X])
 
@@ -439,14 +363,14 @@ def train_lfcbm(
         epochs=config.detector_epochs,
         batch_size=config.detector_batch_size,
         lr=config.detector_lr,
-        output_mode=config.concept_mode,
+        output_mode=_internal_output_mode(config.concept_output_type),
     )
     detector.fit(data.training, data.validation)
 
     cbm = ConceptBasedModel(
         concept_detector=detector,
-        front_end_model=fe,
-        propagate=(config.concept_mode == "soft"),
+        label_predictor=fe,
+        should_propagate=(config.concept_output_type == "continuous"),
     )
 
     test_pred = cbm.predict(data.test)
@@ -510,10 +434,10 @@ def _run_text_regime(config, regime, model, data, budgets, threshold):
             max_concepts_per_instance=budget,
             random_state=config.seed,
             score_threshold=threshold,
-            noise=err_prob,
+            intervention_noise_rate=err_prob,
         )
         strategy = KFlipInterventionStrategy(
-            exact_k=(config.intervention_strategy == "exact_k"),
+            use_exact_k=(config.intervention_strategy == "exactly_k"),
         )
 
         result = runner.run(
@@ -536,7 +460,7 @@ def _run_text_regime(config, regime, model, data, budgets, threshold):
         C_pred_binary = (result.C_pred >= 0.5).astype(int)
         C_final_binary = (result.C_intervened >= 0.5).astype(int)
         actual_edits_mask = C_pred_binary != C_final_binary
-        result.y_prob_after = regime_model.front_end_model.predict_proba(C_final_binary)
+        result.y_prob_after = regime_model.label_predictor.predict_proba(C_final_binary)
         result.y_pred_after = np.argmax(result.y_prob_after, axis=1)
 
         y_pred_before = np.argmax(result.y_prob_before, axis=1)
@@ -562,7 +486,7 @@ def _run_text_regime(config, regime, model, data, budgets, threshold):
 # ── Stage: run_interventions ─────────────────────────────────────────
 
 def run_interventions(
-    config: RobotTextBenchmarkConfig,
+    config: RobotBenchmarkConfig,
     model: Optional[ConceptBasedModel] = None,
     data: Optional[ConceptDatasetSample] = None,
 ) -> pd.DataFrame:
@@ -580,7 +504,7 @@ def run_interventions(
 
     budgets = [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
     budgets = [b for b in budgets if b > 0]
-    threshold = config.flip_threshold
+    threshold = config.concept_uncertainty_threshold
 
     all_dfs = []
     for regime in config.intervention_regimes:
@@ -605,7 +529,7 @@ def run_interventions(
 # ── Stage: align ─────────────────────────────────────────────────────
 
 def align(
-    config: RobotTextBenchmarkConfig,
+    config: RobotBenchmarkConfig,
     model: Optional[ConceptBasedModel] = None,
     data: Optional[ConceptDatasetSample] = None,
 ) -> dict:
@@ -620,7 +544,7 @@ def align(
         model = load(config.get_model_path("cbm"))
 
     return run_alignment(
-        cbm=model,
+        concept_based_model=model,
         train_dataset=data.training,
         test_dataset=data.test,
         monotonicity_constraints=config.get_alignment_constraints(),
@@ -631,14 +555,14 @@ def align(
 # ── Stage: collect_results ───────────────────────────────────────────
 
 def collect_results(
-    configs: Optional[List[RobotTextBenchmarkConfig]] = None,
+    configs: Optional[List[RobotBenchmarkConfig]] = None,
 ) -> pd.DataFrame:
     """Aggregate robot text results into a single CSV.
 
     Reads saved artifacts only — no model retraining.
     """
     if configs is None:
-        configs = [RobotTextBenchmarkConfig()]
+        configs = [RobotBenchmarkConfig(data_type="text")]
 
     rows: list[dict] = []
     for cfg in configs:
@@ -697,7 +621,7 @@ def collect_results(
 # ── Stage: run (orchestrator) ────────────────────────────────────────
 
 def run(
-    config: Optional[RobotTextBenchmarkConfig] = None,
+    config: Optional[RobotBenchmarkConfig] = None,
     stages: Optional[List[str]] = None,
     force_setup: bool = False,
 ) -> None:
@@ -711,7 +635,7 @@ def run(
     from concept_benchmark._logging import setup_logging
     setup_logging()
     if config is None:
-        config = RobotTextBenchmarkConfig()
+        config = RobotBenchmarkConfig(data_type="text")
     if stages is None:
         stages = ["setup", "cbm", "dnn", "intervene", "align", "collect"]
 
@@ -775,7 +699,7 @@ def run(
         else:
             logger.info("Using existing DNN: %s", config.get_model_path("dnn"))
 
-    if "lfcbm" in stages and config.lfcbm_enable:
+    if "lfcbm" in stages and config.use_label_free_concepts:
         logger.info("=== [%d/%d] Train LFCBM ===", _si["lfcbm"], n_stages)
         if model_stale or config.force_retrain or not config.get_model_path("lfcbm").exists():
             train_lfcbm(config)
@@ -824,7 +748,7 @@ def _parse_args(argv=None):
     parser.add_argument("--regimes", nargs="+", default=None,
                         help="Intervention regimes (e.g. baseline expert subjective).")
     parser.add_argument("--strategy", type=str, default=None,
-                        choices=["kflip", "exact_k"])
+                        choices=["up_to_k", "exactly_k"])
     parser.add_argument("--lfcbm", action="store_true",
                         help="Also run LFCBM variant.")
     parser.add_argument("--force-setup", action="store_true")
@@ -846,9 +770,9 @@ def main(argv=None):
         raise ValueError(f"unknown stages: {sorted(unknown)}. Valid: {list(ROBOT_TEXT_STAGES)}")
 
     if args.config:
-        config = RobotTextBenchmarkConfig.from_yaml(args.config)
+        config = RobotBenchmarkConfig.from_yaml(args.config)
     else:
-        config = RobotTextBenchmarkConfig(seed=args.seed)
+        config = RobotBenchmarkConfig(data_type="text", seed=args.seed)
 
     if args.budgets:
         config.intervention_budgets = _parse_budgets(args.budgets)
@@ -857,7 +781,7 @@ def main(argv=None):
     if args.strategy:
         config.intervention_strategy = args.strategy
     if args.lfcbm:
-        config.lfcbm_enable = True
+        config.use_label_free_concepts = True
         if "lfcbm" not in args.stages:
             args.stages.append("lfcbm")
 

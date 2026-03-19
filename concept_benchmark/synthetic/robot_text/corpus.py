@@ -5,8 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from concept_benchmark.config import RobotBenchmarkConfig
 
 
 def load_jsonl(p: Path) -> list[dict]:
@@ -273,3 +277,39 @@ def core_vector_from_row(row: dict) -> np.ndarray:
         ],
         dtype=np.float32,
     )
+
+
+# ── Corpus path resolution ────────────────────────────────────────────
+
+
+def get_corpus_path(config: RobotBenchmarkConfig) -> Path:
+    """Resolve the corpus path based on difficulty setting."""
+    from concept_benchmark.paths import package_dir
+
+    if config.template_complexity == "high":
+        p = (
+            package_dir
+            / "synthetic"
+            / "helper"
+            / "static"
+            / "text_templates"
+            / "hard_corpus.jsonl"
+        )
+        if p.is_file():
+            return p
+    name = (
+        "templates.txt"
+        if config.template_complexity == "medium"
+        else "templates_simple.txt"
+    )
+    return package_dir / "synthetic" / "helper" / "static" / "text_templates" / name
+
+
+def get_generic_corpus_path(
+    config: RobotBenchmarkConfig,
+    corpus_path: Path,
+) -> Path | None:
+    """Resolve the generic corpus path for a given target concept."""
+    target = config.generic_text_concept.lower()
+    gen = corpus_path.with_name(f"hard_corpus_{target}_generic.jsonl")
+    return gen if gen.is_file() else None

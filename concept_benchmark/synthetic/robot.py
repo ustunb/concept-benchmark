@@ -125,7 +125,7 @@ def create_robot_text_dataset(
                 "secondary_color",
             )
         )
-        else "greyscale"
+        else "grayscale"
     )
 
     def _colors_for_row(r):
@@ -146,7 +146,7 @@ def create_robot_text_dataset(
         cms = (
             row.get(color_mode_col, None)
             if (include_color and color_mode_col in df.columns)
-            else (colorish(df) if include_color else "greyscale")
+            else (colorish(df) if include_color else "grayscale")
         )
         knees_b = tbool(row.get(knees_col, False))
         elbows_b = tbool(row.get(elbows_col, False))
@@ -178,7 +178,7 @@ def create_robot_text_dataset(
             "color_pair": color_pair if color_pair else "unknown",
             "color_left": c1 if c1 else "unknown",
             "color_right": c2 if c2 else "unknown",
-            "color_mode": "greyscale" if not include_color else str(cms),
+            "color_mode": "grayscale" if not include_color else str(cms),
         }
         fill["hand_shape"] = text_helper._synonym("hand_shape", fill["hand_shape"])
         fill["foot_shape"] = text_helper._synonym("foot_shape", fill["foot_shape"])
@@ -493,7 +493,7 @@ def create_robot_image_dataset(
 #         'model': "'glorp' if (int(row['body_shape']=='square') + int(row['foot_shape']=='pointy') - 2 >= 0) else 'drent'",
 #         'model_type': 'deterministic',  # 'deterministic', 'stochastic'
 #         'size': 'large',  # 'small', 'large'
-#         'color_mode': 'color',  # 'greyscale', 'color'
+#         'color_mode': 'color',  # 'grayscale', 'color'
 #     }
 #
 #     dataset = create_synthetic_dataset(**params)

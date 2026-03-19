@@ -69,14 +69,24 @@ A concept bottleneck model (CBM) first predicts interpretable *concepts* from in
 The robot benchmark classifies fictional robots — **Glorps** vs. **Drents** — from their body features:
 
 ```python
-from concept_benchmark import RobotDatasetGenerator
+from concept_benchmark import DatasetGenerator
 
-dataset = RobotDatasetGenerator(
-    seed=1014,                # reproducibility
-    subconcept=True,          # 12 fine-grained concepts (default: 7 coarse)
-    model_type="stochastic",  # probabilistic labeling (or "deterministic")
-    size="medium",            # image resolution: "small" (8px), "medium" (32px), "large" (600px)
-    draw=True,                # render robot images (default) — set False to skip for quick exploration
+dataset = DatasetGenerator(
+    "robot",
+    seed=1014,                       # reproducibility
+    concept_preset="foot_subtypes",  # 12 fine-grained concepts (default: "ground_truth" = 7)
+    use_stochastic_labels=True,      # probabilistic labeling (or False for deterministic)
+    image_size="medium",             # "small" (8px), "medium" (32px, default), or "large" (600px)
+    render_images=True,              # set False to skip image rendering for quick exploration
+    label_formula={                  # scoring rule for class assignment
+        "terms": {
+            "mouth_type": {"value": "closed", "weight": 5.0},
+            "foot_shape": {"value": "pointy", "weight": 8.0},
+            "has_knees":  {"value": "true",   "weight": -5.0},
+        },
+        "intercept": 2.0,
+        "temperature": 4.2,          # sigmoid temperature for stochastic labels
+    },
 ).generate()
 
 print(dataset.training.C.shape)   # (3800, 12) — concept annotations
@@ -110,7 +120,7 @@ Train a CBM — concept detector (images → concepts) and label predictor (conc
 
 ```python
 import numpy as np
-from concept_benchmark import RobotDatasetGenerator
+from concept_benchmark import DatasetGenerator
 from concept_benchmark.utils import set_deterministic_seed
 from experiments.models import (
     ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier,
@@ -122,7 +132,8 @@ patch_macos_dataloader()
 device = determine_device()
 loader_config = get_loader_config(device)
 
-dataset = RobotDatasetGenerator(seed=1014, subconcept=True, draw=True).generate()
+dataset = DatasetGenerator(
+    "robot", seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
 
 # Step 1: train concept detector (images → concepts)
 n_concepts = dataset.training.n_concepts
@@ -135,7 +146,7 @@ fe = FrontEndModel()
 fe.fit(dataset.training.C, dataset.training.y)
 
 # Step 3: combine into a CBM and evaluate
-cbm = ConceptBasedModel(concept_detector=cd, front_end_model=fe)
+cbm = ConceptBasedModel(concept_detector=cd, label_predictor=fe)
 predictions = cbm.predict(dataset.test)
 accuracy = np.mean(predictions == dataset.test.y)
 print(f"CBM accuracy: {accuracy:.4f}")
@@ -149,13 +160,14 @@ For a complete walkthrough including interventions and alignment, see `examples/
 The Sudoku benchmark determines whether a 9×9 board is valid. 27 concepts capture row, column, and block validity — a board is valid iff all 27 are true:
 
 ```python
-from concept_benchmark import SudokuDatasetGenerator
+from concept_benchmark import DatasetGenerator
 
-dataset = SudokuDatasetGenerator(
+dataset = DatasetGenerator(
+    "sudoku",
     seed=171,             # reproducibility
-    n_samples=1000,       # number of boards
-    max_corrupt=9,        # cells swapped in invalid boards (higher = subtler errors)
-    valid_ratio=0.5,      # fraction of valid boards
+    n_boards=1000,        # number of boards
+    max_cell_swaps=9,     # cells swapped in invalid boards (higher = subtler errors)
+    valid_board_ratio=0.5,  # fraction of valid boards
 ).generate()
 
 print(dataset.training.C.shape)   # (600, 27) — 27 concept annotations
@@ -185,7 +197,7 @@ For a complete walkthrough including selective classification and interventions,
 To reproduce the paper results — including all intervention regimes, alignment constraints, and selective classification — use the pipeline scripts (requires cloning the repo):
 
 ```bash
-python scripts/robot_pipeline.py --seed 1014 --subconcept   # see --help for all flags
+python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes   # see --help for all flags
 python scripts/sudoku_pipeline.py --seed 171
 ```
 
@@ -200,9 +212,10 @@ This guide shows how to evaluate your own concept bottleneck model on the benchm
 Generate a dataset and access it in the format your model expects:
 
 ```python
-from concept_benchmark import RobotDatasetGenerator
+from concept_benchmark import DatasetGenerator
 
-dataset = RobotDatasetGenerator(seed=1014, subconcept=True, draw=True).generate()
+dataset = DatasetGenerator(
+    "robot", seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
 train, val, test = dataset.training, dataset.validation, dataset.test
 ```
 
@@ -312,7 +325,7 @@ from experiments.models import ConceptBasedModel
 
 cbm = ConceptBasedModel(
     concept_detector=MyConceptDetector(my_concept_model),
-    front_end_model=MyFrontEnd(my_classifier),
+    label_predictor=MyFrontEnd(my_classifier),
 )
 
 predictions = cbm.predict(test)
@@ -326,7 +339,7 @@ For running interventions and alignment on your model, see the [Evaluation](#eva
 
 ### Robot Classification
 
-This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot — **Glorp** or **Drent** — from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The default labeling rule is: Glorp if mouth is closed, foot is pointy, and robot has knees (all three); Drent otherwise. The labeling function can be deterministic or stochastic (probabilistic), controlled via the `model_type` parameter. Which features matter and which are excluded (via `drop_concepts`) are configurable, mimicking real-world settings where the true relationship between features and labels is unknown. Available as image and text modalities.
+This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot — **Glorp** or **Drent** — from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The default labeling rule is: Glorp if mouth is closed, foot is pointy, and robot has knees (all three); Drent otherwise. The labeling function can be deterministic or stochastic (probabilistic), controlled via the `labeling_mode` parameter. Which features matter and which are excluded (via `drop_concepts`) are configurable, mimicking real-world settings where the true relationship between features and labels is unknown. Available as image and text modalities.
 
 <p align="center">
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
@@ -334,28 +347,32 @@ This benchmark targets decision-support settings where a human uses the model's 
 
 #### Parameters
 
-All parameters can be passed to `RobotDatasetGenerator()` or as CLI flags to `robot_pipeline.py`:
+All parameters can be passed to `DatasetGenerator(
+    "robot",)` or as CLI flags to `robot_pipeline.py`:
 
 ```python
-from concept_benchmark import RobotDatasetGenerator
+from concept_benchmark import DatasetGenerator
 
-dataset = RobotDatasetGenerator(
-    seed=1014,                # random seed (default: 1014 for image, 1337 for text)
-    data_type="image",        # "image" (render PNGs) or "text" (generate descriptions)
-    subconcept=True,          # True: 12 fine-grained concepts; False: 7 coarse (default)
-    model_type="stochastic",  # "stochastic" (probabilistic) or "deterministic" (threshold)
-    model_scalar=4.2,         # sigmoid temperature for stochastic labeling
-    size="medium",            # image resolution: "small" (8px), "medium" (32px), "large" (600px)
-    color_mode="color",       # "color" or "grayscale" (image only)
-    samples_per_instance=4,   # images per unique robot config (total = configs × this)
-    concept_missing=0.0,      # fraction of concept labels masked during training
-    concept_missing_mech="none",  # missingness mechanism: "none", "mcar", or "mnar"
-    # label_formula: scoring rule for class assignment (see config.py for default)
-    # drop_concepts: which features to exclude (preset via subconcept flag)
-    # skew_specs: class-balance constraints for training data (see config.py)
-    # --- text-only ---
-    # difficulty="hard"       # corpus difficulty
-    # generic_rate=0.7        # fraction of test set using concept-ambiguous text
+dataset = DatasetGenerator(
+    "robot",
+    seed=1014,                       # random seed (default: 1014 for image, 1337 for text)
+    concept_preset="foot_subtypes",  # "foot_subtypes": 12 fine-grained; "ground_truth": 7 (default)
+    use_stochastic_labels=True,      # True (probabilistic) or False (deterministic threshold)
+    image_size="medium",             # "small" (8px), "medium" (32px, default), or "large" (600px)
+    color_mode="color",              # "color" or "grayscale" (image only)
+    renders_per_robot=4,             # images per unique robot config (total = configs × this)
+    missing_fraction=0.0,            # fraction of concept labels masked during training
+    missing_mechanism="mcar",        # missingness mechanism: "mcar" or "mnar"
+    label_formula={                  # scoring rule for class assignment
+        "terms": {
+            "mouth_type": {"value": "closed", "weight": 5.0},
+            "foot_shape": {"value": "pointy", "weight": 8.0},
+            "has_knees":  {"value": "true",   "weight": -5.0},
+        },
+        "intercept": 2.0,
+        "temperature": 4.2,
+    },
+    # excluded_concepts: which features to exclude (preset via concept_preset)
 ).generate()
 ```
 
@@ -364,7 +381,7 @@ dataset = RobotDatasetGenerator(
 To train models and run the full evaluation (interventions, alignment, etc.) without writing Python, use the pipeline script:
 
 ```bash
-python scripts/robot_pipeline.py --seed 1014 --subconcept
+python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes
 ```
 
 Run `python scripts/robot_pipeline.py --help` for the full list of options.
@@ -379,20 +396,20 @@ This benchmark targets automation settings where the system handles routine case
 
 #### Parameters
 
-All parameters can be passed to `SudokuDatasetGenerator()` or as CLI flags to `sudoku_pipeline.py`:
+All parameters can be passed to `DatasetGenerator("sudoku", ...)` or as CLI flags to `sudoku_pipeline.py`:
 
 ```python
-from concept_benchmark import SudokuDatasetGenerator
+from concept_benchmark import DatasetGenerator
 
-dataset = SudokuDatasetGenerator(
-    seed=171,             # random seed
-    n_samples=1000,       # number of boards to generate
-    max_corrupt=9,        # cells swapped in invalid boards (higher = subtler errors)
-    valid_ratio=0.5,      # fraction of valid boards
-    data_type="image",    # "image" (OCR-inferred digits) or "tabular" (ground-truth values)
-    handwriting=True,     # render digits in handwritten style (image only)
-    target_accuracy=0.9,  # minimum accuracy on kept predictions (selective classification)
-    # intervention_thresholds=[0.2, 0.4, 0.6, 0.8]  # concept confidence thresholds
+dataset = DatasetGenerator(
+    "sudoku",
+    seed=171,                # random seed
+    n_boards=1000,           # number of boards to generate
+    max_cell_swaps=9,        # cells swapped in invalid boards (higher = subtler errors)
+    valid_board_ratio=0.5,   # fraction of valid boards
+    data_type="image",       # "image" (renders board PNGs) or "tabular" (ground-truth values)
+    font_style="handwritten",  # "handwritten" or "printed" (image only)
+    # target_accuracy=0.9    # minimum accuracy (selective classification, pipeline only)
 ).generate()
 ```
 
@@ -463,7 +480,7 @@ from experiments.intervention import ConceptInterventionRunner, InterventionConf
 from experiments.kflip import KFlipInterventionStrategy
 
 # Combine detector and label predictor into a CBM
-cbm = ConceptBasedModel(concept_detector=cd, front_end_model=fe)
+cbm = ConceptBasedModel(concept_detector=cd, label_predictor=fe)
 
 # Configure the intervention
 config = InterventionConfig(
@@ -600,7 +617,7 @@ The package supports six intervention regimes that simulate different real-world
 Run regimes via the pipeline script:
 
 ```bash
-python scripts/robot_pipeline.py --seed 1014 --subconcept \
+python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
     --regimes baseline expert subjective machine
 ```
 
@@ -629,7 +646,7 @@ After training a `ConceptBasedModel`, use `run_alignment()` to retrain the front
 from experiments.utils import run_alignment
 
 results = run_alignment(
-    cbm=cbm,
+    concept_based_model=cbm,
     train_dataset=train,
     test_dataset=test,
     monotonicity_constraints={"has_knees": 1},  # force positive weight

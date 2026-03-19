@@ -133,11 +133,11 @@ class ConceptDataset:
         Transformation applied to concepts in ``__getitem__``.
     target_transform : callable, optional
         Transformation applied to labels in ``__getitem__``.
-    concept_noise : bool, optional
+    has_concept_noise : bool, optional
         Whether concept noise is enabled by default (default ``False``).
-    concept_missing : bool, optional
+    has_concept_missing : bool, optional
         Whether concept missingness is enabled by default (default ``False``).
-    label_noise : bool, optional
+    has_label_noise : bool, optional
         Whether label noise is enabled by default (default ``False``).
     **kwargs
         Extra keyword arguments forwarded to the underlying
@@ -163,19 +163,19 @@ class ConceptDataset:
         transform: Callable | None = None,
         concept_transform: Callable | None = None,
         target_transform: Callable | None = None,
-        concept_noise: bool = False,
-        concept_missing: bool = False,
-        label_noise: bool = False,
+        has_concept_noise: bool = False,
+        has_concept_missing: bool = False,
+        has_label_noise: bool = False,
         **kwargs,
     ) -> None:
         self._init_kwargs = dict(kwargs)
-        self._concept_noise = bool(concept_noise)
-        self._concept_missing = bool(concept_missing)
-        self._label_noise = bool(label_noise)
+        self._has_concept_noise = bool(has_concept_noise)
+        self._has_concept_missing = bool(has_concept_missing)
+        self._has_label_noise = bool(has_label_noise)
         self._init_kwargs.update(
-            concept_noise=self._concept_noise,
-            concept_missing=self._concept_missing,
-            label_noise=self._label_noise,
+            has_concept_noise=self._has_concept_noise,
+            has_concept_missing=self._has_concept_missing,
+            has_label_noise=self._has_label_noise,
         )
 
         if not isinstance(X, np.ndarray):
@@ -218,9 +218,9 @@ class ConceptDataset:
             transform=transform,
             concept_transform=concept_transform,
             target_transform=target_transform,
-            concept_noise=self._concept_noise,
-            concept_missing=self._concept_missing,
-            label_noise=self._label_noise,
+            has_concept_noise=self._has_concept_noise,
+            has_concept_missing=self._has_concept_missing,
+            has_label_noise=self._has_label_noise,
             **kwargs,
         )
 
@@ -293,9 +293,9 @@ class ConceptDataset:
 
     def _apply_noise_settings(self):
         for sample in self._iter_samples():
-            sample.concept_noise = self._concept_noise
-            sample.concept_missing = self._concept_missing
-            sample.label_noise = self._label_noise
+            sample.has_concept_noise = self._has_concept_noise
+            sample.has_concept_missing = self._has_concept_missing
+            sample.has_label_noise = self._has_label_noise
 
     # -- Dict-style split access --
 
@@ -418,9 +418,9 @@ class ConceptDataset:
             cvindices=self._cvindices,
             **self._init_kwargs,
         )
-        cpy.concept_noise = self.concept_noise
-        cpy.concept_missing = self.concept_missing
-        cpy.label_noise = self.label_noise
+        cpy.has_concept_noise = self.has_concept_noise
+        cpy.has_concept_missing = self.has_concept_missing
+        cpy.has_label_noise = self.has_label_noise
 
         return cpy
 
@@ -498,33 +498,33 @@ class ConceptDataset:
         self._full.target_transform = target_transform
 
     @property
-    def concept_noise(self) -> bool:
+    def has_concept_noise(self) -> bool:
         """Whether concept noise is applied when reading *C*."""
-        return self._concept_noise
+        return self._has_concept_noise
 
-    @concept_noise.setter
-    def concept_noise(self, value: bool) -> None:
-        self._concept_noise = bool(value)
+    @has_concept_noise.setter
+    def has_concept_noise(self, value: bool) -> None:
+        self._has_concept_noise = bool(value)
         self._apply_noise_settings()
 
     @property
-    def concept_missing(self) -> bool:
+    def has_concept_missing(self) -> bool:
         """Whether concept missingness is applied when reading *C*."""
-        return self._concept_missing
+        return self._has_concept_missing
 
-    @concept_missing.setter
-    def concept_missing(self, value: bool) -> None:
-        self._concept_missing = bool(value)
+    @has_concept_missing.setter
+    def has_concept_missing(self, value: bool) -> None:
+        self._has_concept_missing = bool(value)
         self._apply_noise_settings()
 
     @property
-    def label_noise(self) -> bool:
+    def has_label_noise(self) -> bool:
         """Whether label noise is applied when reading *y*."""
-        return self._label_noise
+        return self._has_label_noise
 
-    @label_noise.setter
-    def label_noise(self, value: bool) -> None:
-        self._label_noise = bool(value)
+    @has_label_noise.setter
+    def has_label_noise(self, value: bool) -> None:
+        self._has_label_noise = bool(value)
         self._apply_noise_settings()
 
     #### cross validation ####
@@ -737,7 +737,7 @@ class ConceptDataset:
         fill_value : float
             Value used to replace missing concepts (default ``NaN``).
         enable : bool, optional
-            If provided, sets :attr:`concept_missing` after sampling.
+            If provided, sets :attr:`has_concept_missing` after sampling.
 
         Returns
         -------
@@ -753,7 +753,7 @@ class ConceptDataset:
         rng_generated = coerce_rng(rng)
 
         if enable is not None:
-            self.concept_missing = bool(enable)
+            self.has_concept_missing = bool(enable)
 
         masks: dict[str, np.ndarray] = {}
         splits = {
@@ -807,7 +807,7 @@ class ConceptDataset:
             - ``prob_matrix``: full flip-probability matrix overriding the
               above options.
         enable : bool, optional
-            If provided, sets :attr:`concept_noise` after sampling.
+            If provided, sets :attr:`has_concept_noise` after sampling.
 
         Returns
         -------
@@ -816,7 +816,7 @@ class ConceptDataset:
         """
 
         if enable is not None:
-            self.concept_noise = bool(enable)
+            self.has_concept_noise = bool(enable)
 
         rng_generated = coerce_rng(rng)
         masks: dict[str, np.ndarray] = {}
@@ -864,7 +864,7 @@ class ConceptDataset:
         label_noise_config : dict, optional
             Fine-grained noise configuration forwarded to the sampler.
         enable : bool, optional
-            If provided, sets :attr:`label_noise` after sampling.
+            If provided, sets :attr:`has_label_noise` after sampling.
 
         Returns
         -------
@@ -873,7 +873,7 @@ class ConceptDataset:
         """
 
         if enable is not None:
-            self.label_noise = bool(enable)
+            self.has_label_noise = bool(enable)
 
         rng_generated = coerce_rng(rng)
 
@@ -942,11 +942,11 @@ class ConceptDatasetSample(Dataset):
         Concept transform applied in ``__getitem__``.
     target_transform : callable, optional
         Target transform applied in ``__getitem__``.
-    concept_noise : bool
+    has_concept_noise : bool
         Whether to apply the concept noise mask (default ``False``).
-    concept_missing : bool
+    has_concept_missing : bool
         Whether to apply the concept missingness mask (default ``False``).
-    label_noise : bool
+    has_label_noise : bool
         Whether to return noisy labels (default ``False``).
     **kwargs
         Extra keyword arguments stored for :meth:`filter` round-tripping.
@@ -964,9 +964,9 @@ class ConceptDatasetSample(Dataset):
         transform: Callable | None = None,
         concept_transform: Callable | None = None,
         target_transform: Callable | None = None,
-        concept_noise: bool = False,
-        concept_missing: bool = False,
-        label_noise: bool = False,
+        has_concept_noise: bool = False,
+        has_concept_missing: bool = False,
+        has_label_noise: bool = False,
         **kwargs,
     ) -> None:
         if not {"classes", "concepts", "data_type"}.issubset(meta.keys()):
@@ -985,7 +985,7 @@ class ConceptDatasetSample(Dataset):
         self._label_noise_labels: np.ndarray | None = None
         self._meta = meta
         self.classes, self.concepts = meta["classes"], meta["concepts"]
-        self.task = meta["data_type"]
+        self.data_type = meta["data_type"]
 
         self._C_base = np.asarray(C, dtype=np.int8)
         self.n = len(self._X)
@@ -1002,11 +1002,25 @@ class ConceptDatasetSample(Dataset):
         self._concept_noise_mask: np.ndarray | None = None
         self._concept_missing_mask: np.ndarray | None = None
         self._concept_missing_fill_value: float = np.nan
-        self._concept_noise_enabled = bool(concept_noise)
-        self._concept_missing_enabled = bool(concept_missing)
-        self._label_noise_enabled = bool(label_noise)
+        self._has_concept_noise = bool(has_concept_noise)
+        self._has_concept_missing = bool(has_concept_missing)
+        self._has_label_noise = bool(has_label_noise)
 
         assert self.__check_rep__()
+
+    def __setstate__(self, state: dict) -> None:
+        """Support unpickling objects saved with old attribute names."""
+        renames = {
+            "_concept_noise_enabled": "_has_concept_noise",
+            "_concept_missing_enabled": "_has_concept_missing",
+            "_label_noise_enabled": "_has_label_noise",
+        }
+        for old, new in renames.items():
+            if old in state and new not in state:
+                state[new] = state.pop(old)
+        if "task" in state and "data_type" not in state:
+            state["data_type"] = state.pop("task")
+        self.__dict__.update(state)
 
     @property
     def meta(self) -> dict:
@@ -1021,7 +1035,7 @@ class ConceptDatasetSample(Dataset):
             )
         self._meta = value
         self.classes, self.concepts = value["classes"], value["concepts"]
-        self.task = value["data_type"]
+        self.data_type = value["data_type"]
 
     @property
     def X(self) -> np.ndarray:
@@ -1036,9 +1050,7 @@ class ConceptDatasetSample(Dataset):
     @property
     def y(self) -> np.ndarray:
         """Label vector, with label noise applied when enabled."""
-        apply_noise = self._label_noise_enabled and (
-            self._label_noise_labels is not None
-        )
+        apply_noise = self._has_label_noise and (self._label_noise_labels is not None)
         return self._label_noise_labels if apply_noise else self._y_base
 
     @y.setter
@@ -1059,8 +1071,8 @@ class ConceptDatasetSample(Dataset):
         missing_mask = self._concept_missing_mask
         fill_value = self._concept_missing_fill_value
 
-        apply_noise = self._concept_noise_enabled and (noise_mask is not None)
-        apply_missing = self._concept_missing_enabled and (missing_mask is not None)
+        apply_noise = self._has_concept_noise and (noise_mask is not None)
+        apply_missing = self._has_concept_missing and (missing_mask is not None)
 
         if not apply_noise and not apply_missing:
             return base
@@ -1154,31 +1166,31 @@ class ConceptDatasetSample(Dataset):
         return self._concept_missing_fill_value
 
     @property
-    def concept_noise(self) -> bool:
+    def has_concept_noise(self) -> bool:
         """Whether concept noise is applied when reading :attr:`C`."""
-        return self._concept_noise_enabled
+        return self._has_concept_noise
 
-    @concept_noise.setter
-    def concept_noise(self, value: bool) -> None:
-        self._concept_noise_enabled = bool(value)
+    @has_concept_noise.setter
+    def has_concept_noise(self, value: bool) -> None:
+        self._has_concept_noise = bool(value)
 
     @property
-    def concept_missing(self) -> bool:
+    def has_concept_missing(self) -> bool:
         """Whether concept missingness is applied when reading :attr:`C`."""
-        return self._concept_missing_enabled
+        return self._has_concept_missing
 
-    @concept_missing.setter
-    def concept_missing(self, value: bool) -> None:
-        self._concept_missing_enabled = bool(value)
+    @has_concept_missing.setter
+    def has_concept_missing(self, value: bool) -> None:
+        self._has_concept_missing = bool(value)
 
     @property
-    def label_noise(self) -> bool:
+    def has_label_noise(self) -> bool:
         """Whether label noise is applied when reading :attr:`y`."""
-        return self._label_noise_enabled
+        return self._has_label_noise
 
-    @label_noise.setter
-    def label_noise(self, value: bool) -> None:
-        self._label_noise_enabled = bool(value)
+    @has_label_noise.setter
+    def has_label_noise(self, value: bool) -> None:
+        self._has_label_noise = bool(value)
 
     def set_label_noise_labels(self, labels: np.ndarray | None) -> None:
         """Set (or clear) the noisy label vector.
@@ -1304,9 +1316,9 @@ class ConceptDatasetSample(Dataset):
             y=self.base_labels[indices],
             meta=filtered_meta,
             indices=indices,
-            concept_noise=self.concept_noise,
-            concept_missing=self.concept_missing,
-            label_noise=self.label_noise,
+            has_concept_noise=self.has_concept_noise,
+            has_concept_missing=self.has_concept_missing,
+            has_label_noise=self.has_label_noise,
             transform=self.transform,
             concept_transform=self.concept_transform,
             target_transform=self.target_transform,
@@ -1468,9 +1480,9 @@ class ConceptDatasetSample(Dataset):
             y=self.base_labels,
             meta=embed_meta,
             indices=self.indices,
-            concept_noise=self.concept_noise,
-            concept_missing=self.concept_missing,
-            label_noise=self.label_noise,
+            has_concept_noise=self.has_concept_noise,
+            has_concept_missing=self.has_concept_missing,
+            has_label_noise=self.has_label_noise,
         )
         if self.concept_noise_mask is not None:
             new_sample.set_concept_noise_mask(self.concept_noise_mask.copy())
@@ -1646,9 +1658,9 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             y=self.base_labels[indices],
             meta=filtered_meta,
             indices=indices,
-            concept_noise=self.concept_noise,
-            concept_missing=self.concept_missing,
-            label_noise=self.label_noise,
+            has_concept_noise=self.has_concept_noise,
+            has_concept_missing=self.has_concept_missing,
+            has_label_noise=self.has_label_noise,
             preprocess=self.preprocess,
             transform=self.transform,
             concept_transform=self.concept_transform,

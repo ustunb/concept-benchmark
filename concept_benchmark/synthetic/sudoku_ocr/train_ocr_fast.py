@@ -225,9 +225,9 @@ def main():
     ap = argparse.ArgumentParser(
         description="Train TinyResNet on Sudoku OCR sidecar (demo)."
     )
-    ap.add_argument("--n", type=int, default=defaults.n)
-    ap.add_argument("--n-samples", type=int, default=defaults.n_samples)
-    ap.add_argument("--max-corrupt", type=int, default=defaults.max_corrupt)
+    ap.add_argument("--n", type=int, default=defaults.block_size)
+    ap.add_argument("--n-samples", type=int, default=defaults.n_boards)
+    ap.add_argument("--max-corrupt", type=int, default=defaults.max_cell_swaps)
     ap.add_argument("--seed", type=int, default=defaults.seed)
     ap.add_argument("--epochs", type=int, default=2)
     ap.add_argument("--batch-size", type=int, default=256)
@@ -257,9 +257,9 @@ def main():
     args, _ = ap.parse_known_args()
     set_deterministic_seed(args.seed)
     cfg = SudokuBenchmarkConfig(
-        n=args.n,
-        n_samples=args.n_samples,
-        max_corrupt=args.max_corrupt,
+        block_size=args.n,
+        n_boards=args.n_samples,
+        max_cell_swaps=args.max_corrupt,
         seed=args.seed,
     )
 

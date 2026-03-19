@@ -193,7 +193,7 @@ def train_dnn(
 
 
 def run_alignment(
-    cbm,
+    concept_based_model,
     train_dataset,
     test_dataset,
     monotonicity_constraints: Dict[str, int],
@@ -203,7 +203,7 @@ def run_alignment(
 
     Parameters
     ----------
-    cbm : ConceptBasedModel
+    concept_based_model : ConceptBasedModel
         Trained ConceptBasedModel.
     train_dataset : ConceptDatasetSample
         Training split (for retraining the frontend).
@@ -226,16 +226,16 @@ def run_alignment(
     # Use ground-truth concepts for training (matching the paper where both
     # original and aligned frontends are trained on GT labels).
     # Test uses predicted concepts (binarised at 0.5, matching cbm.predict()).
-    h_train = train_dataset.C.astype(np.float32)
-    h_test = (cbm.concept_detector.predict(test_dataset) > 0.5).astype(np.float32)
+    concept_preds_train = train_dataset.C.astype(np.float32)
+    concept_preds_test = (concept_based_model.concept_detector.predict(test_dataset) > 0.5).astype(np.float32)
 
     stats = retrain_aligned(
-        h_train=h_train,
+        concept_preds_train=concept_preds_train,
         y_train=train_dataset.y.astype(int),
-        h_test=h_test,
+        concept_preds_test=concept_preds_test,
         y_test=test_dataset.y.astype(int),
         concept_names=list(test_dataset.concepts),
-        original_frontend=cbm.front_end_model,
+        original_frontend=concept_based_model.label_predictor,
         monotonicity_constraints=monotonicity_constraints,
     )
 

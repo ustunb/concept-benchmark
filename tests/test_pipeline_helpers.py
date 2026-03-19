@@ -12,7 +12,7 @@ class TestInterventionSettings:
 
         s = InterventionSettings(seed=42, budgets=[1, 3])
         assert s.intervention_accuracy == 0.9
-        assert s.intervention_strategy == "kflip"
+        assert s.intervention_strategy == "up_to_k"
         assert s.intervention_threshold == 1.0
         assert s.intervention_expert == ""
         assert s.intervention_llm is None
@@ -25,7 +25,7 @@ class TestInterventionSettings:
             budgets=[1, 2, 5],
             intervention_accuracy=0.8,
             intervention_threshold=0.5,
-            intervention_strategy="exact_k",
+            intervention_strategy="exactly_k",
             intervention_expert="llm",
             intervention_llm={"provider": "gemini"},
             run_dir="/tmp/test",
@@ -33,7 +33,7 @@ class TestInterventionSettings:
         assert s.seed == 1
         assert s.budgets == [1, 2, 5]
         assert s.intervention_accuracy == 0.8
-        assert s.intervention_strategy == "exact_k"
+        assert s.intervention_strategy == "exactly_k"
 
 
 class TestFEOnProbs:

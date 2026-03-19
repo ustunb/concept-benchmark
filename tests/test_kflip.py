@@ -21,7 +21,7 @@ def _make_model(k=4, seed=42):
     y = rng.integers(0, 2, size=50).astype(np.int32)
     fe = FrontEndModel()
     fe.fit(C, y)
-    return ConceptBasedModel(front_end_model=fe)
+    return ConceptBasedModel(label_predictor=fe)
 
 
 def _make_batch(n=10, k=4, seed=0):
@@ -122,7 +122,7 @@ class TestKFlip:
         p_fast = strat_fast.propose(model, batch, config)
 
         # General path (disable fast path)
-        model.front_end_model._kflip_fast_path = False
+        model.label_predictor._kflip_fast_path = False
         config2 = InterventionConfig(
             max_concepts_per_instance=1,
             score_threshold=0.1,
@@ -147,7 +147,7 @@ class TestKFlip:
             score_threshold=0.0,
             random_state=0,
         )
-        strat = KFlipInterventionStrategy(exact_k=True)
+        strat = KFlipInterventionStrategy(use_exact_k=True)
         proposal = strat.propose(model, batch, config)
         # Every intervened row should have exactly 2 concepts (or 0 if not selected)
         per_row = proposal.mask.sum(axis=1)
@@ -162,10 +162,10 @@ class TestKFlip:
             score_threshold=0.0,
             random_state=0,
         )
-        strat = KFlipInterventionStrategy(exact_k=False)
+        strat = KFlipInterventionStrategy(use_exact_k=False)
         proposal = strat.propose(model, batch, config)
         per_row = proposal.mask.sum(axis=1)
-        # With exact_k=False, subsets of size 1..k are allowed
+        # With use_exact_k=False, subsets of size 1..k are allowed
         assert np.all(per_row <= 3)
 
     def test_limit_subsets(self):

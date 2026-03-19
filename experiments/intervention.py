@@ -78,18 +78,19 @@ class InterventionConfig:
 
     * **KFlipInterventionStrategy** — ``max_concepts_per_instance`` (the *k*
       budget) and ``score_threshold`` (minimum flip probability).
-    * **ConceptualSafeguardsStrategy** — ``tau`` (abstention margin),
+    * **ConceptualSafeguardsStrategy** — ``abstention_threshold`` (abstention margin),
       ``concept_order``, and budget fields.
     * **OrderedCBMStrategy** — ``concept_order`` (or learns one via
-      ``prepare``), budget fields, and ``tau`` when
+      ``prepare``), budget fields, and ``abstention_threshold`` when
       ``select_only_abstained`` is set.
     * **RandomInterventionStrategy** — budget fields and
-      ``per_instance_ordering``.
+      ``use_per_instance_ordering``.
 
     Attributes:
-        tau: Confidence margin used by conceptual safeguards to detect
-            abstentions.  Interventions trigger when the predicted class
-            confidence lies within ``[tau, 1 - tau]``.
+        abstention_threshold: Confidence margin used by conceptual safeguards
+            to detect abstentions.  Interventions trigger when the predicted
+            class confidence lies within
+            ``[abstention_threshold, 1 - abstention_threshold]``.
         concept_budget: Maximum number of concept corrections allowed across
             the entire batch.  Integers are treated as counts; floats in
             ``(0, 1]`` are interpreted as fractions of all possible
@@ -110,9 +111,9 @@ class InterventionConfig:
             than deterministic.
         select_only_abstained: When ``True``, strategies should restrict
             themselves to instances that the current downstream model flags as
-            abstentions (based on ``tau``).  Strategies may choose to ignore
-            this flag when abstention logic is not applicable.
-        per_instance_ordering: Controls whether strategies should generate
+            abstentions (based on ``abstention_threshold``).  Strategies may
+            choose to ignore this flag when abstention logic is not applicable.
+        use_per_instance_ordering: Controls whether strategies should generate
             independent concept orders per instance (``True``) or apply a single
             shared order across the batch (``False``).
         allow_repeated: Permit multiple interventions on the same concept within
@@ -121,11 +122,11 @@ class InterventionConfig:
         score_threshold: Minimum score required for an instance to be considered
             for intervention.  Used by KFlip (flip probability) and
             ScoreIntervention.
-        noise: Fraction of concept ground-truth values to flip before
-            overwriting, simulating noisy interventions.
+        intervention_noise_rate: Fraction of concept ground-truth values to
+            flip before overwriting, simulating noisy interventions.
     """
 
-    tau: Optional[float] = None
+    abstention_threshold: Optional[float] = None
     concept_budget: Optional[float] = None
     instance_budget: Optional[float] = None
     max_concepts_per_instance: Optional[int] = None
@@ -133,15 +134,15 @@ class InterventionConfig:
     concept_order: Optional[Sequence[int]] = None
     shuffle_candidates: bool = False
     select_only_abstained: bool = False
-    per_instance_ordering: bool = True
+    use_per_instance_ordering: bool = True
     allow_repeated: bool = False
     score_threshold: float = 0.2
-    noise: float = 0.0
+    intervention_noise_rate: float = 0.0
     _rng: np.random.Generator = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if self.tau is not None and not (0.0 <= self.tau <= 0.5):
-            raise ValueError("tau must lie within [0, 0.5].")
+        if self.abstention_threshold is not None and not (0.0 <= self.abstention_threshold <= 0.5):
+            raise ValueError("abstention_threshold must lie within [0, 0.5].")
         if not (0.0 <= self.score_threshold <= 1.0):
             raise ValueError("score_threshold must lie within [0, 1].")
         self._rng = np.random.default_rng(self.random_state)
@@ -196,7 +197,7 @@ class InterventionResult:
     y_prob_after: np.ndarray
     y_pred_after: np.ndarray
     proposal: StrategyProposal
-    strat_metrics: Dict[str, Any]
+    strategy_metrics: Dict[str, Any]
 
 
 class InterventionStrategy:
@@ -315,15 +316,15 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
         batch: InterventionBatch,
         config: InterventionConfig,
     ) -> StrategyProposal:
-        if config.tau is None:
+        if config.abstention_threshold is None:
             raise InterventionError(
-                "Conceptual safeguards require tau to be specified in the config."
+                "Conceptual safeguards require abstention_threshold to be specified in the config."
             )
 
         y_prob = model._propagate_predict_proba_mc(batch.C_pred)
         predicted = np.argmax(y_prob, axis=1)
         confidences = y_prob[np.arange(batch.n_samples), predicted]
-        abstain_mask = (confidences >= config.tau) & (confidences <= 1.0 - config.tau)
+        abstain_mask = (confidences >= config.abstention_threshold) & (confidences <= 1.0 - config.abstention_threshold)
 
         non_abstained = ~abstain_mask
         selective_acc_before = (
@@ -380,7 +381,7 @@ class OrderedCBMStrategy(InterventionStrategy):
             )
 
         n_samples, n_concepts = batch.C_pred.shape
-        y_prob_orig = model.front_end_model.predict_proba(batch.C_pred)
+        y_prob_orig = model.label_predictor.predict_proba(batch.C_pred)
         y_pred_orig = np.argmax(y_prob_orig, axis=1)
         y_error_orig = (y_pred_orig != batch.y_true).astype(int)
 
@@ -388,7 +389,7 @@ class OrderedCBMStrategy(InterventionStrategy):
         for concept_idx in range(n_concepts):
             C_intervened = batch.C_pred.copy()
             C_intervened[:, concept_idx] = batch.C_true[:, concept_idx]
-            y_prob_tti = model.front_end_model.predict_proba(C_intervened)
+            y_prob_tti = model.label_predictor.predict_proba(C_intervened)
             y_pred_tti = np.argmax(y_prob_tti, axis=1)
             y_error_tti = (y_pred_tti != batch.y_true).astype(int)
             error_deltas[:, concept_idx] = y_error_tti - y_error_orig
@@ -415,12 +416,12 @@ class OrderedCBMStrategy(InterventionStrategy):
                 )
             order = np.asarray(self.state["ordering"])
 
-        if config.select_only_abstained and config.tau is not None:
-            y_prob = model.front_end_model.predict_proba(batch.C_pred)
+        if config.select_only_abstained and config.abstention_threshold is not None:
+            y_prob = model.label_predictor.predict_proba(batch.C_pred)
             predicted = np.argmax(y_prob, axis=1)
             confidences = y_prob[np.arange(batch.n_samples), predicted]
-            abstain_mask = (confidences >= config.tau) & (
-                confidences <= 1.0 - config.tau
+            abstain_mask = (confidences >= config.abstention_threshold) & (
+                confidences <= 1.0 - config.abstention_threshold
             )
             candidate_ids = np.nonzero(abstain_mask)[0]
         else:
@@ -453,12 +454,12 @@ class RandomInterventionStrategy(InterventionStrategy):
         batch: InterventionBatch,
         config: InterventionConfig,
     ) -> StrategyProposal:
-        if config.select_only_abstained and config.tau is not None:
-            y_prob = model.front_end_model.predict_proba(batch.C_pred)
+        if config.select_only_abstained and config.abstention_threshold is not None:
+            y_prob = model.label_predictor.predict_proba(batch.C_pred)
             predicted = np.argmax(y_prob, axis=1)
             confidences = y_prob[np.arange(batch.n_samples), predicted]
-            abstain_mask = (confidences >= config.tau) & (
-                confidences <= 1.0 - config.tau
+            abstain_mask = (confidences >= config.abstention_threshold) & (
+                confidences <= 1.0 - config.abstention_threshold
             )
             candidate_ids = np.nonzero(abstain_mask)[0]
         else:
@@ -476,7 +477,7 @@ class RandomInterventionStrategy(InterventionStrategy):
         total_limit = config.resolve_concept_budget(mask.size)
         total_applied = 0
 
-        if config.per_instance_ordering:
+        if config.use_per_instance_ordering:
             for idx in selected:
                 order = config.rng.permutation(n_concepts)
                 total_applied = self._apply_ordering(
@@ -521,7 +522,7 @@ class ScoreIntervention(InterventionStrategy):
         mask = np.zeros_like(batch.C_pred, dtype=bool)
 
         concepts_before = (batch.C_pred >= 0.5).astype(int)
-        p_before = model.front_end_model.predict_proba(concepts_before)
+        p_before = model.label_predictor.predict_proba(concepts_before)
         y_pred_before = np.argmax(p_before, axis=1)
 
         scores = np.zeros(n_samples, dtype=float)
@@ -556,7 +557,7 @@ class ScoreIntervention(InterventionStrategy):
         ):
             all_flipped = concepts_before.copy()
             all_flipped[:, combo_indices] = 1 - all_flipped[:, combo_indices]
-            p_after = model.front_end_model.predict_proba(all_flipped)
+            p_after = model.label_predictor.predict_proba(all_flipped)
             scores_combo = np.max(np.abs(p_after - p_before), axis=1)
             improve = scores_combo > scores
             scores[improve] = scores_combo[improve]
@@ -659,7 +660,7 @@ class ScoreIntervention(InterventionStrategy):
         overwrite_mask = mask & ~np.isnan(batch.C_true)
         C_intervened = np.where(overwrite_mask, batch.C_true, batch.C_pred)
         concepts_after = (C_intervened >= 0.5).astype(int)
-        p_after = model.front_end_model.predict_proba(concepts_after)
+        p_after = model.label_predictor.predict_proba(concepts_after)
         y_pred_after = np.argmax(p_after, axis=1)
 
         overall_acc_after: Optional[float] = None
@@ -738,8 +739,9 @@ class ConceptInterventionRunner:
         instance_ids: Optional[np.ndarray] = None,
     ) -> InterventionResult:
 
-        # NOTE: config.noise is not consumed here — intervention noise is applied
-        # post-hoc by the pipeline (see _test_interventions in robot_pipeline.py).
+        # NOTE: config.intervention_noise_rate is not consumed here — intervention
+        # noise is applied post-hoc by the pipeline (see _test_interventions in
+        # robot_pipeline.py).
         if concept_true is None:
             concept_true = dataset.base_concepts
 
@@ -766,7 +768,7 @@ class ConceptInterventionRunner:
             predict_proba_fn = self.model._propagate_predict_proba_mc
             concepts_before = batch.C_pred
         else:
-            predict_proba_fn = self.model.front_end_model.predict_proba
+            predict_proba_fn = self.model.label_predictor.predict_proba
             concepts_before = batch.C_pred >= 0.5
 
         # Evaluate the model before and after the intervention.
@@ -782,39 +784,39 @@ class ConceptInterventionRunner:
         y_pred_after = np.argmax(y_prob_after, axis=1)
 
         # Conceptual Safeguards results
-        strat_metrics = {}
+        strategy_metrics = {}
         if isinstance(strategy, ConceptualSafeguardsStrategy):
-            strat_metrics["selective_acc_before"] = proposal.details.get(
+            strategy_metrics["selective_acc_before"] = proposal.details.get(
                 "selective_acc_before", None
             )
-            strat_metrics["coverage_before"] = (
+            strategy_metrics["coverage_before"] = (
                 1 - (proposal.selected_instances.size / batch.n_samples)
                 if batch.n_samples > 0
                 else 0.0
             )
 
-            abstain_post = (y_prob_after[:, 1] >= config.tau) & (
-                y_prob_after[:, 1] <= 1.0 - config.tau
+            abstain_post = (y_prob_after[:, 1] >= config.abstention_threshold) & (
+                y_prob_after[:, 1] <= 1.0 - config.abstention_threshold
             )
 
-            strat_metrics["selective_acc_after"] = (
+            strategy_metrics["selective_acc_after"] = (
                 (y_pred_after[~abstain_post] == batch.y_true[~abstain_post]).mean()
                 if (~abstain_post).any()
                 else -np.inf
             )
-            strat_metrics["coverage_after"] = 1 - abstain_post.mean()
+            strategy_metrics["coverage_after"] = 1 - abstain_post.mean()
 
         elif isinstance(strategy, ScoreIntervention):
-            strat_metrics["overall_acc_before"] = proposal.details.get(
+            strategy_metrics["overall_acc_before"] = proposal.details.get(
                 "overall_acc_before", None
             )
-            strat_metrics["overall_acc_after"] = proposal.details.get(
+            strategy_metrics["overall_acc_after"] = proposal.details.get(
                 "overall_acc_after", None
             )
-            strat_metrics["acc_non_intervened_before"] = proposal.details.get(
+            strategy_metrics["acc_non_intervened_before"] = proposal.details.get(
                 "acc_non_intervened_before", None
             )
-            strat_metrics["intervened"] = (
+            strategy_metrics["intervened"] = (
                 proposal.selected_instances.size / batch.n_samples
                 if batch.n_samples > 0
                 else 0.0
@@ -828,7 +830,7 @@ class ConceptInterventionRunner:
             y_prob_after=y_prob_after,
             y_pred_after=y_pred_after,
             proposal=proposal,
-            strat_metrics=strat_metrics,
+            strategy_metrics=strategy_metrics,
         )
 
     def _build_batch(

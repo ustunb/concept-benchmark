@@ -51,6 +51,22 @@ doc/datasets/generated/
 ci_scripts/
 skltemplate/
 
+# Ad-hoc scripts (verification, debugging, one-off experiments)
+scripts/verify_*.py
+scripts/debug_*.py
+scripts/determinism_*.py
+scripts/diagnose_*.py
+scripts/sweep_*.py
+scripts/recompute_*.py
+scripts/run_*.py
+scripts/test_*.py
+scripts/full_*.py
+scripts/sth.py
+scripts/build_*.py
+scripts/antrophic_*.py
+scripts/generate_doc_figures.py
+scripts/cub_noise_results.json
+
 # other
 examples/paper/results
 

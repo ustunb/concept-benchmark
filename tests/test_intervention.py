@@ -38,7 +38,7 @@ def _make_cbm(k=4, seed=42):
     C = rng.random((40, k)).astype(np.float32)
     y = rng.integers(0, 2, size=40).astype(np.int32)
     fe.fit(C, y)
-    return ConceptBasedModel(front_end_model=fe)
+    return ConceptBasedModel(label_predictor=fe)
 
 
 # ── InterventionConfig ───────────────────────────────────────────────
@@ -47,7 +47,7 @@ def _make_cbm(k=4, seed=42):
 class TestInterventionConfig:
     def test_default_values(self):
         cfg = InterventionConfig()
-        assert cfg.tau is None
+        assert cfg.abstention_threshold is None
         assert cfg.concept_budget is None
         assert cfg.max_concepts_per_instance is None
         assert cfg.random_state is None
@@ -70,8 +70,8 @@ class TestInterventionConfig:
         assert cfg.per_instance_limit(7) == 7
 
     def test_tau_validation(self):
-        with pytest.raises(ValueError, match="tau must lie within"):
-            InterventionConfig(tau=0.8)
+        with pytest.raises(ValueError, match="abstention_threshold must lie within"):
+            InterventionConfig(abstention_threshold=0.8)
 
     def test_resolve_budget_fraction(self):
         cfg = InterventionConfig(concept_budget=0.5)
@@ -178,9 +178,9 @@ class TestConceptualSafeguardsStrategy:
         k = 4
         model = _make_cbm(k=k)
         batch = _make_batch(n=10, k=k)
-        config = InterventionConfig()  # tau=None
+        config = InterventionConfig()  # abstention_threshold=None
         strat = ConceptualSafeguardsStrategy()
-        with pytest.raises(InterventionError, match="tau"):
+        with pytest.raises(InterventionError, match="abstention_threshold"):
             strat.propose(model, batch, config)
 
     def test_targets_uncertain(self):
@@ -195,7 +195,7 @@ class TestConceptualSafeguardsStrategy:
             y_true=np.zeros(10, dtype=np.int32),
         )
         config = InterventionConfig(
-            tau=0.3, max_concepts_per_instance=2, random_state=0
+            abstention_threshold=0.3, max_concepts_per_instance=2, random_state=0
         )
         strat = ConceptualSafeguardsStrategy()
         proposal = strat.propose(model, batch, config)
@@ -245,7 +245,7 @@ class TestRunner:
 
         fe = FrontEndModel()
         fe.fit((C > 0.5).astype(float), y)
-        model = ConceptBasedModel(front_end_model=fe)
+        model = ConceptBasedModel(label_predictor=fe)
         return model, sample
 
     def test_run_shapes(self):

@@ -50,9 +50,9 @@ def _train_cbm(ds, epochs=1):
     cbm.fit(
         train_dataset=ds.training,
         valid_dataset=ds.validation,
-        freeze=False,
+        freeze_backbone=False,
         concept_embed_params={"device": "cpu", "batch_size": 8, "num_workers": 0},
-        fit_params={
+        concept_fit_params={
             "epochs": epochs,
             "lr": 1e-3,
             "patience": 1,
@@ -113,16 +113,18 @@ def test_robot_alignment_end_to_end():
     ds = _tabular_dataset(n=50, k=4)
     cbm = _train_cbm(ds)
 
-    h_train = ds.training.C.astype(np.float32)
-    h_test = (cbm.concept_detector.predict(ds.test) > 0.5).astype(np.float32)
+    concept_preds_train = ds.training.C.astype(np.float32)
+    concept_preds_test = (cbm.concept_detector.predict(ds.test) > 0.5).astype(
+        np.float32
+    )
 
     result = retrain_aligned(
-        h_train=h_train,
+        concept_preds_train=concept_preds_train,
         y_train=ds.training.y.astype(int),
-        h_test=h_test,
+        concept_preds_test=concept_preds_test,
         y_test=ds.test.y.astype(int),
         concept_names=list(ds.test.concepts),
-        original_frontend=cbm.front_end_model,
+        original_frontend=cbm.label_predictor,
         monotonicity_constraints={ds.test.concepts[0]: 1},
     )
 
@@ -158,7 +160,7 @@ def test_sudoku_selective():
 
     # Selective prediction: keep only confident predictions
     concept_preds = cbm.concept_detector.predict(ds.test)
-    proba = cbm.front_end_model.predict_proba((concept_preds > 0.5).astype(float))
+    proba = cbm.label_predictor.predict_proba((concept_preds > 0.5).astype(float))
     confidence = np.max(proba, axis=1)
     threshold = 0.6
     kept = confidence >= threshold

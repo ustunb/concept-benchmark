@@ -85,7 +85,7 @@ def test_robot_image_generation_and_training(tmp_path):
     cbm.fit(
         train_dataset=ds.training,
         valid_dataset=ds.validation,
-        freeze=False,
+        freeze_backbone=False,
         concept_embed_params={"device": "cpu", "batch_size": 4, "num_workers": 0},
         fit_params={
             "epochs": 1,

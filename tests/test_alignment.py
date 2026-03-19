@@ -82,9 +82,9 @@ class TestRetrainAligned:
     def test_returns_expected_keys(self):
         fe, C, y = _fit_frontend(k=3, n=60)
         result = retrain_aligned(
-            h_train=C[:40],
+            concept_preds_train=C[:40],
             y_train=y[:40],
-            h_test=C[40:],
+            concept_preds_test=C[40:],
             y_test=y[40:],
             concept_names=["c0", "c1", "c2"],
             original_frontend=fe,
@@ -102,9 +102,9 @@ class TestRetrainAligned:
     def test_accuracy_change_consistent(self):
         fe, C, y = _fit_frontend(k=3, n=60)
         result = retrain_aligned(
-            h_train=C[:40],
+            concept_preds_train=C[:40],
             y_train=y[:40],
-            h_test=C[40:],
+            concept_preds_test=C[40:],
             y_test=y[40:],
             concept_names=["c0", "c1", "c2"],
             original_frontend=fe,
@@ -152,9 +152,9 @@ class TestTestAlignment:
     def test_returns_expected_keys(self):
         fe, C, y = _fit_frontend(k=3, n=40)
         ds = self._make_test_dataset(k=3, n=20)
-        h_test = np.random.default_rng(1).random((20, 3)).astype(np.float32)
+        concept_preds_test = np.random.default_rng(1).random((20, 3)).astype(np.float32)
         params = {"c0": 1.0, "c1": -1.0, "c2": 0.5, "bias": 0.0}
-        result = alignment_test_fn(h_test, params, fe, ds)
+        result = alignment_test_fn(concept_preds_test, params, fe, ds)
         for key in (
             "original_accuracy",
             "aligned_accuracy",
@@ -167,8 +167,8 @@ class TestTestAlignment:
         fe, C, y = _fit_frontend(k=3, n=40)
         original_coef = fe.model.coef_.copy()
         ds = self._make_test_dataset(k=3, n=20)
-        h_test = np.random.default_rng(1).random((20, 3)).astype(np.float32)
+        concept_preds_test = np.random.default_rng(1).random((20, 3)).astype(np.float32)
         params = {"c0": 99.0, "c1": -99.0, "c2": 0.0, "bias": 5.0}
-        alignment_test_fn(h_test, params, fe, ds)
+        alignment_test_fn(concept_preds_test, params, fe, ds)
         # Original should NOT be modified (deep copy inside)
         np.testing.assert_array_equal(fe.model.coef_, original_coef)

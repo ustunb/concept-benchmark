@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-__all__ = ["calc_metric"]
+__all__ = ["compute_selective_metric"]
 
 import numpy as np
 
 _ABSTAIN = -10
 
 
-def calc_metric(pred_probs, y_true, tau=0.5):
+def compute_selective_metric(pred_probs, y_true, abstention_threshold=0.5):
     """Compute selective accuracy and coverage for a confidence threshold.
 
-    Predictions are classified as positive (``P(y=1) > 1 - tau``), negative
-    (``P(y=1) < tau``), or abstentions (``P(y=1)`` in ``[tau, 1 - tau]``).
+    Predictions are classified as positive (``P(y=1) > 1 - abstention_threshold``),
+    negative (``P(y=1) < abstention_threshold``), or abstentions
+    (``P(y=1)`` in ``[abstention_threshold, 1 - abstention_threshold]``).
     Abstained predictions are excluded from the accuracy calculation.
 
     Parameters
@@ -20,21 +21,21 @@ def calc_metric(pred_probs, y_true, tau=0.5):
         Predicted probabilities of the positive class, shape ``(N,)``.
     y_true : np.ndarray
         Ground-truth binary labels, shape ``(N,)``.
-    tau : float, optional
+    abstention_threshold : float, optional
         Confidence threshold in ``[0, 0.5]``.  Default ``0.5`` (no
         abstentions).
 
     Returns
     -------
     dict
-        ``{"coverage": float, "selective_accuracy": float, "tau": float}``
+        ``{"coverage": float, "selective_accuracy": float, "abstention_threshold": float}``
         where *coverage* is the fraction of non-abstained predictions and
         *selective_accuracy* is accuracy on the non-abstained subset.
     """
     selected_y = pred_probs.copy()
-    selected_y[pred_probs < tau] = 0
-    selected_y[(pred_probs >= tau) & (pred_probs <= 1 - tau)] = _ABSTAIN
-    selected_y[pred_probs > 1 - tau] = 1
+    selected_y[pred_probs < abstention_threshold] = 0
+    selected_y[(pred_probs >= abstention_threshold) & (pred_probs <= 1 - abstention_threshold)] = _ABSTAIN
+    selected_y[pred_probs > 1 - abstention_threshold] = 1
 
     abstain = selected_y == _ABSTAIN
 
@@ -45,4 +46,4 @@ def calc_metric(pred_probs, y_true, tau=0.5):
         coverage = (~abstain).mean()
         selective_accuracy = (selected_y[~abstain] == y_true[~abstain]).mean()
 
-    return {"coverage": coverage, "selective_accuracy": selective_accuracy, "tau": tau}
+    return {"coverage": coverage, "selective_accuracy": selective_accuracy, "abstention_threshold": abstention_threshold}

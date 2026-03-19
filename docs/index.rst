@@ -18,7 +18,7 @@ The package includes two benchmarks:
 
    installation
    quickstart
-   benchmark-your-model
+   benchmark_your_model
 
 .. toctree::
    :maxdepth: 2
