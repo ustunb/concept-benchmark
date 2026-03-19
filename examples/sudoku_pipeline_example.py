@@ -20,7 +20,7 @@ Note: ``uv sync`` makes ``experiments/`` importable automatically.
 import numpy as np
 from sklearn.metrics import accuracy_score
 
-from concept_benchmark import SudokuDatasetGenerator
+from concept_benchmark import DatasetGenerator
 from concept_benchmark.utils import set_deterministic_seed
 from experiments.intervention import ConceptInterventionRunner, InterventionConfig
 from experiments.kflip import KFlipInterventionStrategy
@@ -50,12 +50,13 @@ print(f"Using device: {device}")
 # ---------------------------------------------------------------------------
 # 1. Generate dataset
 # ---------------------------------------------------------------------------
-print("Generating Sudoku dataset (1000 boards, max_corrupt=9)...")
-dataset = SudokuDatasetGenerator(
+print("Generating Sudoku dataset (1000 boards, max_cell_swaps=9)...")
+dataset = DatasetGenerator(
+    "sudoku",
     seed=SEED,
-    n_samples=1000,
-    max_corrupt=9,     # cells swapped in invalid boards (higher = subtler)
-    valid_ratio=0.5,   # 50% valid, 50% invalid
+    n_boards=1000,
+    max_cell_swaps=9,        # cells swapped in invalid boards (higher = subtler)
+    valid_board_ratio=0.5,   # 50% valid, 50% invalid
     data_type="tabular",  # use "image" to render board PNGs for explore()
 ).generate()
 
@@ -94,7 +95,7 @@ print(f"  Weight range: [{weights.min():.2f}, {weights.max():.2f}]")
 # ---------------------------------------------------------------------------
 # 4. Combine into a CS model and evaluate
 # ---------------------------------------------------------------------------
-cbm = ConceptBasedModel(concept_detector=cd, front_end_model=fe)
+cbm = ConceptBasedModel(concept_detector=cd, label_predictor=fe)
 predictions = cbm.predict(test)
 raw_acc = np.mean(predictions == test.y)
 print(f"\nCS model raw accuracy: {raw_acc:.4f}")

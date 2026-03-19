@@ -315,59 +315,48 @@ def ensure_digits_dir(args):
     print("Finished generating example digits.")
 
 
-# ---------------- main ----------------
-def main():
-    defaults = SudokuBenchmarkConfig.default()
-    ap = argparse.ArgumentParser(
-        description="Generate a Sudoku OCR dataset (images + sidecar)."
-    )
-    ap.add_argument("--n", type=int, default=defaults.n)
-    ap.add_argument("--n-samples", type=int, default=defaults.n_samples)
-    ap.add_argument("--valid-ratio", type=float, default=defaults.valid_ratio)
-    ap.add_argument("--max-corrupt", type=int, default=defaults.max_corrupt)
-    ap.add_argument("--seed", type=int, default=defaults.seed)
+# ---------------- generate_sudoku_pipeline_data ----------------
+def generate_sudoku_pipeline_data(
+    config: SudokuBenchmarkConfig,
+    *,
+    skip_image: bool = False,
+    skip_digits: bool = False,
+) -> None:
+    """Generate image + tabular sudoku datasets and OCR sidecar from a config.
 
-    ap.add_argument(
-        "--progress", action="store_true", help="Show a progress bar during generation."
-    )
+    This is the main entry point for the sudoku data pipeline. It:
+    1. Generates the base sudoku dataset (boards + concepts)
+    2. Renders board images with handwritten digits
+    3. Builds OCR preprocessing JSONL
+    4. Saves a tabular ConceptDataset aligned to the image dataset
 
-    # image knobs (aligned with run_sudoku defaults)
-    ap.add_argument("--cell-px", type=int, default=50)
-    ap.add_argument("--margin-px", type=int, default=2)
-    ap.add_argument("--line-px", type=int, default=2)
-    ap.add_argument("--bold-px", type=int, default=5)
-    ap.add_argument("--font-size", type=int, default=25)
-    ap.add_argument("--no-standardize", action="store_true")
-    ap.add_argument("--font-path", type=str, default=None)
-    ap.add_argument("--handwriting", type=bool, default=True)
-    ap.add_argument("--radius", type=float, default=0.5)
-    ap.add_argument("--sigma", type=float, default=0.0)
-    ap.add_argument("--angle", type=float, default=98)
+    Args:
+        config: Sudoku benchmark configuration.
+        skip_image: If True, load existing image dataset instead of regenerating.
+        skip_digits: If True, skip creating example digit images for OCR.
+    """
+    # Build an args-like namespace from config for helper functions that expect it
+    class _Args:
+        cell_px = config.cell_px
+        margin_px = config.cell_margin_px
+        line_px = config.gridline_px
+        bold_px = config.block_border_px
+        font_size = config.font_size
+        no_standardize = False
+        font_path = None
+        handwriting = config.font_style == "handwritten"
+        radius = 0.5
+        sigma = 0.0
+        angle = 98
+        digits_per_class = 64
 
-    ap.add_argument("--digits-per-class", type=int, default=64)
-    ap.add_argument(
-        "--skip-digits",
-        action="store_true",
-        help="Skip creating data/sudoku/digits samples.",
-    )
-    ap.add_argument(
-        "--skip-image", action="store_true", help="Skip image dataset generation."
-    )
+    args = _Args()
 
-    args = ap.parse_args()
-
-    cfg = SudokuBenchmarkConfig(
-        n=args.n,
-        n_samples=args.n_samples,
-        max_corrupt=args.max_corrupt,
-        seed=args.seed,
-    )
-    dataset_dir = cfg.get_dataset_path(data_type="image")
+    dataset_dir = config.get_dataset_path(data_type="image")
     dataset_name = dataset_dir.name
     image_dataset_path = dataset_dir / "sudoku_dataset.pkl"
-    ocr_jsonl = dataset_dir / "ocr_preprocessing" / "ocr_preprocessing.jsonl"
 
-    if args.skip_image:
+    if skip_image:
         ds = load_object(image_dataset_path)
         transform = None
         meta = getattr(ds, "meta", {})
@@ -377,17 +366,17 @@ def main():
             else "image_transform"
         )
     else:
-        # wrap image_transform so we can capture boards/starters
+        # wrap image_transform so we can capture starters for OCR JSONL
         transform = make_image_transform(args)
         transform_name = "image_transform"
 
         ds = create_sudoku_dataset(
-            n=args.n,
-            n_samples=args.n_samples,
-            valid_ratio=args.valid_ratio,
-            max_corrupt=args.max_corrupt,
+            n=config.block_size,
+            n_samples=config.n_boards,
+            valid_ratio=config.valid_board_ratio,
+            max_corrupt=config.max_cell_swaps,
             data_type="image",
-            seed=args.seed,
+            seed=config.seed,
             transform=transform,
             dataset_name=dataset_name,
         )
@@ -401,6 +390,8 @@ def main():
         meta = infer_meta_like(ds, transform_name=transform_name)
 
     meta_full = dict(meta)
+    # Remove boards array from meta_full to avoid serialization issues in JSON
+    meta_full.pop("boards", None)
     meta_full.setdefault("data_type", "image")
     meta_full.setdefault("transform", transform_name)
 
@@ -413,15 +404,6 @@ def main():
 
     meta_full["dataset_name"] = dataset_name
 
-    def shape_of(x):
-        try:
-            return x.shape
-        except Exception:
-            try:
-                return tuple(np.array(x, dtype=object).shape)
-            except Exception:
-                return ("<unknown>",)
-
     print("=== Dataset Summary ===")
     print(f"data_type: {meta_full.get('data_type')}")
     print(
@@ -430,19 +412,18 @@ def main():
     print(
         f"samples: {len(y)}  |  valid: {int((y == 1).sum())}  |  invalid: {int((y == 0).sum())}"
     )
-    print(f"X shape: {shape_of(X)}")
     print(f"C shape: {C.shape}")
     print(f"y shape: {y.shape}")
     print(f"transform: {meta_full.get('transform')}")
     print(f"Images & CSVs saved under {dataset_dir}.")
 
-    if not args.skip_image:
+    if not skip_image:
         save_dataset_pkl(ds, meta_full, dataset_dir)
 
         image_dir = dataset_dir
         save_image_side_artifacts(image_dir, meta_full, args)
 
-        if not args.skip_digits:
+        if not skip_digits:
             ensure_digits_dir(args)
 
         build_ocr_preprocessing(
@@ -453,13 +434,22 @@ def main():
             image_transform_wrapper=transform,
         )
 
-    # Tabular ConceptDataset aligned to the image dataset (always saved)
-    tab_dataset_dir = cfg.get_dataset_path(data_type="tabular")
+    # Tabular ConceptDataset aligned to the image dataset
+    tab_dataset_dir = config.get_dataset_path(data_type="tabular")
     tab_ds_name = tab_dataset_dir.name
-    if transform is not None:
+
+    # Get boards from dataset meta (stored by create_sudoku_dataset)
+    ds_meta = getattr(ds, "meta", {})
+    boards_from_meta = ds_meta.get("boards") if isinstance(ds_meta, dict) else None
+
+    if boards_from_meta is not None:
+        boards = np.asarray(boards_from_meta)
+    elif transform is not None:
         boards = np.asarray(getattr(transform, "boards", []))
     else:
+        ocr_jsonl = dataset_dir / "ocr_preprocessing" / "ocr_preprocessing.jsonl"
         boards = load_boards_from_jsonl(ocr_jsonl)
+
     X_tab = np.stack([default_transform(b) for b in boards], axis=0)
     tab_meta_full = dict(meta_full)
     tab_meta_full["data_type"] = "tabular"
@@ -478,13 +468,44 @@ def main():
     print(
         f"samples: {len(tab_ds.y)}  |  valid: {int((tab_ds.y == 1).sum())}  |  invalid: {int((tab_ds.y == 0).sum())}"
     )
-    print(f"X shape: {getattr(tab_ds.X, 'shape', '<unknown>')}")
-    print(f"C shape: {getattr(tab_ds.C, 'shape', '<unknown>')}")
-    print(f"y shape: {getattr(tab_ds.y, 'shape', '<unknown>')}")
-    print(f"transform: {tab_meta_full.get('transform')}")
     print(f"Saved tabular ConceptDataset to {tab_save_dir}")
-
     print("Done.")
+
+
+# ---------------- main ----------------
+def main():
+    defaults = SudokuBenchmarkConfig.default()
+    ap = argparse.ArgumentParser(
+        description="Generate a Sudoku OCR dataset (images + sidecar)."
+    )
+    ap.add_argument("--n", type=int, default=defaults.block_size)
+    ap.add_argument("--n-samples", type=int, default=defaults.n_boards)
+    ap.add_argument("--valid-ratio", type=float, default=defaults.valid_board_ratio)
+    ap.add_argument("--max-corrupt", type=int, default=defaults.max_cell_swaps)
+    ap.add_argument("--seed", type=int, default=defaults.seed)
+    ap.add_argument(
+        "--skip-digits",
+        action="store_true",
+        help="Skip creating data/sudoku/digits samples.",
+    )
+    ap.add_argument(
+        "--skip-image", action="store_true", help="Skip image dataset generation."
+    )
+
+    args = ap.parse_args()
+
+    cfg = SudokuBenchmarkConfig(
+        block_size=args.n,
+        n_boards=args.n_samples,
+        max_cell_swaps=args.max_corrupt,
+        seed=args.seed,
+    )
+
+    generate_sudoku_pipeline_data(
+        cfg,
+        skip_image=args.skip_image,
+        skip_digits=args.skip_digits,
+    )
 
 
 if __name__ == "__main__":

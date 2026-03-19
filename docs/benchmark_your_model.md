@@ -9,9 +9,9 @@ This guide shows how to evaluate your own concept bottleneck model on the benchm
 Generate a dataset and access it in the format your model expects:
 
 ```python
-from concept_benchmark import RobotDatasetGenerator
+from concept_benchmark import DatasetGenerator
 
-dataset = RobotDatasetGenerator(seed=1014, subconcept=True, draw=True).generate()
+dataset = DatasetGenerator("robot", seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
 train, val, test = dataset.training, dataset.validation, dataset.test
 ```
 
@@ -121,7 +121,7 @@ from experiments.models import ConceptBasedModel
 
 cbm = ConceptBasedModel(
     concept_detector=MyConceptDetector(my_concept_model),
-    front_end_model=MyFrontEnd(my_classifier),
+    label_predictor=MyFrontEnd(my_classifier),
 )
 
 predictions = cbm.predict(test)
@@ -190,7 +190,7 @@ Test whether sign-constraining concept weights preserves intervention benefit:
 from experiments.utils import run_alignment
 
 stats = run_alignment(
-    cbm=cbm,
+    concept_based_model=cbm,
     train_dataset=train,
     test_dataset=test,
     monotonicity_constraints={"has_knees": 1},  # force positive weight
@@ -204,7 +204,7 @@ print(f"Change:   {stats['accuracy_change']:+.4f}")
 
 ## Comparing to baselines
 
-Use the same seed for apples-to-apples comparison with the built-in models. Expected results for the robot benchmark (seed=1014, subconcept=True):
+Use the same seed for apples-to-apples comparison with the built-in models. Expected results for the robot benchmark (seed=1014, concept_preset="foot_subtypes"):
 
 | Model | k=0 | k=1 | k=3 | k=12 (max) |
 |-------|-----|-----|-----|------------|
@@ -214,7 +214,7 @@ Use the same seed for apples-to-apples comparison with the built-in models. Expe
 Run the built-in pipeline to generate baseline numbers:
 
 ```bash
-./venv/bin/python scripts/robot_pipeline.py --seed 1014 --subconcept
+./venv/bin/python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes
 ```
 
 For the complete set of expected results across all regimes, see the [README](https://github.com/ustunb/concept-benchmark#readme).

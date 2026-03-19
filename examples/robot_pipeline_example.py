@@ -21,7 +21,7 @@ Note: ``uv sync`` makes ``experiments/`` importable automatically.
 
 import numpy as np
 
-from concept_benchmark import RobotDatasetGenerator
+from concept_benchmark import DatasetGenerator
 from concept_benchmark.utils import set_deterministic_seed
 from experiments.intervention import ConceptInterventionRunner, InterventionConfig
 from experiments.kflip import KFlipInterventionStrategy
@@ -54,12 +54,13 @@ print(f"Using device: {device}")
 # ---------------------------------------------------------------------------
 # 1. Generate dataset with rendered images
 # ---------------------------------------------------------------------------
-print("Generating robot image dataset (subconcept=True, 12 concepts)...")
-dataset = RobotDatasetGenerator(
+print("Generating robot image dataset (concept_preset='foot_subtypes', 12 concepts)...")
+dataset = DatasetGenerator(
+    "robot",
     seed=SEED,
-    subconcept=True,           # 12 fine-grained concepts (default: 7 coarse)
-    model_type="stochastic",   # probabilistic labeling
-    # draw=True is the default — renders robot images
+    concept_preset="foot_subtypes",  # 12 fine-grained concepts (default: "ground_truth" = 7)
+    use_stochastic_labels=True,      # probabilistic labeling
+    # render_images=True is the default — renders robot images
 ).generate()
 
 train, val, test = dataset.training, dataset.validation, dataset.test
@@ -99,7 +100,7 @@ for name, w in zip(train.concepts, fe.model.coef_[0]):
 # ---------------------------------------------------------------------------
 # 4. Combine into a CBM and evaluate
 # ---------------------------------------------------------------------------
-cbm = ConceptBasedModel(concept_detector=cd, front_end_model=fe)
+cbm = ConceptBasedModel(concept_detector=cd, label_predictor=fe)
 predictions = cbm.predict(test)
 baseline_acc = np.mean(predictions == test.y)
 print(f"\nCBM accuracy (k=0, no interventions): {baseline_acc:.4f}")
@@ -160,7 +161,7 @@ print(f"  DNN accuracy: {dnn_acc:.4f}")
 # destroys intervention benefit.
 print("\nRunning alignment (has_knees constrained to +1)...")
 alignment_results = run_alignment(
-    cbm=cbm,
+    concept_based_model=cbm,
     train_dataset=train,
     test_dataset=test,
     monotonicity_constraints={"has_knees": 1},

@@ -173,7 +173,7 @@ class JointConceptModel(nn.Module):
         backbone: Optional[nn.Module],
         head: nn.Module,
         *,
-        flatten: bool = True,
+        should_flatten: bool = True,
     ) -> None:
         """Create a joint concept model.
 
@@ -181,13 +181,13 @@ class JointConceptModel(nn.Module):
             backbone: Optional feature extractor applied before the concept head.
                 If ``None`` the raw input is forwarded directly to ``head``.
             head: Module that maps backbone features to per-concept logits.
-            flatten: Whether to flatten high-rank tensors before feeding them to
+            should_flatten: Whether to flatten high-rank tensors before feeding them to
                 ``head``. Disable when ``head`` expects structured inputs (e.g. CNN).
         """
         super().__init__()
         self.backbone = backbone
         self.head = head
-        self.flatten = bool(flatten)
+        self.should_flatten = bool(should_flatten)
 
     def forward(self, x: Any) -> torch.Tensor:
         """Return per-concept logits for the provided batch.
@@ -220,7 +220,7 @@ class JointConceptModel(nn.Module):
                 )
         if not isinstance(features, torch.Tensor):
             features = torch.as_tensor(features)
-        if self.flatten and features.ndim > 2:
+        if self.should_flatten and features.ndim > 2:
             features = features.view(features.size(0), -1)
         return self.head(features)
 
@@ -419,12 +419,12 @@ class ConceptDetector:
         self,
         path: Union[str, "os.PathLike"],
         *,
-        overwrite: bool = False,
+        should_overwrite: bool = False,
         msg: bool = True,
     ) -> "os.PathLike":
         """Persist the detector using concept_benchmark.ext.fileutils.save."""
         payload = {"version": 1, "state": self.state_dict()}
-        return save_object(payload, path, overwrite=overwrite, msg=msg)
+        return save_object(payload, path, overwrite=should_overwrite, msg=msg)
 
     @classmethod
     def load(
@@ -548,7 +548,7 @@ class ConceptDetector:
             # absorb flatten into head for raw features
             head = nn.Sequential(nn.Flatten(), head)
 
-        return JointConceptModel(self.embedding_model, head, flatten=not flatten_inputs)
+        return JointConceptModel(self.embedding_model, head, should_flatten=not flatten_inputs)
 
     def _set_trainable(self, freeze_backbone: bool) -> None:
         """Freeze or unfreeze the backbone parameters depending on user request."""
@@ -564,12 +564,12 @@ class ConceptDetector:
         self,
         train_dataset: ConceptDatasetSample,
         valid_dataset: ConceptDatasetSample,
-        freeze: bool = False,
-        embed_params: Optional[dict] = None,
+        freeze_backbone: bool = False,
+        embedding_params: Optional[dict] = None,
         fit_params: Optional[dict] = None,
-        l1_size: Optional[int] = 100,
-        calibrate: bool = False,
-        log_training: bool = False,
+        hidden_layer_size: Optional[int] = 100,
+        should_calibrate: bool = False,
+        should_log_training: bool = False,
         log_interval: Optional[int] = None,
         *,
         model: Optional[nn.Module] = None,
@@ -583,23 +583,23 @@ class ConceptDetector:
             Dataset providing supervised concept labels for optimisation.
         valid_dataset : ConceptDatasetSample
             Held-out dataset used for early stopping and calibration.
-        freeze : bool
+        freeze_backbone : bool
             When ``True`` the detector disables gradient updates on the
             backbone parameters.
-        embed_params : dict, optional
+        embedding_params : dict, optional
             Unused in the joint setup; accepted for parity with older call
             sites.
         fit_params : dict, optional
             Keyword overrides passed to the trainer. Recognised keys include
             ``epochs``, ``batch_size``, ``device``, ``lr_encoder``,
             ``lr_heads``, and ``optimizer_factory``.
-        l1_size : int, optional
+        hidden_layer_size : int, optional
             Hidden width for the default MLP head when a custom model is not
             supplied.
-        calibrate : bool
+        should_calibrate : bool
             When ``True`` runs ``calibrate`` on the validation split after
             training completes.
-        log_training : bool
+        should_log_training : bool
             Convenience flag that sets ``fit_params['verbose']``.
         log_interval : int, optional
             How often (in steps) to emit training loss when verbose logging
@@ -619,7 +619,7 @@ class ConceptDetector:
         if fit_params is None:
             fit_params = {}
         fit_params = dict(fit_params)
-        fit_params.setdefault("verbose", bool(log_training))
+        fit_params.setdefault("verbose", bool(should_log_training))
         if log_interval is not None:
             fit_params.setdefault("log_interval", int(log_interval))
 
@@ -638,7 +638,7 @@ class ConceptDetector:
         if model is not None:
             self.model = model
         if self.model is None:
-            hidden = int(l1_size or fit_params.get("hidden_dim", 100))
+            hidden = int(hidden_layer_size or fit_params.get("hidden_dim", 100))
             builder = self.model_builder or self._build_default_model
             self.model = builder(
                 train_dataset, device=training_device, hidden_dim=hidden
@@ -692,7 +692,7 @@ class ConceptDetector:
 
             fit_params["optimizer_factory"] = _make_optimizer
 
-        self._set_trainable(freeze_backbone=freeze)
+        self._set_trainable(freeze_backbone=freeze_backbone)
 
         trainer_fn = trainer if trainer is not None else self.trainer
         result = trainer_fn(
@@ -711,7 +711,7 @@ class ConceptDetector:
         self.model.eval()
         self.model.cpu()
 
-        if calibrate:
+        if should_calibrate:
             self.calibrate(valid_dataset)
         else:
             self.calibration_params = None
@@ -820,8 +820,8 @@ class ConceptDetector:
     def predict(
         self,
         dataset: ConceptDatasetSample,
-        embed_params: Optional[dict] = None,
-        calibrate: Optional[bool] = None,
+        embedding_params: Optional[dict] = None,
+        should_calibrate: Optional[bool] = None,
     ) -> np.ndarray:
         """Predict concept probabilities for each sample.
 
@@ -842,13 +842,13 @@ class ConceptDetector:
 
         logits = self._predict_logits(dataset)
 
-        if calibrate is None:
+        if should_calibrate is None:
             apply_cal = self.calibration_params is not None
         else:
-            apply_cal = calibrate
+            apply_cal = should_calibrate
             if apply_cal and self.calibration_params is None:
                 raise RuntimeError(
-                    "Calibration requested but not fitted. Call fit(..., calibrate=True)."
+                    "Calibration requested but not fitted. Call fit(..., should_calibrate=True)."
                 )
 
         if apply_cal and self.calibration_params is not None:
@@ -951,7 +951,7 @@ class ConceptBasedModel:
     """Two-stage concept bottleneck model.
 
     Composes a :class:`ConceptDetector` (X → concept probabilities) with a
-    :class:`FrontEndModel` (binary concepts → labels).  When ``propagate``
+    :class:`FrontEndModel` (binary concepts → labels).  When ``should_propagate``
     is ``True``, concept uncertainty is propagated to the label prediction
     via Monte Carlo sampling instead of hard-thresholding at 0.5.
 
@@ -959,15 +959,15 @@ class ConceptBasedModel:
     ----------
     concept_detector : ConceptDetector, optional
         First stage that maps raw inputs to concept probabilities.
-    front_end_model : FrontEndModel, optional
+    label_predictor : FrontEndModel, optional
         Second stage that maps binary concepts to labels.
-    propagate : bool
+    should_propagate : bool
         If ``True``, use MC sampling to propagate concept uncertainty
         through the downstream classifier.
     mc_mode : ``{"auto", "mc", "exact"}``
         ``"auto"`` selects exact enumeration when feasible (≤
         ``mc_exact_threshold`` binary assignments), otherwise MC sampling.
-    mc_samples, mc_max_samples, mc_chunk_size, mc_tol, mc_exact_threshold
+    mc_samples, mc_max_samples, mc_chunk_size, mc_tolerance, mc_exact_threshold
         Control the MC sampling budget and convergence tolerance.
     random_state : int, optional
         Seed for reproducible MC sampling.
@@ -976,13 +976,13 @@ class ConceptBasedModel:
     def __init__(
         self,
         concept_detector: Optional[ConceptDetector] = None,
-        front_end_model: Optional[FrontEndModel] = None,
-        propagate: bool = False,
+        label_predictor: Optional[FrontEndModel] = None,
+        should_propagate: bool = False,
         mc_mode: str = "auto",
         mc_samples: int = 1024,
         mc_max_samples: int = 16384,
         mc_chunk_size: int = 2048,
-        mc_tol: float = 1e-3,
+        mc_tolerance: float = 1e-3,
         random_state: Optional[int] = None,
         mc_exact_threshold: int = 4096,
         **kwargs,
@@ -992,18 +992,18 @@ class ConceptBasedModel:
                 "concept_detector must be an instance of ConceptDetector or its subclass."
             )
 
-        if front_end_model:
-            assert isinstance(front_end_model, FrontEndModel), (
-                "front_end_model must be an instance of FrontEndModel or FrontEndModelCVXPY."
+        if label_predictor:
+            assert isinstance(label_predictor, FrontEndModel), (
+                "label_predictor must be an instance of FrontEndModel or FrontEndModelCVXPY."
             )
 
         self.concept_detector = (
             concept_detector if concept_detector else ConceptDetector(**kwargs)
         )
-        self.front_end_model = front_end_model if front_end_model else FrontEndModel()
+        self.label_predictor = label_predictor if label_predictor else FrontEndModel()
 
-        self._propagate = propagate
-        self._concept_poss = None
+        self._propagate = should_propagate
+        self._concept_possibilities = None
         self._y_proba_all_concepts = None
 
         # MC configuration
@@ -1012,20 +1012,28 @@ class ConceptBasedModel:
         self._mc_samples = int(mc_samples)
         self._mc_max_samples = int(mc_max_samples)
         self._mc_chunk_size = int(mc_chunk_size)
-        self._mc_tol = float(mc_tol)
+        self._mc_tol = float(mc_tolerance)
         self._random_state = random_state
         self._mc_exact_threshold = int(mc_exact_threshold)
 
+    def __setstate__(self, state: dict) -> None:
+        """Support unpickling objects saved with old attribute names."""
+        if "front_end_model" in state and "label_predictor" not in state:
+            state["label_predictor"] = state.pop("front_end_model")
+        if "concept_poss" in state and "_concept_possibilities" not in state:
+            state["_concept_possibilities"] = state.pop("concept_poss")
+        self.__dict__.update(state)
+
     @property
-    def propagate(self) -> bool:
+    def should_propagate(self) -> bool:
         return self._propagate
 
     @property
-    def concept_poss(self) -> Optional[np.ndarray]:
+    def concept_possibilities(self) -> Optional[np.ndarray]:
         """
         Return all possible concept combinations.
         """
-        return self._concept_poss
+        return self._concept_possibilities
 
     @property
     def y_proba_all_concepts(self) -> Optional[dict]:
@@ -1038,13 +1046,13 @@ class ConceptBasedModel:
         self,
         train_dataset: ConceptDatasetSample,
         valid_dataset: ConceptDatasetSample,
-        freeze: bool = True,
+        freeze_backbone: bool = True,
         *,
         concept_fit_params: Optional[dict] = None,
         concept_embed_params: Optional[dict] = None,
         front_fit_params: Optional[dict] = None,
-        calibrate: bool = False,
-        log_training: bool = False,
+        should_calibrate: bool = False,
+        should_log_training: bool = False,
         log_interval: Optional[int] = None,
         **kwargs,
     ) -> None:
@@ -1054,41 +1062,41 @@ class ConceptBasedModel:
         Args:
             train_dataset: Training split.
             valid_dataset: Validation split (used for concept detector early stopping/calibration).
-            freeze: If True, skip (re)training the concept detector and only fit the front-end model.
+            freeze_backbone: If True, skip (re)training the concept detector and only fit the front-end model.
             concept_fit_params: Dict forwarded to ConceptDetector.fit(..., fit_params=...).
-            concept_embed_params: Dict forwarded to dataset.embed(...); passed via ConceptDetector.fit(..., embed_params=...).
+            concept_embed_params: Dict forwarded to dataset.embed(...); passed via ConceptDetector.fit(..., embedding_params=...).
             front_fit_params: Dict forwarded to FrontEndModel.fit(..., fit_params=...).
-            calibrate: If True, perform per-concept calibration after training detector.
+            should_calibrate: If True, perform per-concept calibration after training detector.
 
         Backward compatibility:
             - If kwargs contains 'fit_params', it is treated as concept_fit_params.
-            - If kwargs contains 'embed_params', it is treated as concept_embed_params.
-            - If kwargs contains 'calibrate', it overrides the calibrate flag.
+            - If kwargs contains 'embedding_params', it is treated as concept_embed_params.
+            - If kwargs contains 'should_calibrate', it overrides the should_calibrate flag.
         """
         # Backward-compat: map legacy kwargs
         if concept_fit_params is None and "fit_params" in kwargs:
             concept_fit_params = kwargs.pop("fit_params")
-        if concept_embed_params is None and "embed_params" in kwargs:
-            concept_embed_params = kwargs.pop("embed_params")
-        if "calibrate" in kwargs:
-            calibrate = kwargs.pop("calibrate")
+        if concept_embed_params is None and "embedding_params" in kwargs:
+            concept_embed_params = kwargs.pop("embedding_params")
+        if "should_calibrate" in kwargs:
+            should_calibrate = kwargs.pop("should_calibrate")
 
         # Ensure concept_fit_params dict exists and inject logging toggles if set
         if concept_fit_params is None:
             concept_fit_params = {}
-        concept_fit_params.setdefault("verbose", bool(log_training))
+        concept_fit_params.setdefault("verbose", bool(should_log_training))
         if log_interval is not None:
             concept_fit_params.setdefault("log_interval", int(log_interval))
 
-        if not freeze:
+        if not freeze_backbone:
             self.concept_detector.fit(
                 train_dataset=train_dataset,
                 valid_dataset=valid_dataset,
-                freeze=freeze,
-                embed_params=concept_embed_params,
+                freeze_backbone=freeze_backbone,
+                embedding_params=concept_embed_params,
                 fit_params=concept_fit_params,
-                calibrate=calibrate,
-                log_training=log_training,
+                should_calibrate=should_calibrate,
+                should_log_training=should_log_training,
                 log_interval=log_interval,
             )
 
@@ -1120,9 +1128,9 @@ class ConceptBasedModel:
             C_train = C_train[observed_rows]
             y_train = y_train[observed_rows]
 
-        self.front_end_model.fit(C_train, y_train, fit_params=front_fit_params)
+        self.label_predictor.fit(C_train, y_train, fit_params=front_fit_params)
 
-        if self.propagate:
+        if self.should_propagate:
             # Only prepare exact propagation tables if we'll use exact mode
             try:
                 n_concepts = self.concept_detector.n_concepts
@@ -1134,14 +1142,14 @@ class ConceptBasedModel:
     def predict(
         self,
         dataset: ConceptDatasetSample,
-        propagate: Optional[bool] = None,
+        should_propagate: Optional[bool] = None,
     ) -> np.ndarray:
         """
         Predict label for the dataset.
         """
         probas = self.predict_proba(
             dataset,
-            propagate=propagate,
+            should_propagate=should_propagate,
         )
         preds = np.argmax(probas, axis=1)
 
@@ -1150,7 +1158,7 @@ class ConceptBasedModel:
     def predict_proba(
         self,
         dataset: ConceptDatasetSample,
-        propagate: Optional[bool] = None,
+        should_propagate: Optional[bool] = None,
         return_concepts: bool = False,
     ) -> np.ndarray:
         """
@@ -1158,10 +1166,10 @@ class ConceptBasedModel:
         """
         concept_preds = self.concept_detector.predict(dataset)
 
-        # Override object's propagate if specified
-        propagate = self.propagate if propagate is None else propagate
+        # Override object's should_propagate if specified
+        should_propagate = self.should_propagate if should_propagate is None else should_propagate
 
-        if propagate:
+        if should_propagate:
             n_concepts = concept_preds.shape[1]
             if self._should_use_exact(n_concepts):
                 return self._propagate_predict_proba(concept_preds)
@@ -1169,7 +1177,7 @@ class ConceptBasedModel:
                 return self._propagate_predict_proba_mc(concept_preds)
 
         binary_concept_preds = (concept_preds > 0.5).astype(np.float32)
-        pred_y_prob = self.front_end_model.predict_proba(binary_concept_preds)
+        pred_y_prob = self.label_predictor.predict_proba(binary_concept_preds)
 
         out = pred_y_prob if not return_concepts else (pred_y_prob, concept_preds)
 
@@ -1182,17 +1190,17 @@ class ConceptBasedModel:
         """
         Predict probabilities using concept propagation.
         """
-        if self._concept_poss is None or self._y_proba_all_concepts is None:
+        if self._concept_possibilities is None or self._y_proba_all_concepts is None:
             self._prep_propagation()
 
         # Vectorized propagation over all samples and concept combinations
         # Shapes:
         #   concept_preds: (N, C)
-        #   concept_poss:  (M, C) with binary {0,1}
+        #   concept_possibilities:  (M, C) with binary {0,1}
         #   y_proba_all_concepts: dict[(C,)-> (1,K)] -> stacked to (M, K)
 
         # Ensure concept combination order aligns with y_proba matrix rows
-        combs = self._concept_poss  # (M, C)
+        combs = self._concept_possibilities  # (M, C)
         # Stack dict values in the same order as combs
         y_mat = np.vstack(
             [
@@ -1280,11 +1288,11 @@ class ConceptBasedModel:
             # Deduplicate concept vectors to reduce model calls
             try:
                 uniq, inv = np.unique(Z_flat, axis=0, return_inverse=True)
-                y_uniq = self.front_end_model.predict_proba(uniq)
+                y_uniq = self.label_predictor.predict_proba(uniq)
                 Y_flat = y_uniq[inv]
             except (TypeError, ValueError):
                 # Fallback without deduplication (e.g. non-sortable dtypes)
-                Y_flat = self.front_end_model.predict_proba(Z_flat)
+                Y_flat = self.label_predictor.predict_proba(Z_flat)
 
             # Reshape back to (A, s, K)
             Y = Y_flat.reshape(P_active.shape[0], s, -1)
@@ -1331,7 +1339,7 @@ class ConceptBasedModel:
         # Final means as output
         if sum_acc is None:
             # No sampling happened (edge case), fallback to deterministic round
-            return self.front_end_model.predict_proba((P > 0.5).astype(np.float32))
+            return self.label_predictor.predict_proba((P > 0.5).astype(np.float32))
         out = sum_acc / counts[:, None]
         return out
 
@@ -1348,7 +1356,7 @@ class ConceptBasedModel:
                   and values are their corresponding probabilities.
         """
         probas = {}
-        for c in self.concept_poss:
+        for c in self.concept_possibilities:
             probas[tuple(c)] = np.prod(
                 (concept_probas**c) * (1 - concept_probas) ** (1 - c)
             )
@@ -1364,14 +1372,14 @@ class ConceptBasedModel:
 
         return all_poss
 
-    def _pred_y_proba_concept_poss(self) -> dict:
+    def _pred_y_proba_concept_possibilities(self) -> dict:
         """
         Predict probabilities for all concept combination.
         """
         all_y_probas = {}
 
-        for c in tqdm(self.concept_poss):
-            pr = self.front_end_model.predict_proba(c.reshape(1, -1))
+        for c in tqdm(self.concept_possibilities):
+            pr = self.label_predictor.predict_proba(c.reshape(1, -1))
             all_y_probas[tuple(c)] = pr
 
         return all_y_probas
@@ -1381,5 +1389,5 @@ class ConceptBasedModel:
         Prepare for propagation by generating concept possibilities and
         predicting probabilities for all concept combinations.
         """
-        self._concept_poss = self._gen_concept_possibilities()
-        self._y_proba_all_concepts = self._pred_y_proba_concept_poss()
+        self._concept_possibilities = self._gen_concept_possibilities()
+        self._y_proba_all_concepts = self._pred_y_proba_concept_possibilities()

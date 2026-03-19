@@ -60,19 +60,11 @@ logger = logging.getLogger(__name__)
 
 def setup_dataset(config: SudokuBenchmarkConfig) -> None:
     """Generate sudoku dataset (image + tabular + OCR sidecar)."""
-    import subprocess
-    import sys
+    from concept_benchmark.synthetic.sudoku_ocr.make_ocr_dataset import (
+        generate_sudoku_pipeline_data,
+    )
 
-    cmd = [
-        sys.executable,
-        "-m", "concept_benchmark.synthetic.sudoku_ocr.make_ocr_dataset",
-        "--n", str(config.n),
-        "--n-samples", str(config.n_samples),
-        "--valid-ratio", str(config.valid_ratio),
-        "--max-corrupt", str(config.max_corrupt),
-        "--seed", str(config.seed),
-    ]
-    subprocess.run(cmd, check=True)
+    generate_sudoku_pipeline_data(config)
 
 
 # ── Stage: train_ocr ──────────────────────────────────────────────────
@@ -86,7 +78,7 @@ def train_ocr(config: SudokuBenchmarkConfig) -> None:
         sys.executable,
         "-m", "concept_benchmark.synthetic.sudoku_ocr.train_ocr_fast",
         "--seed", str(config.seed),
-        "--max-corrupt", str(config.max_corrupt),
+        "--max-corrupt", str(config.max_cell_swaps),
     ]
     subprocess.run(cmd, check=True)
 
@@ -111,18 +103,14 @@ def train_cs(
         data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=config.seed)
         data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
 
-    if config.concept_missing_mech != "none":
-        if config.concept_missing <= 0.0:
-            raise ValueError(
-                "concept_missing must be > 0 when concept_missing_mech is not 'none'"
-            )
+    if config.missing_fraction > 0:
         data.sample_concept_missingness(
-            p=config.concept_missing,
-            mechanism=config.concept_missing_mech,
+            p=config.missing_fraction,
+            mechanism=config.missing_mechanism,
             rng=np.random.default_rng(config.seed),
         )
-        data.training.concept_missing = True
-        data.validation.concept_missing = True
+        data.training.has_concept_missing = True
+        data.validation.has_concept_missing = True
 
     _macos = platform.system() == "Darwin"
     loader_config = {
@@ -138,11 +126,11 @@ def train_cs(
 
     model = SudokuConceptModel()
     cd = ConceptDetector(model=model)
-    cbm = ConceptBasedModel(concept_detector=cd, propagate=True)
+    cbm = ConceptBasedModel(concept_detector=cd, should_propagate=True)
     cbm.fit(
         train_dataset=data.training,
         valid_dataset=data.validation,
-        freeze=False,
+        freeze_backbone=False,
         concept_embed_params={"shuffle": False, **loader_config},
         fit_params={
             "epochs": config.cs_epochs,
@@ -310,7 +298,7 @@ def run_interventions(
     budgets = [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
     for budget in budgets:
         interv_cfg = InterventionConfig(
-            tau=cs_t,
+            abstention_threshold=cs_t,
             max_concepts_per_instance=budget,
             random_state=config.seed,
         )
@@ -321,8 +309,8 @@ def run_interventions(
         pred_binary = (result.C_pred >= 0.5).astype(int)
         final_binary = (result.C_intervened >= 0.5).astype(int)
         total_concept_edits_made = int(np.sum(pred_binary != final_binary))
-        selective_acc_after = result.strat_metrics.get("selective_acc_after", None)
-        coverage_after = result.strat_metrics.get("coverage_after", None)
+        selective_acc_after = result.strategy_metrics.get("selective_acc_after", None)
+        coverage_after = result.strategy_metrics.get("coverage_after", None)
         rows.append({
             "budget": budget,
             "accuracy": acc_intervened,
@@ -376,12 +364,12 @@ def align(
     from experiments.alignment import test_alignment
 
     # Threshold at 0.5 to match cbm.predict() binarisation
-    h_test = (cs_model.concept_detector.predict(data.test) > 0.5).astype(np.float32)
+    concept_preds_test = (cs_model.concept_detector.predict(data.test) > 0.5).astype(np.float32)
     stats = test_alignment(
-        h_test=h_test,
-        align_params=config.get_alignment_weights(),
-        fe=cs_model.front_end_model,
-        test=data.test,
+        concept_preds_test=concept_preds_test,
+        alignment_params=config.get_alignment_weights(),
+        label_predictor=cs_model.label_predictor,
+        test_dataset=data.test,
     )
 
     logger.info("=== Alignment Results ===")
@@ -403,11 +391,10 @@ def align(
 
 def _dataset_label(cfg: SudokuBenchmarkConfig) -> str:
     """Human-readable dataset label for the summary CSV."""
-    label = f"mc{cfg.max_corrupt}"
-    if cfg.concept_missing_mech != "none":
-        label += f"_{cfg.concept_missing_mech}"
-        if cfg.concept_missing > 0:
-            label += f"_{int(cfg.concept_missing * 100)}"
+    label = f"mc{cfg.max_cell_swaps}"
+    if cfg.missing_fraction > 0:
+        label += f"_{cfg.missing_mechanism}"
+        label += f"_{int(cfg.missing_fraction * 100)}"
     return label
 
 
@@ -931,9 +918,9 @@ def main(argv=None):
     if args.budgets:
         config.intervention_budgets = _parse_budgets(args.budgets)
     if args.no_handwriting:
-        config.handwriting = False
+        config.font_style = "printed"
     elif args.handwriting:
-        config.handwriting = True
+        config.font_style = "handwritten"
     if args.data_type is not None:
         config.data_type = args.data_type
 

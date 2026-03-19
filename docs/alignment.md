@@ -21,7 +21,7 @@ After training a `ConceptBasedModel`, use `run_alignment()` to retrain the front
 from experiments.utils import run_alignment
 
 results = run_alignment(
-    cbm=cbm,
+    concept_based_model=cbm,
     train_dataset=train,
     test_dataset=test,
     monotonicity_constraints={"has_knees": 1},  # force positive weight

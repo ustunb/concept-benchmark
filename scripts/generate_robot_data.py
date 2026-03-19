@@ -1,8 +1,8 @@
-"""Generate a robot classification dataset using RobotDatasetGenerator.
+"""Generate a robot classification dataset using DatasetGenerator.
 
 Usage:
     python scripts/generate_robot_data.py --seed 1014
-    python scripts/generate_robot_data.py --seed 1014 --subconcept --no-draw
+    python scripts/generate_robot_data.py --seed 1014 --concept-preset foot_subtypes --no-draw
     python scripts/generate_robot_data.py --seed 1014 --output data/my_robots
 """
 from __future__ import annotations
@@ -18,22 +18,23 @@ logger = logging.getLogger("generate_robot_data")
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Generate a robot classification dataset.")
     parser.add_argument("--seed", type=int, default=1014, help="Random seed (default: 1014)")
-    parser.add_argument("--subconcept", action="store_true", help="Use 12 subconcepts instead of 7 ideal")
+    parser.add_argument("--concept-preset", choices=["ground_truth", "foot_subtypes"], default="ground_truth", help="Concept preset: ground_truth (7 ideal) or foot_subtypes (12 subconcepts)")
     parser.add_argument("--no-draw", action="store_true", help="Skip rendering robot PNGs (faster)")
     parser.add_argument("--output", type=str, default=None, help="Output directory for the dataset pickle")
     args = parser.parse_args(argv)
 
-    from concept_benchmark import RobotDatasetGenerator
+    from concept_benchmark import DatasetGenerator
     from concept_benchmark.ext.fileutils import save
 
-    gen = RobotDatasetGenerator(
+    gen = DatasetGenerator(
+        "robot",
         seed=args.seed,
-        subconcept=args.subconcept,
-        draw=not args.no_draw,
+        concept_preset=args.concept_preset,
+        render_images=not args.no_draw,
     )
     logger.info(
-        "Generating robot dataset: seed=%d, subconcept=%s, draw=%s",
-        args.seed, args.subconcept, not args.no_draw,
+        "Generating robot dataset: seed=%d, concept_preset=%s, render_images=%s",
+        args.seed, args.concept_preset, not args.no_draw,
     )
     dataset = gen.generate()
 

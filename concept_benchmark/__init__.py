@@ -10,16 +10,15 @@ configurations for two synthetic tasks:
 
 Quick start::
 
-    from concept_benchmark import RobotDatasetGenerator
+    from concept_benchmark import DatasetGenerator
 
-    gen = RobotDatasetGenerator(seed=1014, subconcept=True, draw=True)
-    dataset = gen.generate()
+    dataset = DatasetGenerator("robot", seed=1014, render_images=False).generate()
     print(dataset)
 """
 
 from . import config, synthetic, utils
 from .data import ConceptDataset, ConceptDatasetSample
-from .generators import RobotDatasetGenerator, SudokuDatasetGenerator
+from .generators import DatasetGenerator
 
 __all__ = [
     "config",
@@ -27,6 +26,5 @@ __all__ = [
     "utils",
     "ConceptDataset",
     "ConceptDatasetSample",
-    "RobotDatasetGenerator",
-    "SudokuDatasetGenerator",
+    "DatasetGenerator",
 ]

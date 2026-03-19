@@ -121,9 +121,9 @@ class ConstrainedFrontEndModel(FrontEndModel):
 
 
 def retrain_aligned(
-    h_train: np.ndarray,
+    concept_preds_train: np.ndarray,
     y_train: np.ndarray,
-    h_test: np.ndarray,
+    concept_preds_test: np.ndarray,
     y_test: np.ndarray,
     concept_names: List[str],
     original_frontend: FrontEndModel,
@@ -138,11 +138,11 @@ def retrain_aligned(
 
     Parameters
     ----------
-    h_train : np.ndarray
+    concept_preds_train : np.ndarray
         Concept predictions on training set.
     y_train : np.ndarray
         Training labels.
-    h_test : np.ndarray
+    concept_preds_test : np.ndarray
         Concept predictions on test set.
     y_test : np.ndarray
         Test labels.
@@ -163,10 +163,10 @@ def retrain_aligned(
         concept_names=concept_names,
         monotonicity_constraints=monotonicity_constraints,
     )
-    aligned_fe.fit(h_train, y_train)
+    aligned_fe.fit(concept_preds_train, y_train)
 
-    original_probs = original_frontend.predict_proba(h_test)
-    aligned_probs = aligned_fe.predict_proba(h_test)
+    original_probs = original_frontend.predict_proba(concept_preds_test)
+    aligned_probs = aligned_fe.predict_proba(concept_preds_test)
     original_preds = original_probs.argmax(1)
     aligned_preds = aligned_probs.argmax(1)
 
@@ -233,18 +233,18 @@ def align_frontend_weights(frontend_model, concept_names, weight_dict):
     return frontend_model
 
 
-def test_alignment(h_test, align_params, fe, test):
+def test_alignment(concept_preds_test, alignment_params, label_predictor, test_dataset):
     """Test alignment by replacing frontend weights with specified values.
 
     Parameters
     ----------
-    h_test : np.ndarray
+    concept_preds_test : np.ndarray
         Concept predictions on test set.
-    align_params : dict
+    alignment_params : dict
         Dict of alignment weights.
-    fe : FrontEndModel
+    label_predictor : FrontEndModel
         Original frontend model.
-    test : ConceptDataset
+    test_dataset : ConceptDataset
         Test dataset split.
 
     Returns
@@ -252,15 +252,15 @@ def test_alignment(h_test, align_params, fe, test):
     dict
         Dict with alignment statistics.
     """
-    test_labels = test.y.astype(int)
-    original_frontend = fe
-    aligned_frontend = copy.deepcopy(fe)
+    test_labels = test_dataset.y.astype(int)
+    original_frontend = label_predictor
+    aligned_frontend = copy.deepcopy(label_predictor)
     aligned_frontend = align_frontend_weights(
-        aligned_frontend, test.concepts, align_params
+        aligned_frontend, test_dataset.concepts, alignment_params
     )
 
-    original_probs = original_frontend.predict_proba(h_test)
-    aligned_probs = aligned_frontend.predict_proba(h_test)
+    original_probs = original_frontend.predict_proba(concept_preds_test)
+    aligned_probs = aligned_frontend.predict_proba(concept_preds_test)
     original_preds = original_probs.argmax(1)
     aligned_preds = aligned_probs.argmax(1)
 

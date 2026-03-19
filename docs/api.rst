@@ -1,13 +1,10 @@
 API Reference
 =============
 
-Dataset Generators
-------------------
+Dataset Generator
+-----------------
 
-.. autoclass:: concept_benchmark.RobotDatasetGenerator
-   :members:
-
-.. autoclass:: concept_benchmark.SudokuDatasetGenerator
+.. autoclass:: concept_benchmark.DatasetGenerator
    :members:
 
 Data Containers
@@ -31,8 +28,6 @@ Benchmark Configurations
 .. autoclass:: concept_benchmark.config.SudokuBenchmarkConfig
    :members:
 
-.. autoclass:: concept_benchmark.config.RobotTextBenchmarkConfig
-   :members:
 
 Models (experiments/)
 ---------------------

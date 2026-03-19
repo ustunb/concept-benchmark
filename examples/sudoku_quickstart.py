@@ -18,13 +18,13 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 
-from concept_benchmark import SudokuDatasetGenerator
+from concept_benchmark import DatasetGenerator
 
 # ---------------------------------------------------------------------------
 # 1. Generate dataset (renders board images by default, ~35 s for 100 boards)
 # ---------------------------------------------------------------------------
 print("Generating Sudoku dataset (50 boards with handwritten digit images)...")
-dataset = SudokuDatasetGenerator(seed=171, n_samples=50).generate()
+dataset = DatasetGenerator("sudoku", seed=171, n_boards=50).generate()
 
 train, test = dataset.training, dataset.test
 print(f"  Training:  {train.n} samples, {train.n_concepts} concepts")

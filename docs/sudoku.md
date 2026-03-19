@@ -10,20 +10,20 @@ This benchmark targets automation settings where the system handles routine case
 
 ## Parameters
 
-All parameters can be passed to `SudokuDatasetGenerator()` or as CLI flags to `sudoku_pipeline.py`:
+All parameters can be passed to `DatasetGenerator("sudoku", ...)` or as CLI flags to `sudoku_pipeline.py`:
 
 ```python
-from concept_benchmark import SudokuDatasetGenerator
+from concept_benchmark import DatasetGenerator
 
-dataset = SudokuDatasetGenerator(
-    seed=171,             # random seed
-    n_samples=1000,       # number of boards to generate
-    max_corrupt=9,        # cells swapped in invalid boards (higher = subtler errors)
-    valid_ratio=0.5,      # fraction of valid boards
-    data_type="image",    # "image" (OCR-inferred digits) or "tabular" (ground-truth values)
-    handwriting=True,     # render digits in handwritten style (image only)
-    target_accuracy=0.9,  # minimum accuracy on kept predictions (selective classification)
-    # intervention_thresholds=[0.2, 0.4, 0.6, 0.8]  # concept confidence thresholds
+dataset = DatasetGenerator(
+    "sudoku",
+    seed=171,                # random seed
+    n_boards=1000,           # number of boards to generate
+    max_cell_swaps=9,        # cells swapped in invalid boards (higher = subtler errors)
+    valid_board_ratio=0.5,   # fraction of valid boards
+    data_type="image",       # "image" (renders board PNGs) or "tabular" (ground-truth values)
+    font_style="handwritten",  # "handwritten" or "printed" (image only)
+    # target_accuracy=0.9    # minimum accuracy (selective classification, pipeline only)
 ).generate()
 ```
 

@@ -26,8 +26,8 @@ def test_train_heads_with_encoder_finetunes_encoder_changes(tabular_train_valid)
         valid_dataset=valid,
         embedding_model=enc,
         input_dim=None,
-        l1_size=8,
-        freeze=False,
+        hidden_layer_size=8,
+        freeze_backbone=False,
         fit_params={
             "epochs": 2,
             "device": "cpu",

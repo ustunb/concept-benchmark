@@ -216,8 +216,8 @@ class TextConceptDetector(ConceptDetector):
         self,
         train_dataset: ConceptDatasetSample,
         valid_dataset: Optional[ConceptDatasetSample] = None,
-        embed_params: Optional[dict] = None,
-        l1_size: Optional[int] = None,
+        embedding_params: Optional[dict] = None,
+        hidden_layer_size: Optional[int] = None,
         n_jobs: Optional[int] = None,
         **kwargs,
     ) -> None:
@@ -417,7 +417,7 @@ class TextConceptDetector(ConceptDetector):
     def predict(
         self,
         dataset: ConceptDatasetSample,
-        embed_params: Optional[dict] = None,
+        embedding_params: Optional[dict] = None,
         **kwargs,
     ) -> np.ndarray:
         if self.model is None:

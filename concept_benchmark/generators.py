@@ -1,25 +1,27 @@
 """High-level dataset generators for concept benchmarks.
 
-Provides a simple ``generate()`` API that wraps data creation, splitting,
-and seed management into a single call:
+Provides a unified ``DatasetGenerator`` API that wraps data creation,
+splitting, and seed management into a single call:
 
-    >>> from concept_benchmark import RobotDatasetGenerator
-    >>> dataset = RobotDatasetGenerator(seed=1014, draw=False).generate()
+    >>> from concept_benchmark import DatasetGenerator
+    >>> dataset = DatasetGenerator("robot", seed=1014, render_images=False).generate()
     >>> dataset.training.C.shape
     (3800, 7)
 
-    >>> from concept_benchmark import SudokuDatasetGenerator
-    >>> dataset = SudokuDatasetGenerator(seed=171).generate()
+    >>> dataset = DatasetGenerator("sudoku", seed=171, data_type="tabular").generate()
     >>> dataset.training.C.shape
     (600, 27)
 """
 
 from __future__ import annotations
 
+import dataclasses
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Literal, overload
+
 import numpy as np
 
 from concept_benchmark.config import (
-    ROBOT_CONCEPTS,
     RobotBenchmarkConfig,
     SudokuBenchmarkConfig,
 )
@@ -27,127 +29,16 @@ from concept_benchmark.synthetic.robot import create_synthetic_dataset
 from concept_benchmark.synthetic.sudoku import create_sudoku_dataset
 from concept_benchmark.utils import create_skewed_splits_full, set_deterministic_seed
 
-__all__ = ["RobotDatasetGenerator", "SudokuDatasetGenerator"]
+if TYPE_CHECKING:
+    from concept_benchmark.data import ConceptDataset
+
+__all__ = ["DatasetGenerator"]
 
 
-class RobotDatasetGenerator:
-    """Generate a robot classification dataset with train/val/test splits.
-
-    Wraps :class:`RobotBenchmarkConfig`, data generation, CV indexing, and
-    skewed splitting into a single ``generate()`` call.
-
-    Parameters
-    ----------
-    label_formula : dict, optional
-        Combined labeling function specification.  Maps ``(feature, value)``
-        tuples to weights; use ``"intercept"`` key for the bias term::
-
-            label_formula={
-                ("mouth_type", "closed"): 5.0,
-                ("foot_shape", "pointy"): 8.0,
-                ("has_knees", "true"): -5.0,
-                "intercept": 2.0,
-            }
-
-        This is equivalent to the score equation::
-
-            score = 5·1[mouth=closed] + 8·1[foot=pointy] - 5·1[knees=true] + 2
-
-        If not provided, defaults to the paper's labeling rule.
-    **kwargs
-        Forwarded to :class:`RobotBenchmarkConfig`.  Common options:
-
-        seed : int
-            Random seed (default ``1014``).
-        subconcept : bool
-            Use 12 fine-grained subconcepts instead of 7 ideal concepts.
-        draw : bool
-            Whether to render robot PNGs to disk (default ``True``).
-            Set to ``False`` for faster generation when images aren't needed.
-        model_type : str
-            ``"stochastic"`` (default) or ``"deterministic"``.
-        drop_concepts : list[str]
-            Concepts to exclude from the concept matrix.
-        size : str
-            Image resolution: ``"small"`` (8px), ``"medium"`` (32px),
-            ``"large"`` (600px).  Default ``"medium"``.
-
-    Examples
-    --------
-    >>> gen = RobotDatasetGenerator(seed=1014, draw=False)
-    >>> dataset = gen.generate()
-    >>> dataset.training.C.shape
-    (3800, 7)
-
-    >>> gen = RobotDatasetGenerator(
-    ...     label_formula={
-    ...         ("mouth_type", "closed"): 5.0,
-    ...         ("foot_shape", "pointy"): 8.0,
-    ...         ("has_knees", "true"): -5.0,
-    ...         "intercept": 2.0,
-    ...     },
-    ...     draw=False,
-    ... )
-    """
-
-    _VALID_FEATURES = frozenset(ROBOT_CONCEPTS.keys())
-
-    def __init__(self, *, label_formula=None, **kwargs):
-        if label_formula is not None:
-            conflicting = {
-                "model_features",
-                "model_weights",
-                "model_intercept",
-            } & kwargs.keys()
-            if conflicting:
-                raise ValueError(
-                    f"Cannot pass both label_formula and {conflicting}. "
-                    "Use one or the other."
-                )
-            model_features = {}
-            model_weights = {}
-            intercept = 0.0
-            for key, weight in label_formula.items():
-                if key == "intercept":
-                    intercept = weight
-                else:
-                    if not (isinstance(key, tuple) and len(key) == 2):
-                        raise ValueError(
-                            f"label_formula key must be 'intercept' or a "
-                            f"(feature, value) tuple, got {key!r}. "
-                            f"Valid features: {sorted(self._VALID_FEATURES)}"
-                        )
-                    feature, value = key
-                    if feature not in self._VALID_FEATURES:
-                        raise ValueError(
-                            f"Unknown feature {feature!r} in label_formula. "
-                            f"Valid features: {sorted(self._VALID_FEATURES)}"
-                        )
-                    valid_values = ROBOT_CONCEPTS[feature]
-                    if value not in valid_values:
-                        raise ValueError(
-                            f"Invalid value {value!r} for feature {feature!r}. "
-                            f"Valid values: {valid_values}"
-                        )
-                    model_features[feature] = value
-                    model_weights[feature] = weight
-            kwargs.setdefault("model_features", model_features)
-            kwargs.setdefault("model_weights", model_weights)
-            kwargs.setdefault("model_intercept", intercept)
-        self.config = RobotBenchmarkConfig(**kwargs)
-
-    def generate(self):
-        """Generate the dataset and return it with train/val/test splits.
-
-        Returns
-        -------
-        ConceptDataset
-            Dataset with ``.training``, ``.validation``, and ``.test`` set.
-        """
-        return generate_robot_dataset(self.config)
+# ── Standalone generation functions ──────────────────────────────────
 
 
-def generate_robot_dataset(config: RobotBenchmarkConfig):
+def generate_robot_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
     """Generate a robot dataset from a config, with train/val/test splits."""
     set_deterministic_seed(config.seed)
     settings = config.to_dict()
@@ -157,89 +48,270 @@ def generate_robot_dataset(config: RobotBenchmarkConfig):
     return create_skewed_splits_full(dataset=data, rng=rng, **settings)
 
 
-class SudokuDatasetGenerator:
-    """Generate a Sudoku validation dataset with train/val/test splits.
+def generate_sudoku_dataset(config: SudokuBenchmarkConfig) -> ConceptDataset:
+    """Generate a sudoku dataset from a config, with train/val/test splits."""
+    from functools import partial
 
-    Wraps :class:`SudokuBenchmarkConfig` and data generation into a single
-    ``generate()`` call.  By default ``data_type="image"`` renders boards
-    as PNG images so that ``.explore()`` shows the actual images the model
-    sees.  Use ``data_type="tabular"`` for a lightweight representation
-    where ``X`` contains flattened digit vectors (much faster).
+    set_deterministic_seed(config.seed)
+
+    data_type = config.data_type
+    kwargs = {}
+    if data_type == "image" and config.render_images:
+        from concept_benchmark.synthetic.sudoku import image_transform
+
+        kwargs["transform"] = partial(
+            image_transform,
+            cell_px=config.cell_px,
+            margin_px=config.cell_margin_px,
+            line_px=config.gridline_px,
+            bold_px=config.block_border_px,
+            font_size=config.font_size,
+            handwriting=config.font_style == "handwritten",
+        )
+    elif data_type == "image" and not config.render_images:
+        # Image mode but skip rendering — use tabular transform internally,
+        # metadata still says "image".
+        pass
+
+    data = create_sudoku_dataset(
+        n=config.block_size,
+        n_samples=config.n_boards,
+        valid_ratio=config.valid_board_ratio,
+        max_corrupt=config.max_cell_swaps,
+        seed=config.seed,
+        data_type=data_type if config.render_images else "tabular",
+        **kwargs,
+    )
+    data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=config.seed)
+    data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
+    return data
+
+
+def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
+    """Generate a robot text dataset from a config, with train/val/test splits.
+
+    Uses the robot text catalog to enumerate concept combinations, generates
+    text descriptions from corpus templates, and splits by robot identity.
+    """
+    from concept_benchmark.synthetic.robot_text.catalog import (
+        compute_label,
+        enumerate_robot_concepts,
+    )
+    from concept_benchmark.synthetic.robot_text.corpus import (
+        get_corpus_path,
+        get_generic_corpus_path,
+    )
+    from concept_benchmark.synthetic.robot_text.dataset import (
+        build_text_dataset,
+        kfold_by_robot_identity,
+    )
+    from concept_benchmark.synthetic.helper.robot_catalog import collapse_robot_subtypes
+    from concept_benchmark.synthetic.helper.utils import build_model_expression
+
+    from concept_benchmark.utils import set_deterministic_seed
+    set_deterministic_seed(config.seed)
+
+    # Enumerate all robot concept combinations
+    catalog_df = enumerate_robot_concepts(concepts=config.concepts, seed=config.seed)
+
+    # Collapse subtypes for label computation only
+    catalog_for_labels = catalog_df.copy()
+    collapse_robot_subtypes(catalog_for_labels, robot_features=list(config.concepts.keys()))
+
+    # Build expression from structured params (same as image pipeline)
+    expr = build_model_expression(
+        config.label_features,
+        model_type="deterministic",
+        weights=config.label_weights,
+        intercept=config.label_intercept,
+    )
+
+    model_type = "stochastic" if config.use_stochastic_labels else "deterministic"
+    catalog_df["label"] = compute_label(
+        catalog_for_labels,
+        expr,
+        label_model_type=model_type,
+        alpha=config.label_temperature if model_type == "stochastic" else 1.0,
+        seed=config.seed,
+    )
+
+    _lbl = catalog_df["label"].astype(str)
+    n_pos = int((_lbl == "glorp").sum())
+    n_neg = int((_lbl == "drent").sum())
+    minority_label = "glorp" if n_pos < n_neg else "drent"
+
+    # Determine per-row variant counts
+    row_variants = [
+        config.minority_text_variants if lab == minority_label else config.majority_text_variants
+        for lab in _lbl
+    ]
+
+    # Find corpus paths
+    corpus_path = get_corpus_path(config)
+    generic_path = get_generic_corpus_path(config, corpus_path) if config.use_generic_text else None
+
+    # Build dataset
+    ds = build_text_dataset(
+        catalog_df=catalog_df,
+        corpus_path=corpus_path,
+        variants_per_row=1,
+        seed=config.seed,
+        row_variants=row_variants,
+        generic_path=generic_path,
+        generic_rate=config.generic_text_rate if config.use_generic_text else 0.0,
+        generic_target=config.generic_text_concept,
+    )
+
+    # Split by robot identity
+    ds = kfold_by_robot_identity(
+        ds,
+        cv_k=config.cv_k,
+        cv_fold=config.cv_fold,
+        dev_per_fold=config.validation_size_per_fold,
+        deployment_size=config.test_size,
+        seed=config.seed,
+        generic_target=config.generic_text_concept,
+        corpus_path=corpus_path,
+        catalog_df=catalog_df,
+        generic_path=generic_path,
+        generic_rate=config.generic_text_rate if config.use_generic_text else 0.0,
+    )
+
+    return ds
+
+
+# ── Benchmark registry ───────────────────────────────────────────────
+
+_BENCHMARKS = MappingProxyType({
+    "robot": (RobotBenchmarkConfig, generate_robot_dataset),
+    "sudoku": (SudokuBenchmarkConfig, generate_sudoku_dataset),
+})
+
+
+# ── Unified DatasetGenerator ─────────────────────────────────────────
+
+
+class DatasetGenerator:
+    """Unified generator for all concept benchmarks.
+
+    Follows the HuggingFace ``load_dataset`` pattern — the first argument
+    selects the benchmark, remaining kwargs configure it:
+
+        >>> DatasetGenerator("robot", seed=1014, render_images=False).generate()
+        >>> DatasetGenerator("sudoku", seed=171, data_type="tabular").generate()
 
     Parameters
     ----------
+    benchmark : str
+        Benchmark name: ``"robot"`` or ``"sudoku"``.
     **kwargs
-        Forwarded to :class:`SudokuBenchmarkConfig`.  Common options:
-
-        seed : int
-            Random seed (default ``171``).
-        n : int
-            Block size (default ``3`` for 9x9 boards).
-        n_samples : int
-            Number of boards to generate (default ``1000``).
-        max_corrupt : int
-            Maximum number of cell swaps for invalid boards (default ``9``).
-        valid_ratio : float
-            Fraction of valid boards (default ``0.5``).
-        data_type : str
-            ``"image"`` (default) renders board PNGs; ``"tabular"`` stores
-            flattened digit vectors (much faster).
-
-    Examples
-    --------
-    >>> gen = SudokuDatasetGenerator(seed=171)
-    >>> dataset = gen.generate()
-    >>> dataset.training.C.shape
-    (600, 27)
+        Benchmark-specific configuration parameters. Passed directly to the
+        underlying config dataclass (``RobotBenchmarkConfig`` or
+        ``SudokuBenchmarkConfig``). Unknown parameters raise ``ValueError``
+        with a list of valid parameters.
     """
 
-    def __init__(self, **kwargs):
-        """Create a generator with the given benchmark configuration.
+    @overload
+    def __init__(
+        self,
+        benchmark: Literal["robot"],
+        *,
+        seed: int = ...,
+        data_type: str = ...,
+        render_images: bool = ...,
+        concepts: dict[str, list] | None = ...,
+        concept_preset: str = ...,
+        fine_grained_concepts: list[str] | None = ...,
+        label_formula: dict | None = ...,
+        use_stochastic_labels: bool = ...,
+        sampling_constraints: list[dict] | None = ...,
+        image_size: str = ...,
+        color_mode: str = ...,
+        renders_per_robot: int = ...,
+        train_size: int = ...,
+        test_size: int = ...,
+        excluded_concepts: list[str] | None = ...,
+        missing_fraction: float = ...,
+        missing_mechanism: str = ...,
+    ) -> None: ...
 
-        Parameters
-        ----------
-        **kwargs
-            Passed directly to :class:`SudokuBenchmarkConfig`.
-        """
-        self.config = SudokuBenchmarkConfig(**kwargs)
+    @overload
+    def __init__(
+        self,
+        benchmark: Literal["sudoku"],
+        *,
+        seed: int = ...,
+        data_type: str = ...,
+        render_images: bool = ...,
+        block_size: int = ...,
+        n_boards: int = ...,
+        valid_board_ratio: float = ...,
+        max_cell_swaps: int = ...,
+        cell_px: int = ...,
+        cell_margin_px: int = ...,
+        gridline_px: int = ...,
+        block_border_px: int = ...,
+        font_size: int = ...,
+        font_style: str = ...,
+        missing_fraction: float = ...,
+        missing_mechanism: str = ...,
+    ) -> None: ...
 
-    def generate(self):
-        """Generate the dataset and return it with train/val/test splits.
-
-        Returns
-        -------
-        ConceptDataset
-            Dataset with ``.training``, ``.validation``, and ``.test`` set.
-        """
-        from functools import partial
-
-        set_deterministic_seed(self.config.seed)
-        cfg = self.config
-
-        data_type = cfg.data_type
-        kwargs = {}
-        if data_type == "image":
-            from concept_benchmark.synthetic.sudoku import image_transform
-
-            kwargs["transform"] = partial(
-                image_transform,
-                cell_px=cfg.cell_px,
-                margin_px=cfg.margin_px,
-                line_px=cfg.line_px,
-                bold_px=cfg.bold_px,
-                font_size=cfg.font_size,
-                handwriting=cfg.handwriting,
+    def __init__(self, benchmark: str, **kwargs):
+        if benchmark in _BENCHMARKS:
+            config_class, self._generate_fn = _BENCHMARKS[benchmark]
+        else:
+            raise ValueError(
+                f"Unknown benchmark {benchmark!r}. "
+                f"Available: {sorted(_BENCHMARKS)}"
             )
 
-        data = create_sudoku_dataset(
-            n=cfg.n,
-            n_samples=cfg.n_samples,
-            valid_ratio=cfg.valid_ratio,
-            max_corrupt=cfg.max_corrupt,
-            seed=cfg.seed,
-            data_type=data_type,
-            **kwargs,
+        # Text modality routes to text generator
+        if benchmark == "robot" and kwargs.get("data_type") == "text":
+            self._generate_fn = generate_robot_text_dataset
+
+        self.benchmark = benchmark
+        try:
+            self.config = config_class(**kwargs)
+        except TypeError as e:
+            valid = [f.name for f in dataclasses.fields(config_class)]
+            raise ValueError(
+                f"Invalid parameter for benchmark {benchmark!r}: {e}. "
+                f"Available parameters: {', '.join(valid)}"
+            ) from None
+
+    @classmethod
+    def from_config(
+        cls, config: RobotBenchmarkConfig | SudokuBenchmarkConfig
+    ) -> "DatasetGenerator":
+        """Create a generator from an existing config object.
+
+        This is the preferred entry point for pipelines and scripts that
+        already have a config (e.g. from CLI parsing or YAML):
+
+            >>> cfg = RobotBenchmarkConfig(seed=1014, concept_preset="foot_subtypes")
+            >>> dataset = DatasetGenerator.from_config(cfg).generate()
+        """
+        for name, (config_class, _) in _BENCHMARKS.items():
+            if isinstance(config, config_class):
+                obj = cls.__new__(cls)
+                obj.benchmark = name
+                obj.config = config
+                _, obj._generate_fn = _BENCHMARKS[name]
+                # Text modality routes to text generator
+                if name == "robot" and getattr(config, "data_type", None) == "text":
+                    obj._generate_fn = generate_robot_text_dataset
+                return obj
+        raise TypeError(
+            f"Unsupported config type {type(config).__name__!r}. "
+            f"Expected one of: {', '.join(c.__name__ for c, _ in _BENCHMARKS.values())}"
         )
-        data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=cfg.seed)
-        data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
-        return data
+
+    def generate(self) -> ConceptDataset:
+        """Generate the dataset with train/val/test splits."""
+        return self._generate_fn(self.config)
+
+    @classmethod
+    def available_benchmarks(cls) -> list[str]:
+        """Return sorted list of registered benchmark names."""
+        return sorted(_BENCHMARKS)

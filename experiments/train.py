@@ -378,8 +378,8 @@ def train_concept_heads(
     embedding_model: Optional[nn.Module],
     *,
     input_dim: Optional[int] = None,
-    l1_size: int = 100,
-    freeze: bool = False,
+    hidden_layer_size: int = 100,
+    freeze_backbone: bool = False,
     fit_params: Optional[Dict[str, Any]] = None,
 ) -> nn.ModuleList:
     params = {
@@ -464,7 +464,7 @@ def train_concept_heads(
             return self.linear(h)
 
     model = _EmbedAndLinear(
-        embedding_model, int(input_dim), int(num_concepts), bool(freeze)
+        embedding_model, int(input_dim), int(num_concepts), bool(freeze_backbone)
     )
 
     trainer = DefaultConceptTrainer()

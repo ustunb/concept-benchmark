@@ -4,8 +4,8 @@ Provides functions to run each stage of the robot benchmark programmatically.
 
 Usage:
     python scripts/robot_pipeline.py --seed 1014
-    python scripts/robot_pipeline.py --seed 1014 --subconcept
-    python scripts/robot_pipeline.py --seed 1014 --subconcept --regimes baseline expert
+    python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes
+    python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes --regimes baseline expert
     python scripts/robot_pipeline.py --config my_config.yaml
 """
 from __future__ import annotations
@@ -27,13 +27,13 @@ from tqdm import tqdm
 
 from concept_benchmark.utils import (
     compute_accuracy,
-    create_skewed_splits_full,
     determine_device,
     get_loader_config,
     patch_macos_dataloader,
     set_deterministic_seed,
 )
 from concept_benchmark.config import RobotBenchmarkConfig
+from concept_benchmark.generators import DatasetGenerator
 from concept_benchmark.ext.fileutils import load, save
 from experiments.models import (
     ConceptBasedModel,
@@ -44,7 +44,6 @@ from experiments.models import (
 )
 from experiments.utils import run_alignment
 from concept_benchmark.paths import data_dir, results_dir
-from concept_benchmark.synthetic.robot import create_synthetic_dataset
 
 @dataclass
 class InterventionSettings:
@@ -54,7 +53,7 @@ class InterventionSettings:
     budgets: List[int]
     intervention_accuracy: float = 0.9
     intervention_threshold: float = 1.0
-    intervention_strategy: str = "kflip"
+    intervention_strategy: str = "up_to_k"
     intervention_expert: str = ""  # "" for standard path, "llm" for inline LLM
     intervention_llm: Optional[Dict[str, Any]] = None
     run_dir: str = "."
@@ -105,15 +104,10 @@ def setup_dataset(config: RobotBenchmarkConfig):
 
     Returns the saved ConceptDataset.
     """
-    settings = config.to_dict()
     logger.info("Generating robot dataset...")
-    data = create_synthetic_dataset(**settings)
-    data.generate_cvindices(seed=config.seed)
-
-    rng = np.random.default_rng(config.seed)
-    sk_data = create_skewed_splits_full(dataset=data, rng=rng, **settings)
-    save(sk_data, config.get_dataset_path(), overwrite=True)
-    return sk_data
+    data = DatasetGenerator.from_config(config).generate()
+    save(data, config.get_dataset_path(), overwrite=True)
+    return data
 
 
 # ── Stage: train_cbm ──────────────────────────────────────────────────
@@ -138,17 +132,13 @@ def train_cbm(
         data = load(config.get_dataset_path())
 
     # Apply concept missingness if configured
-    if config.concept_missing_mech != "none":
-        if config.concept_missing <= 0.0:
-            raise ValueError(
-                "concept_missing must be > 0 when concept_missing_mech is not 'none'"
-            )
+    if config.missing_fraction > 0:
         data.sample_concept_missingness(
-            p=config.concept_missing,
-            mechanism=config.concept_missing_mech,
+            p=config.missing_fraction,
+            mechanism=config.missing_mechanism,
             rng=np.random.default_rng(config.seed),
         )
-        data.training.concept_missing = True
+        data.training.has_concept_missing = True
 
     _macos = platform.system() == "Darwin"
     loader_config = {
@@ -169,11 +159,11 @@ def train_cbm(
     cbm.fit(
         train_dataset=data.training,
         valid_dataset=data.validation,
-        freeze=False,
+        freeze_backbone=False,
         concept_embed_params={"shuffle": False, **loader_config},
         fit_params={
             "epochs": config.epochs,
-            "lr": config.lr,
+            "lr": config.learning_rate,
             "patience": config.patience,
             **loader_config,
         },
@@ -318,16 +308,16 @@ def train_lfcbm(
     if data is None:
         data = load(config.get_dataset_path())
 
-    concepts_file = config.lfcbm_concepts_file
+    concepts_file = config.label_free_concepts_file
     if not concepts_file:
-        from concept_benchmark.paths import pkg_dir
-        suffix = "_subconcept" if config.subconcept else ""
-        default = pkg_dir / "concept_descriptions" / f"gt_concepts{suffix}.jsonl"
+        from concept_benchmark.paths import package_dir
+        suffix = "_subconcept" if config.concept_preset == "foot_subtypes" else ""
+        default = package_dir / "concept_descriptions" / f"gt_concepts{suffix}.jsonl"
         if default.exists():
             concepts_file = str(default)
         else:
             raise FileNotFoundError(
-                f"No LFCBM concepts file: set config.lfcbm_concepts_file or create {default}"
+                f"No label-free concepts file: set config.label_free_concepts_file or create {default}"
             )
 
     concept_set = LFConceptSet.from_file(concepts_file)
@@ -383,7 +373,7 @@ def train_dnn(
     model = RobotClassifierCNN(input_size=config.input_size)
 
     criterion = nn.BCELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
 
     loader_config = get_loader_config(device)
     train_loader = data.training.loader(shuffle=True, **loader_config)
@@ -494,7 +484,7 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
             concept_names = concept_names[: prob_test.shape[1]]
 
     # Create a CBM wrapper for the intervention framework
-    cbm = ConceptBasedModel(concept_detector=None, front_end_model=fe)
+    cbm = ConceptBasedModel(concept_detector=None, label_predictor=fe)
     runner = ConceptInterventionRunner(cbm)
     llm_cache = None
     _intervention_cache = None
@@ -523,11 +513,11 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
             max_concepts_per_instance=budget,
             random_state=settings.seed,
             score_threshold=settings.intervention_threshold,
-            noise=1.0 - human_acc,
+            intervention_noise_rate=1.0 - human_acc,
         )
 
         strategy = KFlipInterventionStrategy(
-            exact_k=(settings.intervention_strategy == "exact_k"),
+            use_exact_k=(settings.intervention_strategy == "exactly_k"),
         )
 
         if settings.intervention_expert.lower() == "llm":
@@ -694,7 +684,7 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
                     max_concepts_per_instance=maxK,
                     random_state=settings.seed,
                     score_threshold=settings.intervention_threshold,
-                    noise=1.0 - human_acc,
+                    intervention_noise_rate=1.0 - human_acc,
                 )
                 proposal_max = strategy.propose(cbm, batch, config_max)
                 mask_max = proposal_max.mask
@@ -965,15 +955,15 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
     from experiments.lfcbm import LabelFreeCBM, LFConceptSet, LFTrainingConfig
 
     # Load concept descriptions for this regime
-    from concept_benchmark.paths import pkg_dir
+    from concept_benchmark.paths import package_dir
     if regime == "llm":
         concepts_file = config.llm_concepts_file
         if not concepts_file:
-            concepts_file = str(pkg_dir / "concept_descriptions" / "llm.jsonl")
+            concepts_file = str(package_dir / "concept_descriptions" / "llm.jsonl")
     else:  # clip
         concepts_file = config.clip_concepts_file
         if not concepts_file:
-            concepts_file = str(pkg_dir / "concept_descriptions" / "clip.jsonl")
+            concepts_file = str(package_dir / "concept_descriptions" / "clip.jsonl")
 
     p_cf = Path(concepts_file)
     if not p_cf.is_absolute():
@@ -1120,7 +1110,7 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
         test_paths = [str(image_dir / p) for p in data.test.X]
         c_preds = lfcbm_obj.concept_proba(test_paths)
         regime_concept_names = list(lfcbm_obj.concept_set.keys)
-        regime_model = ConceptBasedModel(concept_detector=None, front_end_model=fe_machine)
+        regime_model = ConceptBasedModel(concept_detector=None, label_predictor=fe_machine)
         human_acc = config.expert_intervention_accuracy
     elif regime in ("llm", "clip"):
         # LLM/CLIP regimes use separate concept files for corrections
@@ -1134,12 +1124,12 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
     # for other regimes, binarize first (matching original code).
     if regime == "machine":
         acc_det = float(
-            (np.argmax(regime_model.front_end_model.predict_proba(c_preds),
+            (np.argmax(regime_model.label_predictor.predict_proba(c_preds),
                         axis=1) == data.test.y.astype(int)).mean()
         )
     else:
         acc_det = float(
-            (np.argmax(regime_model.front_end_model.predict_proba(
+            (np.argmax(regime_model.label_predictor.predict_proba(
                 (c_preds >= 0.5).astype(int)), axis=1) == data.test.y.astype(int)).mean()
         )
 
@@ -1157,7 +1147,7 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
             prob_test=c_preds,
             settings=isettings,
             acc_det=acc_det,
-            fe=regime_model.front_end_model,
+            fe=regime_model.label_predictor,
             test=data.test,
             concept_names=regime_concept_names,
         )
@@ -1212,10 +1202,10 @@ def run_interventions(
         return pd.DataFrame()
 
     results_df = pd.concat(all_dfs, axis=0).reset_index(drop=True)
-    results_df["data_name"] = "subconcept" if config.subconcept else "ideal"
+    results_df["data_name"] = "subconcept" if config.concept_preset == "foot_subtypes" else "ideal"
     results_df["n"] = data.test.n
-    results_df["concept_missing"] = config.concept_missing
-    results_df["concept_missing_mech"] = config.concept_missing_mech
+    results_df["missing_fraction"] = config.missing_fraction
+    results_df["missing_mechanism"] = config.missing_mechanism
     results_df.to_csv(config.get_results_path("cbm"), index=False)
     return results_df
 
@@ -1241,7 +1231,7 @@ def align(
         model = load(config.get_model_path("cbm"))
 
     return run_alignment(
-        cbm=model,
+        concept_based_model=model,
         train_dataset=data.training,
         test_dataset=data.test,
         monotonicity_constraints=config.get_alignment_constraints(),
@@ -1253,9 +1243,9 @@ def align(
 
 def _dataset_label(cfg: RobotBenchmarkConfig) -> str:
     """Return a human-readable dataset label for a config."""
-    base = "subconcept" if cfg.subconcept else "ideal"
-    if cfg.concept_missing_mech != "none":
-        return f"{base}_{cfg.concept_missing_mech}"
+    base = "subconcept" if cfg.concept_preset == "foot_subtypes" else "ideal"
+    if cfg.missing_fraction > 0:
+        return f"{base}_{cfg.missing_mechanism}"
     return base
 
 
@@ -1355,7 +1345,7 @@ def collect_results(
                 })
 
         # Aligned CBM (only for non-missingness configs)
-        if cfg.concept_missing_mech == "none":
+        if cfg.missing_fraction == 0:
             align_path = cfg.get_alignment_results_path()
             if align_path.exists():
                 with open(align_path) as f:
@@ -1381,7 +1371,7 @@ def collect_results(
 
                     # Load the config's own dataset so concept shapes match
                     cfg_data = load(cfg.get_dataset_path())
-                    aligned_fe = _copy.deepcopy(cbm.front_end_model)
+                    aligned_fe = _copy.deepcopy(cbm.label_predictor)
                     aligned_fe = align_frontend_weights(
                         aligned_fe, list(cfg_data.test.concepts), aligned_weights,
                     )
@@ -1458,7 +1448,7 @@ def run(
             )
 
     device = determine_device()
-    variant = "subconcept" if config.subconcept else "ideal"
+    variant = "subconcept" if config.concept_preset == "foot_subtypes" else "ideal"
     n_stages = len(stages)
     _si = {s: i for i, s in enumerate(stages, 1)}
     logger.info(
@@ -1569,19 +1559,19 @@ def _parse_args(argv=None):
         help=f"Pipeline stages to run (default: all). Valid: {' -> '.join(ROBOT_STAGES)}",
     )
     parser.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
-    parser.add_argument("--subconcept", action="store_true")
-    parser.add_argument("--concept-missing", type=float, default=None,
+    parser.add_argument("--concept-preset", choices=["ground_truth", "foot_subtypes"], default="ground_truth")
+    parser.add_argument("--missing-fraction", type=float, default=None,
                         help="Fraction of concept labels to mask (e.g. 0.2).")
-    parser.add_argument("--concept-missing-mech", type=str, default=None,
-                        choices=["none", "mcar", "mnar"])
+    parser.add_argument("--missing-mechanism", type=str, default=None,
+                        choices=["mcar", "mnar"])
     parser.add_argument("--budgets", nargs="+", default=None,
                         help="Intervention budgets (e.g. 1 3 5 max).")
     parser.add_argument("--regimes", nargs="+", default=None,
                         help="Intervention regimes (e.g. baseline expert subjective machine).")
     parser.add_argument("--strategy", type=str, default=None,
-                        choices=["kflip", "exact_k"])
+                        choices=["up_to_k", "exactly_k"])
     parser.add_argument("--llm-api-key", type=str, default=None)
-    parser.add_argument("--force-retrain", action="store_true")
+    parser.add_argument("--force-retrain", action="store_true", dest="force_retrain")
     parser.add_argument("--force-setup", action="store_true")
     return parser.parse_args(argv)
 
@@ -1602,7 +1592,7 @@ def main(argv=None):
 
     if args.config:
         config = RobotBenchmarkConfig.from_yaml(args.config)
-    elif args.subconcept:
+    elif args.concept_preset == "foot_subtypes":
         config = RobotBenchmarkConfig.default_subconcept()
         config.seed = args.seed
     else:
@@ -1618,11 +1608,11 @@ def main(argv=None):
         config.llm_api_key = args.llm_api_key
     if args.force_retrain:
         config.force_retrain = True
-    if args.concept_missing is not None:
-        config.concept_missing = args.concept_missing
-        config.concept_missing_mech = args.concept_missing_mech or "mcar"
-    elif args.concept_missing_mech is not None:
-        config.concept_missing_mech = args.concept_missing_mech
+    if args.missing_fraction is not None:
+        config.missing_fraction = args.missing_fraction
+        config.missing_mechanism = args.missing_mechanism or "mcar"
+    elif args.missing_mechanism is not None:
+        config.missing_mechanism = args.missing_mechanism
 
     run(config, stages=args.stages, force_setup=args.force_setup)
 

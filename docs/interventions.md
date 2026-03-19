@@ -52,7 +52,7 @@ from experiments.intervention import ConceptInterventionRunner, InterventionConf
 from experiments.kflip import KFlipInterventionStrategy
 
 # Combine detector and label predictor into a CBM
-cbm = ConceptBasedModel(concept_detector=cd, front_end_model=fe)
+cbm = ConceptBasedModel(concept_detector=cd, label_predictor=fe)
 
 # Configure the intervention
 config = InterventionConfig(
@@ -189,7 +189,7 @@ The package supports six intervention regimes that simulate different real-world
 Run regimes via the pipeline script:
 
 ```bash
-python scripts/robot_pipeline.py --seed 1014 --subconcept \
+python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
     --regimes baseline expert subjective machine
 ```
 

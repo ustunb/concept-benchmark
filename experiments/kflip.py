@@ -38,7 +38,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
         When set, caps the number of candidate subsets evaluated per
         instance.  Subsets are ranked by a heuristic that weights concept
         closeness to 0.5 by the absolute logistic-regression coefficient.
-    exact_k : bool
+    use_exact_k : bool
         If ``True``, only evaluate subsets of exactly size *k*.  If
         ``False`` (default), evaluate all subsets of sizes 1 through *k*.
 
@@ -60,12 +60,12 @@ class KFlipInterventionStrategy(InterventionStrategy):
         *,
         batch_size: int = 8192,
         limit_subsets: Optional[int] = None,
-        exact_k: bool = False,
+        use_exact_k: bool = False,
     ) -> None:
         super().__init__(name="kflip")
         self.batch_size = int(batch_size)
         self.limit_subsets = limit_subsets
-        self.exact_k = exact_k
+        self.use_exact_k = use_exact_k
 
     def propose(
         self,
@@ -88,12 +88,12 @@ class KFlipInterventionStrategy(InterventionStrategy):
         base_Z = (P >= 0.5).astype(np.float32)  # 'hard' mode
 
         # baseline labels
-        base_probs = model.front_end_model.predict_proba(base_Z)  # (N,K)
+        base_probs = model.label_predictor.predict_proba(base_Z)  # (N,K)
         base_lbl = base_probs.argmax(axis=1)
         n_classes = int(base_probs.shape[1])
 
         # enumerate candidate subsets
-        if self.exact_k:
+        if self.use_exact_k:
             all_subsets = list(itertools.combinations(range(n_concepts), k))
         else:
             all_subsets = []
@@ -103,7 +103,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
             # simple heuristic: closeness to 0.5 weighted by |coef|
             try:
                 coef = getattr(
-                    getattr(model.front_end_model, "model", model.front_end_model),
+                    getattr(model.label_predictor, "model", model.label_predictor),
                     "coef_",
                     None,
                 )
@@ -141,13 +141,13 @@ class KFlipInterventionStrategy(InterventionStrategy):
         _fast_w: Optional[np.ndarray] = None
         _fast_b: Optional[float] = None
         try:
-            _lr = getattr(model.front_end_model, "model", model.front_end_model)
+            _lr = getattr(model.label_predictor, "model", model.label_predictor)
             _coef = getattr(_lr, "coef_", None)
             _inter = getattr(_lr, "intercept_", None)
             if (
                 _coef is not None
                 and _inter is not None
-                and getattr(model.front_end_model, "_kflip_fast_path", True)
+                and getattr(model.label_predictor, "_kflip_fast_path", True)
             ):
                 _coef = np.asarray(_coef)
                 if _coef.shape[0] == 1:  # binary classification
@@ -247,7 +247,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
                     AS = np.tile(assign, (m, 1))  # (m*A, subset_size)
                     Z_chunk[:, subset] = AS
 
-                    Y = model.front_end_model.predict_proba(Z_chunk)  # (m*A, j)
+                    Y = model.label_predictor.predict_proba(Z_chunk)  # (m*A, j)
                     Y_lbl = Y.argmax(axis=1).reshape(m, A)  # (m, A)
 
                     flip_mask = Y_lbl != base_lbl[s : s + m][:, None]  # (m, A)
@@ -272,8 +272,8 @@ class KFlipInterventionStrategy(InterventionStrategy):
         y_prob_now = base_probs
         pred_now = base_lbl
         conf = y_prob_now[np.arange(n_samples), pred_now]
-        if config.select_only_abstained and config.tau is not None:
-            abstain_mask = (conf >= config.tau) & (conf <= 1.0 - config.tau)
+        if config.select_only_abstained and config.abstention_threshold is not None:
+            abstain_mask = (conf >= config.abstention_threshold) & (conf <= 1.0 - config.abstention_threshold)
             candidate_ids = np.nonzero((flip_prob >= threshold) & abstain_mask)[0]
         else:
             candidate_ids = np.nonzero(flip_prob >= threshold)[0]

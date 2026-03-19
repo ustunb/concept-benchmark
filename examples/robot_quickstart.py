@@ -16,13 +16,13 @@ Usage:
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 
-from concept_benchmark import RobotDatasetGenerator
+from concept_benchmark import DatasetGenerator
 
 # ---------------------------------------------------------------------------
-# 1. Generate dataset (draw=False skips image rendering for speed)
+# 1. Generate dataset (render_images=False skips image rendering for speed)
 # ---------------------------------------------------------------------------
 print("Generating robot dataset...")
-dataset = RobotDatasetGenerator(seed=1014, draw=False).generate()
+dataset = DatasetGenerator("robot", seed=1014, render_images=False).generate()
 
 train, test = dataset.training, dataset.test
 print(f"  Training:  {train.n} samples, {train.n_concepts} concepts")
