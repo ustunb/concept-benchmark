@@ -317,6 +317,7 @@ _BINARY_CONCEPT_MAP: dict[str, tuple[str, callable]] = {
     ),
 }
 
+
 def compute_text_concept_names(
     concepts: dict[str, list],
     expand: list[str] | None = None,
