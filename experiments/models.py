@@ -616,15 +616,20 @@ class ConceptDetector:
         if log_interval is not None:
             fit_params.setdefault("log_interval", int(log_interval))
 
-        training_device = torch.device(fit_params.get("device", "cpu"))
+        from concept_benchmark.utils import determine_device, get_loader_config
+
+        _loader_defaults = get_loader_config()
+        training_device = torch.device(
+            fit_params.get("device", None) or determine_device()
+        )
         eval_batch = int(
-            fit_params.get("eval_batch_size", fit_params.get("batch_size", 128))
+            fit_params.get("eval_batch_size", fit_params.get("batch_size", _loader_defaults["batch_size"]))
         )
         # Snapshot evaluation configuration so inference and calibration share settings.
         self._eval_config = {
             "batch_size": eval_batch,
-            "num_workers": fit_params.get("num_workers", 0),
-            "pin_memory": fit_params.get("pin_memory", False),
+            "num_workers": fit_params.get("num_workers", _loader_defaults["num_workers"]),
+            "pin_memory": fit_params.get("pin_memory", _loader_defaults["pin_memory"]),
             "device": training_device,
         }
 

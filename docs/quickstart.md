@@ -65,12 +65,8 @@ from concept_benchmark.utils import set_deterministic_seed
 from experiments.models import (
     ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier,
 )
-from concept_benchmark.utils import determine_device, get_loader_config, patch_macos_dataloader
 
 set_deterministic_seed(1014)
-patch_macos_dataloader()
-device = determine_device()
-loader_config = get_loader_config()
 
 dataset = DatasetGenerator(
     "robot", seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
@@ -79,7 +75,7 @@ dataset = DatasetGenerator(
 n_concepts = dataset.train.n_concepts
 cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=n_concepts, input_size=32))
 cd.fit(dataset.train, dataset.validation,
-       fit_params={"epochs": 50, "lr": 1e-3, "patience": 10, "device": str(device), **loader_config})
+       fit_params={"epochs": 50, "lr": 1e-3, "patience": 10})
 
 # Step 2: train label predictor (concepts → label)
 fe = FrontEndModel()

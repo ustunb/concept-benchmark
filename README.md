@@ -71,31 +71,14 @@ The robot benchmark classifies fictional robots — **Glorps** vs. **Drents** �
 ```python
 from concept_benchmark import DatasetGenerator
 
-# Generate the full dataset
-gen = DatasetGenerator(
+dataset = DatasetGenerator(
     "robot",
-    seed=1014,                       # reproducibility
+    seed=1014,
     concept_preset="foot_subtypes",  # 12 fine-grained concepts (default: "ground_truth" = 7)
-    use_stochastic_labels=True,      # probabilistic labeling (or False for deterministic)
-    image_size="medium",             # "small" (8px), "medium" (32px, default), or "large" (600px)
-    render_images=True,              # set False to skip image rendering for quick exploration
-    label_formula={                  # scoring rule for class assignment
-        "terms": {
-            "mouth_type": {"value": "closed", "weight": 5.0},
-            "foot_shape": {"value": "pointy", "weight": 8.0},
-            "has_knees":  {"value": "true",   "weight": -5.0},
-        },
-        "intercept": 2.0,
-        "temperature": 4.2,          # sigmoid temperature for stochastic labels
-    },
-)
-dataset = gen.generate()
+    render_images=True,              # set False to skip rendering for quick exploration
+).generate()
 
-# Drop excluded concepts (concept_preset controls which are kept)
-from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
-dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["foot_subtypes"])
-
-# Split into train/val/test (accepts absolute counts or fractions)
+dataset.drop_concepts(["has_elbows", "hand_shape"])  # remove spurious features
 dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
 
 print(dataset.train.C.shape)   # (3800, 12) — concept annotations
@@ -105,6 +88,8 @@ print(dataset.train.concepts)
 #  'foot_shape_flat_5sided', 'foot_shape_pointy_rounded',
 #  'foot_shape_pointy_square', 'foot_shape_pointy_4sided']
 ```
+
+See [Robot Parameters](#parameters) for the full list of options (stochastic labels, label formula, image size, subconcepts, etc.).
 
 Inspect the data:
 
@@ -129,30 +114,16 @@ Train a CBM — concept detector (images → concepts) and label predictor (conc
 
 ```python
 import numpy as np
-from concept_benchmark import DatasetGenerator
-from concept_benchmark.utils import set_deterministic_seed
 from experiments.models import (
     ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier,
 )
-from concept_benchmark.utils import determine_device, get_loader_config, patch_macos_dataloader
 
-set_deterministic_seed(1014)
-patch_macos_dataloader()
-device = determine_device()
-loader_config = get_loader_config()
-
-gen = DatasetGenerator(
-    "robot", seed=1014, concept_preset="foot_subtypes", render_images=True)
-dataset = gen.generate()
-from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
-dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["foot_subtypes"])
-dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
-
+# Using `dataset` from the generation step above
 # Step 1: train concept detector (images → concepts)
 n_concepts = dataset.train.n_concepts
 cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=n_concepts, input_size=32))
 cd.fit(dataset.train, dataset.validation,
-       fit_params={"epochs": 50, "lr": 1e-3, "patience": 10, "device": str(device), **loader_config})
+       fit_params={"epochs": 50, "lr": 1e-3, "patience": 10})
 
 # Step 2: train label predictor (concepts → label)
 fe = FrontEndModel()
@@ -225,17 +196,9 @@ This guide shows how to evaluate your own concept bottleneck model on the benchm
 
 ### Getting data for your model
 
-Generate a dataset, apply layers, and access it in the format your model expects:
+Generate a dataset as shown in the [Quick Start](#robot-classification), then access the splits:
 
 ```python
-from concept_benchmark import DatasetGenerator
-
-gen = DatasetGenerator(
-    "robot", seed=1014, concept_preset="foot_subtypes", render_images=True)
-dataset = gen.generate()
-from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
-dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["foot_subtypes"])
-dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
 train, val, test = dataset.train, dataset.validation, dataset.test
 ```
 
@@ -351,14 +314,14 @@ The return value can also be a tuple (first element is used) or a dict with a `"
 
 ```python
 cd = ConceptDetector(model=my_pytorch_module)
-cd.fit(train, val, fit_params={"epochs": 50, "lr": 1e-3, "device": "cpu"})
+cd.fit(train, val, fit_params={"epochs": 50, "lr": 1e-3})
 ```
 
 You can also split your model into a backbone + concept head using the `embedding_model` parameter. The detector will probe the backbone's output shape and attach an MLP head automatically:
 
 ```python
 cd = ConceptDetector(embedding_model=my_backbone)
-cd.fit(train, val, fit_params={"epochs": 50, "lr": 1e-3, "device": "cpu"})
+cd.fit(train, val, fit_params={"epochs": 50, "lr": 1e-3})
 ```
 
 ### Wrapping your label predictor
@@ -469,6 +432,35 @@ dataset = DatasetGenerator(
     # ── Text-only (data_type="text") ──
     template_complexity="high",      # template complexity level
 ).generate()
+```
+
+#### Post-processing
+
+After generating, you can drop concepts and split into train/val/test:
+
+```python
+# Drop spurious features not used for classification
+dataset.drop_concepts(["has_elbows", "hand_shape"])
+
+# Split into train/val/test
+dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
+```
+
+For the paper's skewed splits (ensuring minimum representation of rare concept patterns), drop additional foot subtypes and use `sampling_constraints`:
+
+```python
+from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
+
+dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["foot_subtypes"])
+# drops: has_elbows, hand_shape, foot_shape, foot_shape_flat_rounded,
+#        foot_shape_flat_lshaped, foot_shape_pointy_trapezoid, foot_shape_pointy_3sided
+
+dataset.sample(
+    test_size=10000, val_size=0.2, train_size=3800, seed=1014,
+    sampling_constraints=[
+        {"concepts": {"foot_shape_pointy_4sided": 1}, "min_fraction": 0.49},
+    ],
+)
 ```
 
 #### Pipeline

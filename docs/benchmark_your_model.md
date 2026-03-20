@@ -10,10 +10,9 @@ Generate a dataset and access it in the format your model expects:
 
 ```python
 from concept_benchmark import DatasetGenerator
-from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
 
 dataset = DatasetGenerator("robot", seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
-dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["foot_subtypes"])
+dataset.drop_concepts(["has_elbows", "hand_shape"])
 dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
 train, val, test = dataset.train, dataset.validation, dataset.test
 ```
@@ -75,14 +74,14 @@ The return value can also be a tuple (first element is used) or a dict with a `"
 
 ```python
 cd = ConceptDetector(model=my_pytorch_module)
-cd.fit(train, val, fit_params={"epochs": 50, "lr": 1e-3, "device": "cpu"})
+cd.fit(train, val, fit_params={"epochs": 50, "lr": 1e-3})
 ```
 
 You can also split your model into a backbone + concept head using the `embedding_model` parameter. The detector will probe the backbone's output shape and attach an MLP head automatically:
 
 ```python
 cd = ConceptDetector(embedding_model=my_backbone)
-cd.fit(train, val, fit_params={"epochs": 50, "lr": 1e-3, "device": "cpu"})
+cd.fit(train, val, fit_params={"epochs": 50, "lr": 1e-3})
 ```
 
 ## Wrapping your label predictor
