@@ -33,10 +33,11 @@ def get_robot_catalog_df(concepts, repetitions=1):
     each row shows a distinct combination of features – i.e., a unique robot
     :return: pandas DataFrame
     """
-    index = pd.MultiIndex.from_product(concepts.values(), names=concepts.keys())
-    for i in range(1, repetitions):
-        new_index = pd.MultiIndex.from_product(concepts.values(), names=concepts.keys())
-        index = index.append(new_index)
+    indices = [
+        pd.MultiIndex.from_product(concepts.values(), names=concepts.keys())
+        for _ in range(repetitions)
+    ]
+    index = indices[0].append(indices[1:]) if len(indices) > 1 else indices[0]
 
     df = pd.DataFrame(index=index).reset_index()
     df["color_scheme"] = np.mod(df.index, len(COLOR_SCHEMES))

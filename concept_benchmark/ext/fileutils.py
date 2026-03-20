@@ -17,7 +17,7 @@ def save(obj, path, msg=True, overwrite=False, check_save=False, mkdir=True):
     """
     f = Path(path)
     if f.is_file() and overwrite is False:
-        raise IOError(f"file: {f} exists")
+        raise OSError(f"file: {f} exists")
 
     if not f.parent.exists() and mkdir:
         f.parent.mkdir(parents=True, exist_ok=True)
@@ -41,14 +41,18 @@ def save(obj, path, msg=True, overwrite=False, check_save=False, mkdir=True):
 
 
 def load(path):
-    """
-    loads pickle file from disk
+    """Load a dill-serialized object from disk.
+
+    .. warning::
+        Uses ``dill.load()`` which can execute arbitrary code during
+        deserialization.  Only load files from trusted sources.
+
     :param path: path of the file
     :return: contents of file under 'data'
     """
     f = Path(path)
     if not f.is_file():
-        raise IOError(f"file: {f} not found")
+        raise OSError(f"file: {f} not found")
 
     with open(f, "rb") as infile:
         file_contents = dill.load(infile)

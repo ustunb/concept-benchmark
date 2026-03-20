@@ -569,15 +569,31 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         return results_dir / f"{filename}.data"
 
     def get_model_path(self, model_class: str) -> Path:
-        """Return the path where a trained model is saved."""
+        """Return the path where a trained model is saved.
+
+        New paths include seed for cache safety.  Falls back to the legacy
+        (no-seed) path when it exists and the new path does not, so that
+        previously-cached models are still found.
+        """
         if self.data_type == "text":
             return results_dir / f"robot_text_{model_class}_seed{self.seed}.model"
-        filename = (
+        new_filename = (
             f"robot_{self.data_type}_{self._labeling_tag}_{self.renders_per_robot}"
             f"{self._preset_suffix}"
+            f"_seed{self.seed}"
             f"_{model_class}.model"
         )
-        return results_dir / filename
+        new_path = results_dir / new_filename
+        if not new_path.exists():
+            legacy_filename = (
+                f"robot_{self.data_type}_{self._labeling_tag}_{self.renders_per_robot}"
+                f"{self._preset_suffix}"
+                f"_{model_class}.model"
+            )
+            legacy_path = results_dir / legacy_filename
+            if legacy_path.exists():
+                return legacy_path
+        return new_path
 
     def get_results_path(self, model_class: str = "cbm") -> Path:
         """Return the path where results CSV is saved."""
@@ -740,12 +756,25 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
         return data_dir / "sudoku" / filename
 
     def get_model_path(self, model_class: str, data_type: str | None = None) -> Path:
-        """Return the path where a trained model is saved."""
+        """Return the path where a trained model is saved.
+
+        Falls back to legacy (no-seed) path when it exists and the new
+        path does not.
+        """
         dt = data_type or self.data_type
-        filename = (
+        new_filename = (
             f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}"
+            f"_seed{self.seed}"
         )
-        return results_dir / f"{filename}.model"
+        new_path = results_dir / f"{new_filename}.model"
+        if not new_path.exists():
+            legacy_filename = (
+                f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}"
+            )
+            legacy_path = results_dir / f"{legacy_filename}.model"
+            if legacy_path.exists():
+                return legacy_path
+        return new_path
 
     def get_results_path(
         self, model_class: str = "cbm", data_type: str | None = None

@@ -184,3 +184,20 @@ class TestKFlip:
         strat = KFlipInterventionStrategy(limit_subsets=3)
         proposal = strat.propose(model, batch, config)
         assert proposal.mask.shape == (6, k)
+
+    def test_large_k_with_limit_subsets(self):
+        """k=20 concepts with limit_subsets cap — should complete quickly."""
+        k = 20
+        model = _make_model(k=k)
+        batch = _make_batch(n=5, k=k, seed=7)
+        config = InterventionConfig(
+            max_concepts_per_instance=20,
+            score_threshold=0.0,
+            random_state=0,
+        )
+        # Without limit_subsets, C(20,1)+...+C(20,20) = 2^20-1 ~1M subsets per sample.
+        # With limit_subsets=500, it stays tractable.
+        strat = KFlipInterventionStrategy(limit_subsets=500)
+        proposal = strat.propose(model, batch, config)
+        assert proposal.mask.shape == (5, k)
+        assert proposal.mask.dtype == bool

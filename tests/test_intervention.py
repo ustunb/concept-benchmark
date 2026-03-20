@@ -278,3 +278,30 @@ class TestRunner:
                 result.C_intervened[where_mask],
                 sample.base_concepts[where_mask],
             )
+
+    def test_extreme_concept_probabilities(self):
+        """Interventions with extreme concept proba (0.0, 1.0) should not crash."""
+        from concept_benchmark.data import ConceptDatasetSample
+        from experiments.models import ConceptBasedModel, FrontEndModel
+
+        n, k = 10, 4
+        rng = np.random.default_rng(99)
+        X = rng.random((n, 8)).astype(np.float32)
+        # Extreme concept probabilities: 0.0 and 1.0 only
+        C = np.where(rng.random((n, k)) > 0.5, 1.0, 0.0).astype(np.float32)
+        y = rng.integers(0, 2, size=n).astype(np.int32)
+        meta = {
+            "classes": ["c0", "c1"],
+            "concepts": [f"z{i}" for i in range(k)],
+            "data_type": "tabular",
+        }
+        sample = ConceptDatasetSample(X=X, C=C, y=y, meta=meta)
+        fe = FrontEndModel()
+        fe.fit(C, y)
+        model = ConceptBasedModel(label_predictor=fe)
+        runner = ConceptInterventionRunner(model)
+        config = InterventionConfig(max_concepts_per_instance=2, random_state=0)
+        strat = RandomInterventionStrategy()
+        result = runner.run(strat, config, sample, concept_proba=C.copy())
+        assert result.y_pred_after.shape == (n,)
+        assert not np.any(np.isnan(result.y_prob_after))

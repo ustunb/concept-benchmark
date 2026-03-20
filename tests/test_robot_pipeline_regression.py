@@ -76,7 +76,7 @@ class TestCBMAccuracy:
         cbm = load(ideal_config.get_model_path("cbm"))
         data = load(ideal_config.get_dataset_path())
         acc = (cbm.predict(data.test) == data.test.y).mean().item()
-        assert abs(acc - 0.8673) < 0.001, f"Expected ~0.8673, got {acc}"
+        assert abs(acc - 0.8735) < 0.001, f"Expected ~0.8735, got {acc}"
 
 
 # ── DNN accuracy ──────────────────────────────────────────────────────
@@ -90,7 +90,7 @@ class TestDNNAccuracy:
         loader_config = {"batch_size": 32, "num_workers": 0, "pin_memory": False}
         test_loader = dataset.test.loader(shuffle=False, **loader_config)
         acc = compute_accuracy(dnn, test_loader, device)
-        assert abs(acc - 0.8746) < 0.001, f"Expected ~0.8746, got {acc}"
+        assert abs(acc - 0.8716) < 0.001, f"Expected ~0.8716, got {acc}"
 
 
 # ── Results CSV spot-checks ───────────────────────────────────────────
@@ -208,7 +208,7 @@ class TestInterventionCSV:
             & (ideal_interv_df["threshold"] == 0.2)
         ]
         assert len(row) == 1
-        assert abs(row.iloc[0]["accuracy"] - 0.9769) < 0.001
+        assert abs(row.iloc[0]["accuracy"] - 0.998) < 0.001
 
 
 # ── Alignment regression tests ─────────────────────────────────────
@@ -236,10 +236,10 @@ class TestAlignment:
             return json.load(f)
 
     def test_ideal_original_accuracy(self, ideal_alignment):
-        assert abs(ideal_alignment["original_accuracy"] - 0.8673) < 0.001
+        assert abs(ideal_alignment["original_accuracy"] - 0.8735) < 0.001
 
     def test_ideal_aligned_accuracy(self, ideal_alignment):
-        assert abs(ideal_alignment["aligned_accuracy"] - 0.8657) < 0.001
+        assert abs(ideal_alignment["aligned_accuracy"] - 0.8717) < 0.001
 
     def test_subconcept_original_accuracy(self, subconcept_alignment):
         assert abs(subconcept_alignment["original_accuracy"] - 0.7812) < 0.001

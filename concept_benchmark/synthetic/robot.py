@@ -18,6 +18,23 @@ from .helper.robot_catalog import (
 from .helper import textgen as text_helper
 from .helper.utils import build_model_expression, model_to_logistic, unlist0
 
+# Restricted globals for eval() — prevents access to builtins while allowing
+# only the math/numpy functions needed by synthetic labeling formulas.
+_SAFE_EVAL_GLOBALS = {
+    "__builtins__": {},
+    "expit": expit,
+    "np": np,
+    "abs": abs,
+    "max": max,
+    "min": min,
+    "int": int,
+    "float": float,
+    "str": str,
+    "bool": bool,
+    "any": any,
+    "all": all,
+}
+
 
 def create_synthetic_dataset(data_type: str = "image", **kwargs) -> ConceptDataset:
     """Factory that creates either an image or text robot dataset.
@@ -333,11 +350,11 @@ def create_robot_image_dataset(
             intercept=extra_params.get("model_intercept", 0.0),
             scalar=extra_params.get("model_scalar", 1.0),
         )
-        glorp_model_true = lambda row, _e=expr: eval(_e)  # noqa: S307 — intentional eval of synthetic config formulas
+        glorp_model_true = lambda row, _e=expr: eval(_e, _SAFE_EVAL_GLOBALS, {"row": row})  # noqa: S307 — intentional eval of synthetic config formulas
     elif model:
         # Legacy string path (backward compat for tests / custom usage)
         if model_type == "deterministic":
-            glorp_model_true = lambda row: eval(unlist0(model))  # noqa: S307 — intentional eval of synthetic config formulas
+            glorp_model_true = lambda row: eval(unlist0(model), _SAFE_EVAL_GLOBALS, {"row": row})  # noqa: S307 — intentional eval of synthetic config formulas
         elif model_type == "stochastic":
             glorp_model_true = lambda row: eval(  # noqa: S307 — intentional eval of synthetic config formulas
                 model_to_logistic(
@@ -345,7 +362,9 @@ def create_robot_image_dataset(
                     scalar=extra_params.get("scalar", 1.0),
                     weights=extra_params.get("weights", {}),
                     intercept=extra_params.get("intercept", None),
-                )
+                ),
+                _SAFE_EVAL_GLOBALS,
+                {"row": row},
             )
         else:
             raise ValueError("Invalid model_type. Use 'deterministic' or 'stochastic'.")

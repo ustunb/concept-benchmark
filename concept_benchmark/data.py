@@ -271,19 +271,19 @@ class ConceptDataset:
         if not isinstance(X, np.ndarray):
             try:
                 X = np.asarray(X)
-            except Exception as e:
+            except (TypeError, ValueError) as e:
                 raise ValueError(f"cannot convert X to np.ndarray: {e!r}")
 
         if not isinstance(C, np.ndarray):
             try:
                 C = np.asarray(C)
-            except Exception as e:
+            except (TypeError, ValueError) as e:
                 raise ValueError(f"cannot convert C to np.ndarray: {e!r}")
 
         if not isinstance(y, np.ndarray):
             try:
                 y = np.asarray(y)
-            except Exception as e:
+            except (TypeError, ValueError) as e:
                 raise ValueError(f"cannot convert y to np.ndarray: {e!r}")
 
         if meta.get("data_type") == "image":
@@ -357,6 +357,7 @@ class ConceptDataset:
                 ]
 
         assert self.__check_rep__()
+        return self
 
     def reset(self):
         """Reset to the pre-split state (all data in training, empty val/test)."""
