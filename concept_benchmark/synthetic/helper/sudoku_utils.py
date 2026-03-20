@@ -177,9 +177,7 @@ def invalid_blocks_only_by_col_swap_across_stacks(
     return b
 
 
-def duplicate_in_row(
-    board: np.ndarray, r: int, seed: int | None = None
-) -> np.ndarray:
+def duplicate_in_row(board: np.ndarray, r: int, seed: int | None = None) -> np.ndarray:
     """
     Duplicate one value within row r by copying a value from column c1 into column c2 (c2!=c1).
     Effect of ONE action: invalidates that row, the target column, and the target block (<= 3 concepts).
@@ -192,9 +190,7 @@ def duplicate_in_row(
     return b
 
 
-def duplicate_in_col(
-    board: np.ndarray, c: int, seed: int | None = None
-) -> np.ndarray:
+def duplicate_in_col(board: np.ndarray, c: int, seed: int | None = None) -> np.ndarray:
     """
     Duplicate one value within column c by copying a value from row r1 into row r2 (r2!=r1).
     Effect of ONE action: invalidates that column, the target row, and the target block (<= 3 concepts).

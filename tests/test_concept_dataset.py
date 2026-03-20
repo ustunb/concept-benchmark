@@ -489,9 +489,7 @@ class TestSample:
     def test_group_split_with_stratify(self):
         ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
         groups = np.repeat(np.arange(20), 5)
-        ds.sample(
-            test_size=0.2, val_size=0.2, groups=groups, stratify=ds.y, seed=5
-        )
+        ds.sample(test_size=0.2, val_size=0.2, groups=groups, stratify=ds.y, seed=5)
         # No group leakage
         train_idx = np.where(ds.training.indices)[0]
         val_idx = np.where(ds.validation.indices)[0]
@@ -520,7 +518,9 @@ class TestSample:
         # At least 30% of training should have z0=1
         z0_col = ds.concepts.index("z0")
         z0_frac = np.mean(ds.training.C[:, z0_col])
-        assert z0_frac >= 0.2  # constraint targets 0.3; best-effort oversampling from 10% base rate
+        assert (
+            z0_frac >= 0.2
+        )  # constraint targets 0.3; best-effort oversampling from 10% base rate
 
     def test_reproducible_with_same_seed(self):
         ds1, _ = self._make(n=100, d=4, k=3, n_classes=2, seed=77)

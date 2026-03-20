@@ -104,9 +104,7 @@ def _group_split(
         group_labels: dict[int, list] = {}
         for i in range(n):
             group_labels.setdefault(int(groups[i]), []).append(int(stratify[i]))
-        group_majority = {
-            g: int(round(np.mean(ls))) for g, ls in group_labels.items()
-        }
+        group_majority = {g: int(round(np.mean(ls))) for g, ls in group_labels.items()}
         by_class: dict[int, list] = {}
         for g in unique_groups:
             by_class.setdefault(group_majority[int(g)], []).append(g)
@@ -871,9 +869,7 @@ class ConceptDataset:
 
             if sampling_constraints:
                 n_train = (
-                    train_size
-                    if train_size is not None
-                    else len(remaining) - n_val
+                    train_size if train_size is not None else len(remaining) - n_val
                 )
                 train_idx = _create_skewed_training_set(
                     self, sampling_constraints, remaining, n_train, rng

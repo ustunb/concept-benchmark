@@ -177,12 +177,16 @@ def generate_folds(n_folds=5, n_samples=None, strata=None, random_state=None):
     if stratified:
         check_strata(strata)
         n_samples = len(strata)
-        fold_generator = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=random_state)
+        fold_generator = StratifiedKFold(
+            n_splits=n_folds, shuffle=True, random_state=random_state
+        )
     else:
         if not isinstance(n_samples, int) or n_samples < 2:
             raise ValueError("n_samples must be an integer >= 2")
         strata = np.empty(n_samples)
-        fold_generator = KFold(n_splits=n_folds, shuffle=True, random_state=random_state)
+        fold_generator = KFold(
+            n_splits=n_folds, shuffle=True, random_state=random_state
+        )
 
     folds = np.zeros(n_samples, dtype=int)
     for k, (train_idx, test_idx) in enumerate(fold_generator.split(X=strata, y=strata)):
@@ -222,7 +226,9 @@ def generate_cvindices(
         and len(total_folds_for_cv) > 0
         and (len(total_folds_for_cv) == len(set(total_folds_for_cv)))
     ):
-        raise ValueError("total_folds_for_cv must be a non-empty list of unique integers")
+        raise ValueError(
+            "total_folds_for_cv must be a non-empty list of unique integers"
+        )
     if total_folds_for_inner_cv is not None and not (
         isinstance(total_folds_for_inner_cv, list)
         and len(total_folds_for_inner_cv) == len(set(total_folds_for_inner_cv))
@@ -253,9 +259,13 @@ def generate_cvindices(
         for n in range(1, replicates + 1):
             fold_id = to_fold_id(total_folds=k, replicate_idx=n)
             if stratified:
-                cvindices[fold_id] = generate_folds(n_folds=k, strata=strata, random_state=rng)
+                cvindices[fold_id] = generate_folds(
+                    n_folds=k, strata=strata, random_state=rng
+                )
             else:
-                cvindices[fold_id] = generate_folds(n_folds=k, n_samples=n_samples, random_state=rng)
+                cvindices[fold_id] = generate_folds(
+                    n_folds=k, n_samples=n_samples, random_state=rng
+                )
 
             # generate inner folds for k-fold cv
             for f in range(1, k + 1):
@@ -270,11 +280,15 @@ def generate_cvindices(
                     )
                     if stratified:
                         cvindices[inner_fold_id] = generate_folds(
-                            n_folds=num_inner_folds, strata=strata[fold_idx], random_state=rng
+                            n_folds=num_inner_folds,
+                            strata=strata[fold_idx],
+                            random_state=rng,
                         )
                     else:
                         cvindices[inner_fold_id] = generate_folds(
-                            n_folds=num_inner_folds, n_samples=n_samples_fold, random_state=rng
+                            n_folds=num_inner_folds,
+                            n_samples=n_samples_fold,
+                            random_state=rng,
                         )
 
     cvindices = validate_cvindices(cvindices, stratified=stratified)
@@ -333,12 +347,18 @@ def validate_folds(folds, fold_id=None, n_samples=None, stratified=True):
             if total_folds < fold_idx_inner_cv:
                 raise ValueError("total_folds must be >= fold_idx_inner_cv")
             if not np.isin(fold_idx_inner_cv, np.arange(1, total_folds + 1)):
-                raise ValueError(f"fold_idx_inner_cv {fold_idx_inner_cv} not in range [1, {total_folds}]")
+                raise ValueError(
+                    f"fold_idx_inner_cv {fold_idx_inner_cv} not in range [1, {total_folds}]"
+                )
             if total_folds_inner_cv != fold_values_max:
-                raise ValueError(f"total_folds_inner_cv {total_folds_inner_cv} != fold_values_max {fold_values_max}")
+                raise ValueError(
+                    f"total_folds_inner_cv {total_folds_inner_cv} != fold_values_max {fold_values_max}"
+                )
         else:
             if total_folds != fold_values_max:
-                raise ValueError(f"total_folds {total_folds} != fold_values_max {fold_values_max}")
+                raise ValueError(
+                    f"total_folds {total_folds} != fold_values_max {fold_values_max}"
+                )
             if replicate_idx < 1:
                 raise ValueError("replicate_idx must be >= 1")
             if fold_idx_inner_cv is not None:
