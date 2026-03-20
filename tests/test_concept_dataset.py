@@ -413,10 +413,14 @@ def test_repr_multiline(tab_small):
 class TestSample:
     """Tests for ConceptDataset.sample()."""
 
-    def test_basic_random_split_fractions(self):
+    @pytest.fixture(autouse=True)
+    def _import_factory(self):
         from tests.conftest import make_tabular_dataset
 
-        ds, _ = make_tabular_dataset(n=100, d=4, k=3, n_classes=2)
+        self._make = make_tabular_dataset
+
+    def test_basic_random_split_fractions(self):
+        ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
         ds.sample(test_size=0.2, val_size=0.2, seed=42)
         assert ds.test.n == 20
         assert ds.validation.n == 20
@@ -424,9 +428,7 @@ class TestSample:
         assert ds.__check_rep__()
 
     def test_basic_random_split_ints(self):
-        from tests.conftest import make_tabular_dataset
-
-        ds, _ = make_tabular_dataset(n=100, d=4, k=3, n_classes=2)
+        ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
         ds.sample(test_size=15, val_size=10, seed=7)
         assert ds.test.n == 15
         assert ds.validation.n == 10
@@ -434,9 +436,7 @@ class TestSample:
         assert ds.__check_rep__()
 
     def test_train_size_limits_training(self):
-        from tests.conftest import make_tabular_dataset
-
-        ds, _ = make_tabular_dataset(n=100, d=4, k=3, n_classes=2)
+        ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
         ds.sample(test_size=20, val_size=20, train_size=30, seed=1)
         assert ds.test.n == 20
         assert ds.validation.n == 20
@@ -447,9 +447,7 @@ class TestSample:
         assert ds.__check_rep__()
 
     def test_no_overlap_between_splits(self):
-        from tests.conftest import make_tabular_dataset
-
-        ds, _ = make_tabular_dataset(n=100, d=4, k=3, n_classes=2)
+        ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
         ds.sample(test_size=0.2, val_size=0.2, seed=99)
         tr = set(np.where(ds.training.indices)[0])
         va = set(np.where(ds.validation.indices)[0])
@@ -459,9 +457,7 @@ class TestSample:
         assert va.isdisjoint(te)
 
     def test_stratified_preserves_proportions(self):
-        from tests.conftest import make_tabular_dataset
-
-        ds, _ = make_tabular_dataset(n=200, d=4, k=3, n_classes=2)
+        ds, _ = self._make(n=200, d=4, k=3, n_classes=2)
         ds.sample(test_size=0.2, val_size=0.2, stratify=ds.y, seed=10)
         overall = np.mean(ds.y)
         train_mean = np.mean(ds.training.y)
@@ -472,9 +468,7 @@ class TestSample:
         assert abs(val_mean - overall) < 0.1
 
     def test_group_split_no_leakage(self):
-        from tests.conftest import make_tabular_dataset
-
-        ds, _ = make_tabular_dataset(n=100, d=4, k=3, n_classes=2)
+        ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
         # 20 groups (5 samples each)
         groups = np.repeat(np.arange(20), 5)
         ds.sample(test_size=0.2, val_size=0.2, groups=groups, seed=5)
@@ -493,9 +487,7 @@ class TestSample:
         assert val_groups.isdisjoint(test_groups)
 
     def test_group_split_with_stratify(self):
-        from tests.conftest import make_tabular_dataset
-
-        ds, _ = make_tabular_dataset(n=100, d=4, k=3, n_classes=2)
+        ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
         groups = np.repeat(np.arange(20), 5)
         ds.sample(
             test_size=0.2, val_size=0.2, groups=groups, stratify=ds.y, seed=5
@@ -511,10 +503,8 @@ class TestSample:
         assert train_g.isdisjoint(test_g)
 
     def test_sampling_constraints(self):
-        from tests.conftest import make_tabular_dataset
-
         # Create dataset where concept z0 is rare (only ~10% positive)
-        ds, _ = make_tabular_dataset(n=200, d=4, k=3, n_classes=2)
+        ds, _ = self._make(n=200, d=4, k=3, n_classes=2)
         # Force concept z0 to be mostly 0
         ds._full._C_base[:, 0] = 0
         ds._full._C_base[:20, 0] = 1  # only 20 out of 200
@@ -530,43 +520,35 @@ class TestSample:
         # At least 30% of training should have z0=1
         z0_col = ds.concepts.index("z0")
         z0_frac = np.mean(ds.training.C[:, z0_col])
-        assert z0_frac >= 0.1  # relaxed check — constraint is best-effort
+        assert z0_frac >= 0.2  # constraint targets 0.3; best-effort oversampling from 10% base rate
 
     def test_reproducible_with_same_seed(self):
-        from tests.conftest import make_tabular_dataset
-
-        ds1, _ = make_tabular_dataset(n=100, d=4, k=3, n_classes=2)
-        ds2, _ = make_tabular_dataset(n=100, d=4, k=3, n_classes=2)
+        ds1, _ = self._make(n=100, d=4, k=3, n_classes=2, seed=77)
+        ds2, _ = self._make(n=100, d=4, k=3, n_classes=2, seed=77)
         ds1.sample(test_size=0.2, val_size=0.2, seed=42)
         ds2.sample(test_size=0.2, val_size=0.2, seed=42)
+        np.testing.assert_array_equal(ds1.X, ds2.X)
+        np.testing.assert_array_equal(ds1.C, ds2.C)
         np.testing.assert_array_equal(ds1.training.y, ds2.training.y)
         np.testing.assert_array_equal(ds1.test.y, ds2.test.y)
 
     def test_returns_self_for_chaining(self):
-        from tests.conftest import make_tabular_dataset
-
-        ds, _ = make_tabular_dataset(n=50, d=4, k=3, n_classes=2)
+        ds, _ = self._make(n=50, d=4, k=3, n_classes=2)
         result = ds.sample(test_size=0.2, val_size=0.2, seed=1)
         assert result is ds
 
     def test_check_rep_passes_after_sample(self):
-        from tests.conftest import make_tabular_dataset
-
-        ds, _ = make_tabular_dataset(n=100, d=4, k=3, n_classes=2)
+        ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
         ds.sample(test_size=0.2, val_size=0.2, seed=42)
         assert ds.__check_rep__()
 
     def test_check_rep_passes_with_train_size(self):
-        from tests.conftest import make_tabular_dataset
-
-        ds, _ = make_tabular_dataset(n=100, d=4, k=3, n_classes=2)
+        ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
         ds.sample(test_size=20, val_size=20, train_size=30, seed=1)
         assert ds.__check_rep__()
 
     def test_missingness_composable_after_sample(self):
-        from tests.conftest import make_tabular_dataset
-
-        ds, _ = make_tabular_dataset(n=100, d=4, k=3, n_classes=2)
+        ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
         ds.sample(test_size=0.2, val_size=0.2, seed=42)
         masks = ds.sample_concept_missingness(
             p=0.3, mechanism="mcar", rng=99, enable=True
@@ -575,9 +557,7 @@ class TestSample:
         assert masks["train"].shape == ds.training.base_concepts.shape
 
     def test_missingness_splits_param_training_only(self):
-        from tests.conftest import make_tabular_dataset
-
-        ds, _ = make_tabular_dataset(n=100, d=4, k=3, n_classes=2)
+        ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
         ds.sample(test_size=0.2, val_size=0.2, seed=42)
         masks = ds.sample_concept_missingness(
             p=0.5, mechanism="mcar", rng=1, splits={"train"}
@@ -587,9 +567,7 @@ class TestSample:
         assert "test" not in masks
 
     def test_drop_concepts_after_sample(self):
-        from tests.conftest import make_tabular_dataset
-
-        ds, _ = make_tabular_dataset(n=100, d=4, k=4, n_classes=2)
+        ds, _ = self._make(n=100, d=4, k=4, n_classes=2)
         ds.sample(test_size=0.2, val_size=0.2, seed=42)
         original_k = ds.n_concepts
         ds.drop_concepts(["z0"])
@@ -600,8 +578,6 @@ class TestSample:
         assert ds.__check_rep__()
 
     def test_invalid_float_size_raises(self):
-        from tests.conftest import make_tabular_dataset
-
-        ds, _ = make_tabular_dataset(n=100, d=4, k=3, n_classes=2)
+        ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
         with pytest.raises(ValueError, match="Float size must be in"):
             ds.sample(test_size=1.5, seed=1)

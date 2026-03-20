@@ -1,6 +1,5 @@
 from __future__ import annotations
 import re
-from typing import List, Dict, Optional, Union
 import numpy as np
 import torch
 from torch import nn
@@ -11,17 +10,18 @@ from concept_benchmark.data import ConceptDatasetSample
 from experiments.models import ConceptDetector
 import os
 
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+if "TOKENIZERS_PARALLELISM" not in os.environ:
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
-def _tok(s: str) -> List[str]:
+def _tok(s: str) -> list[str]:
     s = s.lower()
     s = re.sub(r"[^a-z0-9\s]", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
     return s.split()
 
 
-def _make_bigrams(toks: List[str]) -> List[str]:
+def _make_bigrams(toks: list[str]) -> list[str]:
     return [f"{a}_{b}" for a, b in zip(toks, toks[1:])]
 
 
@@ -40,7 +40,7 @@ def _cross_auroc(scores: np.ndarray, truth: np.ndarray) -> np.ndarray:
             ):
                 try:
                     A[j, k] = roc_auc_score(y, s)
-                except Exception:
+                except ValueError:
                     A[j, k] = np.nan
     return A
 
@@ -57,7 +57,7 @@ def _ece(scores: np.ndarray, y: np.ndarray, n_bins: int = 10) -> float:
         else:
             mask = (scores >= left) & (scores <= right)
         if mask.any():
-            acc = float((scores[mask] >= 0.5).astype(int).mean())
+            acc = float(((scores[mask] >= 0.5).astype(int) == y[mask]).mean())
             conf = float(scores[mask].mean())
             out += abs(acc - conf) * (mask.sum() / m)
     return float(out)
@@ -65,7 +65,7 @@ def _ece(scores: np.ndarray, y: np.ndarray, n_bins: int = 10) -> float:
 
 class _TxtDs(Dataset):
     def __init__(
-        self, texts: List[str], labels: np.ndarray, masks: Optional[np.ndarray] = None
+        self, texts: list[str], labels: np.ndarray, masks: np.ndarray | None = None
     ):
         self.texts = list(texts)
         self.labels = np.asarray(labels, dtype=np.float32)
@@ -119,12 +119,12 @@ class TextConceptDetector(ConceptDetector):
         use_bigrams: bool = True,
         max_len: int = 128,
         min_freq: int = 1,
-        max_vocab: Optional[int] = 40000,
-        pos_weight: Union[None, str, np.ndarray] = "auto",
+        max_vocab: int | None = 40000,
+        pos_weight: None | str | np.ndarray = "auto",
         output_mode: str = "hard",
         threshold_mode: str = "auto",
         validate: bool = True,
-        device: Optional[str] = None,
+        device: str | None = None,
         model_name: str = "distilbert/distilbert-base-uncased",  # alternatives: "prajjwal1/bert-tiny", "prajjwal1/bert-mini", "prajjwal1/bert-small", "distilbert/distilbert-base-uncased"
         pooling: str = "cls",
         base_lr: float = 2e-5,
@@ -132,7 +132,7 @@ class TextConceptDetector(ConceptDetector):
         group_unknown_threshold: float = 0.55,
         **kwargs,
     ) -> None:
-        super().__init__(embedding_model=None, concept_layers=None)
+        super().__init__(embedding_model=None)
         self.embed_dim = int(embed_dim)
         self.hidden_dim = int(hidden_dim)
         self.epochs = int(epochs)
@@ -157,23 +157,23 @@ class TextConceptDetector(ConceptDetector):
             else:
                 device = "cpu"
         self.device = device
-        self.pos_weight_cfg: Union[None, str, np.ndarray] = pos_weight
+        self.pos_weight_cfg: None | str | np.ndarray = pos_weight
         om = (output_mode or "hard").strip().lower()
         self.output_mode = "soft" if om == "soft" else "hard"
         tm = (threshold_mode or "auto").strip().lower()
         self.threshold_mode = "auto" if tm == "auto" else "fixed"
         self.validate_after_fit = bool(validate)
-        self.cross_auroc_: Optional[np.ndarray] = None
-        self.alignment_: Optional[Dict[str, float]] = None
-        self.thresholds_: Optional[np.ndarray] = None
-        self.concept_acc_: Optional[np.ndarray] = None
-        self._n_concepts: Optional[int] = None
+        self.cross_auroc_: np.ndarray | None = None
+        self.alignment_: dict[str, float] | None = None
+        self.thresholds_: np.ndarray | None = None
+        self.concept_acc_: np.ndarray | None = None
+        self._n_concepts: int | None = None
         self.model_name = str(model_name)
         self.pooling = pooling
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         self.group_unknown_threshold = float(group_unknown_threshold)
 
-    def _to_text_list(self, dataset: ConceptDatasetSample) -> List[str]:
+    def _to_text_list(self, dataset: ConceptDatasetSample) -> list[str]:
         X = getattr(dataset, "X", None)
         if X is None:
             raise ValueError("Dataset missing X")
@@ -197,7 +197,7 @@ class TextConceptDetector(ConceptDetector):
             m["pool"] = _AttnPool(hsz)
         return m
 
-    def _forward(self, model: nn.Module, enc: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def _forward(self, model: nn.Module, enc: dict[str, torch.Tensor]) -> torch.Tensor:
         out = model["base"](**enc, output_hidden_states=False, return_dict=True)
         h = out.last_hidden_state
         if self.pooling == "cls":
@@ -215,10 +215,10 @@ class TextConceptDetector(ConceptDetector):
     def fit(
         self,
         train_dataset: ConceptDatasetSample,
-        valid_dataset: Optional[ConceptDatasetSample] = None,
-        embedding_params: Optional[dict] = None,
-        hidden_layer_size: Optional[int] = None,
-        n_jobs: Optional[int] = None,
+        valid_dataset: ConceptDatasetSample | None = None,
+        embedding_params: dict | None = None,
+        hidden_layer_size: int | None = None,
+        n_jobs: int | None = None,
         **kwargs,
     ) -> None:
         Xtr = self._to_text_list(train_dataset)
@@ -375,7 +375,7 @@ class TextConceptDetector(ConceptDetector):
             for j in range(scores.shape[1]):
                 try:
                     eces.append(_ece(scores[:, j], truth[:, j], n_bins=10))
-                except Exception:
+                except (ValueError, IndexError):
                     pass
             ece_macro = float(np.nanmean(eces)) if eces else float("nan")
             self.alignment_ = {
@@ -404,7 +404,7 @@ class TextConceptDetector(ConceptDetector):
                     th.append(t)
                     pred = (scores[:, j] >= t).astype(int)
                     acc.append(float((pred == yj).mean()))
-                except Exception:
+                except (ValueError, IndexError):
                     th.append(0.5)
                     acc.append(np.nan)
             self.thresholds_ = np.asarray(th, dtype=np.float32)
@@ -417,7 +417,7 @@ class TextConceptDetector(ConceptDetector):
     def predict(
         self,
         dataset: ConceptDatasetSample,
-        embedding_params: Optional[dict] = None,
+        embedding_params: dict | None = None,
         **kwargs,
     ) -> np.ndarray:
         if self.model is None:
@@ -433,7 +433,7 @@ class TextConceptDetector(ConceptDetector):
             pin_memory=(self.device in {"cuda", "mps"}),
             num_workers=0,
         )
-        outs: List[np.ndarray] = []
+        outs: list[np.ndarray] = []
         for enc, _, _ in dl:
             enc = {k: v.to(self.device, non_blocking=False) for k, v in enc.items()}
             logits = self._forward(self.model, enc)

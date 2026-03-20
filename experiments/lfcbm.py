@@ -3,12 +3,14 @@ from __future__ import annotations
 
 __all__ = ["LFTrainingConfig", "LFConceptSet", "LabelFreeCBM"]
 
+import csv
 import json
 import logging
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 import torch
@@ -41,18 +43,18 @@ class LFTrainingConfig:
     # Final sparse layer (Elastic-Net via sklearn SAGA)
     l1_ratio: float = 0.99
     # Grid for inverse regularization strength C; we pick the one that hits ~25–35 nnz/class
-    C_grid: Tuple[float, ...] = (0.05, 0.1, 0.2, 0.5, 1.0, 2.0)
-    target_nonzero_per_class: Tuple[int, int] = (25, 35)
+    C_grid: tuple[float, ...] = (0.05, 0.1, 0.2, 0.5, 1.0, 2.0)
+    target_nonzero_per_class: tuple[int, int] = (25, 35)
 
     # Caching of embeddings
-    cache_dir: Optional[Path] = None
+    cache_dir: Path | None = None
     batch_size: int = 256
 
 
 class LFConceptSet:
     """Stores concept keys and display texts, aligns to dataset concept order if provided."""
 
-    def __init__(self, keys: List[str], texts: List[str]) -> None:
+    def __init__(self, keys: list[str], texts: list[str]) -> None:
         if len(keys) != len(texts):
             raise ValueError("keys and texts must have equal length")
         self.keys = list(keys)
@@ -65,19 +67,17 @@ class LFConceptSet:
 
     @classmethod
     def from_file(
-        cls, path: str | Path, dataset_keys: Optional[Sequence[str]] = None
+        cls, path: str | Path, dataset_keys: Sequence[str] | None = None
     ) -> "LFConceptSet":
         p = Path(path)
         if not p.exists():
             raise FileNotFoundError(f"Concept file not found: {p}")
         ext = p.suffix.lower()
 
-        keys: List[str] = []
-        texts: List[str] = []
+        keys: list[str] = []
+        texts: list[str] = []
 
         if ext == ".csv":
-            import csv
-
             with p.open("r", newline="", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 hdr = [h.strip().lower() for h in reader.fieldnames or []]
@@ -96,8 +96,6 @@ class LFConceptSet:
                             texts.append(t)
                             keys.append(k if k else t)
         elif ext in {".json", ".jsonl"}:
-            import json
-
             if ext == ".jsonl":
                 with p.open("r", encoding="utf-8") as f:
                     for line in f:
@@ -217,7 +215,7 @@ class _CLIPEncoder:
     @torch.no_grad()
     def encode_texts(self, texts: Sequence[str], batch_size: int = 256) -> np.ndarray:
         self._ensure_loaded()
-        out: List[np.ndarray] = []
+        out: list[np.ndarray] = []
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
             feats = self._encode_text(batch)
@@ -276,7 +274,7 @@ class _CLIPEncoder:
 
         ds = _ImgDS(paths, self.preprocess)
         dl = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=0)
-        all_feats: List[np.ndarray] = []
+        all_feats: list[np.ndarray] = []
         for xb in dl:
             xb = xb.to(self.device)
             feats = self._encode_image(xb)
@@ -316,7 +314,7 @@ class _CLIPEncoder:
 
 def _cos_cubed_similarity(
     q: torch.Tensor, p: torch.Tensor
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     q, p: shape (M, N), rows = concepts, columns = dataset items
     Implements Eq. (1) with per-row z-score, element-wise cube, then cosine similarity.
@@ -350,21 +348,21 @@ class LabelFreeCBM:
         np.random.seed(int(cfg.seed))
 
         self.encoder = _CLIPEncoder(cfg.clip_model, cfg.clip_pretrained, cfg.device)
-        self.concept_set: Optional[LFConceptSet] = None
+        self.concept_set: LFConceptSet | None = None
 
         # Learned artefacts
-        self.Wc: Optional[torch.Tensor] = None  # shape (M, D)
-        self.keep_mask: Optional[np.ndarray] = None  # shape (M,)
-        self.scaler: Optional[StandardScaler] = None
-        self.classifier: Optional[LogisticRegression] = None
+        self.Wc: torch.Tensor | None = None  # shape (M, D)
+        self.keep_mask: np.ndarray | None = None  # shape (M,)
+        self.scaler: StandardScaler | None = None
+        self.classifier: LogisticRegression | None = None
 
         # Cached embeddings
-        self._img_train: Optional[np.ndarray] = None
-        self._img_valid: Optional[np.ndarray] = None
-        self._img_test: Optional[np.ndarray] = None
-        self._txt_concepts: Optional[np.ndarray] = None
+        self._img_train: np.ndarray | None = None
+        self._img_valid: np.ndarray | None = None
+        self._img_test: np.ndarray | None = None
+        self._txt_concepts: np.ndarray | None = None
 
-        self.train_stats: Dict[str, Any] = {}
+        self.train_stats: dict[str, Any] = {}
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -389,8 +387,8 @@ class LabelFreeCBM:
         valid_X: Sequence[str | Path],
         valid_y: np.ndarray,
         concept_set: LFConceptSet,
-        cache_dir: Optional[Path] = None,
-    ) -> Dict[str, Any]:
+        cache_dir: Path | None = None,
+    ) -> dict[str, Any]:
         self.concept_set = concept_set
         cache = Path(cache_dir or self.cfg.cache_dir or ".").resolve()
         cache.mkdir(parents=True, exist_ok=True)
@@ -570,11 +568,11 @@ class LabelFreeCBM:
         return self.classifier.predict_proba(Z)
 
     # Persist artefacts
-    def save(self, out_dir: str | Path) -> Dict[str, str]:
+    def save(self, out_dir: str | Path) -> dict[str, str]:
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
 
-        paths: Dict[str, str] = {}
+        paths: dict[str, str] = {}
         # Wc
         W_path = out / "lfcbm_Wc.npy"
         np.save(W_path, self.Wc.detach().cpu().numpy())

@@ -273,7 +273,7 @@ class DatasetGenerator:
         except TypeError as e:
             valid = [f.name for f in dataclasses.fields(config_class)]
             raise ValueError(
-                f"Invalid parameter for benchmark {benchmark!r}: {e}. "
+                f"Invalid parameter for benchmark {benchmark!r}: {e!r}. "
                 f"Available parameters: {', '.join(valid)}"
             ) from None
 

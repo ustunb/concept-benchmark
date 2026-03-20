@@ -7,6 +7,7 @@ __all__ = [
     "DataLoader",
 ]
 
+import io
 import platform
 import warnings
 from collections.abc import Callable, Mapping, Set
@@ -273,19 +274,19 @@ class ConceptDataset:
             try:
                 X = np.asarray(X)
             except Exception as e:
-                raise ValueError(f"cannot convert X to np.ndarray: {e}")
+                raise ValueError(f"cannot convert X to np.ndarray: {e!r}")
 
         if not isinstance(C, np.ndarray):
             try:
                 C = np.asarray(C)
             except Exception as e:
-                raise ValueError(f"cannot convert C to np.ndarray: {e}")
+                raise ValueError(f"cannot convert C to np.ndarray: {e!r}")
 
         if not isinstance(y, np.ndarray):
             try:
                 y = np.asarray(y)
             except Exception as e:
-                raise ValueError(f"cannot convert y to np.ndarray: {e}")
+                raise ValueError(f"cannot convert y to np.ndarray: {e!r}")
 
         if meta.get("data_type") == "image":
             # do not cast X
@@ -723,8 +724,8 @@ class ConceptDataset:
     def generate_cvindices(
         self,
         strata=None,
-        total_folds_for_cv=[1, 3, 4, 5],
-        total_folds_for_inner_cv=[],
+        total_folds_for_cv=None,
+        total_folds_for_inner_cv=None,
         replicates=3,
         seed=None,
     ):
@@ -743,6 +744,10 @@ class ConceptDataset:
         seed : int, optional
             Random seed for reproducibility.
         """
+        if total_folds_for_cv is None:
+            total_folds_for_cv = [1, 3, 4, 5]
+        if total_folds_for_inner_cv is None:
+            total_folds_for_inner_cv = []
         indices = generate_cvindices(
             n_samples=self.n if strata is None else None,
             strata=strata,
@@ -951,8 +956,8 @@ class ConceptDataset:
         masks: dict[str, np.ndarray] = {}
         all_splits = {
             "train": self.training,
-            "validation": getattr(self, "validation", None),
-            "test": getattr(self, "test", None),
+            "validation": self.validation,
+            "test": self.test,
         }
 
         for split_name, sample in all_splits.items():
@@ -1017,8 +1022,8 @@ class ConceptDataset:
         masks: dict[str, np.ndarray] = {}
         splits = {
             "train": self.training,
-            "validation": getattr(self, "validation", None),
-            "test": getattr(self, "test", None),
+            "validation": self.validation,
+            "test": self.test,
         }
 
         for split_name, sample in splits.items():
@@ -1086,8 +1091,8 @@ class ConceptDataset:
 
         splits = {
             "train": self.training,
-            "validation": getattr(self, "validation", None),
-            "test": getattr(self, "test", None),
+            "validation": self.validation,
+            "test": self.test,
         }
 
         for split_name, sample in splits.items():
@@ -1665,7 +1670,7 @@ class ConceptDatasetSample(Dataset):
 
         embedded_X = np.concatenate(embedded_X, axis=0)
 
-        embed_meta = dict(self.meta).copy()
+        embed_meta = dict(self.meta)
         embed_meta["data_type"] = "tabular"
 
         new_sample = ConceptDatasetSample(
@@ -1770,15 +1775,13 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         if self.base_dir is not None:
             img_path = self.base_dir / img_path
         try:
-            import io
-
             image = Image.open(io.BytesIO(Path(img_path).read_bytes())).convert("RGB")
             if self.preprocess is not None:
                 image = self.preprocess(image)
             if self.transform is not None:
                 image = self.transform(image)
         except (AttributeError, FileNotFoundError, OSError) as e:
-            warnings.warn(f"{e}; cannot open image, returning path", RuntimeWarning)
+            warnings.warn(f"{e!r}; cannot open image, returning path", RuntimeWarning)
             image = img_path
 
         c = torch.from_numpy(np.array(c, dtype=np.float32))

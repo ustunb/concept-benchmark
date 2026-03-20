@@ -1,4 +1,12 @@
-"""Tests for concept_benchmark.llm_client module (fully mocked, no network)."""
+"""Tests for the llm_client interface contract, not provider implementations.
+
+All LLM calls are fully mocked (no network access). These tests verify:
+- Provider registration and factory validation (make_llm_client).
+- The generate() return type contract (_LLMBase interface).
+- The judge_concept() parsing logic (YES/NO/ambiguous responses).
+
+Provider-specific behavior (e.g. Gemini API details) is NOT tested here.
+"""
 
 from __future__ import annotations
 

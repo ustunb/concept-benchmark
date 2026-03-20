@@ -21,8 +21,6 @@ from .robot_draw import (
     blur_parts,
 )
 
-pd.options.mode.chained_assignment = None
-
 OUTCOME_NAME = "robot_type"
 OUTCOME_MISSING = "?"
 
@@ -35,7 +33,6 @@ def get_robot_catalog_df(concepts, repetitions=1):
     each row shows a distinct combination of features – i.e., a unique robot
     :return: pandas DataFrame
     """
-    # todo: generate multiple catalogs given a parameter i that defines the number of repetitions
     index = pd.MultiIndex.from_product(concepts.values(), names=concepts.keys())
     for i in range(1, repetitions):
         new_index = pd.MultiIndex.from_product(concepts.values(), names=concepts.keys())
@@ -52,11 +49,13 @@ def collapse_robot_subtypes(
     df,
     robot_features=ALL_ROBOT_FEATURES,
     subtype_separator="_",
-    collapse_as_new_feature=[],
+    collapse_as_new_feature=None,
 ):
     """
     collapses feature values with subtypes into feature_types
     """
+    if collapse_as_new_feature is None:
+        collapse_as_new_feature = []
     df_feature_names = [k for k in df.columns if k in robot_features]
     new_features = {}
     for name in df_feature_names:

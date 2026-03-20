@@ -61,7 +61,7 @@ class TestRobotDatasetGenerator:
         assert ds.train.C.shape == (3800, 7)
         assert ds.train.y.shape == (3800,)
         assert ds.test.C.shape[1] == 7
-        assert ds.validation is not None
+        assert ds.validation.n > 0
 
     def test_subconcept_generates_12_concepts(self):
         gen = DatasetGenerator(
@@ -206,8 +206,8 @@ class TestSudokuDatasetGenerator:
         assert ds.C.shape[1] == 27
         assert ds.y.ndim == 1
         ds.sample(test_size=0.2, val_size=0.2, stratify=ds.y, seed=42)
-        assert ds.test is not None
-        assert ds.validation is not None
+        assert ds.test.n > 0
+        assert ds.validation.n > 0
 
     def test_split_sizes_sum_to_total(self):
         ds = DatasetGenerator("sudoku", n_boards=100, data_type="tabular").generate()

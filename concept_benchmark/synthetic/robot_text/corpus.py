@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -296,7 +297,7 @@ def core_vector_from_row(row: dict) -> np.ndarray:
 
 # Maps each feature to (binary concept name, test function).
 # The test function takes a row value and returns 1.0 or 0.0.
-_BINARY_CONCEPT_MAP: dict[str, tuple[str, callable]] = {
+_BINARY_CONCEPT_MAP: dict[str, tuple[str, Callable]] = {
     "head_shape": ("head_is_square", lambda v: 1.0 if str(v) == "square" else 0.0),
     "body_shape": ("body_is_square", lambda v: 1.0 if str(v) == "square" else 0.0),
     "has_knees": ("has_knees", lambda v: 1.0 if str(v).lower() == "true" else 0.0),

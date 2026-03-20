@@ -9,7 +9,7 @@ __all__ = [
 
 from dataclasses import dataclass
 import math
-from typing import Any, Dict, Optional, Protocol, Tuple, Union
+from typing import Any, Protocol
 
 import numpy as np
 import torch
@@ -25,11 +25,11 @@ class TrainerResult:
     """Container returned by a concept trainer."""
 
     model: nn.Module
-    history: Optional[Dict[str, Any]] = None
-    best_metric: Optional[float] = None
+    history: dict[str, Any] | None = None
+    best_metric: float | None = None
 
 
-TrainerOutput = Union[nn.Module, Tuple[nn.Module, Dict[str, Any]], TrainerResult]
+TrainerOutput = nn.Module | tuple[nn.Module, dict[str, Any]] | TrainerResult
 
 
 class ConceptTrainer(Protocol):
@@ -39,10 +39,10 @@ class ConceptTrainer(Protocol):
         self,
         model: nn.Module,
         train_dataset: ConceptDatasetSample,
-        valid_dataset: Optional[ConceptDatasetSample],
+        valid_dataset: ConceptDatasetSample | None,
         *,
         num_concepts: int,
-        params: Optional[Dict[str, Any]] = None,
+        params: dict[str, Any] | None = None,
     ) -> TrainerOutput: ...
 
 
@@ -117,10 +117,10 @@ class DefaultConceptTrainer:
         self,
         model: nn.Module,
         train_dataset: ConceptDatasetSample,
-        valid_dataset: Optional[ConceptDatasetSample],
+        valid_dataset: ConceptDatasetSample | None,
         *,
         num_concepts: int,
-        params: Optional[Dict[str, Any]] = None,
+        params: dict[str, Any] | None = None,
     ) -> TrainerResult:
         """Train ``model`` on concept supervision and return the best checkpoint.
 
@@ -142,7 +142,7 @@ class DefaultConceptTrainer:
             ValueError: If the model forward pass returns an empty sequence of
                 outputs.
         """
-        cfg: Dict[str, Any] = {
+        cfg: dict[str, Any] = {
             "epochs": 10,
             "batch_size": 64,
             "valid_batch_size": None,
@@ -225,10 +225,10 @@ class DefaultConceptTrainer:
         )
 
         best_metric = float("-inf")
-        best_state: Optional[Dict[str, torch.Tensor]] = None
+        best_state: dict[str, torch.Tensor] | None = None
         patience_counter = 0
 
-        history: Dict[str, Any] = {
+        history: dict[str, Any] = {
             "train_loss": [],
             "val_f1": [],
         }
@@ -374,13 +374,13 @@ class DefaultConceptTrainer:
 
 def train_concept_heads(
     train_dataset: ConceptDatasetSample,
-    valid_dataset: Optional[ConceptDatasetSample],
-    embedding_model: Optional[nn.Module],
+    valid_dataset: ConceptDatasetSample | None,
+    embedding_model: nn.Module | None,
     *,
-    input_dim: Optional[int] = None,
+    input_dim: int | None = None,
     hidden_layer_size: int = 100,
     freeze_backbone: bool = False,
-    fit_params: Optional[Dict[str, Any]] = None,
+    fit_params: dict[str, Any] | None = None,
 ) -> nn.ModuleList:
     params = {
         "epochs": 10,
@@ -415,7 +415,6 @@ def train_concept_heads(
             pin_memory=bool(params["pin_memory"]),
         )
         bx, _, *_ = next(iter(loader))
-        bx = bx
         if embedding_model is None:
             with torch.no_grad():
                 if isinstance(bx, torch.Tensor):
@@ -441,7 +440,7 @@ def train_concept_heads(
 
     class _EmbedAndLinear(nn.Module):
         def __init__(
-            self, enc: Optional[nn.Module], d_in: int, k: int, freeze_enc: bool
+            self, enc: nn.Module | None, d_in: int, k: int, freeze_enc: bool
         ):
             super().__init__()
             self.enc = enc

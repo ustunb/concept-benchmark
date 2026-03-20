@@ -14,14 +14,13 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import List, Optional
 
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 
-from concept_benchmark.utils import determine_device, set_deterministic_seed
+from concept_benchmark.utils import determine_device, parse_budgets, set_deterministic_seed
 from concept_benchmark.config import RobotBenchmarkConfig
 from concept_benchmark.data import ConceptDatasetSample
 from concept_benchmark.ext.fileutils import load, save
@@ -35,9 +34,13 @@ logger = logging.getLogger(__name__)
 
 def _internal_output_mode(concept_output_type: str) -> str:
     """Translate public config value to internal detector/LFCBM mode string."""
-    return {"binary": "hard", "continuous": "soft"}.get(
-        concept_output_type, concept_output_type
-    )
+    _mapping = {"binary": "hard", "continuous": "soft"}
+    if concept_output_type not in _mapping:
+        raise ValueError(
+            f"Unknown concept_output_type {concept_output_type!r}. "
+            f"Valid values: {sorted(_mapping)}"
+        )
+    return _mapping[concept_output_type]
 
 
 # Lazy imports for intervention modules
@@ -55,10 +58,6 @@ def _ensure_intervention_imports():
         from experiments.kflip import KFlipInterventionStrategy
 
         _intervention_imported = True
-
-
-def _set_seed(s: int) -> None:
-    set_deterministic_seed(s)
 
 
 # ── Stage: setup_dataset ─────────────────────────────────────────────
@@ -107,13 +106,13 @@ def setup_dataset(
 
 def train_cbm(
     config: RobotBenchmarkConfig,
-    data: Optional[ConceptDatasetSample] = None,
+    data: ConceptDatasetSample | None = None,
 ) -> ConceptBasedModel:
     """Train TextConceptDetector + FrontEndModel.
 
     Returns the trained ConceptBasedModel.
     """
-    _set_seed(config.seed)
+    set_deterministic_seed(config.seed)
 
     if data is None:
         data = load(config.get_dataset_path())
@@ -155,7 +154,7 @@ def train_cbm(
 
 def train_cbm_subjective(
     config: RobotBenchmarkConfig,
-    data: Optional[ConceptDatasetSample] = None,
+    data: ConceptDatasetSample | None = None,
 ) -> ConceptBasedModel:
     """Train a CBM on noisy (subjective) concept labels.
 
@@ -173,7 +172,7 @@ def train_cbm_subjective(
         enable=True,
     )
 
-    _set_seed(config.seed)
+    set_deterministic_seed(config.seed)
     detector = TextConceptDetector(
         embed_dim=128,
         hidden_dim=192,
@@ -295,13 +294,13 @@ def _fit_platt(X, y, tok, model, device):
 
 def train_dnn(
     config: RobotBenchmarkConfig,
-    data: Optional[ConceptDatasetSample] = None,
+    data: ConceptDatasetSample | None = None,
 ) -> dict:
     """Fine-tune DistilBERT on text -> label (bypasses concepts).
 
     Returns a dict with accuracy metrics and model paths.
     """
-    _set_seed(config.seed)
+    set_deterministic_seed(config.seed)
     device = determine_device()
 
     if data is None:
@@ -340,7 +339,7 @@ def train_dnn(
 
 def train_lfcbm(
     config: RobotBenchmarkConfig,
-    data: Optional[ConceptDatasetSample] = None,
+    data: ConceptDatasetSample | None = None,
 ) -> ConceptBasedModel:
     """Train label-free CBM using sentence embeddings + concepts CSV.
 
@@ -348,7 +347,7 @@ def train_lfcbm(
     """
     from concept_benchmark.synthetic.robot_text.lfcbm import LabelFreeDetector
 
-    _set_seed(config.seed)
+    set_deterministic_seed(config.seed)
 
     if data is None:
         data = load(config.get_dataset_path())
@@ -530,8 +529,8 @@ def _run_text_regime(config, regime, model, data, budgets, threshold):
 
 def run_interventions(
     config: RobotBenchmarkConfig,
-    model: Optional[ConceptBasedModel] = None,
-    data: Optional[ConceptDatasetSample] = None,
+    model: ConceptBasedModel | None = None,
+    data: ConceptDatasetSample | None = None,
 ) -> pd.DataFrame:
     """Run k-flip interventions on the trained CBM.
 
@@ -576,8 +575,8 @@ def run_interventions(
 
 def align(
     config: RobotBenchmarkConfig,
-    model: Optional[ConceptBasedModel] = None,
-    data: Optional[ConceptDatasetSample] = None,
+    model: ConceptBasedModel | None = None,
+    data: ConceptDatasetSample | None = None,
 ) -> dict:
     """Run alignment test on the trained CBM.
 
@@ -602,7 +601,7 @@ def align(
 
 
 def collect_results(
-    configs: Optional[List[RobotBenchmarkConfig]] = None,
+    configs: list[RobotBenchmarkConfig] | None = None,
 ) -> pd.DataFrame:
     """Aggregate robot text results into a single CSV.
 
@@ -677,8 +676,8 @@ def collect_results(
 
 
 def run(
-    config: Optional[RobotBenchmarkConfig] = None,
-    stages: Optional[List[str]] = None,
+    config: RobotBenchmarkConfig | None = None,
+    stages: list[str] | None = None,
     force_setup: bool = False,
 ) -> None:
     """Run the full robot text benchmark pipeline.
@@ -860,12 +859,6 @@ def _parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def _parse_budgets(raw):
-    budgets = []
-    for v in raw:
-        budgets.append(-1 if v.lower() == "max" else int(v))
-    return budgets
-
 
 def main(argv=None):
     args = _parse_args(argv)
@@ -885,7 +878,7 @@ def main(argv=None):
         config = RobotBenchmarkConfig(**init_kwargs)
 
     if args.budgets:
-        config.intervention_budgets = _parse_budgets(args.budgets)
+        config.intervention_budgets = parse_budgets(args.budgets)
     if args.regimes:
         config.intervention_regimes = args.regimes
     if args.strategy:

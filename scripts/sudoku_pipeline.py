@@ -12,7 +12,6 @@ from __future__ import annotations
 import copy
 import logging
 import platform
-from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -24,6 +23,7 @@ from concept_benchmark.utils import (
     compute_accuracy,
     determine_device,
     get_loader_config,
+    parse_budgets,
     patch_macos_dataloader,
     set_deterministic_seed,
 )
@@ -38,20 +38,6 @@ from experiments.intervention import (
     ConceptualSafeguardsStrategy,
     InterventionConfig,
 )
-
-# Backward compatibility: allow unpickling models saved under old class paths.
-# Saved CS models reference scripts.sudoku_demo.sudoku_models at pickle time.
-import sys as _sys
-import types as _types
-if "scripts.sudoku_demo.sudoku_models" not in _sys.modules:
-    import experiments.models as _compat_models
-    if "scripts" not in _sys.modules:
-        _sys.modules["scripts"] = _types.ModuleType("scripts")
-    if "scripts.sudoku_demo" not in _sys.modules:
-        _sd = _types.ModuleType("scripts.sudoku_demo")
-        _sys.modules["scripts.sudoku_demo"] = _sd
-        _sys.modules["scripts"].sudoku_demo = _sd
-    _sys.modules["scripts.sudoku_demo.sudoku_models"] = _compat_models
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +75,11 @@ def train_cs(
     config: SudokuBenchmarkConfig,
     data=None,
 ) -> ConceptBasedModel:
-    set_deterministic_seed(config.seed)
     """Train a concept supervision model (concept detector + frontend).
 
     Returns the trained CBM.
     """
+    set_deterministic_seed(config.seed)
     patch_macos_dataloader()
     device = determine_device()
 
@@ -230,7 +216,7 @@ def train_dnn(
 
 def run_interventions(
     config: SudokuBenchmarkConfig,
-    cs_model: Optional[ConceptBasedModel] = None,
+    cs_model: ConceptBasedModel | None = None,
     data=None,
 ) -> pd.DataFrame:
     """Run conceptual safeguards interventions on the sudoku CS model.
@@ -329,7 +315,7 @@ def run_interventions(
 
 def align(
     config: SudokuBenchmarkConfig,
-    cs_model: Optional[ConceptBasedModel] = None,
+    cs_model: ConceptBasedModel | None = None,
     data=None,
 ) -> dict:
     """Run alignment test on the trained CS model.
@@ -385,7 +371,7 @@ def _dataset_label(cfg: SudokuBenchmarkConfig) -> str:
 
 
 def collect_results(
-    configs: Optional[List[SudokuBenchmarkConfig]] = None,
+    configs: list[SudokuBenchmarkConfig] | None = None,
 ) -> pd.DataFrame:
     """Aggregate all sudoku results into a single flat CSV.
 
@@ -499,8 +485,8 @@ def collect_results(
 # ── Stage: run (orchestrator) ─────────────────────────────────────────
 
 def run(
-    config: Optional[SudokuBenchmarkConfig] = None,
-    stages: Optional[List[str]] = None,
+    config: SudokuBenchmarkConfig | None = None,
+    stages: list[str] | None = None,
     force_setup: bool = False,
 ) -> None:
     """Run the full sudoku benchmark pipeline.
@@ -740,10 +726,10 @@ def _dnn_val_probs(model, loader, device):
 
 def compute_selective_results(
     config: SudokuBenchmarkConfig,
-    cs_model: Optional[ConceptBasedModel] = None,
-    dnn_weights: Optional[dict] = None,
+    cs_model: ConceptBasedModel | None = None,
+    dnn_weights: dict | None = None,
     data=None,
-    target_accuracies: Optional[List[float]] = None,
+    target_accuracies: list[float] | None = None,
 ) -> pd.DataFrame:
     """Compute selective accuracy and coverage at multiple target accuracy
     thresholds for both DNN and CS models.  Saves results as CSV.
@@ -878,11 +864,6 @@ def _parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def _parse_budgets(raw):
-    budgets = []
-    for v in raw:
-        budgets.append(-1 if v.lower() == "max" else int(v))
-    return budgets
 
 
 def main(argv=None):
@@ -898,7 +879,7 @@ def main(argv=None):
         config = SudokuBenchmarkConfig(seed=args.seed)
 
     if args.budgets:
-        config.intervention_budgets = _parse_budgets(args.budgets)
+        config.intervention_budgets = parse_budgets(args.budgets)
     if args.no_handwriting:
         config.font_style = "printed"
     elif args.handwriting:

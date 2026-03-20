@@ -8,7 +8,6 @@ import logging
 import os
 import platform
 from pathlib import Path
-from typing import Dict, Optional
 
 import numpy as np
 import torch
@@ -53,7 +52,7 @@ def compute_accuracy(
     return correct / total if total > 0 else 0
 
 
-def get_loader_config(device: torch.device | None = None) -> dict:
+def get_loader_config() -> dict:
     """Return DataLoader kwargs safe for the current platform."""
     _macos = platform.system() == "Darwin"
     return {
@@ -106,7 +105,7 @@ def train_dnn(
     epochs: int = 50,
     lr: float = 1e-3,
     patience: int = 10,
-    loader_config: Optional[dict] = None,
+    loader_config: dict | None = None,
 ) -> float:
     """Train a binary classifier with early stopping. Returns test accuracy.
 
@@ -196,8 +195,8 @@ def run_alignment(
     concept_based_model,
     train_dataset,
     test_dataset,
-    monotonicity_constraints: Dict[str, int],
-    save_path: Optional[Path] = None,
+    monotonicity_constraints: dict[str, int],
+    save_path: Path | None = None,
 ) -> dict:
     """Run alignment: retrain frontend with sign constraints, compare to original.
 

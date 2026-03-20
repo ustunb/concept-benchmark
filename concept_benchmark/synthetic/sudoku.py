@@ -2,8 +2,10 @@
 Generate Sudoku ConceptDataset
 """
 
+from __future__ import annotations
+
 import random
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 import math
 
 import torch
@@ -11,19 +13,11 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
 from tqdm.auto import tqdm
-from typing import Sequence
-
-
-def _get_default_font(size):
-    """Load a default font at the requested size, compatible with Pillow <10 and >=10."""
-    try:
-        return ImageFont.load_default(size=size)
-    except TypeError:
-        return ImageFont.load_default()
 
 
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.paths import data_dir
+from concept_benchmark.synthetic.helper.sudoku_handwriting import _get_default_font
 from concept_benchmark.synthetic.helper.sudoku_utils import (
     generate_invalid_board,
     generate_valid_board,
@@ -99,6 +93,7 @@ def create_sudoku_dataset(
 
     random.seed(seed)
     np.random.seed(seed)
+    rng = np.random.default_rng(seed)
 
     N = n * n
     transform = transform or default_transform
@@ -115,11 +110,7 @@ def create_sudoku_dataset(
 
     X_list, C_list, y_list, board_list = [], [], [], []
 
-    pbar = (
-        tqdm(total=n_valid + n_invalid, desc="Generating Sudoku dataset")
-        if tqdm
-        else None
-    )
+    pbar = tqdm(total=n_valid + n_invalid, desc="Generating Sudoku dataset")
 
     # ---- valid boards
     for i in range(n_valid):
@@ -149,8 +140,8 @@ def create_sudoku_dataset(
 
     # ---- invalid boards
     for i in range(n_invalid):
-        num_actions = max(1, int(random.randint(1, max_corrupt)))
-        inv_seed = random.randint(0, 2**31 - 1)
+        num_actions = max(1, int(rng.integers(1, max_corrupt, endpoint=True)))
+        inv_seed = int(rng.integers(0, 2**31))
         b = generate_invalid_board(
             base_board=generate_valid_board(n=n), num_actions=num_actions, seed=inv_seed
         )
@@ -226,9 +217,7 @@ def create_sudoku_dataset(
     }
 
     if data_type == "image":
-        kwargs = {"preprocess": sudoku_image_preprocess}
-    else:
-        kwargs = {}
+        kwargs.setdefault("preprocess", sudoku_image_preprocess)
 
     return ConceptDataset(X=X, C=C, y=y, meta=meta, **kwargs)
 
@@ -301,8 +290,6 @@ def image_transform(
     """Render an NxN Sudoku board to an RGB image with prior-option bubbles (handwritten).
     Each bubble shows *all* options inline in one row (tight kerning). Starters never get bubbles.
     """
-    import math
-
     N = board.shape[0]
     assert board.ndim == 2 and N == board.shape[1], "board must be square"
     n = int(math.isqrt(N))
@@ -557,16 +544,15 @@ def sudoku_image_preprocess(
     to_tensor: bool = True,
     vit: bool = True,
 ) -> np.ndarray:
-    image = image.convert("L")  # Convert to grayscale
-    img_arr = np.array(image)
-    """
-    Processes an image of a sudoku board/
+    """Process an image of a sudoku board.
+
     Args:
-        image: Image to process
-        standardize (bool, optional): If standardizing pixel values to within [0,1]. Defaults to True
-        to_tensor (bool, optional): If converting to tensor or not. Defaults to True.
-        vit (bool, optional): If using the image in a ViT backend model. Defaults to True.
-    Returns: 
+        image: Image to process.
+        standardize: If standardizing pixel values to within [0,1]. Defaults to True.
+        to_tensor: If converting to tensor or not. Defaults to True.
+        vit: If using the image in a ViT backend model. Defaults to True.
+
+    Returns:
         An array representing the image.
     """
 

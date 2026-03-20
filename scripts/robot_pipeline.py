@@ -15,7 +15,7 @@ import logging
 import platform
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ from concept_benchmark.utils import (
     compute_accuracy,
     determine_device,
     get_loader_config,
+    parse_budgets,
     patch_macos_dataloader,
     set_deterministic_seed,
 )
@@ -50,12 +51,12 @@ class InterventionSettings:
     """Typed config for _test_interventions, replacing the old ``sttngs`` dict."""
 
     seed: int
-    budgets: List[int]
+    budgets: list[int]
     intervention_accuracy: float = 0.9
     intervention_threshold: float = 1.0
     intervention_strategy: str = "up_to_k"
     intervention_expert: str = ""  # "" for standard path, "llm" for inline LLM
-    intervention_llm: Optional[Dict[str, Any]] = None
+    intervention_llm: dict[str, Any] | None = None
     run_dir: str = "."
 
 
@@ -76,8 +77,6 @@ class FEOnProbs(FrontEndModel):
         Z = np.log(P / (1.0 - P))
         return self.model.predict_proba(Z)
 
-
-_set_deterministic_seed = set_deterministic_seed  # backward compat alias
 
 
 # Lazy import to avoid circular deps — intervention modules
@@ -135,7 +134,7 @@ def setup_dataset(config: RobotBenchmarkConfig):
 def train_cbm(
     config: RobotBenchmarkConfig,
     data=None,
-    save_key: Optional[str] = "cbm",
+    save_key: str | None = "cbm",
     missing_fraction: float = 0.0,
     missing_mechanism: str = "mcar",
 ) -> ConceptBasedModel:
@@ -148,7 +147,7 @@ def train_cbm(
 
     Returns the trained CBM.
     """
-    _set_deterministic_seed(config.seed)
+    set_deterministic_seed(config.seed)
     patch_macos_dataloader()
     device = determine_device()
 
@@ -327,7 +326,7 @@ def train_lfcbm(
     """
     from experiments.lfcbm import LabelFreeCBM, LFConceptSet, LFTrainingConfig
 
-    _set_deterministic_seed(config.seed)
+    set_deterministic_seed(config.seed)
 
     if data is None:
         data = load(config.get_dataset_path())
@@ -386,7 +385,7 @@ def train_dnn(
 
     Returns the best state_dict.
     """
-    _set_deterministic_seed(config.seed)
+    set_deterministic_seed(config.seed)
     patch_macos_dataloader()
     device = determine_device()
 
@@ -614,8 +613,8 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
                             elif isinstance(v, (int, float, str)):
                                 s = str(v).strip().lower()
                                 parsed[str(k)] = 1 if s in {"1", "true", "yes", "present"} else 0
-                except Exception:
-                    pass
+                except (json.JSONDecodeError, ValueError, KeyError) as e:
+                    logger.debug("JSON parse failure for LLM response: %s", e)
                 return parsed
 
             def _llm_judge_batch(image_paths: list, per_image_names: list) -> list:
@@ -1191,14 +1190,14 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
 
 def run_interventions(
     config: RobotBenchmarkConfig,
-    model: Optional[ConceptBasedModel] = None,
+    model: ConceptBasedModel | None = None,
     data=None,
 ) -> pd.DataFrame:
     """Run interventions on the trained CBM and return a results DataFrame.
 
     Loops over ``config.intervention_regimes`` (default: ``["baseline"]``).
     """
-    _set_deterministic_seed(config.seed)
+    set_deterministic_seed(config.seed)
     _ensure_intervention_imports()
     patch_macos_dataloader()
     determine_device()
@@ -1238,7 +1237,7 @@ def run_interventions(
 
 def align(
     config: RobotBenchmarkConfig,
-    model: Optional[ConceptBasedModel] = None,
+    model: ConceptBasedModel | None = None,
     data=None,
 ) -> dict:
     """Run alignment test on the trained CBM.
@@ -1271,7 +1270,7 @@ def _dataset_label(cfg: RobotBenchmarkConfig) -> str:
 
 
 def collect_results(
-    configs: Optional[List[RobotBenchmarkConfig]] = None,
+    configs: list[RobotBenchmarkConfig] | None = None,
 ) -> pd.DataFrame:
     """Aggregate all robot results into a single flat CSV.
 
@@ -1437,8 +1436,8 @@ def collect_results(
 # ── Stage: run (orchestrator) ─────────────────────────────────────────
 
 def run(
-    config: Optional[RobotBenchmarkConfig] = None,
-    stages: Optional[List[str]] = None,
+    config: RobotBenchmarkConfig | None = None,
+    stages: list[str] | None = None,
     force_setup: bool = False,
     missing_fraction: float = 0.0,
     missing_mechanism: str = "mcar",
@@ -1600,11 +1599,6 @@ def _parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def _parse_budgets(raw):
-    budgets = []
-    for v in raw:
-        budgets.append(-1 if v.lower() == "max" else int(v))
-    return budgets
 
 
 def main(argv=None):
@@ -1623,7 +1617,7 @@ def main(argv=None):
         config = RobotBenchmarkConfig(seed=args.seed)
 
     if args.budgets:
-        config.intervention_budgets = _parse_budgets(args.budgets)
+        config.intervention_budgets = parse_budgets(args.budgets)
     if args.regimes:
         config.intervention_regimes = args.regimes
     if args.strategy:

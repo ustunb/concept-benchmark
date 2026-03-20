@@ -22,7 +22,6 @@ __all__ = [
 
 import copy
 import logging
-from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -54,12 +53,12 @@ class ConstrainedFrontEndModel(FrontEndModel):
 
     def __init__(
         self,
-        concept_names: List[str],
-        monotonicity_constraints: Optional[Dict[str, int]] = None,
+        concept_names: list[str],
+        monotonicity_constraints: dict[str, int] | None = None,
     ) -> None:
         self.model = None
         self.concept_names = concept_names
-        self._mono: Dict[int, int] = {}
+        self._mono: dict[int, int] = {}
         for name, sign in (monotonicity_constraints or {}).items():
             idx = concept_names.index(name)
             self._mono[idx] = sign
@@ -125,9 +124,9 @@ def retrain_aligned(
     y_train: np.ndarray,
     concept_preds_test: np.ndarray,
     y_test: np.ndarray,
-    concept_names: List[str],
+    concept_names: list[str],
     original_frontend: FrontEndModel,
-    monotonicity_constraints: Dict[str, int],
+    monotonicity_constraints: dict[str, int],
 ) -> dict:
     """Retrain the frontend with sign constraints and compare to original.
 
@@ -219,12 +218,19 @@ def align_frontend_weights(frontend_model, concept_names, weight_dict):
     n_concepts = len(concept_names)
     new_coef = np.zeros((1, n_concepts))
 
+    _log = logging.getLogger(__name__)
     for concept_name, weight in weight_dict.items():
         if concept_name == "bias":
             continue
         if concept_name in concept_names:
             concept_idx = concept_names.index(concept_name)
             new_coef[0, concept_idx] = weight
+        else:
+            _log.warning(
+                "Unknown concept name %r in weight_dict (known: %s)",
+                concept_name,
+                concept_names,
+            )
 
     new_bias = weight_dict.get("bias", 0.0)
     lr_model.coef_ = new_coef

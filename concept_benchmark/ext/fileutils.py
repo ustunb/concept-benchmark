@@ -1,6 +1,11 @@
+from __future__ import annotations
+
+import logging
 from pathlib import Path
 import dill
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 def save(obj, path, msg=True, overwrite=False, check_save=False, mkdir=True):
@@ -23,12 +28,14 @@ def save(obj, path, msg=True, overwrite=False, check_save=False, mkdir=True):
     if check_save:
         loaded_obj = load(f)
         if isinstance(loaded_obj, pd.DataFrame):
-            assert loaded_obj.equals(obj)
+            if not loaded_obj.equals(obj):
+                raise ValueError(f"saved DataFrame does not match original at {f}")
         else:
-            assert obj == loaded_obj
+            if obj != loaded_obj:
+                raise ValueError(f"saved object does not match original at {f}")
 
     if msg:
-        print(f"saved to: {f}")
+        logger.info("saved to: %s", f)
 
     return f
 
@@ -46,7 +53,8 @@ def load(path):
     with open(f, "rb") as infile:
         file_contents = dill.load(infile)
 
-    assert "data" in file_contents, f"contents of {f} is missing a field called `data`"
+    if "data" not in file_contents:
+        raise ValueError(f"contents of {f} is missing a field called `data`")
     obj = file_contents["data"]
 
     return obj

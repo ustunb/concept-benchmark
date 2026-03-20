@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import cv2
 import numpy as np
@@ -18,9 +18,9 @@ DATA_SUDOKU = data_dir / "sudoku"
 DEBUG_DIR = DATA_SUDOKU / "demo_ocr_debug"
 
 
-def load_sidecars(jsonl_path: Path) -> List[Dict[str, Any]]:
+def load_sidecars(jsonl_path: Path) -> list[dict[str, Any]]:
     """Read OCR sidecar rows into memory."""
-    recs: List[Dict[str, Any]] = []
+    recs: list[dict[str, Any]] = []
     with jsonl_path.open("r") as f:
         for line in f:
             line = line.strip()
@@ -48,6 +48,32 @@ def cell_preprocess_28x28(cell_bgr: np.ndarray) -> np.ndarray:
     return g
 
 
+@torch.no_grad()
+def predict_board_argmax(
+    model: nn.Module,
+    img_path: Path,
+    *,
+    device: str = "cpu",
+    cell_px: int = 50,
+    margin_px: int = 2,
+) -> np.ndarray:
+    """Predict all 81 digits of a Sudoku board image via argmax classification."""
+    bgr = cv2.imread(str(img_path))
+    if bgr is None:
+        raise FileNotFoundError(str(img_path))
+
+    cells = []
+    for r in range(9):
+        for c in range(9):
+            cell = crop_cell(bgr, r, c, cell_px=cell_px, margin_px=margin_px)
+            x28 = cell_preprocess_28x28(cell)
+            cells.append(x28)
+    cells = np.stack(cells, axis=0)
+    xb = torch.from_numpy(cells).unsqueeze(1).to(device)
+    logits = model(xb)
+    return logits.argmax(1).cpu().numpy().reshape(9, 9)
+
+
 class SudokuCellDataset(Dataset):
     """
     Dataset that breaks each Sudoku board image into 81 labeled cell crops.
@@ -68,7 +94,7 @@ class SudokuCellDataset(Dataset):
         self.margin_px = margin_px
 
         self.records = load_sidecars(jsonl_path)
-        self.samples: List[Tuple[Path, int, int, int]] = []
+        self.samples: list[tuple[Path, int, int, int]] = []
         for rec in self.records:
             img_name = rec["img"]
             board = np.array(rec["board"], dtype=np.int32)

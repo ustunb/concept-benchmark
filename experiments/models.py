@@ -16,7 +16,8 @@ import copy
 import itertools
 import os
 import warnings
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 import torch
@@ -170,7 +171,7 @@ class JointConceptModel(nn.Module):
 
     def __init__(
         self,
-        backbone: Optional[nn.Module],
+        backbone: nn.Module | None,
         head: nn.Module,
         *,
         should_flatten: bool = True,
@@ -304,12 +305,11 @@ class ConceptDetector:
 
     def __init__(
         self,
-        embedding_model: Optional[nn.Module] = None,
-        concept_layers: Optional[Any] = None,
+        embedding_model: nn.Module | None = None,
         *,
-        model: Optional[nn.Module] = None,
-        trainer: Optional[ConceptTrainer] = None,
-        model_builder: Optional[Callable[[int, int, int], nn.Module]] = None,
+        model: nn.Module | None = None,
+        trainer: ConceptTrainer | None = None,
+        model_builder: Callable[[int, int, int], nn.Module] | None = None,
     ) -> None:
         """Initialise a concept detector.
 
@@ -317,7 +317,6 @@ class ConceptDetector:
             embedding_model: Optional backbone that produces intermediate
                 representations. If provided, it is wrapped inside a
                 ``JointConceptModel`` when the detector builds its default head.
-            concept_layers: Kept for backwards compatibility; must be ``None``.
             model: Pre-built joint concept model. When supplied the detector
                 skips automatic model construction.
             trainer: Custom training callable. Defaults to
@@ -326,25 +325,17 @@ class ConceptDetector:
                 ``model`` is not provided. Receives ``(train_dataset, device,
                 hidden_dim)`` and must return an ``nn.Module`` that emits
                 ``n_concepts`` logits.
-
-        Raises:
-            ValueError: If ``concept_layers`` is set (legacy API path).
         """
-        if concept_layers not in (None, []):
-            raise ValueError(
-                "`concept_layers` is deprecated in the joint-training ConceptDetector."
-            )
-
         self.embedding_model = embedding_model
         self.model = model
         self.model_builder = model_builder
         self.trainer = trainer or DefaultConceptTrainer()
-        self.calibration_params: Optional[list[Optional[dict]]] = None
-        self.training_result: Optional[TrainerResult] = None
-        self._n_concepts: Optional[int] = None
-        self._eval_config: Dict[str, Any] = {}
+        self.calibration_params: list[dict | None] | None = None
+        self.training_result: TrainerResult | None = None
+        self._n_concepts: int | None = None
+        self._eval_config: dict[str, Any] = {}
 
-    def to(self, device: Union[str, torch.device]) -> "ConceptDetector":
+    def to(self, device: str | torch.device) -> "ConceptDetector":
         """Move the underlying torch modules to a target device."""
         target = torch.device(device)
         if self.model is not None:
@@ -355,7 +346,7 @@ class ConceptDetector:
             self.embedding_model.to(target)
         return self
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         """Return a serialization-friendly snapshot of the detector."""
         model_copy = None
         if self.model is not None:
@@ -384,7 +375,7 @@ class ConceptDetector:
             "training_summary": training_summary,
         }
 
-    def load_state_dict(self, state: Dict[str, Any]) -> None:
+    def load_state_dict(self, state: dict[str, Any]) -> None:
         """Restore detector state saved with :meth:`state_dict`."""
         version = state.get("version", 1)
         if version != 1:
@@ -417,11 +408,11 @@ class ConceptDetector:
 
     def save(
         self,
-        path: Union[str, "os.PathLike"],
+        path: str | os.PathLike,
         *,
         overwrite: bool = False,
         msg: bool = True,
-    ) -> "os.PathLike":
+    ) -> os.PathLike:
         """Persist the detector using concept_benchmark.ext.fileutils.save."""
         payload = {"version": 1, "state": self.state_dict()}
         return save_object(payload, path, overwrite=overwrite, msg=msg)
@@ -429,9 +420,9 @@ class ConceptDetector:
     @classmethod
     def load(
         cls,
-        path: Union[str, "os.PathLike"],
+        path: str | os.PathLike,
         *,
-        map_location: Optional[Union[str, torch.device]] = "cpu",
+        map_location: str | torch.device | None = "cpu",
     ) -> "ConceptDetector":
         """Restore a detector previously saved with ``save``."""
         payload = load_object(path)
@@ -567,15 +558,15 @@ class ConceptDetector:
         train_dataset: ConceptDatasetSample,
         valid_dataset: ConceptDatasetSample,
         freeze_backbone: bool = False,
-        embedding_params: Optional[dict] = None,
-        fit_params: Optional[dict] = None,
-        hidden_layer_size: Optional[int] = 100,
+        embedding_params: dict | None = None,
+        fit_params: dict | None = None,
+        hidden_layer_size: int | None = 100,
         should_calibrate: bool = False,
         should_log_training: bool = False,
-        log_interval: Optional[int] = None,
+        log_interval: int | None = None,
         *,
-        model: Optional[nn.Module] = None,
-        trainer: Optional[ConceptTrainer] = None,
+        model: nn.Module | None = None,
+        trainer: ConceptTrainer | None = None,
     ) -> None:
         """Train the detector and optionally calibrate the resulting logits.
 
@@ -719,8 +710,8 @@ class ConceptDetector:
             self.calibration_params = None
 
     def _parse_trainer_output(
-        self, output: Union[nn.Module, Tuple[nn.Module, Dict[str, Any]], TrainerResult]
-    ) -> Tuple[nn.Module, Optional[TrainerResult]]:
+        self, output: nn.Module | tuple[nn.Module, dict[str, Any]] | TrainerResult
+    ) -> tuple[nn.Module, TrainerResult | None]:
         """Normalise trainer outputs into a `(model, TrainerResult|None)` tuple."""
         if isinstance(output, TrainerResult):
             return output.model, output
@@ -822,8 +813,8 @@ class ConceptDetector:
     def predict(
         self,
         dataset: ConceptDatasetSample,
-        embedding_params: Optional[dict] = None,
-        should_calibrate: Optional[bool] = None,
+        embedding_params: dict | None = None,
+        should_calibrate: bool | None = None,
     ) -> np.ndarray:
         """Predict concept probabilities for each sample.
 
@@ -886,7 +877,7 @@ class FrontEndModel:
         self.model = None
 
     def fit(
-        self, C: np.ndarray, y: np.ndarray, fit_params: Optional[dict] = None
+        self, C: np.ndarray, y: np.ndarray, fit_params: dict | None = None
     ) -> None:
         """Fit the logistic-regression back-end.
 
@@ -977,15 +968,15 @@ class ConceptBasedModel:
 
     def __init__(
         self,
-        concept_detector: Optional[ConceptDetector] = None,
-        label_predictor: Optional[FrontEndModel] = None,
+        concept_detector: ConceptDetector | None = None,
+        label_predictor: FrontEndModel | None = None,
         should_propagate: bool = False,
         mc_mode: str = "auto",
         mc_samples: int = 1024,
         mc_max_samples: int = 16384,
         mc_chunk_size: int = 2048,
         mc_tolerance: float = 1e-3,
-        random_state: Optional[int] = None,
+        random_state: int | None = None,
         mc_exact_threshold: int = 4096,
         **kwargs,
     ) -> None:
@@ -1018,27 +1009,19 @@ class ConceptBasedModel:
         self._random_state = random_state
         self._mc_exact_threshold = int(mc_exact_threshold)
 
-    def __setstate__(self, state: dict) -> None:
-        """Support unpickling objects saved with old attribute names."""
-        if "front_end_model" in state and "label_predictor" not in state:
-            state["label_predictor"] = state.pop("front_end_model")
-        if "_concept_poss" in state and "_concept_possibilities" not in state:
-            state["_concept_possibilities"] = state.pop("_concept_poss")
-        self.__dict__.update(state)
-
     @property
     def should_propagate(self) -> bool:
         return self._propagate
 
     @property
-    def concept_possibilities(self) -> Optional[np.ndarray]:
+    def concept_possibilities(self) -> np.ndarray | None:
         """
         Return all possible concept combinations.
         """
         return self._concept_possibilities
 
     @property
-    def y_proba_all_concepts(self) -> Optional[dict]:
+    def y_proba_all_concepts(self) -> dict | None:
         """
         Return predicted probabilities for all concept combinations.
         """
@@ -1050,12 +1033,12 @@ class ConceptBasedModel:
         valid_dataset: ConceptDatasetSample,
         freeze_backbone: bool = True,
         *,
-        concept_fit_params: Optional[dict] = None,
-        concept_embed_params: Optional[dict] = None,
-        front_fit_params: Optional[dict] = None,
+        concept_fit_params: dict | None = None,
+        concept_embed_params: dict | None = None,
+        front_fit_params: dict | None = None,
         should_calibrate: bool = False,
         should_log_training: bool = False,
-        log_interval: Optional[int] = None,
+        log_interval: int | None = None,
     ) -> None:
         """
         Fit the concept detector and front-end model.
@@ -1130,7 +1113,7 @@ class ConceptBasedModel:
     def predict(
         self,
         dataset: ConceptDatasetSample,
-        should_propagate: Optional[bool] = None,
+        should_propagate: bool | None = None,
     ) -> np.ndarray:
         """
         Predict label for the dataset.
@@ -1146,9 +1129,9 @@ class ConceptBasedModel:
     def predict_proba(
         self,
         dataset: ConceptDatasetSample,
-        should_propagate: Optional[bool] = None,
+        should_propagate: bool | None = None,
         return_concepts: bool = False,
-    ) -> np.ndarray:
+    ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         """
         Predict probabilities for the dataset.
         """
@@ -1162,9 +1145,10 @@ class ConceptBasedModel:
         if should_propagate:
             n_concepts = concept_preds.shape[1]
             if self._should_use_exact(n_concepts):
-                return self._propagate_predict_proba(concept_preds)
+                y_prob = self._propagate_predict_proba(concept_preds)
             else:
-                return self._propagate_predict_proba_mc(concept_preds)
+                y_prob = self._propagate_predict_proba_mc(concept_preds)
+            return (y_prob, concept_preds) if return_concepts else y_prob
 
         binary_concept_preds = (concept_preds > 0.5).astype(np.float32)
         pred_y_prob = self.label_predictor.predict_proba(binary_concept_preds)

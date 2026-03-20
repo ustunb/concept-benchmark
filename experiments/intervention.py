@@ -28,10 +28,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import itertools
 import math
-from typing import Any, Dict, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 import warnings
 
 import numpy as np
+from tqdm import tqdm
 
 from concept_benchmark.data import ConceptDatasetSample
 from experiments.models import ConceptBasedModel
@@ -47,8 +49,8 @@ class InterventionBatch:
 
     C_pred: np.ndarray
     C_true: np.ndarray
-    y_true: Optional[np.ndarray] = None
-    instance_ids: Optional[np.ndarray] = None
+    y_true: np.ndarray | None = None
+    instance_ids: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         if self.C_pred.shape != self.C_true.shape:
@@ -126,12 +128,12 @@ class InterventionConfig:
             flip before overwriting, simulating noisy interventions.
     """
 
-    abstention_threshold: Optional[float] = None
-    concept_budget: Optional[float] = None
-    instance_budget: Optional[float] = None
-    max_concepts_per_instance: Optional[int] = None
-    random_state: Optional[int] = None
-    concept_order: Optional[Sequence[int]] = None
+    abstention_threshold: float | None = None
+    concept_budget: float | None = None
+    instance_budget: float | None = None
+    max_concepts_per_instance: int | None = None
+    random_state: int | None = None
+    concept_order: Sequence[int] | None = None
     shuffle_candidates: bool = False
     select_only_abstained: bool = False
     use_per_instance_ordering: bool = True
@@ -163,7 +165,7 @@ class InterventionConfig:
         return max(0, min(n_concepts, int(self.max_concepts_per_instance)))
 
     @staticmethod
-    def _resolve_budget(budget: Optional[float], total: int) -> int:
+    def _resolve_budget(budget: float | None, total: int) -> int:
         if budget is None:
             return total
         if isinstance(budget, float):
@@ -181,9 +183,9 @@ class StrategyProposal:
     """Mask proposed by a strategy alongside optional metadata."""
 
     mask: np.ndarray
-    ordering_used: Optional[np.ndarray] = None
-    selected_instances: Optional[np.ndarray] = None
-    details: Dict[str, Any] = field(default_factory=dict)
+    ordering_used: np.ndarray | None = None
+    selected_instances: np.ndarray | None = None
+    details: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -197,7 +199,7 @@ class InterventionResult:
     y_prob_after: np.ndarray
     y_pred_after: np.ndarray
     proposal: StrategyProposal
-    strategy_metrics: Dict[str, Any]
+    strategy_metrics: dict[str, Any]
 
 
 class InterventionStrategy:
@@ -205,10 +207,10 @@ class InterventionStrategy:
 
     def __init__(self, name: str) -> None:
         self.name = name
-        self._state: Dict[str, Any] = {}
+        self._state: dict[str, Any] = {}
 
     @property
-    def state(self) -> Dict[str, Any]:
+    def state(self) -> dict[str, Any]:
         return self._state
 
     def prepare(
@@ -234,7 +236,7 @@ class InterventionStrategy:
         config: InterventionConfig,
         *,
         rng: np.random.Generator,
-        shuffle_override: Optional[bool] = None,
+        shuffle_override: bool | None = None,
     ) -> np.ndarray:
         if candidates.size == 0:
             return candidates
@@ -327,11 +329,14 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
         abstain_mask = (confidences >= config.abstention_threshold) & (confidences <= 1.0 - config.abstention_threshold)
 
         non_abstained = ~abstain_mask
-        selective_acc_before = (
-            float((predicted[non_abstained] == batch.y_true[non_abstained]).mean())
-            if non_abstained.any()
-            else float("nan")
-        )
+        if batch.y_true is not None:
+            selective_acc_before = (
+                float((predicted[non_abstained] == batch.y_true[non_abstained]).mean())
+                if non_abstained.any()
+                else float("nan")
+            )
+        else:
+            selective_acc_before = float("nan")
 
         candidate_ids = np.nonzero(abstain_mask)[0]
         candidate_scores = self._instance_uncertainty_scores(
@@ -434,7 +439,7 @@ class OrderedCBMStrategy(InterventionStrategy):
         )
         mask = np.zeros_like(batch.C_pred, dtype=bool)
         self._apply_ordering(mask, order, selected, config=config)
-        details: Dict[str, Any] = {}
+        details: dict[str, Any] = {}
         if "error_deltas" in self.state:
             details["validation_error_deltas"] = self.state["error_deltas"]
         return StrategyProposal(
@@ -544,13 +549,11 @@ class ScoreIntervention(InterventionStrategy):
             for combo in itertools.combinations(range(n_concepts), m)
         ]
 
-        best_subset_arrays: List[Optional[np.ndarray]] = [None] * n_samples
+        best_subset_arrays: list[np.ndarray | None] = [None] * n_samples
 
         # Vectorized: iterate over combos (C(n,m)), batch all N samples per call.
         # Reduces from N × C(n,m) to C(n,m) predict_proba calls.
         best_combo_idx = np.full(n_samples, -1, dtype=int)
-
-        from tqdm import tqdm
 
         for ci, combo_indices in enumerate(
             tqdm(combination_arrays, desc="Computing intervention scores")
@@ -568,7 +571,7 @@ class ScoreIntervention(InterventionStrategy):
             if ci >= 0:
                 best_subset_arrays[idx] = combination_arrays[ci]
 
-        selected_indices: List[int] = []
+        selected_indices: list[int] = []
         for idx, subset_array in enumerate(best_subset_arrays):
             if subset_array is None:
                 continue
@@ -612,13 +615,13 @@ class ScoreIntervention(InterventionStrategy):
         selected: np.ndarray,
         threshold: float,
         m: int,
-    ) -> Dict[str, Any]:
-        overall_acc_before: Optional[float] = None
-        acc_non_intervened_before: Optional[float] = None
-        confusion_selected_before: Optional[np.ndarray] = None
-        confusion_selected_after: Optional[np.ndarray] = None
-        confusion_non_selected_before: Optional[np.ndarray] = None
-        confusion_non_selected_after: Optional[np.ndarray] = None
+    ) -> dict[str, Any]:
+        overall_acc_before: float | None = None
+        acc_non_intervened_before: float | None = None
+        confusion_selected_before: np.ndarray | None = None
+        confusion_selected_after: np.ndarray | None = None
+        confusion_non_selected_before: np.ndarray | None = None
+        confusion_non_selected_after: np.ndarray | None = None
 
         def compute_confusion(y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
             n_classes = p_before.shape[1]
@@ -663,7 +666,7 @@ class ScoreIntervention(InterventionStrategy):
         p_after = model.label_predictor.predict_proba(concepts_after)
         y_pred_after = np.argmax(p_after, axis=1)
 
-        overall_acc_after: Optional[float] = None
+        overall_acc_after: float | None = None
         if batch.y_true is not None:
             overall_acc_after = float(np.mean(y_pred_after == batch.y_true))
             if selected.size:
@@ -713,10 +716,10 @@ class ConceptInterventionRunner:
         config: InterventionConfig,
         validation_dataset: ConceptDatasetSample,
         *,
-        concept_proba: Optional[np.ndarray] = None,
-        concept_true: Optional[np.ndarray] = None,
-        labels: Optional[np.ndarray] = None,
-        instance_ids: Optional[np.ndarray] = None,
+        concept_proba: np.ndarray | None = None,
+        concept_true: np.ndarray | None = None,
+        labels: np.ndarray | None = None,
+        instance_ids: np.ndarray | None = None,
     ) -> None:
         batch = self._build_batch(
             dataset=validation_dataset,
@@ -733,10 +736,10 @@ class ConceptInterventionRunner:
         config: InterventionConfig,
         dataset: ConceptDatasetSample,
         *,
-        concept_proba: Optional[np.ndarray] = None,
-        concept_true: Optional[np.ndarray] = None,
-        labels: Optional[np.ndarray] = None,
-        instance_ids: Optional[np.ndarray] = None,
+        concept_proba: np.ndarray | None = None,
+        concept_true: np.ndarray | None = None,
+        labels: np.ndarray | None = None,
+        instance_ids: np.ndarray | None = None,
     ) -> InterventionResult:
 
         # NOTE: config.intervention_noise_rate is not consumed here — intervention
@@ -799,11 +802,14 @@ class ConceptInterventionRunner:
                 y_prob_after[:, 1] <= 1.0 - config.abstention_threshold
             )
 
-            strategy_metrics["selective_acc_after"] = (
-                (y_pred_after[~abstain_post] == batch.y_true[~abstain_post]).mean()
-                if (~abstain_post).any()
-                else -np.inf
-            )
+            if batch.y_true is not None:
+                strategy_metrics["selective_acc_after"] = (
+                    (y_pred_after[~abstain_post] == batch.y_true[~abstain_post]).mean()
+                    if (~abstain_post).any()
+                    else -np.inf
+                )
+            else:
+                strategy_metrics["selective_acc_after"] = float("nan")
             strategy_metrics["coverage_after"] = 1 - abstain_post.mean()
 
         elif isinstance(strategy, ScoreIntervention):
@@ -837,10 +843,10 @@ class ConceptInterventionRunner:
         self,
         dataset: ConceptDatasetSample,
         *,
-        concept_proba: Optional[np.ndarray],
-        concept_true: Optional[np.ndarray],
-        labels: Optional[np.ndarray],
-        instance_ids: Optional[np.ndarray],
+        concept_proba: np.ndarray | None,
+        concept_true: np.ndarray | None,
+        labels: np.ndarray | None,
+        instance_ids: np.ndarray | None,
     ) -> InterventionBatch:
         C_pred = concept_proba
         if C_pred is None:

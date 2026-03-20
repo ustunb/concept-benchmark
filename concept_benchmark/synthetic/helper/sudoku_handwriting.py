@@ -196,10 +196,10 @@ class AdvancedHandwrittenGenerator(SimpleHandwrittenGenerator):
 
     def _elastic_transform(self, image, alpha, sigma, seed=None):
         """Apply elastic distortion to the image."""
-        random_state = np.random.RandomState(seed)
+        rng = np.random.default_rng(seed)
         shape = image.shape[:2]
-        dx = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma) * alpha
-        dy = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma) * alpha
+        dx = gaussian_filter((rng.random(shape) * 2 - 1), sigma) * alpha
+        dy = gaussian_filter((rng.random(shape) * 2 - 1), sigma) * alpha
         x, y = np.meshgrid(np.arange(shape[1]), np.arange(shape[0]))
         indices = np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
         distorted_image = np.zeros_like(image)
@@ -280,7 +280,7 @@ def _synthesize_prior_from_neighbors(
     *,
     groups_count: int | None = None,  # exact number of groups; overrides ratio
     groups_ratio: float = 0.20,  # ~20% of eligible cells become group seeds
-    group_sizes: tuple[int, ...] = (2),  # group size choices (including the seed)
+    group_sizes: tuple[int, ...] = (2,),  # group size choices (including the seed)
     allow_diagonal: bool = False,  # rook adjacencies by default
     seed: int | None = None,
 ) -> dict[tuple[int, int], list[int]]:
