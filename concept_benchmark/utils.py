@@ -65,7 +65,7 @@ def get_loader_config() -> dict:
     _macos = platform.system() == "Darwin"
     return {
         "batch_size": 32,
-        "num_workers": 0 if _macos else 12,
+        "num_workers": 0 if _macos else min(12, os.cpu_count() or 1),
         "pin_memory": torch.cuda.is_available(),
     }
 
