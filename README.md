@@ -74,11 +74,16 @@ from concept_benchmark import DatasetGenerator
 dataset = DatasetGenerator(
     "robot",
     seed=1014,
-    concept_preset="foot_subtypes",  # 12 fine-grained concepts (default: "ground_truth" = 7)
+    concept_preset="foot_subtypes",  # expand foot_shape into subtypes (default: "ground_truth")
     render_images=True,              # set False to skip rendering for quick exploration
 ).generate()
 
-dataset.drop_concepts(["has_elbows", "hand_shape"])  # remove spurious features
+# Drop some concepts to get a 12-concept setup
+dataset.drop_concepts([
+    "has_elbows", "hand_shape", "foot_shape",
+    "foot_shape_flat_rounded", "foot_shape_flat_lshaped",
+    "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
+])
 dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
 
 print(dataset.train.C.shape)   # (3800, 12) — concept annotations
@@ -97,7 +102,7 @@ Inspect the data:
 dataset.train.to_dataframe().head(2)
 #    head_shape  body_shape  has_knees  ...  foot_shape_pointy_4sided  label  class
 # 0           0           0          0  ...                         0      1  glorp
-# 1           0           0          0  ...                         1      1  glorp
+# 1           0           0          0  ...                         0      1  glorp
 ```
 
 For interactive browsing with [Renumics Spotlight](https://github.com/Renumics/spotlight) (`pip install concept-benchmark[explore]`):
@@ -422,7 +427,7 @@ dataset = DatasetGenerator(
         "intercept": 2.0,
         "temperature": 4.2,
     },
-    concept_preset="foot_subtypes",  # "ground_truth" (7 concepts) or "foot_subtypes" (12)
+    concept_preset="foot_subtypes",  # "ground_truth" or "foot_subtypes" (expands foot_shape into subtypes)
     renders_per_robot=4,             # samples per unique robot config (image: 4, text: 1)
     expand_concepts=["foot_shape"],                 # which features expand into subconcepts
     # ── Image-only (data_type="image") ──
@@ -439,7 +444,7 @@ dataset = DatasetGenerator(
 After generating, you can drop concepts and split into train/val/test:
 
 ```python
-# Drop spurious features not used for classification
+# Remove concepts from the concept set
 dataset.drop_concepts(["has_elbows", "hand_shape"])
 
 # Split into train/val/test

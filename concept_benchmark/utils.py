@@ -66,7 +66,7 @@ def get_loader_config() -> dict:
     return {
         "batch_size": 32,
         "num_workers": 0 if _macos else 12,
-        "pin_memory": not _macos,
+        "pin_memory": torch.cuda.is_available(),
     }
 
 

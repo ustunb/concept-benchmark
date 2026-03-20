@@ -94,4 +94,4 @@ class TestGetLoaderConfig:
         monkeypatch.setattr("concept_benchmark.utils.platform.system", lambda: "Linux")
         cfg = get_loader_config()
         assert cfg["num_workers"] > 0
-        assert cfg["pin_memory"] is True
+        assert cfg["pin_memory"] is torch.cuda.is_available()

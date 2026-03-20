@@ -12,7 +12,7 @@ from concept_benchmark import DatasetGenerator
 dataset = DatasetGenerator(
     "robot",
     seed=1014,                       # reproducibility
-    concept_preset="foot_subtypes",  # 12 fine-grained concepts (default: "ground_truth" = 7)
+    concept_preset="foot_subtypes",  # expand foot_shape into subtypes (default: "ground_truth")
     use_stochastic_labels=True,      # probabilistic labeling (or False for deterministic)
     image_size="medium",             # "small" (8px), "medium" (32px, default), or "large" (600px)
     render_images=True,              # set False to skip image rendering for quick exploration
@@ -26,6 +26,14 @@ dataset = DatasetGenerator(
         "temperature": 4.2,          # sigmoid temperature for stochastic labels
     },
 ).generate()
+
+# Drop some concepts to get a 12-concept setup
+dataset.drop_concepts([
+    "has_elbows", "hand_shape", "foot_shape",
+    "foot_shape_flat_rounded", "foot_shape_flat_lshaped",
+    "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
+])
+dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
 
 print(dataset.train.C.shape)   # (3800, 12) — concept annotations
 print(dataset.train.concepts)
@@ -41,7 +49,7 @@ Inspect the data:
 dataset.train.to_dataframe().head(2)
 #    head_shape  body_shape  has_knees  ...  foot_shape_pointy_4sided  label  class
 # 0           0           0          0  ...                         0      1  glorp
-# 1           0           0          0  ...                         1      1  glorp
+# 1           0           0          0  ...                         0      1  glorp
 ```
 
 For interactive browsing with [Renumics Spotlight](https://github.com/Renumics/spotlight) (`pip install concept-benchmark[explore]`):
@@ -70,6 +78,12 @@ set_deterministic_seed(1014)
 
 dataset = DatasetGenerator(
     "robot", seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
+dataset.drop_concepts([
+    "has_elbows", "hand_shape", "foot_shape",
+    "foot_shape_flat_rounded", "foot_shape_flat_lshaped",
+    "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
+])
+dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
 
 # Step 1: train concept detector (images → concepts)
 n_concepts = dataset.train.n_concepts
@@ -105,6 +119,9 @@ dataset = DatasetGenerator(
     max_cell_swaps=9,     # cells swapped in invalid boards (higher = subtler errors)
     valid_board_ratio=0.5,  # fraction of valid boards
 ).generate()
+
+# Stratified split — preserves valid/invalid ratio in each split
+dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=171)
 
 print(dataset.train.C.shape)   # (600, 27) — 27 concept annotations
 print(dataset.train.concepts)  # ['row_valid_1', 'row_valid_2', ..., 'block_valid_9']
