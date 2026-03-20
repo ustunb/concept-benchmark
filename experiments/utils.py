@@ -137,7 +137,7 @@ def train_dnn(
         Test accuracy in [0, 1].
     """
     if loader_config is None:
-        loader_config = get_loader_config(device)
+        loader_config = get_loader_config()
 
     model.to(device)
     criterion = nn.BCELoss()

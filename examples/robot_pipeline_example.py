@@ -48,7 +48,7 @@ SEED = 1014
 set_deterministic_seed(SEED)
 patch_macos_dataloader()
 device = determine_device()
-loader_config = get_loader_config(device)
+loader_config = get_loader_config()
 print(f"Using device: {device}")
 
 # ---------------------------------------------------------------------------

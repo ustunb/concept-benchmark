@@ -151,7 +151,7 @@ def train_dnn(
     criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-    loader_config = get_loader_config(device)
+    loader_config = get_loader_config()
     train_loader = data.training.loader(shuffle=True, **loader_config)
     valid_loader = data.validation.loader(shuffle=False, **loader_config)
     test_loader = data.test.loader(shuffle=False, **loader_config)
@@ -758,7 +758,7 @@ def compute_selective_results(
             data = load(tab_dir / "sudoku_dataset.pkl")
         data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
-    loader_cfg = get_loader_config(device)
+    loader_cfg = get_loader_config()
     val_loader = data.validation.loader(shuffle=False, **loader_cfg)
     tst_loader = data.test.loader(shuffle=False, **loader_cfg)
 

@@ -398,7 +398,7 @@ def train_dnn(
     criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
 
-    loader_config = get_loader_config(device)
+    loader_config = get_loader_config()
     train_loader = data.training.loader(shuffle=True, **loader_config)
     valid_loader = data.validation.loader(shuffle=False, **loader_config)
     test_loader = data.test.loader(shuffle=False, **loader_config)
@@ -1192,6 +1192,8 @@ def run_interventions(
     config: RobotBenchmarkConfig,
     model: ConceptBasedModel | None = None,
     data=None,
+    missing_fraction: float = 0.0,
+    missing_mechanism: str = "none",
 ) -> pd.DataFrame:
     """Run interventions on the trained CBM and return a results DataFrame.
 
@@ -1227,8 +1229,8 @@ def run_interventions(
     results_df = pd.concat(all_dfs, axis=0).reset_index(drop=True)
     results_df["data_name"] = "subconcept" if config.concept_preset == "foot_subtypes" else "ideal"
     results_df["n"] = data.test.n
-    results_df["missing_fraction"] = 0.0
-    results_df["missing_mechanism"] = "none"
+    results_df["missing_fraction"] = missing_fraction
+    results_df["missing_mechanism"] = missing_mechanism
     results_df.to_csv(config.get_results_path("cbm"), index=False)
     return results_df
 
@@ -1286,7 +1288,7 @@ def collect_results(
         configs = [RobotBenchmarkConfig.default_ideal()]
 
     device = determine_device()
-    loader_config = get_loader_config(device)
+    loader_config = get_loader_config()
     rows = []
 
     # ── Per-config: DNN, CBM, interventions, alignment ───────────────
@@ -1554,7 +1556,8 @@ def run(
 
     if "intervene" in stages:
         logger.info("=== [%d/%d] Intervene ===", _si["intervene"], n_stages)
-        run_interventions(config)
+        run_interventions(config, missing_fraction=missing_fraction,
+                          missing_mechanism=missing_mechanism)
 
     if "align" in stages:
         logger.info("=== [%d/%d] Align ===", _si["align"], n_stages)

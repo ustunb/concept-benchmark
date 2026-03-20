@@ -10,8 +10,11 @@ Generate a dataset and access it in the format your model expects:
 
 ```python
 from concept_benchmark import DatasetGenerator
+from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
 
 dataset = DatasetGenerator("robot", seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
+dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["foot_subtypes"])
+dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
 train, val, test = dataset.train, dataset.validation, dataset.test
 ```
 

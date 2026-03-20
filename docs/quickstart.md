@@ -70,7 +70,7 @@ from concept_benchmark.utils import determine_device, get_loader_config, patch_m
 set_deterministic_seed(1014)
 patch_macos_dataloader()
 device = determine_device()
-loader_config = get_loader_config(device)
+loader_config = get_loader_config()
 
 dataset = DatasetGenerator(
     "robot", seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
