@@ -1,6 +1,6 @@
 # Robot Classification
 
-This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot — **Glorp** or **Drent** — from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The default labeling rule is: Glorp if mouth is closed, foot is pointy, and robot has knees (all three); Drent otherwise. The labeling function can be deterministic or stochastic (probabilistic), controlled via `use_stochastic_labels`. Which features matter and which are excluded (via `excluded_concepts`) are configurable, mimicking real-world settings where the true relationship between features and labels is unknown. Available as image and text modalities.
+This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot — **Glorp** or **Drent** — from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The default labeling rule is: Glorp if mouth is closed, foot is pointy, and robot has knees (all three); Drent otherwise. The labeling function can be deterministic or stochastic (probabilistic), controlled via `use_stochastic_labels`. Which features matter and which are kept (via `concept_preset`) are configurable, mimicking real-world settings where the true relationship between features and labels is unknown. Available as image and text modalities.
 
 ```{image} assets/robot_concepts.png
 :width: 400px
@@ -38,8 +38,6 @@ dataset = DatasetGenerator(
         #               pointy_square, pointy_3sided, pointy_4sided
     },
     use_stochastic_labels=True,      # True (probabilistic) or False (deterministic threshold)
-    train_size=3800,                 # number of training samples
-    test_size=10000,                 # number of test samples
     label_formula={                  # scoring rule for class assignment
         "terms": {
             "mouth_type": {"value": "closed", "weight": 5.0},
@@ -49,15 +47,8 @@ dataset = DatasetGenerator(
         "intercept": 2.0,
         "temperature": 4.2,
     },
-    missing_fraction=0.0,            # fraction of concept labels masked during training
-    missing_mechanism="mcar",        # missingness mechanism: "mcar" or "mnar"
     concept_preset="foot_subtypes",  # "ground_truth" (7 concepts) or "foot_subtypes" (12)
     renders_per_robot=4,             # samples per unique robot config (image: 4, text: 1)
-    sampling_constraints=[           # min-fraction constraints for skewed splits
-        {"concepts": {"foot_shape_pointy_4sided": 1}, "min_fraction": 0.49},
-        # ...
-    ],
-    excluded_concepts=None,          # features to exclude (auto-set by concept_preset)
     expand_concepts=["foot_shape"],                 # which features expand into subconcepts
     # ── Image-only (data_type="image") ──
     image_size="medium",             # "small" (8px), "medium" (32px), or "large" (600px)

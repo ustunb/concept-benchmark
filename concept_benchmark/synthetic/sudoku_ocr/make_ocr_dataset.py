@@ -277,13 +277,6 @@ def ensure_digits_dir(args):
         print(f"Digits directory already exists at {DIGITS_DIR}, not regenerating.")
         return
 
-    if cv2 is None:
-        print(
-            "WARNING: cv2 is not available, cannot generate example digit images "
-            f"for {DIGITS_DIR}. Install opencv-python if you need fresh digits."
-        )
-        return
-
     print(f"Creating example digits for OCR under {DIGITS_DIR}...")
     DIGITS_DIR.mkdir(parents=True, exist_ok=True)
 

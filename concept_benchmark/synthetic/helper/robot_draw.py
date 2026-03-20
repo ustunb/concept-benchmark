@@ -10,9 +10,6 @@ from PIL import ImageFilter as PILImageFilter
 
 from .utils import generate_color_schemes
 
-# from itertools import combinations_with_replacement as cwr
-# COLOR_LIST = [c.name for c in pero.colors]
-# COLOR_SCHEMES = [(w, v) for (w, v) in cwr(COLOR_LIST, 2) if w != v]
 ROBOT_TYPES = ("glorp", "drent")
 
 ALL_ROBOT_FEATURES = {
@@ -52,20 +49,11 @@ COLOR_SCHEMES = generate_color_schemes(
 
 
 DEFAULT_ROBOT_FEATURES = {
-    #
     "head_shape": "square",
-    # 'head_subtype_choice': 'default',
-    #
     "body_shape": "square",
-    # 'body_subtype_choice': 'default',
-    #
-    # foot
     "foot_shape": "flat",
     "foot_subtype_choice": "default",
-    #
     "has_knees": True,
-    #'has_elbows': True,
-    #
     "color_scheme": COLOR_SCHEMES[0],
 }
 
@@ -259,8 +247,7 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
     line.draw(canvas, x1=x_right, x2=x_right, y1=y_top * 0.9, y2=y_top + leg_height)
 
     # knees
-    if "has_knees" in features.keys():  # and features["has_knees"] == "true":
-        # knee_size = round(0.05 * r)
+    if "has_knees" in features.keys():
         knee_size = 0.1 * r if width < 120 or features["has_knees"] == "true" else 0
 
         knee = pero.Ellipse(
@@ -274,19 +261,6 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
     if foot_subtype in FOOT_SUBTYPES.keys():
         if features["foot_subtype_choice"] == "default":
             foot_subtype = "%s" % FOOT_SUBTYPES[foot_subtype][0]
-
-    # orient = str(features.get("foot_orientation", "")).lower()
-    # if orient in ("vertex", "side"):
-    #     if foot_subtype.startswith("flat_") and orient == "vertex":
-    #         suf = foot_subtype.split("_", 1)[1]
-    #         cand = f"pointy_{suf}"
-    #         if cand in ALL_ROBOT_FEATURES["foot_shape"]:
-    #             foot_subtype = cand
-    #     elif foot_subtype.startswith("pointy_") and orient == "side":
-    #         suf = foot_subtype.split("_", 1)[1]
-    #         cand = f"flat_{suf}"
-    #         if cand in ALL_ROBOT_FEATURES["foot_shape"]:
-    #             foot_subtype = cand
 
     # PAIR 1: trapezoid
     if foot_subtype == "flat_trapezoid":

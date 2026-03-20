@@ -1,15 +1,27 @@
 # tests/conftest.py
 from __future__ import annotations
 
-from typing import Callable, Dict, Tuple, List
+from typing import Callable
 
 import numpy as np
 import pytest
+import torch
 
 from pathlib import Path
 from PIL import Image
 
 from concept_benchmark.data import ConceptDataset
+
+
+def _any_state_diff(state_a, state_b):
+    """Return True if any parameter tensor differs between two state dicts."""
+    for k in state_a:
+        ta, tb = state_a[k], state_b[k]
+        if ta.dtype != tb.dtype or ta.shape != tb.shape:
+            return True
+        if not torch.allclose(ta, tb):
+            return True
+    return False
 
 
 def pytest_addoption(parser):
@@ -34,7 +46,6 @@ def pytest_collection_modifyitems(config, items):
 @pytest.fixture(scope="session", autouse=True)
 def rng_seed() -> int:
     """Global RNG seed for deterministic tests."""
-    np.random.seed(1337)
     return 1337
 
 
@@ -46,7 +57,8 @@ def make_tabular_arrays(
     *,
     class_balance: str = "balanced",
     concept_density: float = 0.3,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict]:
+    seed: int = 1337,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
     """Create X, C, y, meta for tabular datasets.
 
     Args:
@@ -56,21 +68,22 @@ def make_tabular_arrays(
       n_classes: Number of classes.
       class_balance: "balanced" or "random".
       concept_density: Bernoulli p for concepts in (0, 1).
+      seed: RNG seed for reproducibility.
 
     Returns:
       Tuple of (X, C, y, meta).
     """
-    X = np.random.normal(size=(n, d)).astype(np.float32)
-    C = (np.random.rand(n, k) < concept_density).astype(np.int8)
+    rng = np.random.default_rng(seed)
+    X = rng.standard_normal(size=(n, d)).astype(np.float32)
+    C = (rng.random((n, k)) < concept_density).astype(np.int8)
 
     if class_balance == "balanced":
         reps = int(np.ceil(n / n_classes))
         y = np.arange(n_classes, dtype=np.int32).repeat(reps)[:n]
-        rng = np.random.default_rng(202)
         rng.shuffle(y)
         y = y.astype(np.int32)
     else:
-        y = np.random.randint(0, n_classes, size=n).astype(np.int32)
+        y = rng.integers(0, n_classes, size=n).astype(np.int32)
 
     meta = {
         "classes": [f"c{i}" for i in range(n_classes)],
@@ -85,7 +98,7 @@ def make_cvindices(
     *,
     K: int = 5,
     replicate: int = 1,
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
     """Create a simple K-fold index vector inside a cvindices dict.
 
     Args:
@@ -114,7 +127,8 @@ def make_tabular_dataset(
     target_transform: Callable | None = None,
     with_cv: bool = False,
     K: int = 5,
-) -> Tuple[ConceptDataset, Dict[str, np.ndarray]]:
+    seed: int = 1337,
+) -> tuple[ConceptDataset, dict[str, np.ndarray]]:
     """Build a ConceptDataset for tabular data.
 
     Args:
@@ -127,6 +141,7 @@ def make_tabular_dataset(
       target_transform: Optional label transform.
       with_cv: Whether to attach cvindices.
       K: Number of folds if with_cv.
+      seed: RNG seed for reproducibility.
 
     Returns:
       (dataset, cvindices_dict). cvindices_dict may be {} if with_cv=False.
@@ -136,6 +151,7 @@ def make_tabular_dataset(
         d=d,
         k=k,
         n_classes=n_classes,
+        seed=seed,
     )
     cv = make_cvindices(n=n, K=K) if with_cv else {}
     ds = ConceptDataset(
@@ -160,9 +176,9 @@ def _write_synthetic_images(
     root: Path,
     n: int,
     *,
-    size: Tuple[int, int] = (16, 16),
+    size: tuple[int, int] = (16, 16),
     mode: str = "L",
-) -> List[str]:
+) -> list[str]:
     """Create `n` deterministic synthetic images on disk and return their paths.
 
     Args:
@@ -175,7 +191,7 @@ def _write_synthetic_images(
         List of file paths as strings.
     """
     root.mkdir(parents=True, exist_ok=True)
-    paths: List[str] = []
+    paths: list[str] = []
     w, h = size
     for i in range(n):
         # Deterministic pixel pattern per index
@@ -201,11 +217,12 @@ def make_image_arrays(
     *,
     concept_density: float = 0.3,
     class_balance: str = "balanced",
-    size: Tuple[int, int] = (16, 16),
+    size: tuple[int, int] = (16, 16),
     mode: str = "L",
     root: Path,
     add_missing: bool = False,
-) -> Tuple[List[str], np.ndarray, np.ndarray, Dict]:
+    seed: int = 1337,
+) -> tuple[list[str], np.ndarray, np.ndarray, dict]:
     """Create image paths X, concepts C, labels y, and meta for image datasets.
 
     Args:
@@ -218,26 +235,27 @@ def make_image_arrays(
         mode: PIL mode ("L" or "RGB").
         root: Directory where images are written.
         add_missing: If True, append one nonexistent path to test error branches.
+        seed: RNG seed for reproducibility.
 
     Returns:
         (X_paths, C, y, meta).
     """
+    rng = np.random.default_rng(seed)
     X_paths = _write_synthetic_images(root=root, n=n, size=size, mode=mode)
     if add_missing:
         X_paths.append(str(root / "does_not_exist.png"))
 
     X_paths = np.array(X_paths, dtype=object)  # Use object dtype for string paths
 
-    C = (np.random.rand(n, k) < concept_density).astype(np.int8)
+    C = (rng.random((n, k)) < concept_density).astype(np.int8)
 
     if class_balance == "balanced":
         reps = int(np.ceil(n / n_classes))
         y = np.arange(n_classes, dtype=np.int32).repeat(reps)[:n]
-        rng = np.random.default_rng(404)
         rng.shuffle(y)
         y = y.astype(np.int32)
     else:
-        y = np.random.randint(0, n_classes, size=n).astype(np.int32)
+        y = rng.integers(0, n_classes, size=n).astype(np.int32)
 
     # If we appended a missing path, make C and y match X length by duplicating the first row/label
     if add_missing:
@@ -259,12 +277,12 @@ def make_image_dataset(
     n_classes: int,
     *,
     root: Path,
-    size: Tuple[int, int] = (16, 16),
+    size: tuple[int, int] = (16, 16),
     mode: str = "L",
     with_cv: bool = False,
     K: int = 5,
     add_missing: bool = False,
-) -> Tuple[ConceptDataset, Dict[str, np.ndarray]]:
+) -> tuple[ConceptDataset, dict[str, np.ndarray]]:
     """Build a `ConceptDataset` configured for image samples.
 
     Args:
@@ -312,7 +330,7 @@ def tab_small() -> ConceptDataset:
 
 
 @pytest.fixture
-def tab_small_cv() -> Tuple[ConceptDataset, str]:
+def tab_small_cv() -> tuple[ConceptDataset, str]:
     """Tiny dataset with CV indices and a valid fold_id."""
     ds, cv = make_tabular_dataset(n=12, d=3, k=4, n_classes=2, with_cv=True, K=3)
     fold_id = next(iter(cv.keys()))
@@ -320,7 +338,7 @@ def tab_small_cv() -> Tuple[ConceptDataset, str]:
 
 
 @pytest.fixture
-def tab_medium_cv() -> Tuple[ConceptDataset, str]:
+def tab_medium_cv() -> tuple[ConceptDataset, str]:
     """Medium dataset with CV for split tests."""
     ds, cv = make_tabular_dataset(n=60, d=8, k=6, n_classes=3, with_cv=True, K=5)
     fold_id = next(iter(cv.keys()))
@@ -343,7 +361,7 @@ def img_small(tmp_path: Path) -> ConceptDataset:
 
 
 @pytest.fixture
-def img_small_cv(tmp_path: Path) -> Tuple[ConceptDataset, str]:
+def img_small_cv(tmp_path: Path) -> tuple[ConceptDataset, str]:
     """Tiny image dataset with CV indices and a valid fold_id."""
     ds, cv = make_image_dataset(
         n=12,

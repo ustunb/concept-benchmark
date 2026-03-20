@@ -71,7 +71,8 @@ The robot benchmark classifies fictional robots — **Glorps** vs. **Drents** �
 ```python
 from concept_benchmark import DatasetGenerator
 
-dataset = DatasetGenerator(
+# Generate the full dataset
+gen = DatasetGenerator(
     "robot",
     seed=1014,                       # reproducibility
     concept_preset="foot_subtypes",  # 12 fine-grained concepts (default: "ground_truth" = 7)
@@ -87,10 +88,18 @@ dataset = DatasetGenerator(
         "intercept": 2.0,
         "temperature": 4.2,          # sigmoid temperature for stochastic labels
     },
-).generate()
+)
+dataset = gen.generate()
 
-print(dataset.training.C.shape)   # (3800, 12) — concept annotations
-print(dataset.training.concepts)
+# Drop excluded concepts (concept_preset controls which are kept)
+from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
+dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["foot_subtypes"])
+
+# Split into train/val/test (accepts absolute counts or fractions)
+dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
+
+print(dataset.train.C.shape)   # (3800, 12) — concept annotations
+print(dataset.train.concepts)
 # ['head_shape', 'body_shape', 'has_knees', 'has_antennae', 'ears_shape',
 #  'mouth_type', 'foot_shape_flat_trapezoid', 'foot_shape_flat_square',
 #  'foot_shape_flat_5sided', 'foot_shape_pointy_rounded',
@@ -100,7 +109,7 @@ print(dataset.training.concepts)
 Inspect the data:
 
 ```python
-dataset.training.to_dataframe().head(2)
+dataset.train.to_dataframe().head(2)
 #    head_shape  body_shape  has_knees  ...  foot_shape_pointy_4sided  label  class
 # 0           0           0          0  ...                         0      1  glorp
 # 1           0           0          0  ...                         1      1  glorp
@@ -109,7 +118,7 @@ dataset.training.to_dataframe().head(2)
 For interactive browsing with [Renumics Spotlight](https://github.com/Renumics/spotlight) (`pip install concept-benchmark[explore]`):
 
 ```python
-dataset.training.explore()  # opens in the browser
+dataset.train.explore()  # opens in the browser
 ```
 
 <p align="center">
@@ -130,20 +139,24 @@ from concept_benchmark.utils import determine_device, get_loader_config, patch_m
 set_deterministic_seed(1014)
 patch_macos_dataloader()
 device = determine_device()
-loader_config = get_loader_config(device)
+loader_config = get_loader_config()
 
-dataset = DatasetGenerator(
-    "robot", seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
+gen = DatasetGenerator(
+    "robot", seed=1014, concept_preset="foot_subtypes", render_images=True)
+dataset = gen.generate()
+from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
+dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["foot_subtypes"])
+dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
 
 # Step 1: train concept detector (images → concepts)
-n_concepts = dataset.training.n_concepts
+n_concepts = dataset.train.n_concepts
 cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=n_concepts, input_size=32))
-cd.fit(dataset.training, dataset.validation,
+cd.fit(dataset.train, dataset.validation,
        fit_params={"epochs": 50, "lr": 1e-3, "patience": 10, "device": str(device), **loader_config})
 
 # Step 2: train label predictor (concepts → label)
 fe = FrontEndModel()
-fe.fit(dataset.training.C, dataset.training.y)
+fe.fit(dataset.train.C, dataset.train.y)
 
 # Step 3: combine into a CBM and evaluate
 cbm = ConceptBasedModel(concept_detector=cd, label_predictor=fe)
@@ -170,15 +183,18 @@ dataset = DatasetGenerator(
     valid_board_ratio=0.5,  # fraction of valid boards
 ).generate()
 
-print(dataset.training.C.shape)   # (600, 27) — 27 concept annotations
-print(dataset.training.concepts)  # ['row_valid_1', 'row_valid_2', ..., 'block_valid_9']
+# Stratified split — preserves valid/invalid ratio in each split
+dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=171)
+
+print(dataset.train.C.shape)   # (600, 27) — 27 concept annotations
+print(dataset.train.concepts)  # ['row_valid_1', 'row_valid_2', ..., 'block_valid_9']
 ```
 
 Inspect the data:
 
 ```python
-df = dataset.training.to_dataframe()
-show_cols = list(dataset.training.concepts[:5]) + ["label"]
+df = dataset.train.to_dataframe()
+show_cols = list(dataset.train.concepts[:5]) + ["label"]
 print(df[show_cols])
 #      row_valid_1  row_valid_2  row_valid_3  row_valid_4  row_valid_5  label
 # 0              1            1            1            1            1      1
@@ -209,14 +225,18 @@ This guide shows how to evaluate your own concept bottleneck model on the benchm
 
 ### Getting data for your model
 
-Generate a dataset and access it in the format your model expects:
+Generate a dataset, apply layers, and access it in the format your model expects:
 
 ```python
 from concept_benchmark import DatasetGenerator
 
-dataset = DatasetGenerator(
-    "robot", seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
-train, val, test = dataset.training, dataset.validation, dataset.test
+gen = DatasetGenerator(
+    "robot", seed=1014, concept_preset="foot_subtypes", render_images=True)
+dataset = gen.generate()
+from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
+dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["foot_subtypes"])
+dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
+train, val, test = dataset.train, dataset.validation, dataset.test
 ```
 
 Each split is a `ConceptDatasetSample` with these attributes:
@@ -245,6 +265,61 @@ for x_batch, c_batch, y_batch in loader:
 # Pandas DataFrame
 df = train.to_dataframe()
 ```
+
+#### Splitting
+
+`sample()` splits the dataset into train/val/test. Sizes can be absolute counts or fractions:
+
+```python
+# Absolute counts
+dataset.sample(test_size=10000, val_size=1000, train_size=3800, seed=42)
+
+# Fractions (of total dataset size)
+dataset.sample(test_size=0.2, val_size=0.2, seed=42)
+
+# Stratified — preserves class proportions in each split
+dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=42)
+
+# Group-based — no group appears in multiple splits (e.g., robot identity)
+dataset.sample(test_size=0.2, val_size=0.2, groups=group_ids, seed=42)
+
+# Skewed training set — ensure min-fraction of specific concept patterns
+dataset.sample(
+    test_size=10000, val_size=0.2, train_size=3800,
+    sampling_constraints=[{"concepts": {"my_concept": 1}, "min_fraction": 0.3}],
+    seed=42,
+)
+```
+
+You can re-split at any time by calling `sample()` again.
+
+#### Concept missingness
+
+Simulate missing concept annotations (e.g., incomplete labels from crowdsourcing). Missingness is applied as a composable layer on top of splits — the underlying data is unchanged:
+
+```python
+dataset.sample(test_size=0.2, val_size=0.2, seed=42)
+
+# MCAR: each concept label independently missing with probability p
+dataset.sample_concept_missingness(p=0.2, mechanism="mcar", rng=99, enable=True)
+
+# MNAR: missingness depends on concept value (present concepts more likely observed)
+dataset.sample_concept_missingness(
+    p=0.2, mechanism="mnar", rng=99, enable=True,
+    mnar_config={"present_prob": 0.8, "absent_prob": 0.1},
+)
+
+# Apply to training only (validation/test keep full annotations)
+dataset.sample_concept_missingness(
+    p=0.2, mechanism="mcar", rng=99, splits={"train"}, enable=True,
+)
+
+# Toggle missingness on/off without resampling
+dataset.has_concept_missing = False   # disable — C returns clean values
+dataset.has_concept_missing = True    # re-enable — C returns masked values
+```
+
+Similarly, `sample_concept_noise()` adds symmetric or asymmetric label flips, and `sample_label_noise()` corrupts target labels.
 
 ### Wrapping your concept detector
 
@@ -339,7 +414,7 @@ For running interventions and alignment on your model, see the [Evaluation](#eva
 
 ### Robot Classification
 
-This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot — **Glorp** or **Drent** — from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The default labeling rule is: Glorp if mouth is closed, foot is pointy, and robot has knees (all three); Drent otherwise. The labeling function can be deterministic or stochastic (probabilistic), controlled via the `use_stochastic_labels` parameter. Which features matter and which are excluded (via `excluded_concepts`) are configurable, mimicking real-world settings where the true relationship between features and labels is unknown. Available as image and text modalities.
+This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot — **Glorp** or **Drent** — from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The default labeling rule is: Glorp if mouth is closed, foot is pointy, and robot has knees (all three); Drent otherwise. The labeling function can be deterministic or stochastic (probabilistic), controlled via the `use_stochastic_labels` parameter. Which features matter and which are kept (via `concept_preset`) are configurable, mimicking real-world settings where the true relationship between features and labels is unknown. Available as image and text modalities.
 
 <p align="center">
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
@@ -375,8 +450,6 @@ dataset = DatasetGenerator(
         #               pointy_square, pointy_3sided, pointy_4sided
     },
     use_stochastic_labels=True,      # True (probabilistic) or False (deterministic threshold)
-    train_size=3800,                 # number of training samples
-    test_size=10000,                 # number of test samples
     label_formula={                  # scoring rule for class assignment
         "terms": {
             "mouth_type": {"value": "closed", "weight": 5.0},
@@ -386,15 +459,8 @@ dataset = DatasetGenerator(
         "intercept": 2.0,
         "temperature": 4.2,
     },
-    missing_fraction=0.0,            # fraction of concept labels masked during training
-    missing_mechanism="mcar",        # missingness mechanism: "mcar" or "mnar"
     concept_preset="foot_subtypes",  # "ground_truth" (7 concepts) or "foot_subtypes" (12)
     renders_per_robot=4,             # samples per unique robot config (image: 4, text: 1)
-    sampling_constraints=[           # min-fraction constraints for skewed splits
-        {"concepts": {"foot_shape_pointy_4sided": 1}, "min_fraction": 0.49},
-        # ...
-    ],
-    excluded_concepts=None,          # features to exclude (auto-set by concept_preset)
     expand_concepts=["foot_shape"],                 # which features expand into subconcepts
     # ── Image-only (data_type="image") ──
     image_size="medium",             # "small" (8px), "medium" (32px), or "large" (600px)
@@ -435,8 +501,6 @@ dataset = DatasetGenerator(
     n_boards=1000,             # number of boards to generate
     max_cell_swaps=9,          # cells swapped in invalid boards (higher = subtler errors)
     valid_board_ratio=0.5,     # fraction of valid boards
-    missing_fraction=0.0,      # fraction of concept labels masked during training
-    missing_mechanism="mcar",  # missingness mechanism: "mcar" or "mnar"
     # ── Rendering (image only) ──
     font_style="handwritten",  # "handwritten" or "printed"
     font_size=25,              # digit font size in pixels

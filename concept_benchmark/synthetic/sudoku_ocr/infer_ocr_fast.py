@@ -8,52 +8,18 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import sys
 import time
 
 import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-# repo path shim (safe if already installed)
-repo_root = Path(__file__).resolve().parents[3]
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
-
 from concept_benchmark.synthetic.sudoku_ocr.ocr_utils import (
     DATA_SUDOKU,
     TinyResNet,
-    crop_cell,
-    cell_preprocess_28x28,
     load_sidecars,
+    predict_board_argmax,
 )
-
-
-@torch.no_grad()
-def predict_board_argmax(
-    model: torch.nn.Module,
-    img_path: Path,
-    *,
-    device: str = "cpu",
-    cell_px: int = 50,
-    margin_px: int = 2,
-):
-    import cv2
-
-    bgr = cv2.imread(str(img_path))
-    if bgr is None:
-        raise FileNotFoundError(str(img_path))
-
-    cells = []
-    for r in range(9):
-        for c in range(9):
-            cell = crop_cell(bgr, r, c, cell_px=cell_px, margin_px=margin_px)
-            x28 = cell_preprocess_28x28(cell)
-            cells.append(x28)
-    cells = np.stack(cells, axis=0)
-    xb = torch.from_numpy(cells).unsqueeze(1).to(device)
-    logits = model(xb)
-    return logits.argmax(1).cpu().numpy().reshape(9, 9)
 
 
 def main():

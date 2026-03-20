@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import platform
+import random
 
 import numpy as np
 import torch
@@ -15,8 +16,6 @@ logger = logging.getLogger(__name__)
 
 def set_deterministic_seed(seed: int):
     """Full reproducibility: numpy, torch, random, PYTHONHASHSEED."""
-    import random
-
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
@@ -61,7 +60,7 @@ def compute_accuracy(
     return correct / total if total > 0 else 0
 
 
-def get_loader_config(device: torch.device | None = None) -> dict:
+def get_loader_config() -> dict:
     """Return DataLoader kwargs safe for the current platform."""
     _macos = platform.system() == "Darwin"
     return {
@@ -108,6 +107,14 @@ def _create_sample(size, indices, dataset):
     mask = np.zeros(size, dtype=bool)
     mask[indices] = True
     return dataset._full.filter(mask)
+
+
+def parse_budgets(raw: list[str]) -> list[int]:
+    """Parse CLI budget strings (e.g. ``['1', '3', 'max']``) to ints (-1 for max)."""
+    budgets = []
+    for v in raw:
+        budgets.append(-1 if v.lower() == "max" else int(v))
+    return budgets
 
 
 def create_skewed_splits_full(
@@ -161,6 +168,7 @@ def create_skewed_splits_full(
     dataset.training = _create_sample(total_size, train_indices, dataset)
     dataset.validation = _create_sample(total_size, val_indices, dataset)
     dataset.test = _create_sample(total_size, test_indices, dataset)
+    dataset._apply_noise_settings()
 
     return dataset
 

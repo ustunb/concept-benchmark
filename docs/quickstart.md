@@ -27,8 +27,8 @@ dataset = DatasetGenerator(
     },
 ).generate()
 
-print(dataset.training.C.shape)   # (3800, 12) — concept annotations
-print(dataset.training.concepts)
+print(dataset.train.C.shape)   # (3800, 12) — concept annotations
+print(dataset.train.concepts)
 # ['head_shape', 'body_shape', 'has_knees', 'has_antennae', 'ears_shape',
 #  'mouth_type', 'foot_shape_flat_trapezoid', 'foot_shape_flat_square',
 #  'foot_shape_flat_5sided', 'foot_shape_pointy_rounded',
@@ -38,7 +38,7 @@ print(dataset.training.concepts)
 Inspect the data:
 
 ```python
-dataset.training.to_dataframe().head(2)
+dataset.train.to_dataframe().head(2)
 #    head_shape  body_shape  has_knees  ...  foot_shape_pointy_4sided  label  class
 # 0           0           0          0  ...                         0      1  glorp
 # 1           0           0          0  ...                         1      1  glorp
@@ -47,7 +47,7 @@ dataset.training.to_dataframe().head(2)
 For interactive browsing with [Renumics Spotlight](https://github.com/Renumics/spotlight) (`pip install concept-benchmark[explore]`):
 
 ```python
-dataset.training.explore()  # opens in the browser
+dataset.train.explore()  # opens in the browser
 ```
 
 ```{image} assets/robot_samples.png
@@ -70,20 +70,20 @@ from concept_benchmark.utils import determine_device, get_loader_config, patch_m
 set_deterministic_seed(1014)
 patch_macos_dataloader()
 device = determine_device()
-loader_config = get_loader_config(device)
+loader_config = get_loader_config()
 
 dataset = DatasetGenerator(
     "robot", seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
 
 # Step 1: train concept detector (images → concepts)
-n_concepts = dataset.training.n_concepts
+n_concepts = dataset.train.n_concepts
 cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=n_concepts, input_size=32))
-cd.fit(dataset.training, dataset.validation,
+cd.fit(dataset.train, dataset.validation,
        fit_params={"epochs": 50, "lr": 1e-3, "patience": 10, "device": str(device), **loader_config})
 
 # Step 2: train label predictor (concepts → label)
 fe = FrontEndModel()
-fe.fit(dataset.training.C, dataset.training.y)
+fe.fit(dataset.train.C, dataset.train.y)
 
 # Step 3: combine into a CBM and evaluate
 cbm = ConceptBasedModel(concept_detector=cd, label_predictor=fe)
@@ -110,15 +110,15 @@ dataset = DatasetGenerator(
     valid_board_ratio=0.5,  # fraction of valid boards
 ).generate()
 
-print(dataset.training.C.shape)   # (600, 27) — 27 concept annotations
-print(dataset.training.concepts)  # ['row_valid_1', 'row_valid_2', ..., 'block_valid_9']
+print(dataset.train.C.shape)   # (600, 27) — 27 concept annotations
+print(dataset.train.concepts)  # ['row_valid_1', 'row_valid_2', ..., 'block_valid_9']
 ```
 
 Inspect the data:
 
 ```python
-df = dataset.training.to_dataframe()
-show_cols = list(dataset.training.concepts[:5]) + ["label"]
+df = dataset.train.to_dataframe()
+show_cols = list(dataset.train.concepts[:5]) + ["label"]
 print(df[show_cols])
 #      row_valid_1  row_valid_2  row_valid_3  row_valid_4  row_valid_5  label
 # 0              1            1            1            1            1      1

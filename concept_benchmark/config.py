@@ -10,8 +10,8 @@ from __future__ import annotations
 __all__ = [
     "RobotBenchmarkConfig",
     "SudokuBenchmarkConfig",
-    "TEXT_IDEAL_EXCLUDED_CONCEPTS",
-    "TEXT_SUBCONCEPT_EXCLUDED_CONCEPTS",
+    "PRESET_EXCLUDED_CONCEPTS",
+    "TEXT_PRESET_EXCLUDED_CONCEPTS",
 ]
 
 import copy
@@ -19,7 +19,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field, fields, asdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import logging
 
@@ -56,8 +56,18 @@ SUBCONCEPT_EXCLUDED_CONCEPTS = [
     "foot_shape",
 ]
 
-TEXT_IDEAL_EXCLUDED_CONCEPTS: List[str] = []
+TEXT_IDEAL_EXCLUDED_CONCEPTS: list[str] = []
 TEXT_SUBCONCEPT_EXCLUDED_CONCEPTS = ["has_elbows", "hands_are_pointy"]
+
+PRESET_EXCLUDED_CONCEPTS = {
+    "ground_truth": tuple(IDEAL_EXCLUDED_CONCEPTS),
+    "foot_subtypes": tuple(SUBCONCEPT_EXCLUDED_CONCEPTS),
+}
+
+TEXT_PRESET_EXCLUDED_CONCEPTS = {
+    "ground_truth": tuple(TEXT_IDEAL_EXCLUDED_CONCEPTS),
+    "foot_subtypes": tuple(TEXT_SUBCONCEPT_EXCLUDED_CONCEPTS),
+}
 
 ROBOT_CONCEPTS = {
     "head_shape": ["square", "round"],
@@ -117,7 +127,7 @@ ROBOT_TEXT_VALID_REGIMES = frozenset({"baseline", "expert", "subjective", "machi
 # ── Label formula validation ──────────────────────────────────────────
 
 
-def _validate_label_formula(d: Dict) -> None:
+def _validate_label_formula(d: dict) -> None:
     """Validate that label_formula has the correct nested-dict structure."""
     if "terms" not in d:
         raise ValueError(
@@ -148,7 +158,7 @@ def _dict_sha256(d: dict, *, truncate: int | None = None) -> str:
     """SHA-256 hex digest of a JSON-serialized dict."""
     blob = json.dumps(d, sort_keys=True, default=str).encode()
     h = hashlib.sha256(blob).hexdigest()
-    return h[:truncate] if truncate else h
+    return h[:truncate] if truncate is not None else h
 
 
 class _BenchmarkConfigBase:
@@ -210,7 +220,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     renders_per_robot: int = 4
     render_images: bool = field(default=True, metadata={"scope": "image"})
     seed: int = 1014
-    concepts: Dict[str, list] = field(
+    concepts: dict[str, list] = field(
         default_factory=lambda: copy.deepcopy(ROBOT_CONCEPTS)
     )
     use_stochastic_labels: bool = True
@@ -219,7 +229,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     #   stochastic:    P(Glorp) = σ(temperature × score), then Bernoulli sample
     # Nested dict: {"terms": {"feature": {"value": "v", "weight": w}},
     #               "intercept": float, "temperature": float}
-    label_formula: Dict = field(
+    label_formula: dict = field(
         default_factory=lambda: {
             "terms": {
                 "mouth_type": {"value": "closed", "weight": 5.0},
@@ -230,15 +240,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             "temperature": 4.2,
         }
     )
-    test_size: int = 10000
-    train_size: int = 3800
-    sampling_constraints: List[Dict] = field(
-        default_factory=lambda: copy.deepcopy(ROBOT_SAMPLING_CONSTRAINTS),
-    )
-    excluded_concepts: List[str] = field(
-        default_factory=lambda: list(IDEAL_EXCLUDED_CONCEPTS),
-    )
-    expand_concepts: List[str] = field(
+    expand_concepts: list[str] = field(
         default_factory=lambda: ["foot_shape"],
     )
     color_mode: str = field(default="color", metadata={"scope": "image"})
@@ -250,8 +252,8 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     batch_size: int = field(default=32, metadata={"scope": "image"})
 
     # Intervention
-    intervention_budgets: List[int] = field(default_factory=lambda: [1, 3])
-    intervention_thresholds: List[float] = field(
+    intervention_budgets: list[int] = field(default_factory=lambda: [1, 3])
+    intervention_thresholds: list[float] = field(
         default_factory=lambda: [0.2, 0.4],
         metadata={"scope": "image"},
     )
@@ -259,7 +261,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     intervention_strategy: str = "up_to_k"  # "up_to_k" or "exactly_k"
 
     # Intervention regimes
-    intervention_regimes: List[str] = field(default_factory=lambda: ["baseline"])
+    intervention_regimes: list[str] = field(default_factory=lambda: ["baseline"])
     expert_intervention_accuracy: float = 0.80
     subjective_noise_rate: float = 0.20
     subjective_intervention_accuracy: float = 0.80
@@ -272,12 +274,8 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     llm_api_key_env: str = "GEMINI_API_KEY"
     force_retrain: bool = False  # force retrain LFCBM/subjective models
 
-    # Missingness
-    missing_fraction: float = 0.0
-    missing_mechanism: str = "mcar"
-
     # Alignment (sign constraints for constrained retraining)
-    alignment_constraints: Optional[Dict[str, int]] = None
+    alignment_constraints: dict[str, int] | None = None
 
     # Variant
     concept_preset: str = "ground_truth"
@@ -326,15 +324,11 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             self._validate_image()
 
     def _auto_configure_text(self):
-        """Auto-switch defaults for text modality."""
-        # Clear image-default sampling constraints (text doesn't need them)
-        if self.sampling_constraints == ROBOT_SAMPLING_CONSTRAINTS:
-            self.sampling_constraints = []
-        # Auto-set text-appropriate excluded_concepts based on concept_preset
-        if self.excluded_concepts == list(IDEAL_EXCLUDED_CONCEPTS):
-            self.excluded_concepts = list(TEXT_IDEAL_EXCLUDED_CONCEPTS)
-        elif self.excluded_concepts == list(SUBCONCEPT_EXCLUDED_CONCEPTS):
-            self.excluded_concepts = list(TEXT_SUBCONCEPT_EXCLUDED_CONCEPTS)
+        """Auto-switch defaults for text modality.
+
+        Uses field defaults as sentinels: if the user hasn't changed them from
+        the image-oriented defaults, we override to text-appropriate values.
+        """
         # For ground_truth preset, clear image-default expand_concepts
         # so text uses collapsed binary features (9 concepts like the original)
         if self.concept_preset == "ground_truth" and self.expand_concepts == [
@@ -383,12 +377,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
 
     def _validate_image(self):
         """Validate image-specific parameters."""
-        # If foot_subtypes but excluded_concepts still has the ground_truth default,
-        # automatically switch to SUBCONCEPT_EXCLUDED_CONCEPTS so the flag alone is sufficient.
-        if self.concept_preset == "foot_subtypes" and self.excluded_concepts == list(
-            IDEAL_EXCLUDED_CONCEPTS
-        ):
-            self.excluded_concepts = list(SUBCONCEPT_EXCLUDED_CONCEPTS)
         if self.image_size not in IMAGE_SIZE_TO_PIXELS:
             raise ValueError(
                 f"image_size must be one of {sorted(IMAGE_SIZE_TO_PIXELS)}, "
@@ -408,11 +396,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 f"template_complexity must be 'high', 'medium', or 'low', "
                 f"got {self.template_complexity!r}"
             )
-        # Auto-switch excluded_concepts for foot_subtypes in text mode
-        if self.concept_preset == "foot_subtypes" and self.excluded_concepts == list(
-            TEXT_IDEAL_EXCLUDED_CONCEPTS
-        ):
-            self.excluded_concepts = list(TEXT_SUBCONCEPT_EXCLUDED_CONCEPTS)
         unknown = set(self.intervention_regimes) - ROBOT_TEXT_VALID_REGIMES
         if unknown:
             raise ValueError(
@@ -432,26 +415,20 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         """``'_subconcept'`` or ``'_ideal'`` for filename construction."""
         return "_subconcept" if self.concept_preset == "foot_subtypes" else "_ideal"
 
-    def _missingness_suffix(self) -> str:
-        """Filename suffix for missingness, empty string if none."""
-        if self.missing_fraction > 0:
-            return f"_{self.missing_mechanism}_{int(self.missing_fraction * 100)}"
-        return ""
-
     @property
     def pixel_resolution(self) -> int:
         """Pixel resolution for the current image_size."""
         return IMAGE_SIZE_TO_PIXELS[self.image_size]
 
     @property
-    def label_features(self) -> Dict[str, str]:
+    def label_features(self) -> dict[str, str]:
         """Feature→value mapping extracted from label_formula."""
         return {
             feat: spec["value"] for feat, spec in self.label_formula["terms"].items()
         }
 
     @property
-    def label_weights(self) -> Dict[str, float]:
+    def label_weights(self) -> dict[str, float]:
         """Feature→weight mapping extracted from label_formula."""
         return {
             feat: spec["weight"] for feat, spec in self.label_formula["terms"].items()
@@ -475,10 +452,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     @classmethod
     def default_subconcept(cls) -> RobotBenchmarkConfig:
         """Config matching the paper's subconcept robot benchmark."""
-        return cls(
-            concept_preset="foot_subtypes",
-            excluded_concepts=list(SUBCONCEPT_EXCLUDED_CONCEPTS),
-        )
+        return cls(concept_preset="foot_subtypes")
 
     @property
     def input_size(self) -> int:
@@ -486,7 +460,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             raise ValueError("input_size is not defined for text data_type")
         return self.pixel_resolution
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to a dict compatible with DEFAULT_ROBOT_SETTINGS.
 
         Only supported for image data_type.
@@ -503,20 +477,14 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             "train_dnn": 0,
             "seed": self.seed,
             "rng_seed": self.seed,
-            "test_size": self.test_size,
-            "train_skew_size": self.train_size,
             "concepts": copy.deepcopy(self.concepts),
             "additional_features": list(self.expand_concepts),
             "subconcept": self.concept_preset == "foot_subtypes",
-            "drop_concepts": list(self.excluded_concepts),
             "model_type": self._labeling_tag,
             "model_features": dict(self.label_features),
             "model_weights": dict(self.label_weights),
             "model_intercept": self.label_intercept,
             "model_scalar": self.label_temperature,
-            "skew_specs": copy.deepcopy(self.sampling_constraints),
-            "concept_missing": self.missing_fraction,
-            "concept_missing_mech": self.missing_mechanism,
         }
 
     def setup_fingerprint(self) -> str:
@@ -606,7 +574,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             return results_dir / f"robot_text_{model_class}_seed{self.seed}.model"
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}_{self.renders_per_robot}"
-            f"{self._preset_suffix}{self._missingness_suffix()}"
+            f"{self._preset_suffix}"
             f"_{model_class}.model"
         )
         return results_dir / filename
@@ -618,10 +586,10 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         filename = f"robot_{self.data_type}_{self._labeling_tag}"
         if model_class == "cbm":
             filename += self._preset_suffix
-        filename += f"{self._missingness_suffix()}_{model_class}_results.csv"
+        filename += f"_{model_class}_results.csv"
         return results_dir / filename
 
-    def get_alignment_constraints(self) -> Dict[str, int]:
+    def get_alignment_constraints(self) -> dict[str, int]:
         """Return monotonicity constraints for alignment.
 
         Default: ``{"has_knees": 1}`` for image, ``{"mouth_is_open": 1}``
@@ -639,7 +607,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             return results_dir / f"robot_text_alignment_seed{self.seed}.json"
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}"
-            f"{self._preset_suffix}{self._missingness_suffix()}"
+            f"{self._preset_suffix}"
             f"_alignment.json"
         )
         return results_dir / filename
@@ -662,12 +630,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         """Return the path for the collect-stage summary CSV."""
         if self.data_type == "text":
             return results_dir / "robot_text_results.csv"
-        if self.excluded_concepts == list(IDEAL_EXCLUDED_CONCEPTS):
-            variant = "ideal"
-        elif self.excluded_concepts == list(SUBCONCEPT_EXCLUDED_CONCEPTS):
-            variant = "subconcept"
-        else:
-            variant = "custom"
+        variant = "subconcept" if self.concept_preset == "foot_subtypes" else "ideal"
         return (
             results_dir
             / f"robot_{variant}_seed{self.seed}_{self._config_hash()}_results.csv"
@@ -696,20 +659,16 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     cs_epochs: int = 100
     cs_patience: int = 20
 
-    # Missingness
-    missing_fraction: float = 0.0
-    missing_mechanism: str = "mcar"
-
     # Intervention
-    intervention_budgets: List[int] = field(default_factory=lambda: [1, 3, 27])
-    intervention_thresholds: List[float] = field(
+    intervention_budgets: list[int] = field(default_factory=lambda: [1, 3, 27])
+    intervention_thresholds: list[float] = field(
         default_factory=lambda: [0.2, 0.4, 0.6, 0.8]
     )
     target_accuracy: float = 0.9
     decision_threshold: float = 0.5
 
     # Alignment
-    alignment_weights: Optional[Dict[str, float]] = None
+    alignment_weights: dict[str, float] | None = None
 
     # OCR settings
     cell_px: int = 50
@@ -734,7 +693,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
         """Config matching the paper's sudoku benchmark."""
         return cls()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to a dict compatible with DEFAULT_SUDOKU_SETTINGS."""
         return {
             "data_name": "sudoku",
@@ -752,7 +711,6 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
             ),
             "epochs": self.epochs,
             "patience": self.patience,
-            "concept_missing_mech": self.missing_mechanism,
         }
 
     def setup_fingerprint(self) -> str:
@@ -775,35 +733,31 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
             d.pop(k, None)
         return _dict_sha256(d)
 
-    def get_dataset_path(self, data_type: Optional[str] = None) -> Path:
+    def get_dataset_path(self, data_type: str | None = None) -> Path:
         """Return the directory path for the dataset."""
         dt = data_type or self.data_type
         filename = f"sudoku_{dt}_n{self.block_size}_ns{self.n_boards}_mc{self.max_cell_swaps}_seed{self.seed}"
         return data_dir / "sudoku" / filename
 
-    def get_model_path(self, model_class: str, data_type: Optional[str] = None) -> Path:
+    def get_model_path(self, model_class: str, data_type: str | None = None) -> Path:
         """Return the path where a trained model is saved."""
         dt = data_type or self.data_type
         filename = (
             f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}"
         )
-        if self.missing_fraction > 0.0:
-            filename += f"_cm{self.missing_mechanism}{self.missing_fraction}"
         return results_dir / f"{filename}.model"
 
     def get_results_path(
-        self, model_class: str = "cbm", data_type: Optional[str] = None
+        self, model_class: str = "cbm", data_type: str | None = None
     ) -> Path:
         """Return the path where results are saved."""
         dt = data_type or self.data_type
         filename = (
             f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}"
         )
-        if self.missing_fraction > 0.0:
-            filename += f"_cm{self.missing_mechanism}{self.missing_fraction}"
         return results_dir / f"{filename}.results"
 
-    def get_alignment_weights(self) -> Dict[str, float]:
+    def get_alignment_weights(self) -> dict[str, float]:
         """Return alignment weights, computing defaults if not explicitly set.
 
         Default: all row/col/block concepts get weight 1.0 (AND semantics).
@@ -811,7 +765,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
         if self.alignment_weights is not None:
             return self.alignment_weights
         board_size = self.block_size * self.block_size  # 9 for standard sudoku
-        weights: Dict[str, float] = {}
+        weights: dict[str, float] = {}
         for i in range(board_size):
             weights[f"row_valid_{i + 1}"] = 1.0
             weights[f"col_valid_{i + 1}"] = 1.0
@@ -819,12 +773,10 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
         weights["bias"] = -(3 * board_size - 0.5)
         return weights
 
-    def get_alignment_results_path(self, data_type: Optional[str] = None) -> Path:
+    def get_alignment_results_path(self, data_type: str | None = None) -> Path:
         """Return the path where alignment results JSON is saved."""
         dt = data_type or self.data_type
         filename = f"sudoku_alignment_{dt}_n{self.block_size}_mc{self.max_cell_swaps}"
-        if self.missing_fraction > 0.0:
-            filename += f"_cm{self.missing_mechanism}{self.missing_fraction}"
         return results_dir / f"{filename}.json"
 
     def _config_hash(self) -> str:

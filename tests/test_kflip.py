@@ -167,6 +167,10 @@ class TestKFlip:
         per_row = proposal.mask.sum(axis=1)
         # With use_exact_k=False, subsets of size 1..k are allowed
         assert np.all(per_row <= 3)
+        # Verify that at least one row selected fewer than max (smaller subset)
+        assert np.any(per_row < 3), (
+            "Expected at least one row with fewer than 3 concepts selected"
+        )
 
     def test_limit_subsets(self):
         k = 4

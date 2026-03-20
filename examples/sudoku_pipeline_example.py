@@ -44,7 +44,7 @@ SEED = 171
 set_deterministic_seed(SEED)
 patch_macos_dataloader()
 device = determine_device()
-loader_config = get_loader_config(device)
+loader_config = get_loader_config()
 print(f"Using device: {device}")
 
 # ---------------------------------------------------------------------------
@@ -59,8 +59,9 @@ dataset = DatasetGenerator(
     valid_board_ratio=0.5,   # 50% valid, 50% invalid
     data_type="tabular",  # use "image" to render board PNGs for explore()
 ).generate()
+dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=SEED)
 
-train, val, test = dataset.training, dataset.validation, dataset.test
+train, val, test = dataset.train, dataset.validation, dataset.test
 print(f"  Training:    {train.n} samples, {train.n_concepts} concepts")
 print(f"  Validation:  {val.n} samples")
 print(f"  Test:        {test.n} samples")

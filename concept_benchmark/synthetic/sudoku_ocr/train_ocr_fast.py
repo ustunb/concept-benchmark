@@ -24,10 +24,9 @@ from concept_benchmark.ext.fileutils import load as load_object, save as save_ob
 from concept_benchmark.synthetic.sudoku_ocr.ocr_utils import (
     SudokuCellDataset,
     TinyResNet,
-    cell_preprocess_28x28,
     compute_class_weights,
-    crop_cell,
     load_sidecars,
+    predict_board_argmax,
 )
 from concept_benchmark.utils import set_deterministic_seed
 from concept_benchmark.config import SudokuBenchmarkConfig
@@ -142,33 +141,6 @@ def eval_model(model: nn.Module, loader: DataLoader, device: str):
         else:
             per_class_acc[cls] = correct_per_class[cls] / total_per_class[cls]
     return avg_loss, avg_acc, per_class_acc
-
-
-@torch.no_grad()
-def predict_board_argmax(
-    model: nn.Module,
-    img_path: Path,
-    *,
-    device: str = "cpu",
-    cell_px: int = 50,
-    margin_px: int = 2,
-) -> np.ndarray:
-    import cv2
-
-    bgr = cv2.imread(str(img_path))
-    if bgr is None:
-        return np.zeros((9, 9), dtype=np.int64)
-
-    cells = []
-    for r in range(9):
-        for c in range(9):
-            cell = crop_cell(bgr, r, c, cell_px=cell_px, margin_px=margin_px)
-            x28 = cell_preprocess_28x28(cell)
-            cells.append(x28)
-    cells = np.stack(cells, axis=0)
-    xb = torch.from_numpy(cells).unsqueeze(1).to(device)
-    logits = model(xb)
-    return logits.argmax(1).cpu().numpy().reshape(9, 9)
 
 
 def build_ocr_concept_dataset(

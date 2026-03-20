@@ -4,7 +4,7 @@ import json
 import re
 import numpy as np
 import pandas as pd
-from typing import Sequence, Iterable
+from collections.abc import Iterable, Sequence
 from concept_benchmark.data import ConceptDataset
 
 _MOD_RE = re.compile(r"\{([a-zA-Z0-9_]+)~(not|syn)\}")

@@ -3,7 +3,6 @@ from __future__ import annotations
 __all__ = ["KFlipInterventionStrategy"]
 
 import itertools
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from tqdm import tqdm
@@ -59,7 +58,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
         self,
         *,
         batch_size: int = 8192,
-        limit_subsets: Optional[int] = None,
+        limit_subsets: int | None = None,
         use_exact_k: bool = False,
     ) -> None:
         super().__init__(name="kflip")
@@ -128,18 +127,18 @@ class KFlipInterventionStrategy(InterventionStrategy):
             all_subsets = [subset for _, subset in subset_scores[: self.limit_subsets]]
 
         flip_prob = np.zeros(n_samples, dtype=np.float64)
-        best_subset: List[Tuple[int, ...]] = [tuple() for _ in range(n_samples)]
+        best_subset: list[tuple[int, ...]] = [tuple() for _ in range(n_samples)]
         best_label = np.full(n_samples, -1, dtype=int)
 
         # Cache assignment grids by subset size (reused across subsets)
-        _assign_cache: Dict[int, np.ndarray] = {}
+        _assign_cache: dict[int, np.ndarray] = {}
 
         # Try to extract logistic regression weights for the fast path.
         # Instead of building (N*A, C) arrays and calling predict_proba,
         # we precompute the base logit and update only the subset columns
         # via broadcasting: logit[i,a] = base_logit[i] - sub_logit[i] + assign_logit[a]
-        _fast_w: Optional[np.ndarray] = None
-        _fast_b: Optional[float] = None
+        _fast_w: np.ndarray | None = None
+        _fast_b: float | None = None
         try:
             _lr = getattr(model.label_predictor, "model", model.label_predictor)
             _coef = getattr(_lr, "coef_", None)
@@ -295,7 +294,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
                 start_total=total_applied,
             )
 
-        details: Dict[str, object] = {
+        details: dict[str, object] = {
             "flip_prob": flip_prob,
             "best_subset": best_subset,
             "threshold": threshold,

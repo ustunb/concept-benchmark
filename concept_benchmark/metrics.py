@@ -10,10 +10,10 @@ def compute_selective_metric(pred_probs, y_true, abstention_threshold=0.5):
     selected_y[pred_probs < abstention_threshold] = 0
     selected_y[
         (pred_probs >= abstention_threshold) & (pred_probs <= 1 - abstention_threshold)
-    ] = -10  # abstain
+    ] = np.nan  # abstain
     selected_y[pred_probs > 1 - abstention_threshold] = 1
 
-    abstain = selected_y == -10
+    abstain = np.isnan(selected_y)
 
     if not np.any(~abstain):
         coverage = 0.0

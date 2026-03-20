@@ -1,20 +1,10 @@
 import copy
-import torch
 import torch.nn as nn
 
 from experiments.train import (
     train_concept_heads,
 )
-
-
-def _any_state_diff(state_a, state_b):
-    for k in state_a:
-        ta, tb = state_a[k], state_b[k]
-        if ta.dtype != tb.dtype or ta.shape != tb.shape:
-            return True
-        if not torch.allclose(ta, tb):
-            return True
-    return False
+from tests.conftest import _any_state_diff
 
 
 def test_train_heads_with_encoder_finetunes_encoder_changes(tabular_train_valid):

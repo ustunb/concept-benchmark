@@ -19,11 +19,7 @@ from experiments.models import (
 
 
 def _tabular_dataset(n=60, k=4, seed=42, concept_names=None):
-    """Generate a tiny tabular dataset with CV splits.
-
-    Uses balanced labels and enough samples to guarantee both classes
-    appear in every fold.
-    """
+    """Generate a tiny tabular dataset with train/val/test splits."""
     rng = np.random.default_rng(seed)
     X = rng.random((n, 8)).astype(np.float32)
     C = rng.integers(0, 2, size=(n, k)).astype(np.float32)
@@ -38,8 +34,7 @@ def _tabular_dataset(n=60, k=4, seed=42, concept_names=None):
         "data_type": "tabular",
     }
     ds = ConceptDataset(X=X, C=C, y=y, meta=meta)
-    ds.generate_cvindices(seed=seed)
-    ds.split("K05N01", fold_num_validation=4, fold_num_test=5)
+    ds.sample(test_size=0.2, val_size=0.2, stratify=ds.y, seed=seed)
     return ds
 
 

@@ -48,22 +48,26 @@ SEED = 1014
 set_deterministic_seed(SEED)
 patch_macos_dataloader()
 device = determine_device()
-loader_config = get_loader_config(device)
+loader_config = get_loader_config()
 print(f"Using device: {device}")
 
 # ---------------------------------------------------------------------------
 # 1. Generate dataset with rendered images
 # ---------------------------------------------------------------------------
 print("Generating robot image dataset (concept_preset='foot_subtypes', 12 concepts)...")
-dataset = DatasetGenerator(
+gen = DatasetGenerator(
     "robot",
     seed=SEED,
     concept_preset="foot_subtypes",  # 12 fine-grained concepts (default: "ground_truth" = 7)
     use_stochastic_labels=True,      # probabilistic labeling
     # render_images=True is the default — renders robot images
-).generate()
+)
+dataset = gen.generate()
+from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
+dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["foot_subtypes"])
+dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=SEED)
 
-train, val, test = dataset.training, dataset.validation, dataset.test
+train, val, test = dataset.train, dataset.validation, dataset.test
 print(f"  Training:    {train.n} samples, {train.n_concepts} concepts")
 print(f"  Validation:  {val.n} samples")
 print(f"  Test:        {test.n} samples")

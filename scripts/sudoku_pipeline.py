@@ -12,7 +12,6 @@ from __future__ import annotations
 import copy
 import logging
 import platform
-from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -24,6 +23,7 @@ from concept_benchmark.utils import (
     compute_accuracy,
     determine_device,
     get_loader_config,
+    parse_budgets,
     patch_macos_dataloader,
     set_deterministic_seed,
 )
@@ -38,20 +38,6 @@ from experiments.intervention import (
     ConceptualSafeguardsStrategy,
     InterventionConfig,
 )
-
-# Backward compatibility: allow unpickling models saved under old class paths.
-# Saved CS models reference scripts.sudoku_demo.sudoku_models at pickle time.
-import sys as _sys
-import types as _types
-if "scripts.sudoku_demo.sudoku_models" not in _sys.modules:
-    import experiments.models as _compat_models
-    if "scripts" not in _sys.modules:
-        _sys.modules["scripts"] = _types.ModuleType("scripts")
-    if "scripts.sudoku_demo" not in _sys.modules:
-        _sd = _types.ModuleType("scripts.sudoku_demo")
-        _sys.modules["scripts.sudoku_demo"] = _sd
-        _sys.modules["scripts"].sudoku_demo = _sd
-    _sys.modules["scripts.sudoku_demo.sudoku_models"] = _compat_models
 
 logger = logging.getLogger(__name__)
 
@@ -89,28 +75,21 @@ def train_cs(
     config: SudokuBenchmarkConfig,
     data=None,
 ) -> ConceptBasedModel:
-    set_deterministic_seed(config.seed)
     """Train a concept supervision model (concept detector + frontend).
 
     Returns the trained CBM.
     """
+    set_deterministic_seed(config.seed)
     patch_macos_dataloader()
     device = determine_device()
 
     if data is None:
         tab_dir = config.get_dataset_path(data_type="tabular")
         data = load(tab_dir / "sudoku_dataset.pkl")
-        data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=config.seed)
-        data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
+        data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
-    if config.missing_fraction > 0:
-        data.sample_concept_missingness(
-            p=config.missing_fraction,
-            mechanism=config.missing_mechanism,
-            rng=np.random.default_rng(config.seed),
-        )
-        data.training.has_concept_missing = True
-        data.validation.has_concept_missing = True
+    # Missingness can be applied here if needed:
+    # data.sample_concept_missingness(p=0.2, mechanism="mcar", rng=config.seed)
 
     _macos = platform.system() == "Darwin"
     loader_config = {
@@ -164,8 +143,7 @@ def train_dnn(
     if data is None:
         tab_dir = config.get_dataset_path(data_type="tabular")
         data = load(tab_dir / "sudoku_dataset.pkl")
-        data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=config.seed)
-        data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
+        data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
     from experiments.models import SudokuValidatorCNN as DNNSudokuModel
 
@@ -173,7 +151,7 @@ def train_dnn(
     criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-    loader_config = get_loader_config(device)
+    loader_config = get_loader_config()
     train_loader = data.training.loader(shuffle=True, **loader_config)
     valid_loader = data.validation.loader(shuffle=False, **loader_config)
     test_loader = data.test.loader(shuffle=False, **loader_config)
@@ -238,7 +216,7 @@ def train_dnn(
 
 def run_interventions(
     config: SudokuBenchmarkConfig,
-    cs_model: Optional[ConceptBasedModel] = None,
+    cs_model: ConceptBasedModel | None = None,
     data=None,
 ) -> pd.DataFrame:
     """Run conceptual safeguards interventions on the sudoku CS model.
@@ -255,8 +233,7 @@ def run_interventions(
         else:
             tab_dir = config.get_dataset_path(data_type="tabular")
             data = load(tab_dir / "sudoku_dataset.pkl")
-        data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=config.seed)
-        data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
+        data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
     if cs_model is None:
         cs_model = load(config.get_model_path("cs", data_type="tabular"))
@@ -338,7 +315,7 @@ def run_interventions(
 
 def align(
     config: SudokuBenchmarkConfig,
-    cs_model: Optional[ConceptBasedModel] = None,
+    cs_model: ConceptBasedModel | None = None,
     data=None,
 ) -> dict:
     """Run alignment test on the trained CS model.
@@ -355,8 +332,7 @@ def align(
     if data is None:
         tab_dir = config.get_dataset_path(data_type="tabular")
         data = load(tab_dir / "sudoku_dataset.pkl")
-        data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=config.seed)
-        data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
+        data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
     if cs_model is None:
         cs_model = load(config.get_model_path("cs", data_type="tabular"))
@@ -391,15 +367,11 @@ def align(
 
 def _dataset_label(cfg: SudokuBenchmarkConfig) -> str:
     """Human-readable dataset label for the summary CSV."""
-    label = f"mc{cfg.max_cell_swaps}"
-    if cfg.missing_fraction > 0:
-        label += f"_{cfg.missing_mechanism}"
-        label += f"_{int(cfg.missing_fraction * 100)}"
-    return label
+    return f"mc{cfg.max_cell_swaps}"
 
 
 def collect_results(
-    configs: Optional[List[SudokuBenchmarkConfig]] = None,
+    configs: list[SudokuBenchmarkConfig] | None = None,
 ) -> pd.DataFrame:
     """Aggregate all sudoku results into a single flat CSV.
 
@@ -513,8 +485,8 @@ def collect_results(
 # ── Stage: run (orchestrator) ─────────────────────────────────────────
 
 def run(
-    config: Optional[SudokuBenchmarkConfig] = None,
-    stages: Optional[List[str]] = None,
+    config: SudokuBenchmarkConfig | None = None,
+    stages: list[str] | None = None,
     force_setup: bool = False,
 ) -> None:
     """Run the full sudoku benchmark pipeline.
@@ -623,10 +595,9 @@ def run(
         else:
             tab_dir = config.get_dataset_path(data_type="tabular")
             _shared_data = load(tab_dir / "sudoku_dataset.pkl")
-        _shared_data.generate_cvindices(
-            strata=_shared_data.y, total_folds_for_cv=[5], seed=config.seed
+        _shared_data.sample(
+            test_size=0.2, val_size=0.2, stratify=_shared_data.y, seed=config.seed
         )
-        _shared_data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
 
         cs_path = config.get_model_path("cs", data_type="tabular")
         if cs_path.exists():
@@ -755,10 +726,10 @@ def _dnn_val_probs(model, loader, device):
 
 def compute_selective_results(
     config: SudokuBenchmarkConfig,
-    cs_model: Optional[ConceptBasedModel] = None,
-    dnn_weights: Optional[dict] = None,
+    cs_model: ConceptBasedModel | None = None,
+    dnn_weights: dict | None = None,
     data=None,
-    target_accuracies: Optional[List[float]] = None,
+    target_accuracies: list[float] | None = None,
 ) -> pd.DataFrame:
     """Compute selective accuracy and coverage at multiple target accuracy
     thresholds for both DNN and CS models.  Saves results as CSV.
@@ -785,12 +756,9 @@ def compute_selective_results(
         else:
             tab_dir = config.get_dataset_path(data_type="tabular")
             data = load(tab_dir / "sudoku_dataset.pkl")
-        data.generate_cvindices(
-            strata=data.y, total_folds_for_cv=[5], seed=config.seed
-        )
-        data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
+        data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
-    loader_cfg = get_loader_config(device)
+    loader_cfg = get_loader_config()
     val_loader = data.validation.loader(shuffle=False, **loader_cfg)
     tst_loader = data.test.loader(shuffle=False, **loader_cfg)
 
@@ -896,11 +864,6 @@ def _parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def _parse_budgets(raw):
-    budgets = []
-    for v in raw:
-        budgets.append(-1 if v.lower() == "max" else int(v))
-    return budgets
 
 
 def main(argv=None):
@@ -916,7 +879,7 @@ def main(argv=None):
         config = SudokuBenchmarkConfig(seed=args.seed)
 
     if args.budgets:
-        config.intervention_budgets = _parse_budgets(args.budgets)
+        config.intervention_budgets = parse_budgets(args.budgets)
     if args.no_handwriting:
         config.font_style = "printed"
     elif args.handwriting:

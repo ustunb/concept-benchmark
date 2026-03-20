@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import random
-from typing import Optional, Sequence, Tuple
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -50,7 +52,7 @@ def shuffle_columns(board: np.ndarray, n: int | None = None) -> np.ndarray:
 
 
 def shuffle_row_bands(board: np.ndarray, n: int | None = None) -> np.ndarray:
-    N, n0 = _assert_board_size(board)
+    _, n0 = _assert_board_size(board)
     n = n0 if n is None else n
     bands = list(range(n))
     np.random.shuffle(bands)
@@ -58,7 +60,7 @@ def shuffle_row_bands(board: np.ndarray, n: int | None = None) -> np.ndarray:
 
 
 def shuffle_col_stacks(board: np.ndarray, n: int | None = None) -> np.ndarray:
-    N, n0 = _assert_board_size(board)
+    _, n0 = _assert_board_size(board)
     n = n0 if n is None else n
     stacks = list(range(n))
     np.random.shuffle(stacks)
@@ -106,7 +108,7 @@ BASE_BOARD = build_base_board(3)
 
 
 def invalid_rows_only_by_within_column_swap(
-    board: np.ndarray, seed: Optional[int] = None
+    board: np.ndarray, seed: int | None = None
 ) -> np.ndarray:
     """
     Swap two cells that share the same column and the same n x n block-band (i.e., same column, different
@@ -124,7 +126,7 @@ def invalid_rows_only_by_within_column_swap(
 
 
 def invalid_cols_only_by_within_row_swap(
-    board: np.ndarray, seed: Optional[int] = None
+    board: np.ndarray, seed: int | None = None
 ) -> np.ndarray:
     """
     Swap two cells that share the same row and the same n x n stack (i.e., same row, different columns within
@@ -142,7 +144,7 @@ def invalid_cols_only_by_within_row_swap(
 
 
 def invalid_blocks_only_by_row_swap_across_bands(
-    board: np.ndarray, seed: Optional[int] = None
+    board: np.ndarray, seed: int | None = None
 ) -> np.ndarray:
     """
     Swap two ENTIRE rows from different bands. Rows/columns remain valid (they are permutations and column
@@ -159,7 +161,7 @@ def invalid_blocks_only_by_row_swap_across_bands(
 
 
 def invalid_blocks_only_by_col_swap_across_stacks(
-    board: np.ndarray, seed: Optional[int] = None
+    board: np.ndarray, seed: int | None = None
 ) -> np.ndarray:
     """
     Swap two ENTIRE columns from different stacks. Rows/columns remain valid (still permutations), while
@@ -175,9 +177,7 @@ def invalid_blocks_only_by_col_swap_across_stacks(
     return b
 
 
-def duplicate_in_row(
-    board: np.ndarray, r: int, seed: Optional[int] = None
-) -> np.ndarray:
+def duplicate_in_row(board: np.ndarray, r: int, seed: int | None = None) -> np.ndarray:
     """
     Duplicate one value within row r by copying a value from column c1 into column c2 (c2!=c1).
     Effect of ONE action: invalidates that row, the target column, and the target block (<= 3 concepts).
@@ -190,9 +190,7 @@ def duplicate_in_row(
     return b
 
 
-def duplicate_in_col(
-    board: np.ndarray, c: int, seed: Optional[int] = None
-) -> np.ndarray:
+def duplicate_in_col(board: np.ndarray, c: int, seed: int | None = None) -> np.ndarray:
     """
     Duplicate one value within column c by copying a value from row r1 into row r2 (r2!=r1).
     Effect of ONE action: invalidates that column, the target row, and the target block (<= 3 concepts).
@@ -217,10 +215,10 @@ INVALID_MODES = {
 
 
 def generate_invalid_board(
-    base_board: Optional[np.ndarray] = None,
+    base_board: np.ndarray | None = None,
     num_actions: int = 1,
-    mode: Optional[str] = None,
-    seed: Optional[int] = None,
+    mode: str | None = None,
+    seed: int | None = None,
 ) -> np.ndarray:
     """
     Create an invalid board from a valid one using structured corruptions.
@@ -543,19 +541,19 @@ def add_noise_to_concept_vector(
 
 
 def normalize_positions(
-    N: int, positions_subset: Optional[Sequence[Tuple[int, int]]]
-) -> list[Tuple[int, int]]:
+    N: int, positions_subset: Sequence[tuple[int, int]] | None
+) -> list[tuple[int, int]]:
     """
     Validate and canonicalize a list of cell positions.
 
     Args:
         N (int): Board dimension (e.g., 9 for a 9×9 board). Must be >= 1.
-        positions_subset (Optional[Sequence[Tuple[int, int]]]): Optional sequence
+        positions_subset (Sequence[tuple[int, int]] | None): Optional sequence
             of 0-indexed (row, col) pairs to include. If ``None``, all cells
             ``[(0,0), (0,1), …, (N-1,N-1)]`` are used.
 
     Returns:
-        list[Tuple[int, int]]: A row-major–sorted list of valid (row, col) pairs,
+        list[tuple[int, int]]: A row-major-sorted list of valid (row, col) pairs,
         each satisfying ``0 <= row < N`` and ``0 <= col < N``.
 
     Raises:
@@ -574,14 +572,14 @@ def normalize_positions(
     return out
 
 
-def normalize_digits(N: int, digits_subset: Optional[Sequence[int]]) -> list[int]:
+def normalize_digits(N: int, digits_subset: Sequence[int] | None) -> list[int]:
     """
     Validate and canonicalize a list of digits.
 
     Args:
         N (int): Board dimension (e.g., 9 for a 9×9 board). Valid digits are
             integers in ``[1, N]``.
-        digits_subset (Optional[Sequence[int]]): Optional sequence of digits to
+        digits_subset (Sequence[int] | None): Optional sequence of digits to
             include. If ``None``, defaults to ``[1, 2, …, N]``.
 
     Returns:
@@ -602,7 +600,7 @@ def normalize_digits(N: int, digits_subset: Optional[Sequence[int]]) -> list[int
 
 
 def cell_digit_concept_vector(
-    board: np.ndarray, positions: Sequence[Tuple[int, int]], digits: Sequence[int]
+    board: np.ndarray, positions: Sequence[tuple[int, int]], digits: Sequence[int]
 ) -> np.ndarray:
     """
     Build a binary vector encoding per-cell digit indicators.
@@ -616,7 +614,7 @@ def cell_digit_concept_vector(
         board (np.ndarray): An ``N×N`` array of cell values. Expected to contain
             integers in ``{0, 1, …, N}`` where 0 (or non-positive / None) means
             “blank”. Only exact equality to digits in ``digits`` yields 1s.
-        positions (Sequence[Tuple[int, int]]): 0-indexed cell coordinates
+        positions (Sequence[tuple[int, int]]): 0-indexed cell coordinates
             ``(row, col)``. Typically produced by ``_normalize_positions`` for
             validation and row-major ordering.
         digits (Sequence[int]): Digits to test for each position. Typically

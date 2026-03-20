@@ -37,6 +37,9 @@ def main(argv=None):
         args.seed, args.concept_preset, not args.no_draw,
     )
     dataset = gen.generate()
+    from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
+    dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS[args.concept_preset])
+    dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=args.seed)
 
     logger.info(
         "Dataset: %d train, %d val, %d test, %d concepts",

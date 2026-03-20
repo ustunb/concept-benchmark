@@ -129,7 +129,7 @@ class _Encoder:
 
             self._backend = SentenceTransformer(self.model_name, device=self.device)
             self._is_st = True
-        except Exception:
+        except (ImportError, OSError):
             from transformers import AutoTokenizer, AutoModel
             import torch
 

@@ -36,6 +36,7 @@ def main(argv=None):
         args.seed, args.n_boards, args.max_cell_swaps,
     )
     dataset = gen.generate()
+    dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=args.seed)
 
     logger.info(
         "Dataset: %d train, %d val, %d test, %d concepts",

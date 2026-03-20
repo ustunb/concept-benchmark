@@ -15,7 +15,7 @@ import logging
 import platform
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ from concept_benchmark.utils import (
     compute_accuracy,
     determine_device,
     get_loader_config,
+    parse_budgets,
     patch_macos_dataloader,
     set_deterministic_seed,
 )
@@ -50,12 +51,12 @@ class InterventionSettings:
     """Typed config for _test_interventions, replacing the old ``sttngs`` dict."""
 
     seed: int
-    budgets: List[int]
+    budgets: list[int]
     intervention_accuracy: float = 0.9
     intervention_threshold: float = 1.0
     intervention_strategy: str = "up_to_k"
     intervention_expert: str = ""  # "" for standard path, "llm" for inline LLM
-    intervention_llm: Optional[Dict[str, Any]] = None
+    intervention_llm: dict[str, Any] | None = None
     run_dir: str = "."
 
 
@@ -76,8 +77,6 @@ class FEOnProbs(FrontEndModel):
         Z = np.log(P / (1.0 - P))
         return self.model.predict_proba(Z)
 
-
-_set_deterministic_seed = set_deterministic_seed  # backward compat alias
 
 
 # Lazy import to avoid circular deps — intervention modules
@@ -100,12 +99,32 @@ def _ensure_intervention_imports():
 # ── Stage: setup_dataset ──────────────────────────────────────────────
 
 def setup_dataset(config: RobotBenchmarkConfig):
-    """Generate robot dataset, apply skewed splits, and save.
+    """Generate robot dataset, split, and save.
 
     Returns the saved ConceptDataset.
     """
+    from concept_benchmark.config import (
+        PRESET_EXCLUDED_CONCEPTS,
+        ROBOT_SAMPLING_CONSTRAINTS,
+    )
+
     logger.info("Generating robot dataset...")
     data = DatasetGenerator.from_config(config).generate()
+    data.drop_concepts(PRESET_EXCLUDED_CONCEPTS[config.concept_preset])
+
+    # Split into train/val/test with skewing constraints
+    test_size = 10000
+    train_size = 3800
+    remaining = data.n - test_size
+    n_val = int((remaining - train_size) * 0.2)
+    data.sample(
+        test_size=test_size,
+        val_size=n_val,
+        train_size=train_size,
+        sampling_constraints=ROBOT_SAMPLING_CONSTRAINTS,
+        seed=config.seed,
+    )
+
     save(data, config.get_dataset_path(), overwrite=True)
     return data
 
@@ -115,16 +134,20 @@ def setup_dataset(config: RobotBenchmarkConfig):
 def train_cbm(
     config: RobotBenchmarkConfig,
     data=None,
-    save_key: Optional[str] = "cbm",
+    save_key: str | None = "cbm",
+    missing_fraction: float = 0.0,
+    missing_mechanism: str = "mcar",
 ) -> ConceptBasedModel:
     """Train a ConceptBasedModel (concept detector + frontend).
 
     Args:
         save_key: Model save key. Use None to skip saving.
+        missing_fraction: Fraction of concept labels to mask.
+        missing_mechanism: Missingness mechanism ("mcar" or "mnar").
 
     Returns the trained CBM.
     """
-    _set_deterministic_seed(config.seed)
+    set_deterministic_seed(config.seed)
     patch_macos_dataloader()
     device = determine_device()
 
@@ -132,10 +155,10 @@ def train_cbm(
         data = load(config.get_dataset_path())
 
     # Apply concept missingness if configured
-    if config.missing_fraction > 0:
+    if missing_fraction > 0:
         data.sample_concept_missingness(
-            p=config.missing_fraction,
-            mechanism=config.missing_mechanism,
+            p=missing_fraction,
+            mechanism=missing_mechanism,
             rng=np.random.default_rng(config.seed),
         )
         data.training.has_concept_missing = True
@@ -303,7 +326,7 @@ def train_lfcbm(
     """
     from experiments.lfcbm import LabelFreeCBM, LFConceptSet, LFTrainingConfig
 
-    _set_deterministic_seed(config.seed)
+    set_deterministic_seed(config.seed)
 
     if data is None:
         data = load(config.get_dataset_path())
@@ -362,7 +385,7 @@ def train_dnn(
 
     Returns the best state_dict.
     """
-    _set_deterministic_seed(config.seed)
+    set_deterministic_seed(config.seed)
     patch_macos_dataloader()
     device = determine_device()
 
@@ -375,7 +398,7 @@ def train_dnn(
     criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
 
-    loader_config = get_loader_config(device)
+    loader_config = get_loader_config()
     train_loader = data.training.loader(shuffle=True, **loader_config)
     valid_loader = data.validation.loader(shuffle=False, **loader_config)
     test_loader = data.test.loader(shuffle=False, **loader_config)
@@ -590,8 +613,8 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
                             elif isinstance(v, (int, float, str)):
                                 s = str(v).strip().lower()
                                 parsed[str(k)] = 1 if s in {"1", "true", "yes", "present"} else 0
-                except Exception:
-                    pass
+                except (json.JSONDecodeError, ValueError, KeyError) as e:
+                    logger.debug("JSON parse failure for LLM response: %s", e)
                 return parsed
 
             def _llm_judge_batch(image_paths: list, per_image_names: list) -> list:
@@ -1167,14 +1190,16 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
 
 def run_interventions(
     config: RobotBenchmarkConfig,
-    model: Optional[ConceptBasedModel] = None,
+    model: ConceptBasedModel | None = None,
     data=None,
+    missing_fraction: float = 0.0,
+    missing_mechanism: str = "none",
 ) -> pd.DataFrame:
     """Run interventions on the trained CBM and return a results DataFrame.
 
     Loops over ``config.intervention_regimes`` (default: ``["baseline"]``).
     """
-    _set_deterministic_seed(config.seed)
+    set_deterministic_seed(config.seed)
     _ensure_intervention_imports()
     patch_macos_dataloader()
     determine_device()
@@ -1204,8 +1229,8 @@ def run_interventions(
     results_df = pd.concat(all_dfs, axis=0).reset_index(drop=True)
     results_df["data_name"] = "subconcept" if config.concept_preset == "foot_subtypes" else "ideal"
     results_df["n"] = data.test.n
-    results_df["missing_fraction"] = config.missing_fraction
-    results_df["missing_mechanism"] = config.missing_mechanism
+    results_df["missing_fraction"] = missing_fraction
+    results_df["missing_mechanism"] = missing_mechanism
     results_df.to_csv(config.get_results_path("cbm"), index=False)
     return results_df
 
@@ -1214,7 +1239,7 @@ def run_interventions(
 
 def align(
     config: RobotBenchmarkConfig,
-    model: Optional[ConceptBasedModel] = None,
+    model: ConceptBasedModel | None = None,
     data=None,
 ) -> dict:
     """Run alignment test on the trained CBM.
@@ -1243,14 +1268,11 @@ def align(
 
 def _dataset_label(cfg: RobotBenchmarkConfig) -> str:
     """Return a human-readable dataset label for a config."""
-    base = "subconcept" if cfg.concept_preset == "foot_subtypes" else "ideal"
-    if cfg.missing_fraction > 0:
-        return f"{base}_{cfg.missing_mechanism}"
-    return base
+    return "subconcept" if cfg.concept_preset == "foot_subtypes" else "ideal"
 
 
 def collect_results(
-    configs: Optional[List[RobotBenchmarkConfig]] = None,
+    configs: list[RobotBenchmarkConfig] | None = None,
 ) -> pd.DataFrame:
     """Aggregate all robot results into a single flat CSV.
 
@@ -1266,7 +1288,7 @@ def collect_results(
         configs = [RobotBenchmarkConfig.default_ideal()]
 
     device = determine_device()
-    loader_config = get_loader_config(device)
+    loader_config = get_loader_config()
     rows = []
 
     # ── Per-config: DNN, CBM, interventions, alignment ───────────────
@@ -1344,66 +1366,65 @@ def collect_results(
                     "predictions_changed": int(row["predictions_changed"]),
                 })
 
-        # Aligned CBM (only for non-missingness configs)
-        if cfg.missing_fraction == 0:
-            align_path = cfg.get_alignment_results_path()
-            if align_path.exists():
-                with open(align_path) as f:
-                    align_data = json.load(f)
-                aligned_acc = float(align_data["aligned_accuracy"])
-                rows.append({
-                    "dataset": label,
-                    "model": "aligned_cbm",
-                    "budget": 0,
-                    "threshold": "",
-                    "accuracy": round(aligned_acc, 4),
-                    "gain": round(aligned_acc - gain_ref, 4),
-                    "predictions_intervened_on": "",
-                    "avg_concepts_per_sample": "",
-                    "predictions_changed": "",
-                })
+        # Aligned CBM
+        align_path = cfg.get_alignment_results_path()
+        if align_path.exists():
+            with open(align_path) as f:
+                align_data = json.load(f)
+            aligned_acc = float(align_data["aligned_accuracy"])
+            rows.append({
+                "dataset": label,
+                "model": "aligned_cbm",
+                "budget": 0,
+                "threshold": "",
+                "accuracy": round(aligned_acc, 4),
+                "gain": round(aligned_acc - gain_ref, 4),
+                "predictions_intervened_on": "",
+                "avg_concepts_per_sample": "",
+                "predictions_changed": "",
+            })
 
-                # Aligned CBM with intervention at k=3
-                aligned_weights = align_data.get("aligned_weights")
-                if aligned_weights is not None:
-                    from experiments.alignment import align_frontend_weights
-                    import copy as _copy
+            # Aligned CBM with intervention at k=3
+            aligned_weights = align_data.get("aligned_weights")
+            if aligned_weights is not None:
+                from experiments.alignment import align_frontend_weights
+                import copy as _copy
 
-                    # Load the config's own dataset so concept shapes match
-                    cfg_data = load(cfg.get_dataset_path())
-                    aligned_fe = _copy.deepcopy(cbm.label_predictor)
-                    aligned_fe = align_frontend_weights(
-                        aligned_fe, list(cfg_data.test.concepts), aligned_weights,
-                    )
-                    c_preds = cbm.concept_detector.predict(cfg_data.test)
-                    isettings = InterventionSettings(
-                        seed=cfg.seed,
-                        budgets=[3],
-                        intervention_accuracy=cfg.intervention_accuracy,
-                        intervention_threshold=0.2,
-                    )
-                    _, _, int_results = _test_interventions(
-                        prob_test=c_preds,
-                        settings=isettings,
-                        acc_det=aligned_acc,
-                        fe=aligned_fe,
-                        test=cfg_data.test,
-                    )
-                    for key, res in int_results.items():
-                        pio = int(res["predictions_intervened_on"])
-                        tcc = int(res["total_concept_confirmations"])
-                        avg_cps = round(tcc / pio, 2) if pio > 0 else 0.0
-                        rows.append({
-                            "dataset": label,
-                            "model": "aligned_cbm",
-                            "budget": 3,
-                            "threshold": 0.2,
-                            "accuracy": round(float(res["accuracy"]), 4),
-                            "gain": round(float(res["accuracy"]) - gain_ref, 4),
-                            "predictions_intervened_on": pio,
-                            "avg_concepts_per_sample": avg_cps,
-                            "predictions_changed": int(res["predictions_changed"]),
-                        })
+                # Load the config's own dataset so concept shapes match
+                cfg_data = load(cfg.get_dataset_path())
+                aligned_fe = _copy.deepcopy(cbm.label_predictor)
+                aligned_fe = align_frontend_weights(
+                    aligned_fe, list(cfg_data.test.concepts), aligned_weights,
+                )
+                c_preds = cbm.concept_detector.predict(cfg_data.test)
+                isettings = InterventionSettings(
+                    seed=cfg.seed,
+                    budgets=[3],
+                    intervention_accuracy=cfg.intervention_accuracy,
+                    intervention_threshold=0.2,
+                )
+                _, _, int_results = _test_interventions(
+                    prob_test=c_preds,
+                    settings=isettings,
+                    acc_det=aligned_acc,
+                    fe=aligned_fe,
+                    test=cfg_data.test,
+                )
+                for key, res in int_results.items():
+                    pio = int(res["predictions_intervened_on"])
+                    tcc = int(res["total_concept_confirmations"])
+                    avg_cps = round(tcc / pio, 2) if pio > 0 else 0.0
+                    rows.append({
+                        "dataset": label,
+                        "model": "aligned_cbm",
+                        "budget": 3,
+                        "threshold": 0.2,
+                        "accuracy": round(float(res["accuracy"]), 4),
+                        "gain": round(float(res["accuracy"]) - gain_ref, 4),
+                        "predictions_intervened_on": pio,
+                        "avg_concepts_per_sample": avg_cps,
+                        "predictions_changed": int(res["predictions_changed"]),
+                    })
 
     final_df = pd.DataFrame(rows)
     cfg0 = configs[0]
@@ -1417,9 +1438,11 @@ def collect_results(
 # ── Stage: run (orchestrator) ─────────────────────────────────────────
 
 def run(
-    config: Optional[RobotBenchmarkConfig] = None,
-    stages: Optional[List[str]] = None,
+    config: RobotBenchmarkConfig | None = None,
+    stages: list[str] | None = None,
     force_setup: bool = False,
+    missing_fraction: float = 0.0,
+    missing_mechanism: str = "mcar",
 ) -> None:
     """Run the robot benchmark pipeline for a single configuration.
 
@@ -1427,6 +1450,8 @@ def run(
         config: Benchmark configuration. Defaults to ideal.
         stages: List of stages to run. Default: all.
         force_setup: If True, delete cached images/data before regenerating.
+        missing_fraction: Fraction of concept labels to mask.
+        missing_mechanism: Missingness mechanism ("mcar" or "mnar").
     """
     from concept_benchmark._logging import setup_logging
     setup_logging()
@@ -1503,7 +1528,7 @@ def run(
     if "cbm" in stages:
         logger.info("=== [%d/%d] Train CBM ===", _si["cbm"], n_stages)
         if _should_train("cbm"):
-            train_cbm(config)
+            train_cbm(config, missing_fraction=missing_fraction, missing_mechanism=missing_mechanism)
         else:
             logger.info("Using existing CBM: %s", config.get_model_path("cbm"))
         if "subjective" in config.intervention_regimes:
@@ -1531,7 +1556,8 @@ def run(
 
     if "intervene" in stages:
         logger.info("=== [%d/%d] Intervene ===", _si["intervene"], n_stages)
-        run_interventions(config)
+        run_interventions(config, missing_fraction=missing_fraction,
+                          missing_mechanism=missing_mechanism)
 
     if "align" in stages:
         logger.info("=== [%d/%d] Align ===", _si["align"], n_stages)
@@ -1576,11 +1602,6 @@ def _parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def _parse_budgets(raw):
-    budgets = []
-    for v in raw:
-        budgets.append(-1 if v.lower() == "max" else int(v))
-    return budgets
 
 
 def main(argv=None):
@@ -1599,7 +1620,7 @@ def main(argv=None):
         config = RobotBenchmarkConfig(seed=args.seed)
 
     if args.budgets:
-        config.intervention_budgets = _parse_budgets(args.budgets)
+        config.intervention_budgets = parse_budgets(args.budgets)
     if args.regimes:
         config.intervention_regimes = args.regimes
     if args.strategy:
@@ -1608,13 +1629,11 @@ def main(argv=None):
         config.llm_api_key = args.llm_api_key
     if args.force_retrain:
         config.force_retrain = True
-    if args.missing_fraction is not None:
-        config.missing_fraction = args.missing_fraction
-        config.missing_mechanism = args.missing_mechanism or "mcar"
-    elif args.missing_mechanism is not None:
-        config.missing_mechanism = args.missing_mechanism
+    missing_fraction = args.missing_fraction or 0.0
+    missing_mechanism = args.missing_mechanism or "mcar"
 
-    run(config, stages=args.stages, force_setup=args.force_setup)
+    run(config, stages=args.stages, force_setup=args.force_setup,
+        missing_fraction=missing_fraction, missing_mechanism=missing_mechanism)
 
 
 if __name__ == "__main__":

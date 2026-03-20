@@ -22,9 +22,13 @@ from concept_benchmark import DatasetGenerator
 # 1. Generate dataset (render_images=False skips image rendering for speed)
 # ---------------------------------------------------------------------------
 print("Generating robot dataset...")
-dataset = DatasetGenerator("robot", seed=1014, render_images=False).generate()
+gen = DatasetGenerator("robot", seed=1014, render_images=False)
+dataset = gen.generate()
+from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
+dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["ground_truth"])
+dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
 
-train, test = dataset.training, dataset.test
+train, test = dataset.train, dataset.test
 print(f"  Training:  {train.n} samples, {train.n_concepts} concepts")
 print(f"  Test:      {test.n} samples")
 print(f"  Concepts:  {train.concepts}")

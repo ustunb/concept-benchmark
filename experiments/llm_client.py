@@ -13,7 +13,8 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import numpy as np
@@ -52,7 +53,7 @@ class _LLMRegistry:
         return kls(model_name, api_key)
 
 
-def _encode_images_b64(image_paths: Sequence[str | Path]) -> List[tuple]:
+def _encode_images_b64(image_paths: Sequence[str | Path]) -> list[tuple]:
     out = []
     for p in image_paths:
         try:
@@ -67,7 +68,8 @@ def _encode_images_b64(image_paths: Sequence[str | Path]) -> List[tuple]:
                 mime = "image/png"
             out.append((b64, mime))
         except (OSError, ValueError):
-            continue  # skip unreadable image files
+            logging.getLogger(__name__).debug("Skipping unreadable image: %s", p)
+            continue
     return out
 
 
@@ -89,7 +91,7 @@ class _GeminiClient(_LLMBase):
             try:
                 imgs.append(Image.open(p).convert("RGB"))
             except (OSError, ValueError):
-                pass  # skip unreadable image files
+                logging.getLogger(__name__).debug("Skipping unreadable image: %s", p)
         parts = [prompt] + imgs if imgs else [prompt]
         resp = client.models.generate_content(
             model=self.model_name,
@@ -160,7 +162,7 @@ class _AnthropicClient(_LLMBase):
 def make_llm_client(
     provider: str,
     model: str,
-    api_key: Optional[str] = None,
+    api_key: str | None = None,
     api_key_env: str = "",
 ) -> _LLMBase:
     """Create an LLM client for the given provider.
@@ -213,7 +215,7 @@ def judge_concepts_batch(
     image_paths: Sequence[str | Path],
     concept_texts: Sequence[str],
     mask: "np.ndarray",
-    cache_path: Optional[str | Path] = None,
+    cache_path: str | Path | None = None,
 ) -> "np.ndarray":
     """Judge concepts for a batch of images where mask is True.
 

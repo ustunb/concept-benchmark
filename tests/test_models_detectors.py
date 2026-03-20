@@ -1,9 +1,9 @@
 import copy
 import numpy as np
-import torch
 import torch.nn as nn
 
 from experiments.models import ConceptDetector
+from tests.conftest import _any_state_diff
 
 
 import pytest
@@ -13,16 +13,6 @@ def _proba_checks(arr: np.ndarray, n: int, k: int):
     assert arr.shape == (n, k)
     assert np.all(np.isfinite(arr))
     assert np.all(arr >= 0) and np.all(arr <= 1)
-
-
-def _any_state_diff(state_a, state_b):
-    for k in state_a:
-        ta, tb = state_a[k], state_b[k]
-        if ta.dtype != tb.dtype or ta.shape != tb.shape:
-            return True
-        if not torch.allclose(ta, tb):
-            return True
-    return False
 
 
 def test_detector_fit_predict_with_encoder_freeze_variants(tabular_train_valid):

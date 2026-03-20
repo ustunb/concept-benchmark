@@ -285,8 +285,6 @@ def create_robot_image_dataset(
     color_mode: str = "color",
     blur: dict | None = None,
     verbose: bool = False,
-    train_concept_detector: bool | None = None,
-    epochs: int | None = None,
     **extra_params,
 ) -> ConceptDataset:
     """Create an image-based robot ConceptDataset."""
@@ -306,8 +304,6 @@ def create_robot_image_dataset(
         if resolution is not None
         else (600 if size == "large" else 32 if size == "medium" else 8)
     )
-    _ = (train_concept_detector, epochs)  # parameters accepted for API compatibility
-
     catalog_df, new_concepts = generate_robot_catalog(
         concepts=concepts,
         num_robots=total_robots,
@@ -337,13 +333,13 @@ def create_robot_image_dataset(
             intercept=extra_params.get("model_intercept", 0.0),
             scalar=extra_params.get("model_scalar", 1.0),
         )
-        glorp_model_true = lambda row, _e=expr: eval(_e)
+        glorp_model_true = lambda row, _e=expr: eval(_e)  # noqa: S307 — intentional eval of synthetic config formulas
     elif model:
         # Legacy string path (backward compat for tests / custom usage)
         if model_type == "deterministic":
-            glorp_model_true = lambda row: eval(unlist0(model))
+            glorp_model_true = lambda row: eval(unlist0(model))  # noqa: S307 — intentional eval of synthetic config formulas
         elif model_type == "stochastic":
-            glorp_model_true = lambda row: eval(
+            glorp_model_true = lambda row: eval(  # noqa: S307 — intentional eval of synthetic config formulas
                 model_to_logistic(
                     model,
                     scalar=extra_params.get("scalar", 1.0),
@@ -467,34 +463,3 @@ def create_robot_image_dataset(
     )
 
     return robot_dataset
-
-
-# Sample kwargs:
-
-# if __name__ == "__main__":
-#     params = {
-#         'samples_per_instance': 1,
-#         # how many times to repeat each robot with changed colors (irrelavant feature); max 108
-#         'draw': True,
-#         'output_directory': './robot_images',
-#         'concepts': {
-#             'head_shape': ['square', 'round'],
-#             'body_shape': ['square', 'round'],
-#             'has_knees': ['false', 'true'],
-#             'has_elbows': ['false', 'true'],
-#             'has_antennae': ['false', 'true'],
-#             'ears_shape': ['square', 'triangle'],
-#             'mouth_type': ['closed', 'open'],
-#             'hand_shape': ['round_circle', 'round_oval', 'round_oval2',
-#                            'edgy_triangle', 'edgy_square', 'edgy_trapezoid'],
-#             'foot_shape': ['flat_4sided', 'flat_5sided', 'flat_lshaped',
-#                            'pointy_3sided', 'pointy_4sided', 'pointy_6sided'],
-#         },
-#         'model': "'glorp' if (int(row['body_shape']=='square') + int(row['foot_shape']=='pointy') - 2 >= 0) else 'drent'",
-#         'model_type': 'deterministic',  # 'deterministic', 'stochastic'
-#         'size': 'large',  # 'small', 'large'
-#         'color_mode': 'color',  # 'grayscale', 'color'
-#     }
-#
-#     dataset = create_synthetic_dataset(**params)
-#     print(dataset)
