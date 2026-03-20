@@ -12,7 +12,7 @@ Generate a dataset and access it in the format your model expects:
 from concept_benchmark import DatasetGenerator
 
 dataset = DatasetGenerator("robot", seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
-train, val, test = dataset.training, dataset.validation, dataset.test
+train, val, test = dataset.train, dataset.validation, dataset.test
 ```
 
 Each split is a `ConceptDatasetSample` with these attributes:

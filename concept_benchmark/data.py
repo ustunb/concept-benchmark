@@ -41,6 +41,97 @@ from .helper.data_utils import (
 )
 
 
+def _resolve_split_size(size: int | float, total: int) -> int:
+    """Convert a float fraction or absolute count to an integer count."""
+    if isinstance(size, float):
+        if not 0.0 < size < 1.0:
+            raise ValueError(f"Float size must be in (0, 1), got {size}")
+        return int(round(size * total))
+    return min(int(size), total)
+
+
+def _to_mask(indices: np.ndarray, n: int) -> np.ndarray:
+    """Convert an array of integer indices to a boolean mask of length *n*."""
+    mask = np.zeros(n, dtype=bool)
+    if len(indices) > 0:
+        mask[indices] = True
+    return mask
+
+
+def _stratified_split(
+    n: int,
+    labels: np.ndarray,
+    n_test: int,
+    n_val: int,
+    rng: np.random.Generator,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Split indices with class-stratified proportions."""
+    classes = np.unique(labels)
+    train_parts, val_parts, test_parts = [], [], []
+    for c in classes:
+        c_idx = np.where(labels == c)[0].copy()
+        rng.shuffle(c_idx)
+        n_c = len(c_idx)
+        n_c_test = int(round(n_test * n_c / n))
+        n_c_val = int(round(n_val * n_c / n))
+        test_parts.append(c_idx[:n_c_test])
+        val_parts.append(c_idx[n_c_test : n_c_test + n_c_val])
+        train_parts.append(c_idx[n_c_test + n_c_val :])
+    return (
+        np.concatenate(train_parts) if train_parts else np.array([], dtype=int),
+        np.concatenate(val_parts) if val_parts else np.array([], dtype=int),
+        np.concatenate(test_parts) if test_parts else np.array([], dtype=int),
+    )
+
+
+def _group_split(
+    groups: np.ndarray,
+    n_test: int,
+    n_val: int,
+    stratify: np.ndarray | None,
+    rng: np.random.Generator,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Split indices so no group appears in multiple splits."""
+    n = len(groups)
+    unique_groups = np.unique(groups)
+    n_groups = len(unique_groups)
+    g_test = max(1, int(round(n_test / n * n_groups)))
+    g_val = max(1, int(round(n_val / n * n_groups)))
+
+    if stratify is not None:
+        # Majority label per group
+        group_labels: dict[int, list] = {}
+        for i in range(n):
+            group_labels.setdefault(int(groups[i]), []).append(int(stratify[i]))
+        group_majority = {
+            g: int(round(np.mean(ls))) for g, ls in group_labels.items()
+        }
+        by_class: dict[int, list] = {}
+        for g in unique_groups:
+            by_class.setdefault(group_majority[int(g)], []).append(g)
+        test_g, val_g = [], []
+        for cls in sorted(by_class):
+            arr = np.array(by_class[cls])
+            rng.shuffle(arr)
+            frac = len(arr) / n_groups
+            nt = int(round(g_test * frac))
+            nv = int(round(g_val * frac))
+            test_g.extend(arr[:nt].tolist())
+            val_g.extend(arr[nt : nt + nv].tolist())
+    else:
+        arr = unique_groups.copy()
+        rng.shuffle(arr)
+        test_g = arr[:g_test].tolist()
+        val_g = arr[g_test : g_test + g_val].tolist()
+
+    test_set = set(test_g)
+    val_set = set(val_g)
+    test_mask = np.isin(groups, list(test_set))
+    val_mask = np.isin(groups, list(val_set))
+    train_mask = ~(test_mask | val_mask)
+    return np.where(train_mask)[0], np.where(val_mask)[0], np.where(test_mask)[0]
+
+
 def _deep_equal(a, b) -> bool:
     """Type-aware deep equality for nested structures and array-like values.
 
@@ -251,14 +342,20 @@ class ConceptDataset:
         if not keep_indices:
             raise ValueError("Cannot drop all concepts; at least one must remain.")
 
-        # Update concept matrix and metadata
-        self._full._C_base = self._full._C_base[:, keep_indices]
-        self._full.meta["concepts"] = [self.concepts[i] for i in keep_indices]
-        self._full.concepts = self._full.meta["concepts"]
+        new_concepts = [self.concepts[i] for i in keep_indices]
 
-        # Update all samples
+        # Update all samples (including _full and splits)
         for sample in self._iter_samples():
-            sample.concepts = sample.meta["concepts"]
+            sample._C_base = sample._C_base[:, keep_indices]
+            new_meta = dict(sample.meta)
+            new_meta["concepts"] = new_concepts
+            sample.meta = new_meta
+            if sample._concept_noise_mask is not None:
+                sample._concept_noise_mask = sample._concept_noise_mask[:, keep_indices]
+            if sample._concept_missing_mask is not None:
+                sample._concept_missing_mask = sample._concept_missing_mask[
+                    :, keep_indices
+                ]
 
         assert self.__check_rep__()
 
@@ -370,7 +467,7 @@ class ConceptDataset:
                 assert sample.__check_rep__()
                 n_total += sample.n
 
-        assert self.n == n_total
+        assert n_total <= self.n
 
         return True
 
@@ -706,6 +803,98 @@ class ConceptDataset:
 
         return new_ds
 
+    def sample(
+        self,
+        *,
+        test_size: int | float = 0.2,
+        val_size: int | float = 0.2,
+        train_size: int | None = None,
+        groups: np.ndarray | None = None,
+        stratify: np.ndarray | None = None,
+        sampling_constraints: list[dict] | None = None,
+        seed: int | None = None,
+    ) -> "ConceptDataset":
+        """Split into training/validation/test sets.
+
+        Supports random, stratified, and group-based splitting, plus
+        skewed training set resampling via *sampling_constraints*.
+
+        Parameters
+        ----------
+        test_size : int or float
+            Number of test samples (int) or fraction (float in (0, 1)).
+        val_size : int or float
+            Number of validation samples (int) or fraction (float in (0, 1)).
+        train_size : int, optional
+            Maximum number of training samples.  ``None`` uses all remaining.
+        groups : np.ndarray, optional
+            Group labels for group-based splitting (no group leakage).
+        stratify : np.ndarray, optional
+            Labels for stratified splitting (preserves class proportions).
+        sampling_constraints : list of dict, optional
+            Skewing constraints for the training set.  Each dict has
+            ``"concepts"`` (mapping concept_name → value) and
+            ``"min_fraction"`` (minimum fraction of training set).
+        seed : int, optional
+            Random seed for reproducibility.
+
+        Returns
+        -------
+        ConceptDataset
+            Self, with ``training``/``validation``/``test`` set.
+        """
+        from .utils import _create_skewed_training_set
+
+        rng = np.random.default_rng(seed)
+        n = self.n
+        n_test = _resolve_split_size(test_size, n)
+        n_val = _resolve_split_size(val_size, n)
+
+        if groups is not None:
+            train_idx, val_idx, test_idx = _group_split(
+                groups, n_test, n_val, stratify, rng
+            )
+        elif stratify is not None:
+            train_idx, val_idx, test_idx = _stratified_split(
+                n, stratify, n_test, n_val, rng
+            )
+        else:
+            all_idx = np.arange(n)
+            rng.shuffle(all_idx)
+            test_idx = all_idx[:n_test]
+            remaining = all_idx[n_test:]
+
+            if sampling_constraints:
+                n_train = (
+                    train_size
+                    if train_size is not None
+                    else len(remaining) - n_val
+                )
+                train_idx = _create_skewed_training_set(
+                    self, sampling_constraints, remaining, n_train, rng
+                )
+                used = set(train_idx.tolist())
+                val_pool = np.array([i for i in remaining if i not in used])
+                rng.shuffle(val_pool)
+                val_idx = val_pool[:n_val]
+            else:
+                val_idx = remaining[:n_val]
+                train_idx = remaining[n_val:]
+
+        # Apply train_size limit (when no sampling_constraints)
+        if (
+            not sampling_constraints
+            and train_size is not None
+            and len(train_idx) > train_size
+        ):
+            train_idx = train_idx[:train_size]
+
+        self.training = self._full.filter(_to_mask(train_idx, n))
+        self.validation = self._full.filter(_to_mask(val_idx, n))
+        self.test = self._full.filter(_to_mask(test_idx, n))
+        self._apply_noise_settings()
+        return self
+
     def sample_concept_missingness(
         self,
         *,
@@ -715,6 +904,7 @@ class ConceptDataset:
         mnar_config: Mapping[str, object] | None = None,
         fill_value: float = np.nan,
         enable: bool | None = None,
+        splits: set[str] | None = None,
     ) -> dict[str, np.ndarray]:
         """Sample concept-level missingness masks.
 
@@ -738,11 +928,14 @@ class ConceptDataset:
             Value used to replace missing concepts (default ``NaN``).
         enable : bool, optional
             If provided, sets :attr:`has_concept_missing` after sampling.
+        splits : set of str, optional
+            Which splits to apply missingness to (e.g. ``{"train"}``).
+            ``None`` applies to all splits.
 
         Returns
         -------
         dict[str, np.ndarray]
-            Mapping from split name (``"training"``, ``"validation"``,
+            Mapping from split name (``"train"``, ``"validation"``,
             ``"test"``) to the sampled boolean mask.
         """
 
@@ -756,13 +949,15 @@ class ConceptDataset:
             self.has_concept_missing = bool(enable)
 
         masks: dict[str, np.ndarray] = {}
-        splits = {
-            "training": self.training,
+        all_splits = {
+            "train": self.training,
             "validation": getattr(self, "validation", None),
             "test": getattr(self, "test", None),
         }
 
-        for split_name, sample in splits.items():
+        for split_name, sample in all_splits.items():
+            if splits is not None and split_name not in splits:
+                continue
             if sample is None or sample.base_concepts is None:
                 continue
 
@@ -821,7 +1016,7 @@ class ConceptDataset:
         rng_generated = coerce_rng(rng)
         masks: dict[str, np.ndarray] = {}
         splits = {
-            "training": self.training,
+            "train": self.training,
             "validation": getattr(self, "validation", None),
             "test": getattr(self, "test", None),
         }
@@ -890,7 +1085,7 @@ class ConceptDataset:
         noisy_labels["full"] = full_labels
 
         splits = {
-            "training": self.training,
+            "train": self.training,
             "validation": getattr(self, "validation", None),
             "test": getattr(self, "test", None),
         }

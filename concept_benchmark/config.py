@@ -10,8 +10,8 @@ from __future__ import annotations
 __all__ = [
     "RobotBenchmarkConfig",
     "SudokuBenchmarkConfig",
-    "TEXT_IDEAL_EXCLUDED_CONCEPTS",
-    "TEXT_SUBCONCEPT_EXCLUDED_CONCEPTS",
+    "PRESET_EXCLUDED_CONCEPTS",
+    "TEXT_PRESET_EXCLUDED_CONCEPTS",
 ]
 
 import copy
@@ -58,6 +58,16 @@ SUBCONCEPT_EXCLUDED_CONCEPTS = [
 
 TEXT_IDEAL_EXCLUDED_CONCEPTS: List[str] = []
 TEXT_SUBCONCEPT_EXCLUDED_CONCEPTS = ["has_elbows", "hands_are_pointy"]
+
+PRESET_EXCLUDED_CONCEPTS = {
+    "ground_truth": list(IDEAL_EXCLUDED_CONCEPTS),
+    "foot_subtypes": list(SUBCONCEPT_EXCLUDED_CONCEPTS),
+}
+
+TEXT_PRESET_EXCLUDED_CONCEPTS = {
+    "ground_truth": list(TEXT_IDEAL_EXCLUDED_CONCEPTS),
+    "foot_subtypes": list(TEXT_SUBCONCEPT_EXCLUDED_CONCEPTS),
+}
 
 ROBOT_CONCEPTS = {
     "head_shape": ["square", "round"],
@@ -230,14 +240,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             "temperature": 4.2,
         }
     )
-    test_size: int = 10000
-    train_size: int = 3800
-    sampling_constraints: List[Dict] = field(
-        default_factory=lambda: copy.deepcopy(ROBOT_SAMPLING_CONSTRAINTS),
-    )
-    excluded_concepts: List[str] = field(
-        default_factory=lambda: list(IDEAL_EXCLUDED_CONCEPTS),
-    )
     expand_concepts: List[str] = field(
         default_factory=lambda: ["foot_shape"],
     )
@@ -271,10 +273,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     llm_api_key: str = ""
     llm_api_key_env: str = "GEMINI_API_KEY"
     force_retrain: bool = False  # force retrain LFCBM/subjective models
-
-    # Missingness
-    missing_fraction: float = 0.0
-    missing_mechanism: str = "mcar"
 
     # Alignment (sign constraints for constrained retraining)
     alignment_constraints: Optional[Dict[str, int]] = None
@@ -327,14 +325,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
 
     def _auto_configure_text(self):
         """Auto-switch defaults for text modality."""
-        # Clear image-default sampling constraints (text doesn't need them)
-        if self.sampling_constraints == ROBOT_SAMPLING_CONSTRAINTS:
-            self.sampling_constraints = []
-        # Auto-set text-appropriate excluded_concepts based on concept_preset
-        if self.excluded_concepts == list(IDEAL_EXCLUDED_CONCEPTS):
-            self.excluded_concepts = list(TEXT_IDEAL_EXCLUDED_CONCEPTS)
-        elif self.excluded_concepts == list(SUBCONCEPT_EXCLUDED_CONCEPTS):
-            self.excluded_concepts = list(TEXT_SUBCONCEPT_EXCLUDED_CONCEPTS)
         # For ground_truth preset, clear image-default expand_concepts
         # so text uses collapsed binary features (9 concepts like the original)
         if self.concept_preset == "ground_truth" and self.expand_concepts == [
@@ -383,12 +373,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
 
     def _validate_image(self):
         """Validate image-specific parameters."""
-        # If foot_subtypes but excluded_concepts still has the ground_truth default,
-        # automatically switch to SUBCONCEPT_EXCLUDED_CONCEPTS so the flag alone is sufficient.
-        if self.concept_preset == "foot_subtypes" and self.excluded_concepts == list(
-            IDEAL_EXCLUDED_CONCEPTS
-        ):
-            self.excluded_concepts = list(SUBCONCEPT_EXCLUDED_CONCEPTS)
         if self.image_size not in IMAGE_SIZE_TO_PIXELS:
             raise ValueError(
                 f"image_size must be one of {sorted(IMAGE_SIZE_TO_PIXELS)}, "
@@ -408,11 +392,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 f"template_complexity must be 'high', 'medium', or 'low', "
                 f"got {self.template_complexity!r}"
             )
-        # Auto-switch excluded_concepts for foot_subtypes in text mode
-        if self.concept_preset == "foot_subtypes" and self.excluded_concepts == list(
-            TEXT_IDEAL_EXCLUDED_CONCEPTS
-        ):
-            self.excluded_concepts = list(TEXT_SUBCONCEPT_EXCLUDED_CONCEPTS)
         unknown = set(self.intervention_regimes) - ROBOT_TEXT_VALID_REGIMES
         if unknown:
             raise ValueError(
@@ -431,12 +410,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     def _preset_suffix(self) -> str:
         """``'_subconcept'`` or ``'_ideal'`` for filename construction."""
         return "_subconcept" if self.concept_preset == "foot_subtypes" else "_ideal"
-
-    def _missingness_suffix(self) -> str:
-        """Filename suffix for missingness, empty string if none."""
-        if self.missing_fraction > 0:
-            return f"_{self.missing_mechanism}_{int(self.missing_fraction * 100)}"
-        return ""
 
     @property
     def pixel_resolution(self) -> int:
@@ -475,10 +448,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     @classmethod
     def default_subconcept(cls) -> RobotBenchmarkConfig:
         """Config matching the paper's subconcept robot benchmark."""
-        return cls(
-            concept_preset="foot_subtypes",
-            excluded_concepts=list(SUBCONCEPT_EXCLUDED_CONCEPTS),
-        )
+        return cls(concept_preset="foot_subtypes")
 
     @property
     def input_size(self) -> int:
@@ -503,20 +473,14 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             "train_dnn": 0,
             "seed": self.seed,
             "rng_seed": self.seed,
-            "test_size": self.test_size,
-            "train_skew_size": self.train_size,
             "concepts": copy.deepcopy(self.concepts),
             "additional_features": list(self.expand_concepts),
             "subconcept": self.concept_preset == "foot_subtypes",
-            "drop_concepts": list(self.excluded_concepts),
             "model_type": self._labeling_tag,
             "model_features": dict(self.label_features),
             "model_weights": dict(self.label_weights),
             "model_intercept": self.label_intercept,
             "model_scalar": self.label_temperature,
-            "skew_specs": copy.deepcopy(self.sampling_constraints),
-            "concept_missing": self.missing_fraction,
-            "concept_missing_mech": self.missing_mechanism,
         }
 
     def setup_fingerprint(self) -> str:
@@ -606,7 +570,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             return results_dir / f"robot_text_{model_class}_seed{self.seed}.model"
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}_{self.renders_per_robot}"
-            f"{self._preset_suffix}{self._missingness_suffix()}"
+            f"{self._preset_suffix}"
             f"_{model_class}.model"
         )
         return results_dir / filename
@@ -618,7 +582,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         filename = f"robot_{self.data_type}_{self._labeling_tag}"
         if model_class == "cbm":
             filename += self._preset_suffix
-        filename += f"{self._missingness_suffix()}_{model_class}_results.csv"
+        filename += f"_{model_class}_results.csv"
         return results_dir / filename
 
     def get_alignment_constraints(self) -> Dict[str, int]:
@@ -639,7 +603,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             return results_dir / f"robot_text_alignment_seed{self.seed}.json"
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}"
-            f"{self._preset_suffix}{self._missingness_suffix()}"
+            f"{self._preset_suffix}"
             f"_alignment.json"
         )
         return results_dir / filename
@@ -662,12 +626,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         """Return the path for the collect-stage summary CSV."""
         if self.data_type == "text":
             return results_dir / "robot_text_results.csv"
-        if self.excluded_concepts == list(IDEAL_EXCLUDED_CONCEPTS):
-            variant = "ideal"
-        elif self.excluded_concepts == list(SUBCONCEPT_EXCLUDED_CONCEPTS):
-            variant = "subconcept"
-        else:
-            variant = "custom"
+        variant = "subconcept" if self.concept_preset == "foot_subtypes" else "ideal"
         return (
             results_dir
             / f"robot_{variant}_seed{self.seed}_{self._config_hash()}_results.csv"
@@ -695,10 +654,6 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     batch_size: int = 32
     cs_epochs: int = 100
     cs_patience: int = 20
-
-    # Missingness
-    missing_fraction: float = 0.0
-    missing_mechanism: str = "mcar"
 
     # Intervention
     intervention_budgets: List[int] = field(default_factory=lambda: [1, 3, 27])
@@ -752,7 +707,6 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
             ),
             "epochs": self.epochs,
             "patience": self.patience,
-            "concept_missing_mech": self.missing_mechanism,
         }
 
     def setup_fingerprint(self) -> str:
@@ -787,8 +741,6 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
         filename = (
             f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}"
         )
-        if self.missing_fraction > 0.0:
-            filename += f"_cm{self.missing_mechanism}{self.missing_fraction}"
         return results_dir / f"{filename}.model"
 
     def get_results_path(
@@ -799,8 +751,6 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
         filename = (
             f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}"
         )
-        if self.missing_fraction > 0.0:
-            filename += f"_cm{self.missing_mechanism}{self.missing_fraction}"
         return results_dir / f"{filename}.results"
 
     def get_alignment_weights(self) -> Dict[str, float]:
@@ -823,8 +773,6 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
         """Return the path where alignment results JSON is saved."""
         dt = data_type or self.data_type
         filename = f"sudoku_alignment_{dt}_n{self.block_size}_mc{self.max_cell_swaps}"
-        if self.missing_fraction > 0.0:
-            filename += f"_cm{self.missing_mechanism}{self.missing_fraction}"
         return results_dir / f"{filename}.json"
 
     def _config_hash(self) -> str:

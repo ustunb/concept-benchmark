@@ -75,9 +75,26 @@ def setup_dataset(
 
     ds = DatasetGenerator.from_config(config).generate()
 
+    from concept_benchmark.config import TEXT_PRESET_EXCLUDED_CONCEPTS
+    excluded = TEXT_PRESET_EXCLUDED_CONCEPTS[config.concept_preset]
+    if excluded:
+        ds.drop_concepts(excluded)
+
+    ds.sample(
+        test_size=0.15,
+        val_size=0.2,
+        groups=ds.meta["row_index"],
+        stratify=ds.y,
+        seed=config.seed + 1,
+    )
+
+    # Missingness can be applied here if needed:
+    # ds.sample_concept_missingness(p=0.2, mechanism="mcar", rng=config.seed + 999,
+    #                                splits={"train"}, enable=True)
+
     logger.info(
         "Split sizes — train: %d, val: %d, test: %d",
-        ds.training.n,
+        ds.train.n,
         ds.validation.n,
         ds.test.n,
     )
@@ -865,10 +882,6 @@ def main(argv=None):
         init_kwargs = {"data_type": "text", "seed": args.seed}
         if args.concept_preset:
             init_kwargs["concept_preset"] = args.concept_preset
-        if args.missing_fraction is not None:
-            init_kwargs["missing_fraction"] = args.missing_fraction
-        if args.missing_mechanism is not None:
-            init_kwargs["missing_mechanism"] = args.missing_mechanism
         config = RobotBenchmarkConfig(**init_kwargs)
 
     if args.budgets:

@@ -12,7 +12,12 @@ Quick start::
 
     from concept_benchmark import DatasetGenerator
 
-    dataset = DatasetGenerator("robot", seed=1014, render_images=False).generate()
+    from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
+
+    gen = DatasetGenerator("robot", seed=1014, render_images=False)
+    dataset = gen.generate()
+    dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["ground_truth"])
+    dataset.sample(test_size=0.2, val_size=0.2, seed=1014)
     print(dataset)
 """
 

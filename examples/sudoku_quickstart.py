@@ -25,8 +25,9 @@ from concept_benchmark import DatasetGenerator
 # ---------------------------------------------------------------------------
 print("Generating Sudoku dataset (50 boards with handwritten digit images)...")
 dataset = DatasetGenerator("sudoku", seed=171, n_boards=50).generate()
+dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=171)
 
-train, test = dataset.training, dataset.test
+train, test = dataset.train, dataset.test
 print(f"  Training:  {train.n} samples, {train.n_concepts} concepts")
 print(f"  Test:      {test.n} samples")
 print(f"  Concepts:  {train.concepts[:5]} ... ({train.n_concepts} total)")
@@ -36,7 +37,7 @@ print(f"  Classes:   {train.classes}")
 # 2. Explore the dataset — opens an interactive viewer with board images
 # ---------------------------------------------------------------------------
 # Uncomment to launch the Spotlight viewer:
-# dataset.training.explore()
+# dataset.train.explore()
 
 df = train.to_dataframe()
 print(f"\nDataFrame preview ({len(df)} rows, showing first 5 concepts):")

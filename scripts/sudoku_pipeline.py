@@ -100,17 +100,10 @@ def train_cs(
     if data is None:
         tab_dir = config.get_dataset_path(data_type="tabular")
         data = load(tab_dir / "sudoku_dataset.pkl")
-        data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=config.seed)
-        data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
+        data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
-    if config.missing_fraction > 0:
-        data.sample_concept_missingness(
-            p=config.missing_fraction,
-            mechanism=config.missing_mechanism,
-            rng=np.random.default_rng(config.seed),
-        )
-        data.training.has_concept_missing = True
-        data.validation.has_concept_missing = True
+    # Missingness can be applied here if needed:
+    # data.sample_concept_missingness(p=0.2, mechanism="mcar", rng=config.seed)
 
     _macos = platform.system() == "Darwin"
     loader_config = {
@@ -164,8 +157,7 @@ def train_dnn(
     if data is None:
         tab_dir = config.get_dataset_path(data_type="tabular")
         data = load(tab_dir / "sudoku_dataset.pkl")
-        data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=config.seed)
-        data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
+        data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
     from experiments.models import SudokuValidatorCNN as DNNSudokuModel
 
@@ -255,8 +247,7 @@ def run_interventions(
         else:
             tab_dir = config.get_dataset_path(data_type="tabular")
             data = load(tab_dir / "sudoku_dataset.pkl")
-        data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=config.seed)
-        data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
+        data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
     if cs_model is None:
         cs_model = load(config.get_model_path("cs", data_type="tabular"))
@@ -355,8 +346,7 @@ def align(
     if data is None:
         tab_dir = config.get_dataset_path(data_type="tabular")
         data = load(tab_dir / "sudoku_dataset.pkl")
-        data.generate_cvindices(strata=data.y, total_folds_for_cv=[5], seed=config.seed)
-        data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
+        data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
     if cs_model is None:
         cs_model = load(config.get_model_path("cs", data_type="tabular"))
@@ -391,11 +381,7 @@ def align(
 
 def _dataset_label(cfg: SudokuBenchmarkConfig) -> str:
     """Human-readable dataset label for the summary CSV."""
-    label = f"mc{cfg.max_cell_swaps}"
-    if cfg.missing_fraction > 0:
-        label += f"_{cfg.missing_mechanism}"
-        label += f"_{int(cfg.missing_fraction * 100)}"
-    return label
+    return f"mc{cfg.max_cell_swaps}"
 
 
 def collect_results(
@@ -623,10 +609,9 @@ def run(
         else:
             tab_dir = config.get_dataset_path(data_type="tabular")
             _shared_data = load(tab_dir / "sudoku_dataset.pkl")
-        _shared_data.generate_cvindices(
-            strata=_shared_data.y, total_folds_for_cv=[5], seed=config.seed
+        _shared_data.sample(
+            test_size=0.2, val_size=0.2, stratify=_shared_data.y, seed=config.seed
         )
-        _shared_data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
 
         cs_path = config.get_model_path("cs", data_type="tabular")
         if cs_path.exists():
@@ -785,10 +770,7 @@ def compute_selective_results(
         else:
             tab_dir = config.get_dataset_path(data_type="tabular")
             data = load(tab_dir / "sudoku_dataset.pkl")
-        data.generate_cvindices(
-            strata=data.y, total_folds_for_cv=[5], seed=config.seed
-        )
-        data.split(fold_id="K05N01", fold_num_validation=4, fold_num_test=5)
+        data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
     loader_cfg = get_loader_config(device)
     val_loader = data.validation.loader(shuffle=False, **loader_cfg)

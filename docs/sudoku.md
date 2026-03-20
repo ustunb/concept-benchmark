@@ -31,8 +31,6 @@ dataset = DatasetGenerator(
     cell_margin_px=2,          # cell margin in pixels
     gridline_px=2,             # grid line width in pixels
     block_border_px=5,         # block border width in pixels
-    missing_fraction=0.0,      # fraction of concept labels masked during training
-    missing_mechanism="mcar",  # missingness mechanism: "mcar" or "mnar"
 ).generate()
 ```
 

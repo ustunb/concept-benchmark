@@ -35,7 +35,6 @@ def test_robot_image_generation_and_training(tmp_path):
     from torchvision import transforms
 
     from concept_benchmark.synthetic.robot import create_robot_image_dataset
-    from concept_benchmark.utils import create_skewed_splits_full
     from experiments.models import (
         ConceptBasedModel,
         ConceptDetector,
@@ -61,17 +60,7 @@ def test_robot_image_generation_and_training(tmp_path):
     assert len(pngs) >= 16, f"Expected >=16 PNGs, got {len(pngs)}"
 
     # Step 2: Split into train/val/test
-    ds.generate_cvindices(seed=42)
-    rng = np.random.default_rng(42)
-    ds = create_skewed_splits_full(
-        dataset=ds,
-        skew_specs=[],  # no skewing for tiny set
-        test_size=4,
-        train_skew_size=8,
-        val_fraction=0.5,
-        rng=rng,
-        drop_concepts=[],
-    )
+    ds.sample(test_size=4, val_size=4, seed=42)
     assert ds.training is not None
     assert ds.validation is not None
     assert ds.test is not None
