@@ -1,0 +1,21 @@
+{
+  "original_accuracy": 0.7812,
+  "aligned_accuracy": 0.7656,
+  "accuracy_change": -0.015600000000000058,
+  "predictions_changed": 990,
+  "aligned_weights": {
+    "head_shape": 0.06007319207733716,
+    "body_shape": -0.056520779678336644,
+    "has_knees": -5.759101803777805e-10,
+    "has_antennae": -0.0191714739309398,
+    "ears_shape": 0.027030504164856046,
+    "mouth_type": -23.315535009425503,
+    "foot_shape_flat_trapezoid": -7.2786339225249455,
+    "foot_shape_flat_square": -7.208177519880385,
+    "foot_shape_flat_5sided": -6.718378739994247,
+    "foot_shape_pointy_rounded": 17.608083686727365,
+    "foot_shape_pointy_square": 16.916382071847345,
+    "foot_shape_pointy_4sided": 16.629588855934117,
+    "bias": 30.042115102652822
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "original_accuracy": 0.8673,
+  "aligned_accuracy": 0.8657,
+  "accuracy_change": -0.0015999999999999348,
+  "predictions_changed": 1032,
+  "aligned_weights": {
+    "head_shape": 0.06321901738950345,
+    "body_shape": -0.05466139579093423,
+    "has_knees": -4.90024377358084e-10,
+    "has_antennae": -0.021804804067585056,
+    "ears_shape": 0.031212414651538595,
+    "mouth_type": -23.286633109988394,
+    "foot_shape": 23.33212454398404,
+    "bias": 23.278596732788127
+  }
+}
