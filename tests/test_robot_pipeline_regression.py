@@ -6,6 +6,8 @@ They serve as a safety net during refactoring.
 """
 
 import sys
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -260,11 +262,9 @@ class TestRegimeCSV:
 
     @pytest.fixture(scope="class")
     def regime_df(self):
-        csv_path = results_dir / "robot_image_stochastic_subconcept_cbm_results.csv"
+        csv_path = Path(__file__).parent / "data" / "regime_results_reference.csv"
         if not csv_path.exists():
-            pytest.skip(
-                "Regime results CSV not found; run pipeline with --regimes first"
-            )
+            pytest.skip("Reference regime CSV not found at tests/data/")
         df = pd.read_csv(csv_path)
         return df[df["threshold"] == 0.2]
 
