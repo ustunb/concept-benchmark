@@ -34,22 +34,12 @@ dependencies = [
     "matplotlib>=3.10.3",
     "psutil>=7.0.0",
     "torch>=2.7.1",
-    "pyarrow>=21.0.0",
-    "fastparquet>=2024.11.0",
-    "datasets>=4.0.0",
-    "pillow>=10.0.0",
-    "skorch>=1.2.0",
-    "torcheval>=0.0.7",
     "torchvision>=0.23.0",
-    "albumentations",
+    "pillow>=10.0.0",
     "colorir>=2.0.0",
     "pero>=0.18.0",
     "pycairo>=1.28.0",
-    "transformers>=4.55.2",
-    "cvxpy>=1.4.0",
     "pyyaml>=6.0",
-    "open-clip-torch>=2.20.0",
-    "google-genai>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -65,6 +55,10 @@ dev = [
     "jupyter",
     "ipykernel",
     "rich",
+    "open-clip-torch>=2.20.0",
+    "transformers>=4.55.2",
+    "cvxpy>=1.4.0",
+    "google-genai>=1.0.0",
 ]
 explore = ["renumics-spotlight>=1.6"]
 
