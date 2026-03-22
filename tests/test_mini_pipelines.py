@@ -71,7 +71,7 @@ def test_robot_tabular_end_to_end():
     assert len(preds) == ds.test.n
     assert set(preds).issubset({0, 1})
 
-    concept_preds = cbm.concept_detector.predict(ds.test)
+    concept_preds = cbm.concept_detector.predict_proba(ds.test)
     assert concept_preds.shape == (ds.test.n, ds.test.n_concepts)
 
 
@@ -109,9 +109,7 @@ def test_robot_alignment_end_to_end():
     cbm = _train_cbm(ds)
 
     concept_preds_train = ds.training.C.astype(np.float32)
-    concept_preds_test = (cbm.concept_detector.predict(ds.test) > 0.5).astype(
-        np.float32
-    )
+    concept_preds_test = cbm.concept_detector.predict(ds.test).astype(np.float32)
 
     result = retrain_aligned(
         concept_preds_train=concept_preds_train,
@@ -154,7 +152,7 @@ def test_sudoku_selective():
     cbm = _train_cbm(ds)
 
     # Selective prediction: keep only confident predictions
-    concept_preds = cbm.concept_detector.predict(ds.test)
+    concept_preds = cbm.concept_detector.predict_proba(ds.test)
     proba = cbm.label_predictor.predict_proba((concept_preds > 0.5).astype(float))
     confidence = np.max(proba, axis=1)
     threshold = 0.6

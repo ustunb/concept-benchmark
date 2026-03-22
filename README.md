@@ -539,8 +539,7 @@ from experiments.models import ConceptDetector, FrontEndModel
 # Assume cd and fe are already trained (see examples/robot_pipeline_example.py)
 
 # Step 1: Get concept probabilities
-# NOTE: cd.predict() returns probabilities in [0, 1], NOT binary predictions.
-concept_probs = cd.predict(test)
+concept_probs = cd.predict_proba(test)
 
 # Step 2-3: For each sample, replace the k most uncertain concepts
 # with ground-truth values
@@ -552,15 +551,10 @@ for k in [1, 3]:
         C_intervened[i, most_uncertain] = test.C[i, most_uncertain]
 
     # Step 4: Threshold to binary and predict
-    C_binary = (C_intervened > 0.5).astype(np.float32)
-    preds = fe.predict(C_binary)
+    preds = fe.predict((C_intervened > 0.5).astype(np.float32))
     acc = np.mean(preds == test.y)
     print(f"k={k}: accuracy={acc:.4f}")
 ```
-
-> **Important:** `ConceptDetector.predict()` returns **probabilities**, not binary predictions. This differs from the sklearn convention. To get binary predictions, threshold at 0.5: `binary = (cd.predict(dataset) > 0.5).astype(int)`.
-
-> **Important:** `FrontEndModel.predict()` expects **binary** concept values (0/1), not probabilities. Always threshold before passing to the label predictor.
 
 #### Using the intervention API
 

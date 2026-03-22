@@ -92,7 +92,7 @@ def test_robot_image_generation_and_training(tmp_path):
     assert set(preds).issubset({0, 1})
 
     # Step 5: Concept detector predictions have right shape
-    concept_preds = cbm.concept_detector.predict(ds.test)
+    concept_preds = cbm.concept_detector.predict_proba(ds.test)
     assert concept_preds.shape[0] == ds.test.n
 
 

@@ -118,7 +118,7 @@ print(f"\nCBM accuracy (k=0, no interventions): {baseline_acc:.4f}")
 # Replace KFlipInterventionStrategy() with your own InterventionStrategy
 # subclass to benchmark custom intervention policies (see docs/interventions.md).
 runner = ConceptInterventionRunner(model=cbm)
-concept_probs = cd.predict(test)
+concept_probs = cd.predict_proba(test)
 
 print("\nKFlip interventions (correct k most impactful concepts per sample):")
 print(f"  {'k':>3s}   {'accuracy':>8s}   {'gain':>8s}")

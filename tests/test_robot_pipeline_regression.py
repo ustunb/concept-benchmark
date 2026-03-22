@@ -246,3 +246,60 @@ class TestAlignment:
 
     def test_subconcept_aligned_accuracy(self, subconcept_alignment):
         assert abs(subconcept_alignment["aligned_accuracy"] - 0.7656) < 0.001
+
+
+# ── Experiment 3: Regime intervention results ─────────────────────────
+
+
+class TestRegimeCSV:
+    """Spot-check intervention regime results against paper CSV values.
+
+    These tests verify the cached results CSV — they do NOT re-run the
+    pipeline.  If the CSV is missing, the tests are skipped.
+    """
+
+    @pytest.fixture(scope="class")
+    def regime_df(self):
+        csv_path = results_dir / "robot_image_stochastic_subconcept_cbm_results.csv"
+        if not csv_path.exists():
+            pytest.skip(
+                "Regime results CSV not found; run pipeline with --regimes first"
+            )
+        df = pd.read_csv(csv_path)
+        return df[df["threshold"] == 0.2]
+
+    def _get_acc(self, df, regime, budget):
+        row = df[(df["regime"] == regime) & (df["budget"] == budget)]
+        assert len(row) == 1, f"Expected 1 row for {regime} k={budget}, got {len(row)}"
+        return float(row.iloc[0]["accuracy"])
+
+    # Baseline (perfect interventions)
+    def test_baseline_k0(self, regime_df):
+        assert abs(self._get_acc(regime_df, "baseline", 0) - 0.7812) < 0.001
+
+    def test_baseline_k1(self, regime_df):
+        assert abs(self._get_acc(regime_df, "baseline", 1) - 0.9212) < 0.001
+
+    def test_baseline_k2(self, regime_df):
+        assert abs(self._get_acc(regime_df, "baseline", 2) - 0.9439) < 0.001
+
+    # Expert (80% accurate interventions)
+    def test_expert_k1(self, regime_df):
+        assert abs(self._get_acc(regime_df, "expert", 1) - 0.8782) < 0.001
+
+    def test_expert_k2(self, regime_df):
+        assert abs(self._get_acc(regime_df, "expert", 2) - 0.8960) < 0.001
+
+    # Subjective (noisy CBM + 80% accurate interventions)
+    def test_subjective_k0(self, regime_df):
+        assert abs(self._get_acc(regime_df, "subjective", 0) - 0.8762) < 0.001
+
+    def test_subjective_k1(self, regime_df):
+        assert abs(self._get_acc(regime_df, "subjective", 1) - 0.8834) < 0.001
+
+    # Machine (LFCBM + 80% accurate interventions)
+    def test_machine_k0(self, regime_df):
+        assert abs(self._get_acc(regime_df, "machine", 0) - 0.8739) < 0.001
+
+    def test_machine_k1(self, regime_df):
+        assert abs(self._get_acc(regime_df, "machine", 1) - 0.5188) < 0.001

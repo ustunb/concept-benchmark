@@ -106,9 +106,8 @@ print(f"\nCS model raw accuracy: {raw_acc:.4f}")
 # ---------------------------------------------------------------------------
 # The key metric for Sudoku is selective classification: the model only
 # answers when confident, achieving high accuracy on kept predictions.
-# KEY: cd.predict() returns concept probabilities in [0, 1], NOT binary.
-concept_probs = cd.predict(test)
-C_binary = (concept_probs > 0.5).astype(np.float32)
+concept_probs = cd.predict_proba(test)
+C_binary = cd.predict(test).astype(np.float32)
 label_proba = fe.predict_proba(C_binary)[:, 1]
 y_pred = fe.predict(C_binary)
 

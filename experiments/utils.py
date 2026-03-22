@@ -226,7 +226,7 @@ def run_alignment(
     # original and aligned frontends are trained on GT labels).
     # Test uses predicted concepts (binarised at 0.5, matching cbm.predict()).
     concept_preds_train = train_dataset.C.astype(np.float32)
-    concept_preds_test = (concept_based_model.concept_detector.predict(test_dataset) > 0.5).astype(np.float32)
+    concept_preds_test = concept_based_model.concept_detector.predict(test_dataset).astype(np.float32)
 
     stats = retrain_aligned(
         concept_preds_train=concept_preds_train,

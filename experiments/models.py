@@ -80,7 +80,7 @@ class RobotClassifierCNN(nn.Module):
         self.dropout = nn.Dropout(0.5)
         self.fc2 = nn.Linear(128, num_classes)
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
         # Pass through the feature extractor
         x = self.backbone(x)
 
@@ -135,7 +135,7 @@ class RobotConceptClassifier(nn.Module):
             [nn.Linear(feature_size, 1) for _ in range(num_concepts)]
         )
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
         features = self.backbone(x)
         features = torch.flatten(features, 1)
         logits = torch.cat([head(features) for head in self.heads], dim=1)
@@ -156,7 +156,7 @@ class RobotViTConceptClassifier(nn.Module):
             [nn.Linear(feature_size, 1) for _ in range(num_concepts)]
         )
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
         vit_outputs = self.vit(pixel_values=x)
         features = vit_outputs.last_hidden_state[:, 0, :]  # (N, 768)
         # Concatenate per-concept logits into shape (N, num_concepts)
@@ -248,7 +248,7 @@ class SudokuValidatorCNN(nn.Module):
             nn.Linear(hidden_dim, 1),
         )
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
         x = F.one_hot(x.long(), self._NUM_DIGITS).float()
         x = self.embedding(x)
         x = x.permute(0, 2, 1).view(-1, x.size(2), 9, 9)
@@ -279,7 +279,7 @@ class GroupPoolingConceptSudokuCNN(nn.Module):
         maxv = x.amax(dim=dim)
         return torch.cat([mean, maxv], dim=-1)
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
         x = F.one_hot(x.long(), self._NUM_DIGITS).float()
         x = self.embedding(x)  # (N, 81, D)
         x = x.view(x.size(0), 9, 9, -1)  # (N, 9, 9, D)
@@ -623,12 +623,17 @@ class ConceptDetector:
             fit_params.get("device", None) or determine_device()
         )
         eval_batch = int(
-            fit_params.get("eval_batch_size", fit_params.get("batch_size", _loader_defaults["batch_size"]))
+            fit_params.get(
+                "eval_batch_size",
+                fit_params.get("batch_size", _loader_defaults["batch_size"]),
+            )
         )
         # Snapshot evaluation configuration so inference and calibration share settings.
         self._eval_config = {
             "batch_size": eval_batch,
-            "num_workers": fit_params.get("num_workers", _loader_defaults["num_workers"]),
+            "num_workers": fit_params.get(
+                "num_workers", _loader_defaults["num_workers"]
+            ),
             "pin_memory": fit_params.get("pin_memory", _loader_defaults["pin_memory"]),
             "device": training_device,
         }
@@ -821,15 +826,31 @@ class ConceptDetector:
         embedding_params: dict | None = None,
         should_calibrate: bool | None = None,
     ) -> np.ndarray:
+        """Predict binary concept values for each sample.
+
+        Returns an ``(N, n_concepts)`` integer array of 0/1 predictions,
+        thresholded at 0.5 from the underlying probabilities.
+
+        For continuous probabilities, use :meth:`predict_proba`.
+        """
+        return (
+            self.predict_proba(
+                dataset,
+                embedding_params=embedding_params,
+                should_calibrate=should_calibrate,
+            )
+            >= 0.5
+        ).astype(int)
+
+    def predict_proba(
+        self,
+        dataset: ConceptDatasetSample,
+        embedding_params: dict | None = None,
+        should_calibrate: bool | None = None,
+    ) -> np.ndarray:
         """Predict concept probabilities for each sample.
 
-        Returns an ``(N, n_concepts)`` array of probabilities in ``[0, 1]``,
-        **not** binary predictions.  This differs from the sklearn convention
-        where ``predict()`` returns class labels.
-
-        To get binary concept predictions, threshold at 0.5::
-
-            binary = (cd.predict(dataset) > 0.5).astype(int)
+        Returns an ``(N, n_concepts)`` array of probabilities in ``[0, 1]``.
 
         If calibration was fitted during :meth:`fit`, it is applied by default.
         """
@@ -881,9 +902,7 @@ class FrontEndModel:
     def __init__(self, **kwargs) -> None:
         self.model = None
 
-    def fit(
-        self, C: np.ndarray, y: np.ndarray, fit_params: dict | None = None
-    ) -> None:
+    def fit(self, C: np.ndarray, y: np.ndarray, fit_params: dict | None = None) -> None:
         """Fit the logistic-regression back-end.
 
         Parameters
@@ -1140,7 +1159,7 @@ class ConceptBasedModel:
         """
         Predict probabilities for the dataset.
         """
-        concept_preds = self.concept_detector.predict(dataset)
+        concept_preds = self.concept_detector.predict_proba(dataset)
 
         # Override object's should_propagate if specified
         should_propagate = (

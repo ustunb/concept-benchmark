@@ -854,7 +854,7 @@ class ConceptInterventionRunner:
                 raise InterventionError(
                     "Cannot obtain concept predictions: model.concept_detector is None."
                 )
-            C_pred = self.model.concept_detector.predict(dataset)
+            C_pred = self.model.concept_detector.predict_proba(dataset)
 
         C_true = concept_true if concept_true is not None else dataset.C
         if C_true.shape != C_pred.shape:

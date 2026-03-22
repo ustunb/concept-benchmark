@@ -52,6 +52,9 @@ dependencies = [
     "google-genai>=1.0.0",
 ]
 
+[project.optional-dependencies]
+explore = ["renumics-spotlight>=1.6"]
+
 [project.urls]
 Repository = "https://github.com/ustunb/concept-benchmark"
 
@@ -63,6 +66,7 @@ dev = [
     "ipykernel",
     "rich",
 ]
+explore = ["renumics-spotlight>=1.6"]
 
 [tool.uv]
 default-groups = ["dev"]

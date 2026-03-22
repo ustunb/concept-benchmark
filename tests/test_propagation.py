@@ -59,7 +59,7 @@ def test_exact_matches_naive_on_small_k(tabular_train_valid):
     assert np.all(np.isfinite(proba_exact))
 
     # Naive explicit enumeration aggregation
-    concept_probs = model.concept_detector.predict(valid, should_calibrate=False)
+    concept_probs = model.concept_detector.predict_proba(valid, should_calibrate=False)
     proba_naive = _naive_enumeration_aggregate(model, concept_probs)
 
     # Should match very closely (up to tiny numeric differences)

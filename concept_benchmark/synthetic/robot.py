@@ -16,7 +16,7 @@ from .helper.robot_catalog import (
     generate_robot_catalog,
 )
 from .helper import textgen as text_helper
-from .helper.utils import build_model_expression, model_to_logistic, unlist0
+from .helper.utils import build_label_function, model_to_logistic, unlist0
 
 _SAFE_EVAL_GLOBALS = {
     "__builtins__": {},
@@ -338,19 +338,15 @@ def create_robot_image_dataset(
     df = catalog_df
 
     # Specify true labels
-    expr = ""  # populated by build_model_expression when model_features is used
     if model_features:
-        # New structured path — build expression from explicit feature/weight spec
-        expr = build_model_expression(
+        # New structured path — direct computation, no eval()
+        glorp_model_true = build_label_function(
             model_features,
             model_type=model_type,
             weights=extra_params.get("model_weights"),
             intercept=extra_params.get("model_intercept", 0.0),
             scalar=extra_params.get("model_scalar", 1.0),
         )
-        glorp_model_true = lambda row, _e=expr: eval(
-            _e, _SAFE_EVAL_GLOBALS, {"row": row}
-        )  # noqa: S307 — intentional eval of synthetic config formulas
     elif model:
         # Legacy string path (backward compat for tests / custom usage)
         if model_type == "deterministic":
@@ -469,7 +465,7 @@ def create_robot_image_dataset(
         "image_dir": image_dir,
         "resolution": eff_resolution,
         "color_mode": color_mode,
-        "labeling_function": model or expr,
+        "labeling_function": model or repr(model_features),
         "num_robots": total_robots,
         "robot_ids": catalog_df["id"].values,
         "catalog_df": catalog_df,

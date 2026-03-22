@@ -1228,7 +1228,7 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
         raise ValueError(f"Unknown regime: {regime!r}")
 
     if c_preds is None:
-        c_preds = regime_model.concept_detector.predict(data.test)
+        c_preds = regime_model.concept_detector.predict_proba(data.test)
     # For machine regime (FEOnProbs), pass continuous probs directly;
     # for other regimes, binarize first (matching original code).
     if regime == "machine":
@@ -1509,7 +1509,7 @@ def collect_results(
                     list(cfg_data.test.concepts),
                     aligned_weights,
                 )
-                c_preds = cbm.concept_detector.predict(cfg_data.test)
+                c_preds = cbm.concept_detector.predict_proba(cfg_data.test)
                 isettings = InterventionSettings(
                     seed=cfg.seed,
                     budgets=[3],

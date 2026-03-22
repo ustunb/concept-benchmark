@@ -339,8 +339,7 @@ def align(
 
     from experiments.alignment import test_alignment
 
-    # Threshold at 0.5 to match cbm.predict() binarisation
-    concept_preds_test = (cs_model.concept_detector.predict(data.test) > 0.5).astype(np.float32)
+    concept_preds_test = cs_model.concept_detector.predict(data.test).astype(np.float32)
     stats = test_alignment(
         concept_preds_test=concept_preds_test,
         alignment_params=config.get_alignment_weights(),

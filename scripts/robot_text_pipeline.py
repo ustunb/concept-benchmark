@@ -445,7 +445,7 @@ def _run_text_regime(config, regime, model, data, budgets, threshold):
     else:
         raise ValueError(f"Unknown regime: {regime!r}")
 
-    c_preds = regime_model.concept_detector.predict(data.test)
+    c_preds = regime_model.concept_detector.predict_proba(data.test)
     base_pred = regime_model.predict(data.test)
     base_acc = float(np.mean(base_pred == data.test.y))
 
