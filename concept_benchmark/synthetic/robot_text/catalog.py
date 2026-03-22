@@ -109,13 +109,13 @@ def compute_label(
         if score_expr:
             try:
                 score = float(eval(score_expr, SAFE_GLOBALS, {"row": row}))
-            except Exception:
+            except (TypeError, ValueError, NameError, SyntaxError):
                 score = None
         if score is None:
             try:
                 hard = eval(model_expr, SAFE_GLOBALS, {"row": row})
                 score = 1.0 if str(hard).strip().lower() == "glorp" else 0.0
-            except Exception:
+            except (TypeError, ValueError, NameError, SyntaxError):
                 score = 0.0
         p = 1.0 / (1.0 + float(np.exp(-float(alpha) * (float(score) - float(bias)))))
         return "glorp" if rng.random() < p else "drent"

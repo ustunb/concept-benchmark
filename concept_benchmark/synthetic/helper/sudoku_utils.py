@@ -31,62 +31,100 @@ def build_base_board(n: int) -> np.ndarray:
     return board.astype(int)
 
 
-def shuffle_rows(board: np.ndarray, n: int | None = None) -> np.ndarray:
+def shuffle_rows(
+    board: np.ndarray,
+    n: int | None = None,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
     N, n0 = _assert_board_size(board)
     n = n0 if n is None else n
     for band in range(0, N, n):
         rows = list(range(band, band + n))
-        np.random.shuffle(rows)
+        if rng is not None:
+            rng.shuffle(rows)
+        else:
+            np.random.shuffle(rows)
         board[band : band + n] = board[rows]
     return board
 
 
-def shuffle_columns(board: np.ndarray, n: int | None = None) -> np.ndarray:
+def shuffle_columns(
+    board: np.ndarray,
+    n: int | None = None,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
     N, n0 = _assert_board_size(board)
     n = n0 if n is None else n
     for stack in range(0, N, n):
         cols = list(range(stack, stack + n))
-        np.random.shuffle(cols)
+        if rng is not None:
+            rng.shuffle(cols)
+        else:
+            np.random.shuffle(cols)
         board[:, stack : stack + n] = board[:, cols]
     return board
 
 
-def shuffle_row_bands(board: np.ndarray, n: int | None = None) -> np.ndarray:
+def shuffle_row_bands(
+    board: np.ndarray,
+    n: int | None = None,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
     _, n0 = _assert_board_size(board)
     n = n0 if n is None else n
     bands = list(range(n))
-    np.random.shuffle(bands)
+    if rng is not None:
+        rng.shuffle(bands)
+    else:
+        np.random.shuffle(bands)
     return np.vstack([board[i * n : (i + 1) * n] for i in bands])
 
 
-def shuffle_col_stacks(board: np.ndarray, n: int | None = None) -> np.ndarray:
+def shuffle_col_stacks(
+    board: np.ndarray,
+    n: int | None = None,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
     _, n0 = _assert_board_size(board)
     n = n0 if n is None else n
     stacks = list(range(n))
-    np.random.shuffle(stacks)
+    if rng is not None:
+        rng.shuffle(stacks)
+    else:
+        np.random.shuffle(stacks)
     return np.hstack([board[:, i * n : (i + 1) * n] for i in stacks])
 
 
-def relabel_digits(board: np.ndarray, N: int | None = None) -> np.ndarray:
+def relabel_digits(
+    board: np.ndarray,
+    N: int | None = None,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
     N0, _ = _assert_board_size(board)
     N = N0 if N is None else N
     digits = list(range(1, N + 1))
     perm = digits[:]
-    random.shuffle(perm)
+    if rng is not None:
+        rng.shuffle(perm)
+    else:
+        random.shuffle(perm)
     mapping = {d: perm[i] for i, d in enumerate(digits)}
     vfunc = np.vectorize(lambda x: mapping[int(x)])
     return vfunc(board).astype(int)
 
 
-def generate_valid_board(n: int = 3) -> np.ndarray:
+def generate_valid_board(
+    n: int = 3,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
     """Generate a valid N=n*n Sudoku board using isotopy-safe shuffles and relabeling."""
     N = n * n
     board = build_base_board(n)
-    board = shuffle_rows(board, n)
-    board = shuffle_columns(board, n)
-    board = shuffle_row_bands(board, n)
-    board = shuffle_col_stacks(board, n)
-    board = relabel_digits(board, N)
+    board = shuffle_rows(board, n, rng=rng)
+    board = shuffle_columns(board, n, rng=rng)
+    board = shuffle_row_bands(board, n, rng=rng)
+    board = shuffle_col_stacks(board, n, rng=rng)
+    board = relabel_digits(board, N, rng=rng)
     return board
 
 

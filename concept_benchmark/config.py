@@ -220,6 +220,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     renders_per_robot: int = 4
     render_images: bool = field(default=True, metadata={"scope": "image"})
     seed: int = 1014
+    rng_seed: int | None = None  # label RNG seed; None → use self.seed
     concepts: dict[str, list] = field(
         default_factory=lambda: copy.deepcopy(ROBOT_CONCEPTS)
     )
@@ -476,7 +477,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             "color_mode": self.color_mode,
             "train_dnn": 0,
             "seed": self.seed,
-            "rng_seed": self.seed,
+            "rng_seed": self.rng_seed if self.rng_seed is not None else self.seed,
             "concepts": copy.deepcopy(self.concepts),
             "additional_features": list(self.expand_concepts),
             "subconcept": self.concept_preset == "foot_subtypes",

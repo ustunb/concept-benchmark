@@ -99,10 +99,10 @@ class TestDNNAccuracy:
 class TestResultsCSV:
     @pytest.fixture(scope="class")
     def results_df(self):
-        csv_path = results_dir / "robot_ideal_seed1014_2d0aa353_results.csv"
-        if not csv_path.exists():
-            pytest.skip("robot_ideal_seed1014_2d0aa353_results.csv not found")
-        return pd.read_csv(csv_path)
+        candidates = sorted(results_dir.glob("robot_ideal_seed1014_*_results.csv"))
+        if not candidates:
+            pytest.skip("robot_ideal_seed1014 collect CSV not found")
+        return pd.read_csv(candidates[-1])
 
     def test_dnn_accuracy_in_csv(self, results_df):
         row = results_df[

@@ -4,7 +4,6 @@ Generate Sudoku ConceptDataset
 
 from __future__ import annotations
 
-import random
 from collections.abc import Callable, Sequence
 import math
 
@@ -91,8 +90,6 @@ def create_sudoku_dataset(
         ds_path = SUDOKU_DIR / dataset_name
         ds_path.mkdir(parents=True, exist_ok=True)
 
-    random.seed(seed)
-    np.random.seed(seed)
     rng = np.random.default_rng(seed)
 
     N = n * n
@@ -114,7 +111,7 @@ def create_sudoku_dataset(
 
     # ---- valid boards
     for i in range(n_valid):
-        b = generate_valid_board(n=n)
+        b = generate_valid_board(n=n, rng=rng)
         board_list.append(b.copy())
         if data_type == "image":
             img_path = ds_path / f"valid_{i}.png"
@@ -143,7 +140,9 @@ def create_sudoku_dataset(
         num_actions = max(1, int(rng.integers(1, max_corrupt, endpoint=True)))
         inv_seed = int(rng.integers(0, 2**31))
         b = generate_invalid_board(
-            base_board=generate_valid_board(n=n), num_actions=num_actions, seed=inv_seed
+            base_board=generate_valid_board(n=n, rng=rng),
+            num_actions=num_actions,
+            seed=inv_seed,
         )
         board_list.append(b.copy())
         concepts = get_concepts(b, return_label=False)

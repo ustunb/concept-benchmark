@@ -8,6 +8,7 @@ Usage:
     python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes --regimes baseline expert
     python scripts/robot_pipeline.py --config my_config.yaml
 """
+
 from __future__ import annotations
 
 import copy
@@ -46,6 +47,7 @@ from experiments.models import (
 from experiments.utils import run_alignment
 from concept_benchmark.paths import data_dir, results_dir
 
+
 @dataclass
 class InterventionSettings:
     """Typed config for _test_interventions, replacing the old ``sttngs`` dict."""
@@ -66,6 +68,7 @@ class FEOnProbs(FrontEndModel):
     Applies logit transform before predict_proba, matching how the
     LFCBM classifier was trained (on z-scored, then logit-transformed features).
     """
+
     _kflip_fast_path = False  # class-level: fast path skips our logit transform
 
     def __init__(self, clf):
@@ -76,7 +79,6 @@ class FEOnProbs(FrontEndModel):
         P = np.clip(P, 1e-6, 1 - 1e-6)
         Z = np.log(P / (1.0 - P))
         return self.model.predict_proba(Z)
-
 
 
 # Lazy import to avoid circular deps — intervention modules
@@ -98,6 +100,7 @@ def _ensure_intervention_imports():
 
 # ── Stage: setup_dataset ──────────────────────────────────────────────
 
+
 def setup_dataset(config: RobotBenchmarkConfig):
     """Generate robot dataset, split, and save.
 
@@ -110,9 +113,11 @@ def setup_dataset(config: RobotBenchmarkConfig):
 
     logger.info("Generating robot dataset...")
     data = DatasetGenerator.from_config(config).generate()
-    data.drop_concepts(PRESET_EXCLUDED_CONCEPTS[config.concept_preset])
 
-    # Split into train/val/test with skewing constraints
+    # Split with skewing constraints BEFORE dropping concepts.
+    # The constraints reference subconcept names (e.g. foot_shape_pointy_square)
+    # that exist in the full concept set.  Dropping concepts first would remove
+    # them and disable skewing, changing the training set composition.
     test_size = 10000
     train_size = 3800
     remaining = data.n - test_size
@@ -125,11 +130,13 @@ def setup_dataset(config: RobotBenchmarkConfig):
         seed=config.seed,
     )
 
+    data.drop_concepts(PRESET_EXCLUDED_CONCEPTS[config.concept_preset])
     save(data, config.get_dataset_path(), overwrite=True)
     return data
 
 
 # ── Stage: train_cbm ──────────────────────────────────────────────────
+
 
 def train_cbm(
     config: RobotBenchmarkConfig,
@@ -212,8 +219,11 @@ def _build_concept_groups(concept_names, concept_spec):
     groups = {}
     used = set()
     for base in list(concept_spec.keys()):
-        idxs = [i for i, c in enumerate(concept_names)
-                if c == base or c.startswith(f"{base}_")]
+        idxs = [
+            i
+            for i, c in enumerate(concept_names)
+            if c == base or c.startswith(f"{base}_")
+        ]
         if idxs:
             groups[base] = idxs
             used.update(idxs)
@@ -289,6 +299,7 @@ def train_cbm_subjective(
     noisy_data = copy.deepcopy(data)
 
     # Offset seed so noise RNG is independent of data-generation RNG.
+    # This specific offset (+555) reproduces the paper's noise patterns.
     rng = np.random.default_rng(config.seed + 555)
     concept_names = list(noisy_data.training.concepts)
     concept_spec = config.concepts
@@ -297,16 +308,22 @@ def train_cbm_subjective(
     noisy_data.training = _clone_sample_with_C(
         noisy_data.training,
         _apply_concept_noise_grouped(
-            noisy_data.training.C, concept_names, concept_spec,
-            config.subjective_noise_rate, rng,
+            noisy_data.training.C,
+            concept_names,
+            concept_spec,
+            config.subjective_noise_rate,
+            rng,
         ),
     )
     if hasattr(noisy_data, "validation") and noisy_data.validation is not None:
         noisy_data.validation = _clone_sample_with_C(
             noisy_data.validation,
             _apply_concept_noise_grouped(
-                noisy_data.validation.C, concept_names, concept_spec,
-                config.subjective_noise_rate, rng,
+                noisy_data.validation.C,
+                concept_names,
+                concept_spec,
+                config.subjective_noise_rate,
+                rng,
             ),
         )
 
@@ -334,6 +351,7 @@ def train_lfcbm(
     concepts_file = config.label_free_concepts_file
     if not concepts_file:
         from concept_benchmark.paths import package_dir
+
         suffix = "_subconcept" if config.concept_preset == "foot_subtypes" else ""
         default = package_dir / "concept_descriptions" / f"gt_concepts{suffix}.jsonl"
         if default.exists():
@@ -366,7 +384,11 @@ def train_lfcbm(
         valid_y=data.validation.y.astype(int),
         concept_set=concept_set,
     )
-    logger.info("LFCBM stats: %s/%s concepts kept", stats.get("kept_concepts"), stats.get("total_concepts"))
+    logger.info(
+        "LFCBM stats: %s/%s concepts kept",
+        stats.get("kept_concepts"),
+        stats.get("total_concepts"),
+    )
 
     out_dir = str(config.get_model_path("lfcbm")) + "_bundle"
     lfcbm.save(out_dir)
@@ -376,6 +398,7 @@ def train_lfcbm(
 
 
 # ── Stage: train_dnn ──────────────────────────────────────────────────
+
 
 def train_dnn(
     config: RobotBenchmarkConfig,
@@ -440,7 +463,8 @@ def train_dnn(
             if config.patience > 0 and epochs_no_improve >= config.patience:
                 logger.info(
                     "Early stopping at epoch %d with best val loss %.6f",
-                    epoch + 1, best_val_loss,
+                    epoch + 1,
+                    best_val_loss,
                 )
                 break
 
@@ -463,7 +487,10 @@ def train_dnn(
 
 # ── Intervention helper ───────────────────────────────────────────────
 
-def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, test, concept_names=None):
+
+def _test_interventions(
+    prob_test, settings: InterventionSettings, acc_det, fe, test, concept_names=None
+):
     """Run interventions for each budget and return results dict.
 
     Matches the original ``test_interventions`` from ``robot_concept_regimes.py``,
@@ -501,7 +528,9 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
             if n_pred > n_gt:
                 prob_test = prob_test[:, :n_gt]
             else:
-                pad = np.zeros((prob_test.shape[0], n_gt - n_pred), dtype=prob_test.dtype)
+                pad = np.zeros(
+                    (prob_test.shape[0], n_gt - n_pred), dtype=prob_test.dtype
+                )
                 prob_test = np.concatenate([prob_test, pad], axis=1)
         if len(concept_names) != prob_test.shape[1]:
             concept_names = concept_names[: prob_test.shape[1]]
@@ -558,6 +587,7 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
             api_key_env = str(llm_cfg.get("api_key_env", "GEMINI_API_KEY"))
 
             import os
+
             api_key = str(llm_cfg.get("api_key", "")) or os.environ.get(api_key_env, "")
             if not api_key:
                 raise SystemExit(
@@ -572,13 +602,22 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
                     try:
                         return fn()
                     except Exception as e:
-                        if ResourceExhausted is not None and isinstance(e, ResourceExhausted):
+                        if ResourceExhausted is not None and isinstance(
+                            e, ResourceExhausted
+                        ):
                             logger.warning(
                                 "%s ResourceExhausted attempt %d/%d: %s",
-                                label, attempt, max_retries, e,
+                                label,
+                                attempt,
+                                max_retries,
+                                e,
                             )
                             if attempt >= max_retries:
-                                logger.error("%s giving up after %d attempts.", label, max_retries)
+                                logger.error(
+                                    "%s giving up after %d attempts.",
+                                    label,
+                                    max_retries,
+                                )
                                 raise
                             time.sleep(backoff)
                         else:
@@ -596,9 +635,13 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
                     "For each concept below, output 0 or 1 indicating ABSENT(0) or PRESENT(1). "
                     "Return ONLY one JSON object with string keys and 0/1 integer values.\n\n"
                     "concepts:\n- " + "\n- ".join(names) + "\n\n"
-                    "Respond like: {\"conceptA\":1,\"conceptB\":0}"
+                    'Respond like: {"conceptA":1,"conceptB":0}'
                 )
-                logger.debug("LLM fallback judge start image=%s, concepts=%d", image_path, len(names))
+                logger.debug(
+                    "LLM fallback judge start image=%s, concepts=%d",
+                    image_path,
+                    len(names),
+                )
                 raw = _llm_call_with_retry(
                     lambda: (client.generate(prompt, [image_path]) or "").strip(),
                     label="LLM single-image",
@@ -612,7 +655,9 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
                                 parsed[str(k)] = 1 if v else 0
                             elif isinstance(v, (int, float, str)):
                                 s = str(v).strip().lower()
-                                parsed[str(k)] = 1 if s in {"1", "true", "yes", "present"} else 0
+                                parsed[str(k)] = (
+                                    1 if s in {"1", "true", "yes", "present"} else 0
+                                )
                 except (json.JSONDecodeError, ValueError, KeyError) as e:
                     logger.debug("JSON parse failure for LLM response: %s", e)
                 return parsed
@@ -736,7 +781,10 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
                         h.update(b"\x00")
                     return h.hexdigest()
 
-                cache_path = cache_dir / f"llm_interventions_{_concepts_sig()}_{_dataset_sig()}.jsonl"
+                cache_path = (
+                    cache_dir
+                    / f"llm_interventions_{_concepts_sig()}_{_dataset_sig()}.jsonl"
+                )
 
                 def _load_cache():
                     d = {}
@@ -746,7 +794,10 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
                                 try:
                                     rec = json.loads(line)
                                     i0 = int(rec["i"])
-                                    votes_idx = {int(k): int(v) for k, v in rec.get("votes_idx", {}).items()}
+                                    votes_idx = {
+                                        int(k): int(v)
+                                        for k, v in rec.get("votes_idx", {}).items()
+                                    }
                                     d[i0] = votes_idx
                                 except Exception:
                                     continue
@@ -755,7 +806,17 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
                 def _flush_cache(d):
                     with open(cache_path, "w", encoding="utf-8") as f:
                         for i0, votes_idx in d.items():
-                            f.write(json.dumps({"i": int(i0), "votes_idx": {str(k): int(v) for k, v in votes_idx.items()}}) + "\n")
+                            f.write(
+                                json.dumps(
+                                    {
+                                        "i": int(i0),
+                                        "votes_idx": {
+                                            str(k): int(v) for k, v in votes_idx.items()
+                                        },
+                                    }
+                                )
+                                + "\n"
+                            )
 
                 if _intervention_cache is None:
                     _intervention_cache = _load_cache()
@@ -784,7 +845,10 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
                 logger.info(
                     "LLM intervention selection: total=%d, from_cache=%d, "
                     "to_query=%d, images_needing_llm=%d",
-                    total_pairs, cached_pairs, missing_pairs, len(tasks),
+                    total_pairs,
+                    cached_pairs,
+                    missing_pairs,
+                    len(tasks),
                 )
 
                 bs = int(llm_cfg.get("batch_size") or 32)
@@ -794,21 +858,17 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
                 if n_batches > 0:
                     logger.info(
                         "LLM starting batched calls: %d images, batch_size=%d, n_batches=%d",
-                        len(tasks), bs, n_batches,
+                        len(tasks),
+                        bs,
+                        n_batches,
                     )
 
-                retry_backoff = float(
-                    llm_cfg.get("retry_backoff") or 30.0
-                )
-                max_retries = int(
-                    llm_cfg.get("max_retries") or 5
-                )
-                sleep_time = float(
-                    llm_cfg.get("batch_sleep") or 5.0
-                )
+                retry_backoff = float(llm_cfg.get("retry_backoff") or 30.0)
+                max_retries = int(llm_cfg.get("max_retries") or 5)
+                sleep_time = float(llm_cfg.get("batch_sleep") or 5.0)
 
                 for batch_idx, s in enumerate(range(0, len(tasks), bs), start=1):
-                    chunk = tasks[s:s + bs]
+                    chunk = tasks[s : s + bs]
                     image_paths = [p for (_i, p, _n, _j) in chunk]
                     per_image_names = [names for (_i, _p, names, _idxs) in chunk]
 
@@ -820,7 +880,9 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
                     )
                     logger.debug(
                         "LLM batch %d/%d ok; sleeping %.1fs to respect rate limits",
-                        batch_idx, n_batches, sleep_time,
+                        batch_idx,
+                        n_batches,
+                        sleep_time,
                     )
                     time.sleep(sleep_time)
 
@@ -835,7 +897,9 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
                                 _intervention_cache[i_idx][j] = v
 
                     _flush_cache(_intervention_cache)
-                    logger.debug("LLM batch %d/%d complete; cache flushed.", batch_idx, n_batches)
+                    logger.debug(
+                        "LLM batch %d/%d complete; cache flushed.", batch_idx, n_batches
+                    )
 
                 if n_batches > 0:
                     logger.info("LLM all %d batches complete.", n_batches)
@@ -857,7 +921,13 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
                         score = float(np.max(np.abs(p_after - base_prob)))
                         pairs.append((j, score))
                     order[i] = np.asarray(
-                        [j for (j, _) in sorted(pairs, key=lambda t: t[1], reverse=True)], dtype=int
+                        [
+                            j
+                            for (j, _) in sorted(
+                                pairs, key=lambda t: t[1], reverse=True
+                            )
+                        ],
+                        dtype=int,
                     )
 
                 llm_cache = {
@@ -931,7 +1001,9 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
         C_pred_binary = (result.C_pred >= 0.5).astype(int)
         C_final_binary = (result.C_intervened >= 0.5).astype(int)
         actual_edits_mask = C_pred_binary != C_final_binary
-        prediction_num_concepts_intervened_on = {int(i): int(np.sum(actual_edits_mask[i])) for i in range(n_samples)}
+        prediction_num_concepts_intervened_on = {
+            int(i): int(np.sum(actual_edits_mask[i])) for i in range(n_samples)
+        }
 
         y_pred_before = np.argmax(result.y_prob_before, axis=1)
         num_preds_change = int(np.sum(result.y_pred_after != y_pred_before))
@@ -947,14 +1019,18 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
             "accuracy": acc_intervened,
             "accuracy_gain": acc_intervened - acc_det,
             "predictions_intervened_on": int(np.sum(np.any(result.mask, axis=1))),
-            "interventions_rate": float(np.sum(np.any(result.mask, axis=1)) / n_samples),
+            "interventions_rate": float(
+                np.sum(np.any(result.mask, axis=1)) / n_samples
+            ),
             "predictions_changed": num_preds_change,
             "avg_edits_per_intervention": float(
                 sum(prediction_num_concepts_intervened_on.values())
             )
             / n_samples,
             "total_concept_confirmations": int(n_intervened),
-            "total_concept_edits_made": int(sum(prediction_num_concepts_intervened_on.values())),
+            "total_concept_edits_made": int(
+                sum(prediction_num_concepts_intervened_on.values())
+            ),
             "concept_interventions": concept_intervention_counts,
             "human_accuracy": human_acc,
         }
@@ -963,6 +1039,7 @@ def _test_interventions(prob_test, settings: InterventionSettings, acc_det, fe, 
 
 
 # ── LLM/CLIP regime helper ────────────────────────────────────────────
+
 
 def _run_llm_regime(config, regime, model, data, budgets, thresholds):
     """Run LLM or CLIP intervention regime.
@@ -979,6 +1056,7 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
 
     # Load concept descriptions for this regime
     from concept_benchmark.paths import package_dir
+
     if regime == "llm":
         concepts_file = config.llm_concepts_file
         if not concepts_file:
@@ -1026,7 +1104,12 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
             concept_set=concept_set,
             cache_dir=cfg.cache_dir,
         )
-        logger.info("LFCBM (%s) stats: %s/%s concepts kept", regime, stats.get("kept_concepts"), stats.get("total_concepts"))
+        logger.info(
+            "LFCBM (%s) stats: %s/%s concepts kept",
+            regime,
+            stats.get("kept_concepts"),
+            stats.get("total_concepts"),
+        )
         save(lf, lfcbm_path, overwrite=True)
 
     # Get concept probabilities from LFCBM
@@ -1096,6 +1179,7 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
 
 # ── Regime dispatch ───────────────────────────────────────────────────
 
+
 def _run_regime(config, regime, model, data, budgets, thresholds):
     """Run one intervention regime. Returns list of result row dicts.
 
@@ -1133,7 +1217,9 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
         test_paths = [str(image_dir / p) for p in data.test.X]
         c_preds = lfcbm_obj.concept_proba(test_paths)
         regime_concept_names = list(lfcbm_obj.concept_set.keys)
-        regime_model = ConceptBasedModel(concept_detector=None, label_predictor=fe_machine)
+        regime_model = ConceptBasedModel(
+            concept_detector=None, label_predictor=fe_machine
+        )
         human_acc = config.expert_intervention_accuracy
     elif regime in ("llm", "clip"):
         # LLM/CLIP regimes use separate concept files for corrections
@@ -1147,13 +1233,22 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
     # for other regimes, binarize first (matching original code).
     if regime == "machine":
         acc_det = float(
-            (np.argmax(regime_model.label_predictor.predict_proba(c_preds),
-                        axis=1) == data.test.y.astype(int)).mean()
+            (
+                np.argmax(regime_model.label_predictor.predict_proba(c_preds), axis=1)
+                == data.test.y.astype(int)
+            ).mean()
         )
     else:
         acc_det = float(
-            (np.argmax(regime_model.label_predictor.predict_proba(
-                (c_preds >= 0.5).astype(int)), axis=1) == data.test.y.astype(int)).mean()
+            (
+                np.argmax(
+                    regime_model.label_predictor.predict_proba(
+                        (c_preds >= 0.5).astype(int)
+                    ),
+                    axis=1,
+                )
+                == data.test.y.astype(int)
+            ).mean()
         )
 
     COLS = ["budget", "threshold"] + METRIC_COLS
@@ -1188,6 +1283,7 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
 
 # ── Stage: run_interventions ──────────────────────────────────────────
 
+
 def run_interventions(
     config: RobotBenchmarkConfig,
     model: ConceptBasedModel | None = None,
@@ -1209,9 +1305,12 @@ def run_interventions(
     if model is None:
         model = load(config.get_model_path("cbm"))
 
-    budgets = sorted(set(
-        [0] + [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
-    ))
+    budgets = sorted(
+        set(
+            [0]
+            + [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
+        )
+    )
     thresholds = config.intervention_thresholds
 
     all_dfs = []
@@ -1227,7 +1326,9 @@ def run_interventions(
         return pd.DataFrame()
 
     results_df = pd.concat(all_dfs, axis=0).reset_index(drop=True)
-    results_df["data_name"] = "subconcept" if config.concept_preset == "foot_subtypes" else "ideal"
+    results_df["data_name"] = (
+        "subconcept" if config.concept_preset == "foot_subtypes" else "ideal"
+    )
     results_df["n"] = data.test.n
     results_df["missing_fraction"] = missing_fraction
     results_df["missing_mechanism"] = missing_mechanism
@@ -1236,6 +1337,7 @@ def run_interventions(
 
 
 # ── Stage: align ─────────────────────────────────────────────────────
+
 
 def align(
     config: RobotBenchmarkConfig,
@@ -1265,6 +1367,7 @@ def align(
 
 
 # ── Stage: collect_results ────────────────────────────────────────────
+
 
 def _dataset_label(cfg: RobotBenchmarkConfig) -> str:
     """Return a human-readable dataset label for a config."""
@@ -1307,17 +1410,19 @@ def collect_results(
             dnn.load_state_dict(dnn_weights)
             test_loader = data.test.loader(shuffle=False, **loader_config)
             dnn_accuracy = compute_accuracy(dnn, test_loader, device)
-            rows.append({
-                "dataset": label,
-                "model": "dnn",
-                "budget": "",
-                "threshold": "",
-                "accuracy": round(dnn_accuracy, 4),
-                "gain": 0.0,
-                "predictions_intervened_on": "",
-                "avg_concepts_per_sample": "",
-                "predictions_changed": "",
-            })
+            rows.append(
+                {
+                    "dataset": label,
+                    "model": "dnn",
+                    "budget": "",
+                    "threshold": "",
+                    "accuracy": round(dnn_accuracy, 4),
+                    "gain": 0.0,
+                    "predictions_intervened_on": "",
+                    "avg_concepts_per_sample": "",
+                    "predictions_changed": "",
+                }
+            )
 
         # CBM no-intervention (k=0)
         cbm_path = cfg.get_model_path("cbm")
@@ -1327,17 +1432,19 @@ def collect_results(
         cbm = load(cbm_path)
         cbm_acc = float((cbm.predict(data.test) == data.test.y).mean())
         gain_ref = dnn_accuracy if dnn_accuracy is not None else cbm_acc
-        rows.append({
-            "dataset": label,
-            "model": "cbm",
-            "budget": 0,
-            "threshold": "",
-            "accuracy": round(cbm_acc, 4),
-            "gain": round(cbm_acc - gain_ref, 4),
-            "predictions_intervened_on": "",
-            "avg_concepts_per_sample": "",
-            "predictions_changed": "",
-        })
+        rows.append(
+            {
+                "dataset": label,
+                "model": "cbm",
+                "budget": 0,
+                "threshold": "",
+                "accuracy": round(cbm_acc, 4),
+                "gain": round(cbm_acc - gain_ref, 4),
+                "predictions_intervened_on": "",
+                "avg_concepts_per_sample": "",
+                "predictions_changed": "",
+            }
+        )
 
         # CBM with interventions (k>0)
         results_path = cfg.get_results_path("cbm")
@@ -1354,17 +1461,19 @@ def collect_results(
                 pio = int(row["predictions_intervened_on"])
                 tcc = int(row["total_concept_confirmations"])
                 avg_cps = round(tcc / pio, 2) if pio > 0 else 0.0
-                rows.append({
-                    "dataset": label,
-                    "model": "cbm",
-                    "budget": budget,
-                    "threshold": 0.2,
-                    "accuracy": round(acc, 4),
-                    "gain": round(acc - gain_ref, 4),
-                    "predictions_intervened_on": pio,
-                    "avg_concepts_per_sample": avg_cps,
-                    "predictions_changed": int(row["predictions_changed"]),
-                })
+                rows.append(
+                    {
+                        "dataset": label,
+                        "model": "cbm",
+                        "budget": budget,
+                        "threshold": 0.2,
+                        "accuracy": round(acc, 4),
+                        "gain": round(acc - gain_ref, 4),
+                        "predictions_intervened_on": pio,
+                        "avg_concepts_per_sample": avg_cps,
+                        "predictions_changed": int(row["predictions_changed"]),
+                    }
+                )
 
         # Aligned CBM
         align_path = cfg.get_alignment_results_path()
@@ -1372,17 +1481,19 @@ def collect_results(
             with open(align_path) as f:
                 align_data = json.load(f)
             aligned_acc = float(align_data["aligned_accuracy"])
-            rows.append({
-                "dataset": label,
-                "model": "aligned_cbm",
-                "budget": 0,
-                "threshold": "",
-                "accuracy": round(aligned_acc, 4),
-                "gain": round(aligned_acc - gain_ref, 4),
-                "predictions_intervened_on": "",
-                "avg_concepts_per_sample": "",
-                "predictions_changed": "",
-            })
+            rows.append(
+                {
+                    "dataset": label,
+                    "model": "aligned_cbm",
+                    "budget": 0,
+                    "threshold": "",
+                    "accuracy": round(aligned_acc, 4),
+                    "gain": round(aligned_acc - gain_ref, 4),
+                    "predictions_intervened_on": "",
+                    "avg_concepts_per_sample": "",
+                    "predictions_changed": "",
+                }
+            )
 
             # Aligned CBM with intervention at k=3
             aligned_weights = align_data.get("aligned_weights")
@@ -1394,7 +1505,9 @@ def collect_results(
                 cfg_data = load(cfg.get_dataset_path())
                 aligned_fe = _copy.deepcopy(cbm.label_predictor)
                 aligned_fe = align_frontend_weights(
-                    aligned_fe, list(cfg_data.test.concepts), aligned_weights,
+                    aligned_fe,
+                    list(cfg_data.test.concepts),
+                    aligned_weights,
                 )
                 c_preds = cbm.concept_detector.predict(cfg_data.test)
                 isettings = InterventionSettings(
@@ -1414,17 +1527,19 @@ def collect_results(
                     pio = int(res["predictions_intervened_on"])
                     tcc = int(res["total_concept_confirmations"])
                     avg_cps = round(tcc / pio, 2) if pio > 0 else 0.0
-                    rows.append({
-                        "dataset": label,
-                        "model": "aligned_cbm",
-                        "budget": 3,
-                        "threshold": 0.2,
-                        "accuracy": round(float(res["accuracy"]), 4),
-                        "gain": round(float(res["accuracy"]) - gain_ref, 4),
-                        "predictions_intervened_on": pio,
-                        "avg_concepts_per_sample": avg_cps,
-                        "predictions_changed": int(res["predictions_changed"]),
-                    })
+                    rows.append(
+                        {
+                            "dataset": label,
+                            "model": "aligned_cbm",
+                            "budget": 3,
+                            "threshold": 0.2,
+                            "accuracy": round(float(res["accuracy"]), 4),
+                            "gain": round(float(res["accuracy"]) - gain_ref, 4),
+                            "predictions_intervened_on": pio,
+                            "avg_concepts_per_sample": avg_cps,
+                            "predictions_changed": int(res["predictions_changed"]),
+                        }
+                    )
 
     final_df = pd.DataFrame(rows)
     cfg0 = configs[0]
@@ -1436,6 +1551,7 @@ def collect_results(
 
 
 # ── Stage: run (orchestrator) ─────────────────────────────────────────
+
 
 def run(
     config: RobotBenchmarkConfig | None = None,
@@ -1454,6 +1570,7 @@ def run(
         missing_mechanism: Missingness mechanism ("mcar" or "mnar").
     """
     from concept_benchmark._logging import setup_logging
+
     setup_logging()
     patch_macos_dataloader()
 
@@ -1478,12 +1595,16 @@ def run(
     _si = {s: i for i, s in enumerate(stages, 1)}
     logger.info(
         "=== Robot Benchmark === seed=%d, variant=%s, stages=%s, device=%s",
-        config.seed, variant, stages, device,
+        config.seed,
+        variant,
+        stages,
+        device,
     )
 
     if "setup" in stages:
         logger.info("=== [%d/%d] Setup ===", _si["setup"], n_stages)
         import shutil
+
         fp_path = config.get_dataset_path().with_suffix(".fingerprint")
         current_fp = config.setup_fingerprint()
         cached_fp = fp_path.read_text().strip() if fp_path.exists() else None
@@ -1492,7 +1613,9 @@ def run(
             if force_setup:
                 logger.info("--force-setup: regenerating data from scratch")
             elif cached_fp is None:
-                logger.info("No cached data found — generating dataset and robot images (this may take a minute)")
+                logger.info(
+                    "No cached data found — generating dataset and robot images (this may take a minute)"
+                )
             else:
                 logger.info("Config changed since last setup — regenerating data")
             # Clear cached images and dataset
@@ -1511,7 +1634,9 @@ def run(
     # Model fingerprint: retrain if config changed since last training
     model_fp_path = config.get_model_path("cbm").with_suffix(".fingerprint")
     current_model_fp = config.model_fingerprint()
-    cached_model_fp = model_fp_path.read_text().strip() if model_fp_path.exists() else None
+    cached_model_fp = (
+        model_fp_path.read_text().strip() if model_fp_path.exists() else None
+    )
     model_stale = cached_model_fp != current_model_fp
 
     def _should_train(model_key: str) -> bool:
@@ -1528,14 +1653,21 @@ def run(
     if "cbm" in stages:
         logger.info("=== [%d/%d] Train CBM ===", _si["cbm"], n_stages)
         if _should_train("cbm"):
-            train_cbm(config, missing_fraction=missing_fraction, missing_mechanism=missing_mechanism)
+            train_cbm(
+                config,
+                missing_fraction=missing_fraction,
+                missing_mechanism=missing_mechanism,
+            )
         else:
             logger.info("Using existing CBM: %s", config.get_model_path("cbm"))
         if "subjective" in config.intervention_regimes:
             if _should_train("cbm_subjective"):
                 train_cbm_subjective(config)
             else:
-                logger.info("Using existing subjective CBM: %s", config.get_model_path("cbm_subjective"))
+                logger.info(
+                    "Using existing subjective CBM: %s",
+                    config.get_model_path("cbm_subjective"),
+                )
         if "machine" in config.intervention_regimes:
             if _should_train("lfcbm"):
                 train_lfcbm(config)
@@ -1556,8 +1688,11 @@ def run(
 
     if "intervene" in stages:
         logger.info("=== [%d/%d] Intervene ===", _si["intervene"], n_stages)
-        run_interventions(config, missing_fraction=missing_fraction,
-                          missing_mechanism=missing_mechanism)
+        run_interventions(
+            config,
+            missing_fraction=missing_fraction,
+            missing_mechanism=missing_mechanism,
+        )
 
     if "align" in stages:
         logger.info("=== [%d/%d] Align ===", _si["align"], n_stages)
@@ -1581,27 +1716,47 @@ def _parse_args(argv=None):
     )
     parser.add_argument("--seed", type=int, default=1014)
     parser.add_argument(
-        "--stages", nargs="+", default=list(ROBOT_STAGES),
+        "--stages",
+        nargs="+",
+        default=list(ROBOT_STAGES),
         help=f"Pipeline stages to run (default: all). Valid: {' -> '.join(ROBOT_STAGES)}",
     )
-    parser.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
-    parser.add_argument("--concept-preset", choices=["ground_truth", "foot_subtypes"], default="ground_truth")
-    parser.add_argument("--missing-fraction", type=float, default=None,
-                        help="Fraction of concept labels to mask (e.g. 0.2).")
-    parser.add_argument("--missing-mechanism", type=str, default=None,
-                        choices=["mcar", "mnar"])
-    parser.add_argument("--budgets", nargs="+", default=None,
-                        help="Intervention budgets (e.g. 1 3 5 max).")
-    parser.add_argument("--regimes", nargs="+", default=None,
-                        help="Intervention regimes (e.g. baseline expert subjective machine).")
-    parser.add_argument("--strategy", type=str, default=None,
-                        choices=["up_to_k", "exactly_k"])
+    parser.add_argument(
+        "--config", type=str, default=None, help="Path to YAML config file."
+    )
+    parser.add_argument(
+        "--concept-preset",
+        choices=["ground_truth", "foot_subtypes"],
+        default="ground_truth",
+    )
+    parser.add_argument(
+        "--missing-fraction",
+        type=float,
+        default=None,
+        help="Fraction of concept labels to mask (e.g. 0.2).",
+    )
+    parser.add_argument(
+        "--missing-mechanism", type=str, default=None, choices=["mcar", "mnar"]
+    )
+    parser.add_argument(
+        "--budgets",
+        nargs="+",
+        default=None,
+        help="Intervention budgets (e.g. 1 3 5 max).",
+    )
+    parser.add_argument(
+        "--regimes",
+        nargs="+",
+        default=None,
+        help="Intervention regimes (e.g. baseline expert subjective machine).",
+    )
+    parser.add_argument(
+        "--strategy", type=str, default=None, choices=["up_to_k", "exactly_k"]
+    )
     parser.add_argument("--llm-api-key", type=str, default=None)
     parser.add_argument("--force-retrain", action="store_true", dest="force_retrain")
     parser.add_argument("--force-setup", action="store_true")
     return parser.parse_args(argv)
-
-
 
 
 def main(argv=None):
@@ -1609,7 +1764,9 @@ def main(argv=None):
 
     unknown = set(args.stages) - set(ROBOT_STAGES)
     if unknown:
-        raise ValueError(f"unknown stages: {sorted(unknown)}. Valid: {list(ROBOT_STAGES)}")
+        raise ValueError(
+            f"unknown stages: {sorted(unknown)}. Valid: {list(ROBOT_STAGES)}"
+        )
 
     if args.config:
         config = RobotBenchmarkConfig.from_yaml(args.config)
@@ -1618,6 +1775,11 @@ def main(argv=None):
         config.seed = args.seed
     else:
         config = RobotBenchmarkConfig(seed=args.seed)
+
+    # Paper data was generated with rng_seed=12345 (the old hardcoded default
+    # in create_robot_image_dataset).  Pin it here so regeneration reproduces
+    # the exact same stochastic labels.
+    config.rng_seed = 12345
 
     if args.budgets:
         config.intervention_budgets = parse_budgets(args.budgets)
@@ -1632,8 +1794,13 @@ def main(argv=None):
     missing_fraction = args.missing_fraction or 0.0
     missing_mechanism = args.missing_mechanism or "mcar"
 
-    run(config, stages=args.stages, force_setup=args.force_setup,
-        missing_fraction=missing_fraction, missing_mechanism=missing_mechanism)
+    run(
+        config,
+        stages=args.stages,
+        force_setup=args.force_setup,
+        missing_fraction=missing_fraction,
+        missing_mechanism=missing_mechanism,
+    )
 
 
 if __name__ == "__main__":
