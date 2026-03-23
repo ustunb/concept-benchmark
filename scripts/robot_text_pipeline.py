@@ -20,7 +20,11 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 
-from concept_benchmark.utils import determine_device, parse_budgets, set_deterministic_seed
+from concept_benchmark.utils import (
+    determine_device,
+    parse_budgets,
+    set_deterministic_seed,
+)
 from concept_benchmark.config import RobotBenchmarkConfig
 from concept_benchmark.data import ConceptDatasetSample
 from concept_benchmark.ext.fileutils import load, save
@@ -75,6 +79,7 @@ def setup_dataset(
     ds = DatasetGenerator.from_config(config).generate()
 
     from concept_benchmark.config import TEXT_PRESET_EXCLUDED_CONCEPTS
+
     excluded = TEXT_PRESET_EXCLUDED_CONCEPTS[config.concept_preset]
     if excluded:
         ds.drop_concepts(excluded)
@@ -857,7 +862,6 @@ def _parse_args(argv=None):
     parser.add_argument("--lfcbm", action="store_true", help="Also run LFCBM variant.")
     parser.add_argument("--force-setup", action="store_true")
     return parser.parse_args(argv)
-
 
 
 def main(argv=None):

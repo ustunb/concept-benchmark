@@ -272,7 +272,9 @@ class KFlipInterventionStrategy(InterventionStrategy):
         pred_now = base_lbl
         conf = y_prob_now[np.arange(n_samples), pred_now]
         if config.select_only_abstained and config.abstention_threshold is not None:
-            abstain_mask = (conf >= config.abstention_threshold) & (conf <= 1.0 - config.abstention_threshold)
+            abstain_mask = (conf >= config.abstention_threshold) & (
+                conf <= 1.0 - config.abstention_threshold
+            )
             candidate_ids = np.nonzero((flip_prob >= threshold) & abstain_mask)[0]
         else:
             candidate_ids = np.nonzero(flip_prob >= threshold)[0]

@@ -7,6 +7,7 @@ Usage:
     python scripts/sudoku_pipeline.py --seed 171 --stages cs dnn selective
     python scripts/sudoku_pipeline.py --config my_config.yaml
 """
+
 from __future__ import annotations
 
 import copy
@@ -44,6 +45,7 @@ logger = logging.getLogger(__name__)
 
 # ── Stage: setup_dataset ──────────────────────────────────────────────
 
+
 def setup_dataset(config: SudokuBenchmarkConfig) -> None:
     """Generate sudoku dataset (image + tabular + OCR sidecar)."""
     from concept_benchmark.synthetic.sudoku_ocr.make_ocr_dataset import (
@@ -55,6 +57,7 @@ def setup_dataset(config: SudokuBenchmarkConfig) -> None:
 
 # ── Stage: train_ocr ──────────────────────────────────────────────────
 
+
 def train_ocr(config: SudokuBenchmarkConfig) -> None:
     """Train OCR digit recognizer."""
     import subprocess
@@ -62,14 +65,18 @@ def train_ocr(config: SudokuBenchmarkConfig) -> None:
 
     cmd = [
         sys.executable,
-        "-m", "concept_benchmark.synthetic.sudoku_ocr.train_ocr_fast",
-        "--seed", str(config.seed),
-        "--max-corrupt", str(config.max_cell_swaps),
+        "-m",
+        "concept_benchmark.synthetic.sudoku_ocr.train_ocr_fast",
+        "--seed",
+        str(config.seed),
+        "--max-corrupt",
+        str(config.max_cell_swaps),
     ]
     subprocess.run(cmd, check=True)
 
 
 # ── Stage: train_cs ───────────────────────────────────────────────────
+
 
 def train_cs(
     config: SudokuBenchmarkConfig,
@@ -127,6 +134,7 @@ def train_cs(
 
 
 # ── Stage: train_dnn ──────────────────────────────────────────────────
+
 
 def train_dnn(
     config: SudokuBenchmarkConfig,
@@ -193,7 +201,8 @@ def train_dnn(
             if config.patience > 0 and epochs_no_improve >= config.patience:
                 logger.info(
                     "Early stopping at epoch %d with best val loss %.6f",
-                    epoch + 1, best_val_loss,
+                    epoch + 1,
+                    best_val_loss,
                 )
                 break
 
@@ -213,6 +222,7 @@ def train_dnn(
 
 
 # ── Stage: run_interventions ──────────────────────────────────────────
+
 
 def run_interventions(
     config: SudokuBenchmarkConfig,
@@ -288,22 +298,23 @@ def run_interventions(
         total_concept_edits_made = int(np.sum(pred_binary != final_binary))
         selective_acc_after = result.strategy_metrics.get("selective_acc_after", None)
         coverage_after = result.strategy_metrics.get("coverage_after", None)
-        rows.append({
-            "budget": budget,
-            "accuracy": acc_intervened,
-            "predictions_intervened_on": predictions_intervened_on,
-            "total_concept_checks": total_concept_checks,
-            "total_concept_edits_made": total_concept_edits_made,
-            "selective_accuracy_after": selective_acc_after,
-            "coverage_after": coverage_after,
-        })
+        rows.append(
+            {
+                "budget": budget,
+                "accuracy": acc_intervened,
+                "predictions_intervened_on": predictions_intervened_on,
+                "total_concept_checks": total_concept_checks,
+                "total_concept_edits_made": total_concept_edits_made,
+                "selective_accuracy_after": selective_acc_after,
+                "coverage_after": coverage_after,
+            }
+        )
 
     cs_intervention_df = pd.DataFrame(rows)
 
-    csv_path = (
-        config.get_results_path("interventions", data_type="tabular")
-        .with_suffix(".csv")
-    )
+    csv_path = config.get_results_path(
+        "interventions", data_type="tabular"
+    ).with_suffix(".csv")
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     cs_intervention_df.to_csv(csv_path, index=False)
     logger.info("Saved intervention results to %s", csv_path)
@@ -312,6 +323,7 @@ def run_interventions(
 
 
 # ── Stage: align ─────────────────────────────────────────────────────
+
 
 def align(
     config: SudokuBenchmarkConfig,
@@ -348,10 +360,10 @@ def align(
     )
 
     logger.info("=== Alignment Results ===")
-    logger.info("  Original accuracy: %.4f", stats['original_accuracy'])
-    logger.info("  Aligned accuracy:  %.4f", stats['aligned_accuracy'])
-    logger.info("  Accuracy change:   %+.4f", stats['accuracy_change'])
-    logger.info("  Predictions changed: %s", stats['predictions_changed'])
+    logger.info("  Original accuracy: %.4f", stats["original_accuracy"])
+    logger.info("  Aligned accuracy:  %.4f", stats["aligned_accuracy"])
+    logger.info("  Accuracy change:   %+.4f", stats["accuracy_change"])
+    logger.info("  Predictions changed: %s", stats["predictions_changed"])
 
     save_path = config.get_alignment_results_path()
     save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -363,6 +375,7 @@ def align(
 
 
 # ── Stage: collect_results ────────────────────────────────────────────
+
 
 def _dataset_label(cfg: SudokuBenchmarkConfig) -> str:
     """Human-readable dataset label for the summary CSV."""
@@ -393,9 +406,8 @@ def collect_results(
         target = cfg.target_accuracy
 
         # ── Selective CSV: DNN + CS at the default target_accuracy ────
-        sel_csv = (
-            cfg.get_results_path("selective", data_type="tabular")
-            .with_suffix(".csv")
+        sel_csv = cfg.get_results_path("selective", data_type="tabular").with_suffix(
+            ".csv"
         )
         if sel_csv.exists():
             sel_df = pd.read_csv(sel_csv)
@@ -405,31 +417,33 @@ def collect_results(
 
             for model in ["dnn", "cs"]:
                 model_df = sel_df[
-                    (sel_df["model"] == model)
-                    & (sel_df["target_accuracy"] == target)
+                    (sel_df["model"] == model) & (sel_df["target_accuracy"] == target)
                 ]
                 if model_df.empty:
                     continue
                 r = model_df.iloc[0]
                 sel_acc = r["selective_acc"]
-                rows.append({
-                    "dataset": label,
-                    "model": model,
-                    "budget": 0 if model == "cs" else "",
-                    "target_accuracy": target,
-                    "raw_test_acc": round(float(r["raw_test_acc"]), 4),
-                    "selective_acc": round(float(sel_acc), 4) if pd.notna(sel_acc) else "",
-                    "selective_cov": round(float(r["selective_cov"]), 4),
-                    "predictions_intervened_on": "",
-                    "avg_concepts_per_sample": "",
-                    "predictions_changed": "",
-                })
+                rows.append(
+                    {
+                        "dataset": label,
+                        "model": model,
+                        "budget": 0 if model == "cs" else "",
+                        "target_accuracy": target,
+                        "raw_test_acc": round(float(r["raw_test_acc"]), 4),
+                        "selective_acc": round(float(sel_acc), 4)
+                        if pd.notna(sel_acc)
+                        else "",
+                        "selective_cov": round(float(r["selective_cov"]), 4),
+                        "predictions_intervened_on": "",
+                        "avg_concepts_per_sample": "",
+                        "predictions_changed": "",
+                    }
+                )
 
         # ── Intervention CSV: CS at k > 0 ────────────────────────────
-        interv_csv = (
-            cfg.get_results_path("interventions", data_type="tabular")
-            .with_suffix(".csv")
-        )
+        interv_csv = cfg.get_results_path(
+            "interventions", data_type="tabular"
+        ).with_suffix(".csv")
         if interv_csv.exists():
             interv_df = pd.read_csv(interv_csv)
             for _, r in interv_df.iterrows():
@@ -441,36 +455,42 @@ def collect_results(
                 avg_cps = round(tcc / pio, 2) if pio > 0 else 0.0
                 sel_acc = r.get("selective_accuracy_after")
                 cov = r.get("coverage_after")
-                rows.append({
-                    "dataset": label,
-                    "model": "cs",
-                    "budget": budget,
-                    "target_accuracy": target,
-                    "raw_test_acc": "",
-                    "selective_acc": round(float(sel_acc), 4) if pd.notna(sel_acc) else "",
-                    "selective_cov": round(float(cov), 4) if pd.notna(cov) else "",
-                    "predictions_intervened_on": pio,
-                    "avg_concepts_per_sample": avg_cps,
-                    "predictions_changed": int(r["total_concept_edits_made"]),
-                })
+                rows.append(
+                    {
+                        "dataset": label,
+                        "model": "cs",
+                        "budget": budget,
+                        "target_accuracy": target,
+                        "raw_test_acc": "",
+                        "selective_acc": round(float(sel_acc), 4)
+                        if pd.notna(sel_acc)
+                        else "",
+                        "selective_cov": round(float(cov), 4) if pd.notna(cov) else "",
+                        "predictions_intervened_on": pio,
+                        "avg_concepts_per_sample": avg_cps,
+                        "predictions_changed": int(r["total_concept_edits_made"]),
+                    }
+                )
 
         # ── Alignment JSON ───────────────────────────────────────────
         align_path = cfg.get_alignment_results_path(data_type="tabular")
         if align_path.exists():
             with open(align_path) as f:
                 align_data = json.load(f)
-            rows.append({
-                "dataset": label,
-                "model": "aligned_cs",
-                "budget": 0,
-                "target_accuracy": "",
-                "raw_test_acc": round(float(align_data["aligned_accuracy"]), 4),
-                "selective_acc": "",
-                "selective_cov": "",
-                "predictions_intervened_on": "",
-                "avg_concepts_per_sample": "",
-                "predictions_changed": align_data.get("predictions_changed", ""),
-            })
+            rows.append(
+                {
+                    "dataset": label,
+                    "model": "aligned_cs",
+                    "budget": 0,
+                    "target_accuracy": "",
+                    "raw_test_acc": round(float(align_data["aligned_accuracy"]), 4),
+                    "selective_acc": "",
+                    "selective_cov": "",
+                    "predictions_intervened_on": "",
+                    "avg_concepts_per_sample": "",
+                    "predictions_changed": align_data.get("predictions_changed", ""),
+                }
+            )
 
     final_df = pd.DataFrame(rows)
     cfg0 = configs[0]
@@ -482,6 +502,7 @@ def collect_results(
 
 
 # ── Stage: run (orchestrator) ─────────────────────────────────────────
+
 
 def run(
     config: SudokuBenchmarkConfig | None = None,
@@ -496,13 +517,23 @@ def run(
         force_setup: If True, delete cached data before regenerating.
     """
     from concept_benchmark._logging import setup_logging
+
     setup_logging()
     patch_macos_dataloader()
 
     if config is None:
         config = SudokuBenchmarkConfig.default()
     if stages is None:
-        stages = ["setup", "ocr", "cs", "dnn", "intervene", "selective", "align", "collect"]
+        stages = [
+            "setup",
+            "ocr",
+            "cs",
+            "dnn",
+            "intervene",
+            "selective",
+            "align",
+            "collect",
+        ]
 
     # Early validation: check that dataset directory exists if we need it
     _needs_data = {"cs", "dnn", "intervene", "selective", "align", "collect"}
@@ -520,12 +551,15 @@ def run(
     _si = {s: i for i, s in enumerate(stages, 1)}
     logger.info(
         "=== Sudoku Benchmark === seed=%d, stages=%s, device=%s",
-        config.seed, stages, device,
+        config.seed,
+        stages,
+        device,
     )
 
     if "setup" in stages:
         logger.info("=== [%d/%d] Setup ===", _si["setup"], n_stages)
         import shutil
+
         fp_path = config.get_dataset_path(data_type="tabular") / ".fingerprint"
         current_fp = config.setup_fingerprint()
         cached_fp = fp_path.read_text().strip() if fp_path.exists() else None
@@ -534,7 +568,9 @@ def run(
             if force_setup:
                 logger.info("--force-setup: regenerating data from scratch")
             elif cached_fp is None:
-                logger.info("No cached data found — generating sudoku boards (this may take a few minutes)")
+                logger.info(
+                    "No cached data found — generating sudoku boards (this may take a few minutes)"
+                )
             else:
                 logger.info("Config changed since last setup — regenerating data")
             for dt in ("tabular", "image"):
@@ -550,18 +586,26 @@ def run(
     # Model fingerprint: retrain if config changed since last training
     model_fp_path = config.get_model_path("cs").with_suffix(".fingerprint")
     current_model_fp = config.model_fingerprint()
-    cached_model_fp = model_fp_path.read_text().strip() if model_fp_path.exists() else None
+    cached_model_fp = (
+        model_fp_path.read_text().strip() if model_fp_path.exists() else None
+    )
     model_stale = cached_model_fp != current_model_fp
 
     if "ocr" in stages:
         if config.data_type == "tabular":
-            logger.info("=== [%d/%d] Train OCR === (skipped — data_type is tabular)", _si["ocr"], n_stages)
+            logger.info(
+                "=== [%d/%d] Train OCR === (skipped — data_type is tabular)",
+                _si["ocr"],
+                n_stages,
+            )
         else:
             logger.info("=== [%d/%d] Train OCR ===", _si["ocr"], n_stages)
             if model_stale or not config.get_model_path("ocr").exists():
                 train_ocr(config)
             else:
-                logger.info("Using existing OCR model: %s", config.get_model_path("ocr"))
+                logger.info(
+                    "Using existing OCR model: %s", config.get_model_path("ocr")
+                )
 
     if "cs" in stages:
         logger.info("=== [%d/%d] Train CS ===", _si["cs"], n_stages)
@@ -632,6 +676,7 @@ def run(
 
 # ── Helper functions ──────────────────────────────────────────────────
 
+
 def _selective_accuracy_threshold(
     y_true: np.ndarray,
     prob_pos: np.ndarray,
@@ -675,7 +720,9 @@ def _decision_threshold_sweep(
             best_thresholds = [float(t)]
         elif acc == best_acc:
             best_thresholds.append(float(t))
-    best_t = 0.5 * (min(best_thresholds) + max(best_thresholds)) if best_thresholds else 0.5
+    best_t = (
+        0.5 * (min(best_thresholds) + max(best_thresholds)) if best_thresholds else 0.5
+    )
     return best_t, best_acc
 
 
@@ -723,6 +770,7 @@ def _dnn_val_probs(model, loader, device):
 
 # ── Stage: compute and save selective metrics ─────────────────────────
 
+
 def compute_selective_results(
     config: SudokuBenchmarkConfig,
     cs_model: ConceptBasedModel | None = None,
@@ -744,8 +792,19 @@ def compute_selective_results(
     device = determine_device()
 
     if target_accuracies is None:
-        target_accuracies = [0.55, 0.60, 0.65, 0.70, 0.75,
-                             0.80, 0.85, 0.90, 0.95, 0.99, 1.00]
+        target_accuracies = [
+            0.55,
+            0.60,
+            0.65,
+            0.70,
+            0.75,
+            0.80,
+            0.85,
+            0.90,
+            0.95,
+            0.99,
+            1.00,
+        ]
 
     # Load evaluation data: OCR-inferred (image mode) or tabular
     if data is None:
@@ -787,13 +846,15 @@ def compute_selective_results(
         sel_acc, sel_cov = _selective_metrics(
             dnn_test_y, dnn_test_probs, confidence_t, dnn_dt
         )
-        rows.append({
-            "model": "dnn",
-            "target_accuracy": tau,
-            "raw_test_acc": dnn_raw_acc,
-            "selective_acc": sel_acc,
-            "selective_cov": sel_cov,
-        })
+        rows.append(
+            {
+                "model": "dnn",
+                "target_accuracy": tau,
+                "raw_test_acc": dnn_raw_acc,
+                "selective_acc": sel_acc,
+                "selective_cov": sel_cov,
+            }
+        )
 
     # ---- CS selective metrics ----
     if cs_model is None:
@@ -814,20 +875,21 @@ def compute_selective_results(
         sel_acc, sel_cov = _selective_metrics(
             cs_test_y, cs_test_probs, confidence_t, cs_dt
         )
-        rows.append({
-            "model": "cs",
-            "target_accuracy": tau,
-            "raw_test_acc": cs_raw_acc,
-            "selective_acc": sel_acc,
-            "selective_cov": sel_cov,
-        })
+        rows.append(
+            {
+                "model": "cs",
+                "target_accuracy": tau,
+                "raw_test_acc": cs_raw_acc,
+                "selective_acc": sel_acc,
+                "selective_cov": sel_cov,
+            }
+        )
 
     df = pd.DataFrame(rows)
 
     # Save CSV
-    csv_path = (
-        config.get_results_path("selective", data_type="tabular")
-        .with_suffix(".csv")
+    csv_path = config.get_results_path("selective", data_type="tabular").with_suffix(
+        ".csv"
     )
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(csv_path, index=False)
@@ -838,7 +900,16 @@ def compute_selective_results(
 
 # ── CLI entry point ──────────────────────────────────────────────────
 
-SUDOKU_STAGES = ("setup", "ocr", "cs", "dnn", "intervene", "selective", "align", "collect")
+SUDOKU_STAGES = (
+    "setup",
+    "ocr",
+    "cs",
+    "dnn",
+    "intervene",
+    "selective",
+    "align",
+    "collect",
+)
 
 
 def _parse_args(argv=None):
@@ -849,20 +920,27 @@ def _parse_args(argv=None):
     )
     parser.add_argument("--seed", type=int, default=171)
     parser.add_argument(
-        "--stages", nargs="+", default=list(SUDOKU_STAGES),
+        "--stages",
+        nargs="+",
+        default=list(SUDOKU_STAGES),
         help=f"Pipeline stages to run (default: all). Valid: {' -> '.join(SUDOKU_STAGES)}",
     )
-    parser.add_argument("--config", type=str, default=None, help="Path to YAML config file.")
-    parser.add_argument("--budgets", nargs="+", default=None,
-                        help="Intervention budgets (e.g. 1 3 5 max).")
-    parser.add_argument("--data-type", type=str, default=None,
-                        choices=["tabular", "image"])
+    parser.add_argument(
+        "--config", type=str, default=None, help="Path to YAML config file."
+    )
+    parser.add_argument(
+        "--budgets",
+        nargs="+",
+        default=None,
+        help="Intervention budgets (e.g. 1 3 5 max).",
+    )
+    parser.add_argument(
+        "--data-type", type=str, default=None, choices=["tabular", "image"]
+    )
     parser.add_argument("--handwriting", action="store_true", default=None)
     parser.add_argument("--no-handwriting", action="store_true")
     parser.add_argument("--force-setup", action="store_true")
     return parser.parse_args(argv)
-
-
 
 
 def main(argv=None):
@@ -870,7 +948,9 @@ def main(argv=None):
 
     unknown = set(args.stages) - set(SUDOKU_STAGES)
     if unknown:
-        raise ValueError(f"unknown stages: {sorted(unknown)}. Valid: {list(SUDOKU_STAGES)}")
+        raise ValueError(
+            f"unknown stages: {sorted(unknown)}. Valid: {list(SUDOKU_STAGES)}"
+        )
 
     if args.config:
         config = SudokuBenchmarkConfig.from_yaml(args.config)

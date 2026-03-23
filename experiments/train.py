@@ -439,9 +439,7 @@ def train_concept_heads(
         input_dim = int(emb.shape[1])
 
     class _EmbedAndLinear(nn.Module):
-        def __init__(
-            self, enc: nn.Module | None, d_in: int, k: int, freeze_enc: bool
-        ):
+        def __init__(self, enc: nn.Module | None, d_in: int, k: int, freeze_enc: bool):
             super().__init__()
             self.enc = enc
             if self.enc is not None:

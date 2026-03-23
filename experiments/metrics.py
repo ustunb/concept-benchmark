@@ -34,7 +34,9 @@ def compute_selective_metric(pred_probs, y_true, abstention_threshold=0.5):
     """
     selected_y = pred_probs.copy()
     selected_y[pred_probs < abstention_threshold] = 0
-    selected_y[(pred_probs >= abstention_threshold) & (pred_probs <= 1 - abstention_threshold)] = _ABSTAIN
+    selected_y[
+        (pred_probs >= abstention_threshold) & (pred_probs <= 1 - abstention_threshold)
+    ] = _ABSTAIN
     selected_y[pred_probs > 1 - abstention_threshold] = 1
 
     abstain = selected_y == _ABSTAIN
@@ -46,4 +48,8 @@ def compute_selective_metric(pred_probs, y_true, abstention_threshold=0.5):
         coverage = (~abstain).mean()
         selective_accuracy = (selected_y[~abstain] == y_true[~abstain]).mean()
 
-    return {"coverage": coverage, "selective_accuracy": selective_accuracy, "abstention_threshold": abstention_threshold}
+    return {
+        "coverage": coverage,
+        "selective_accuracy": selective_accuracy,
+        "abstention_threshold": abstention_threshold,
+    }

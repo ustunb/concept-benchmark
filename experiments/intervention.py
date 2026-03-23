@@ -143,7 +143,9 @@ class InterventionConfig:
     _rng: np.random.Generator = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if self.abstention_threshold is not None and not (0.0 <= self.abstention_threshold <= 0.5):
+        if self.abstention_threshold is not None and not (
+            0.0 <= self.abstention_threshold <= 0.5
+        ):
             raise ValueError("abstention_threshold must lie within [0, 0.5].")
         if not (0.0 <= self.score_threshold <= 1.0):
             raise ValueError("score_threshold must lie within [0, 1].")
@@ -326,7 +328,9 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
         y_prob = model._propagate_predict_proba_mc(batch.C_pred)
         predicted = np.argmax(y_prob, axis=1)
         confidences = y_prob[np.arange(batch.n_samples), predicted]
-        abstain_mask = (confidences >= config.abstention_threshold) & (confidences <= 1.0 - config.abstention_threshold)
+        abstain_mask = (confidences >= config.abstention_threshold) & (
+            confidences <= 1.0 - config.abstention_threshold
+        )
 
         non_abstained = ~abstain_mask
         if batch.y_true is not None:
