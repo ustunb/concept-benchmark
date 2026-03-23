@@ -4,16 +4,17 @@ Provides a unified ``DatasetGenerator`` API that wraps data creation
 and seed management into a single call.  After ``generate()``, call
 ``sample()`` to split into train/val/test:
 
-    >>> from concept_benchmark import DatasetGenerator
+    >>> from concept_benchmark.robot import DatasetGenerator
     >>> from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
-    >>> gen = DatasetGenerator("robot", seed=1014, render_images=False)
+    >>> gen = DatasetGenerator(seed=1014, render_images=False)
     >>> dataset = gen.generate()
     >>> dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["ground_truth"])
     >>> dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
     >>> dataset.train.C.shape
     (3800, 7)
 
-    >>> dataset = DatasetGenerator("sudoku", seed=171, data_type="tabular").generate()
+    >>> from concept_benchmark.sudoku import DatasetGenerator
+    >>> dataset = DatasetGenerator(seed=171, data_type="tabular").generate()
     >>> dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=171)
     >>> dataset.train.C.shape
     (600, 27)
@@ -183,8 +184,10 @@ class DatasetGenerator:
     Follows the HuggingFace ``load_dataset`` pattern — the first argument
     selects the benchmark, remaining kwargs configure it:
 
-        >>> DatasetGenerator("robot", seed=1014, render_images=False).generate()
-        >>> DatasetGenerator("sudoku", seed=171, data_type="tabular").generate()
+        >>> from concept_benchmark.robot import DatasetGenerator
+        >>> DatasetGenerator(seed=1014, render_images=False).generate()
+        >>> from concept_benchmark.sudoku import DatasetGenerator
+        >>> DatasetGenerator(seed=171, data_type="tabular").generate()
 
     Parameters
     ----------

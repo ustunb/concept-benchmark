@@ -18,13 +18,13 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 
-from concept_benchmark import DatasetGenerator
+from concept_benchmark.sudoku import DatasetGenerator
 
 # ---------------------------------------------------------------------------
 # 1. Generate dataset (renders board images by default, ~35 s for 100 boards)
 # ---------------------------------------------------------------------------
 print("Generating Sudoku dataset (50 boards with handwritten digit images)...")
-dataset = DatasetGenerator("sudoku", seed=171, n_boards=50).generate()
+dataset = DatasetGenerator(seed=171, n_boards=50).generate()
 dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=171)
 
 train, test = dataset.train, dataset.test
@@ -103,7 +103,9 @@ for target_acc in [0.90, 0.95, 0.99]:
     keep = confidence >= best_tau
     coverage = keep.mean()
     sel_acc = accuracy_score(test.y[keep], y_pred[keep]) if keep.sum() > 0 else 0.0
-    print(f"  target={target_acc:.2f}:  sel_acc={sel_acc:.4f},  coverage={coverage:.1%}")
+    print(
+        f"  target={target_acc:.2f}:  sel_acc={sel_acc:.4f},  coverage={coverage:.1%}"
+    )
 
 print("\nDone!")
 

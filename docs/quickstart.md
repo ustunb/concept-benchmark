@@ -7,10 +7,9 @@ A concept bottleneck model (CBM) first predicts interpretable *concepts* from in
 The robot benchmark classifies fictional robots — **Glorps** vs. **Drents** — from their body features:
 
 ```python
-from concept_benchmark import DatasetGenerator, LabelFormula
+from concept_benchmark.robot import DatasetGenerator, LabelFormula
 
 dataset = DatasetGenerator(
-    "robot",
     seed=1014,                       # reproducibility
     concept_preset="foot_subtypes",  # expand foot_shape into subtypes (default: "ground_truth")
     use_stochastic_labels=True,      # probabilistic labeling (or False for deterministic)
@@ -66,7 +65,7 @@ Train a CBM — concept detector (images → concepts) and label predictor (conc
 
 ```python
 import numpy as np
-from concept_benchmark import DatasetGenerator
+from concept_benchmark.robot import DatasetGenerator
 from concept_benchmark.utils import set_deterministic_seed
 from experiments.models import (
     ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier,
@@ -75,7 +74,7 @@ from experiments.models import (
 set_deterministic_seed(1014)
 
 dataset = DatasetGenerator(
-    "robot", seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
+    seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
 dataset.drop_concepts([
     "has_elbows", "hand_shape", "foot_shape",
     "foot_shape_flat_rounded", "foot_shape_flat_lshaped",
@@ -108,10 +107,9 @@ For a complete walkthrough including interventions and alignment, see `examples/
 The Sudoku benchmark determines whether a 9×9 board is valid. 27 concepts capture row, column, and block validity — a board is valid iff all 27 are true:
 
 ```python
-from concept_benchmark import DatasetGenerator
+from concept_benchmark.sudoku import DatasetGenerator
 
 dataset = DatasetGenerator(
-    "sudoku",
     seed=171,             # reproducibility
     n_boards=1000,        # number of boards
     max_cell_swaps=9,     # cells swapped in invalid boards (higher = subtler errors)

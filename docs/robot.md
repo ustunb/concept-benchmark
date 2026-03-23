@@ -10,13 +10,12 @@ This benchmark targets decision-support settings where a human uses the model's 
 
 ## Parameters
 
-All parameters below can be passed to `DatasetGenerator("robot", ...)`. Common parameters apply to both image and text modalities; scope-specific parameters are ignored when the other modality is selected.
+All parameters below can be passed to `DatasetGenerator(...)` (imported from `concept_benchmark.robot`). Common parameters apply to both image and text modalities; scope-specific parameters are ignored when the other modality is selected.
 
 ```python
-from concept_benchmark import DatasetGenerator, LabelFormula
+from concept_benchmark.robot import DatasetGenerator, LabelFormula
 
 dataset = DatasetGenerator(
-    "robot",
     # ── Common (image + text) ──
     seed=1014,                       # random seed (default: 1014 for image, 1337 for text)
     data_type="image",               # "image" (default) or "text"

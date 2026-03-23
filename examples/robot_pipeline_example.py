@@ -21,7 +21,7 @@ Note: ``uv sync`` makes ``experiments/`` importable automatically.
 
 import numpy as np
 
-from concept_benchmark import DatasetGenerator
+from concept_benchmark.robot import DatasetGenerator
 from concept_benchmark.utils import set_deterministic_seed
 from experiments.intervention import ConceptInterventionRunner, InterventionConfig
 from experiments.kflip import KFlipInterventionStrategy
@@ -56,14 +56,14 @@ print(f"Using device: {device}")
 # ---------------------------------------------------------------------------
 print("Generating robot image dataset (concept_preset='foot_subtypes', 12 concepts)...")
 gen = DatasetGenerator(
-    "robot",
     seed=SEED,
     concept_preset="foot_subtypes",  # 12 fine-grained concepts (default: "ground_truth" = 7)
-    use_stochastic_labels=True,      # probabilistic labeling
+    use_stochastic_labels=True,  # probabilistic labeling
     # render_images=True is the default — renders robot images
 )
 dataset = gen.generate()
 from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
+
 dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["foot_subtypes"])
 dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=SEED)
 
@@ -82,10 +82,14 @@ cd = ConceptDetector(
     model=RobotConceptClassifier(num_concepts=n_concepts, input_size=32),
 )
 cd.fit(
-    train, val,
+    train,
+    val,
     fit_params={
-        "epochs": 50, "lr": 1e-3, "patience": 10,
-        "device": str(device), **loader_config,
+        "epochs": 50,
+        "lr": 1e-3,
+        "patience": 10,
+        "device": str(device),
+        **loader_config,
     },
 )
 print("  Done.")

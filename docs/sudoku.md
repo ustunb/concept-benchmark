@@ -10,13 +10,12 @@ This benchmark targets automation settings where the system handles routine case
 
 ## Parameters
 
-All parameters can be passed to `DatasetGenerator("sudoku", ...)` or as CLI flags to `sudoku_pipeline.py`:
+All parameters can be passed to `DatasetGenerator(...)` (imported from `concept_benchmark.sudoku`) or as CLI flags to `sudoku_pipeline.py`:
 
 ```python
-from concept_benchmark import DatasetGenerator
+from concept_benchmark.sudoku import DatasetGenerator
 
 dataset = DatasetGenerator(
-    "sudoku",
     seed=171,                  # random seed
     data_type="image",         # "image" (renders board PNGs) or "tabular" (digit vectors)
     render_images=True,        # set False to skip rendering PNGs (faster, image only)

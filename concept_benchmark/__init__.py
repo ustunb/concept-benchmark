@@ -10,18 +10,14 @@ configurations for two synthetic tasks:
 
 Quick start::
 
-    from concept_benchmark import DatasetGenerator
+    from concept_benchmark.robot import DatasetGenerator
 
-    from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
-
-    gen = DatasetGenerator("robot", seed=1014, render_images=False)
-    dataset = gen.generate()
-    dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["ground_truth"])
+    dataset = DatasetGenerator(seed=1014, render_images=False).generate()
     dataset.sample(test_size=0.2, val_size=0.2, seed=1014)
     print(dataset)
 """
 
-from . import config, synthetic, utils
+from . import config, robot, sudoku, synthetic, utils
 from .data import ConceptDataset, ConceptDatasetSample
 from .formula import LabelFormula
 from .generators import DatasetGenerator
@@ -30,6 +26,8 @@ utils.patch_macos_dataloader()
 
 __all__ = [
     "config",
+    "robot",
+    "sudoku",
     "synthetic",
     "utils",
     "ConceptDataset",
