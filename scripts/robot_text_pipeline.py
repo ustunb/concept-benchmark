@@ -138,7 +138,7 @@ def train_cbm(
         validate=True,
     )
 
-    detector.fit(data.training, data.validation)
+    detector.fit(data.train, data.validation)
 
     cbm = ConceptBasedModel(
         concept_detector=detector,
@@ -147,7 +147,7 @@ def train_cbm(
     )
 
     # Train frontend on ground-truth concepts
-    cbm.label_predictor.fit(data.training.C, data.training.y)
+    cbm.label_predictor.fit(data.train.C, data.train.y)
 
     test_pred = cbm.predict(data.test)
     acc = float(np.mean(test_pred == data.test.y))
@@ -193,13 +193,13 @@ def train_cbm_subjective(
         group_unknown_threshold=0.50,
         validate=True,
     )
-    detector.fit(noisy_data.training, noisy_data.validation)
+    detector.fit(noisy_data.train, noisy_data.validation)
     cbm = ConceptBasedModel(
         concept_detector=detector,
         label_predictor=FrontEndModel(),
         should_propagate=(config.concept_output_type == "continuous"),
     )
-    cbm.label_predictor.fit(noisy_data.training.C, noisy_data.training.y)
+    cbm.label_predictor.fit(noisy_data.train.C, noisy_data.train.y)
 
     test_pred = cbm.predict(data.test)
     acc = float(np.mean(test_pred == data.test.y))
@@ -312,8 +312,8 @@ def train_dnn(
         data = load(config.get_dataset_path())
 
     acc, tok, model = _train_dnn_text(
-        X_tr=data.training.X,
-        y_tr=data.training.y,
+        X_tr=data.train.X,
+        y_tr=data.train.y,
         X_te=data.test.X,
         y_te=data.test.y,
         model_id=config.dnn_model_name,
@@ -387,16 +387,16 @@ def train_lfcbm(
     }
 
     det_lf = LabelFreeDetector(lf_settings)
-    det_lf.fit([str(x) for x in data.training.X], y=data.training.y.astype(int))
+    det_lf.fit([str(x) for x in data.train.X], y=data.train.y.astype(int))
 
     # Use LFCBM predictions as concept features to train a student detector
     if config.concept_output_type == "binary":
         det_lf.settings["lf_mode"] = "hard"
-    C_train = det_lf.predict([str(x) for x in data.training.X])
+    C_train = det_lf.predict([str(x) for x in data.train.X])
 
     # Build a CBM with a simple frontend trained on LFCBM concepts
     fe = FrontEndModel()
-    fe.fit(C_train.astype(np.float32), data.training.y)
+    fe.fit(C_train.astype(np.float32), data.train.y)
 
     # Wrap: we need a concept detector that can predict on a ConceptDatasetSample
     # For LFCBM, predictions are the LFCBM output; we create a thin wrapper
@@ -406,7 +406,7 @@ def train_lfcbm(
         lr=config.detector_lr,
         output_mode=_internal_output_mode(config.concept_output_type),
     )
-    detector.fit(data.training, data.validation)
+    detector.fit(data.train, data.validation)
 
     cbm = ConceptBasedModel(
         concept_detector=detector,
@@ -595,7 +595,7 @@ def align(
 
     return run_alignment(
         concept_based_model=model,
-        train_dataset=data.training,
+        train_dataset=data.train,
         test_dataset=data.test,
         monotonicity_constraints=config.get_alignment_constraints(),
         save_path=config.get_alignment_results_path(),

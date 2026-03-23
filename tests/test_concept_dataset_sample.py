@@ -8,7 +8,7 @@ import pandas as pd
 
 # ---------- Basic behavior ----------
 def test_len_repr_getitem_dtypes(tab_small):
-    sample = tab_small.training  # ConceptDatasetSample
+    sample = tab_small.train  # ConceptDatasetSample
     assert isinstance(sample, ConceptDatasetSample)
     assert len(sample) == sample.n == tab_small.n
     repr(sample)  # smoke
@@ -28,7 +28,7 @@ def test_len_repr_getitem_dtypes(tab_small):
 
 # ---------- filter() ----------
 def test_filter_slices_and_preserves_meta_and_transforms(tab_small):
-    sample = tab_small.training
+    sample = tab_small.train
     n = sample.n
     idx = np.zeros(n, dtype=np.bool_)
     idx[: n // 2] = True
@@ -42,7 +42,7 @@ def test_filter_slices_and_preserves_meta_and_transforms(tab_small):
 
 
 def test_filter_rejects_bad_indices(tab_small):
-    s = tab_small.training
+    s = tab_small.train
     with pytest.raises(AssertionError):
         s.filter(indices=[True, False])  # not ndarray
     with pytest.raises(AssertionError):
@@ -53,7 +53,7 @@ def test_filter_rejects_bad_indices(tab_small):
 
 # ---------- DataLoader ----------
 def test_loader_shapes_and_dtypes(tab_small):
-    s = tab_small.training
+    s = tab_small.train
     loader = s.loader(batch_size=4, shuffle=False, num_workers=0)
     x, c, y = next(iter(loader))
     # Collate converts numpy arrays to tensors
@@ -108,7 +108,7 @@ class MeanEmbedder(torch.nn.Module):
 
 
 def test_embed_returns_tabular_and_preserves_indices(tab_small):
-    s = tab_small.training
+    s = tab_small.train
     emb = s.embed(
         MeanEmbedder(), batch_size=8, shuffle=False, device="cpu", num_workers=0
     )
@@ -122,7 +122,7 @@ def test_embed_returns_tabular_and_preserves_indices(tab_small):
 
 # ---------- Meta deep-equality (arrays/DataFrames) ----------
 def test_sample_meta_deep_equal_numpy_and_dataframe(tab_small):
-    s = tab_small.training
+    s = tab_small.train
     # Extend meta with numpy array and DataFrame
     meta = {
         **s.meta,
@@ -147,7 +147,7 @@ def test_sample_meta_deep_equal_numpy_and_dataframe(tab_small):
 
 
 def test_sample_transform_identity_matters(tab_small):
-    s = tab_small.training
+    s = tab_small.train
 
     def f(z):
         return z
@@ -165,26 +165,26 @@ def test_sample_transform_identity_matters(tab_small):
 
 # ---------- to_dataframe ----------
 def test_to_dataframe_returns_dataframe(tab_small):
-    sample = tab_small.training
+    sample = tab_small.train
     df = sample.to_dataframe()
     assert isinstance(df, pd.DataFrame)
 
 
 def test_to_dataframe_columns(tab_small):
-    sample = tab_small.training
+    sample = tab_small.train
     df = sample.to_dataframe()
     expected_cols = list(sample.concepts) + ["label", "class"]
     assert list(df.columns) == expected_cols
 
 
 def test_to_dataframe_row_count(tab_small):
-    sample = tab_small.training
+    sample = tab_small.train
     df = sample.to_dataframe()
     assert len(df) == sample.n
 
 
 def test_to_dataframe_concept_values_match(tab_small):
-    sample = tab_small.training
+    sample = tab_small.train
     df = sample.to_dataframe()
     np.testing.assert_array_equal(
         df[sample.concepts].values.astype(sample.C.dtype), sample.C

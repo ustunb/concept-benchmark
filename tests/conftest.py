@@ -395,7 +395,7 @@ def tabular_train_valid() -> tuple:
     """Provide small tabular training and validation splits for model tests."""
     ds, _ = make_tabular_dataset(n=32, d=8, k=2, n_classes=2, with_cv=True, K=5)
     ds.split("K05N01", fold_num_validation=4, fold_num_test=5)
-    train, valid = ds.training, ds.validation
+    train, valid = ds.train, ds.validation
     d = train.X.shape[1]
     k = train.n_concepts
     return train, valid, d, k

@@ -167,7 +167,7 @@ def kfold_by_robot_identity(
     test_mask = fold_arr == 0
     train_mask = ~(val_mask | test_mask)
 
-    ds.training = _subset(train_mask)
+    ds.train = _subset(train_mask)
     ds.validation = _subset(val_mask)
 
     # Generate deployment/test set

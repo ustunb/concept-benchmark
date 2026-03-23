@@ -197,10 +197,20 @@ class ConceptDataset:
     """Container for concept-annotated datasets with train/val/test splits.
 
     Wraps a feature matrix *X*, a binary concept matrix *C*, and a label
-    vector *y* together with metadata, cross-validation indices, and optional
-    noise/missingness overlays.  Splits are created via :meth:`split` and
-    accessed as ``dataset.training``, ``dataset.validation``, ``dataset.test``
-    (or dict-style: ``dataset["train"]``).
+    vector *y* together with metadata and optional noise/missingness overlays.
+
+    Create splits with :meth:`sample` and access them as ``dataset.train``,
+    ``dataset.val``, ``dataset.test``::
+
+        from concept_benchmark.robot import DatasetGenerator
+
+        ds = DatasetGenerator(seed=1014, render_images=False).generate()
+        ds.sample(test_size=0.2, val_size=0.2, seed=1014)
+        print(ds.train.n, ds.val.n, ds.test.n)
+
+    Each split is a :class:`ConceptDatasetSample` (a ``torch.utils.data.Dataset``)
+    with ``.X``, ``.C``, ``.y``, ``.concepts``, ``.loader()``, and
+    ``.to_dataframe()`` attributes.
 
     Parameters
     ----------
@@ -215,33 +225,9 @@ class ConceptDataset:
         Metadata dictionary.  Must contain keys ``'classes'`` (list of
         class names), ``'concepts'`` (list of concept names), and
         ``'data_type'`` (``'image'``, ``'tabular'``, or ``'text'``).
-    cvindices : dict, optional
-        Pre-computed cross-validation fold indices.
-    transform : callable, optional
-        Transformation applied to features in ``__getitem__``.
-    concept_transform : callable, optional
-        Transformation applied to concepts in ``__getitem__``.
-    target_transform : callable, optional
-        Transformation applied to labels in ``__getitem__``.
-    has_concept_noise : bool, optional
-        Whether concept noise is enabled by default (default ``False``).
-    has_concept_missing : bool, optional
-        Whether concept missingness is enabled by default (default ``False``).
-    has_label_noise : bool, optional
-        Whether label noise is enabled by default (default ``False``).
-    **kwargs
-        Extra keyword arguments forwarded to the underlying
-        :class:`ConceptDatasetSample`.
-
-    Examples
-    --------
-    >>> ds = ConceptDataset(X, C, y, meta)
-    >>> ds.generate_cvindices(strata=ds.y, total_folds_for_cv=[5])
-    >>> ds.split("K05N01", fold_num_validation=4, fold_num_test=5)
-    >>> print(ds.training.n, ds.validation.n, ds.test.n)
     """
 
-    SAMPLE_TYPES = ("training", "validation", "test")
+    SAMPLE_TYPES = ("train", "validation", "test")
 
     def __init__(
         self,
@@ -366,7 +352,7 @@ class ConceptDataset:
         self._fold_num_test = 0
         self._fold_num_validation = 0
         self._fold_num_range = 0
-        self.training = self._full
+        self.train = self._full
         self.validation = self._full.filter(indices=np.zeros(self.n, dtype=np.bool_))
         self.test = self._full.filter(indices=np.zeros(self.n, dtype=np.bool_))
         self._apply_noise_settings()
@@ -376,7 +362,7 @@ class ConceptDataset:
         seen = set()
         for sample in (
             getattr(self, "_full", None),
-            getattr(self, "training", None),
+            getattr(self, "train", None),
             getattr(self, "validation", None),
             getattr(self, "test", None),
         ):
@@ -397,8 +383,7 @@ class ConceptDataset:
     # -- Dict-style split access --
 
     _SPLIT_ALIASES = {
-        "train": "training",
-        "training": "training",
+        "train": "train",
         "val": "validation",
         "validation": "validation",
         "test": "test",
@@ -420,12 +405,9 @@ class ConceptDataset:
         """Check whether *key* is a valid split name."""
         return key in self._SPLIT_ALIASES
 
-    # -- Aliases --
-
-    @property
-    def train(self) -> "ConceptDatasetSample":
-        """Alias for :attr:`training`."""
-        return self.training
+    def __len__(self) -> int:
+        """Total number of samples across all splits."""
+        return self._full.n
 
     @property
     def val(self) -> "ConceptDatasetSample":
@@ -440,7 +422,7 @@ class ConceptDataset:
         data_type = self._full.meta.get("data_type", "unknown")
         lines = [
             f"{self.__class__.__name__} ({data_type})",
-            f"  Samples: {self.n} (train={self.training.n}, val={self.validation.n}, test={self.test.n})",
+            f"  Samples: {self.n} (train={self.train.n}, val={self.validation.n}, test={self.test.n})",
             f"  Concepts ({self.n_concepts}): {self.concepts}",
             f"  Classes ({self.n_classes}): {self.classes}",
         ]
@@ -494,14 +476,11 @@ class ConceptDataset:
 
         return chk
 
-    def __len__(self):
-        return self.n
-
     def __repr__(self):
         data_type = self._full.meta.get("data_type", "unknown")
         return (
             f"ConceptDataset({data_type}, n_concepts={self.n_concepts}, n_classes={self.n_classes})\n"
-            f"  train: {self.training.n} samples\n"
+            f"  train: {self.train.n} samples\n"
             f"  val:   {self.validation.n} samples\n"
             f"  test:  {self.test.n} samples"
         )
@@ -708,7 +687,7 @@ class ConceptDataset:
             self._fold_num_test = fold_num_test
 
         # update subsamples
-        self.training = self._full.filter(
+        self.train = self._full.filter(
             indices=np.isin(
                 self.folds, [self.fold_num_validation, self.fold_num_test], invert=True
             )
@@ -891,7 +870,7 @@ class ConceptDataset:
         ):
             train_idx = train_idx[:train_size]
 
-        self.training = self._full.filter(_to_mask(train_idx, n))
+        self.train = self._full.filter(_to_mask(train_idx, n))
         self.validation = self._full.filter(_to_mask(val_idx, n))
         self.test = self._full.filter(_to_mask(test_idx, n))
         self._apply_noise_settings()
@@ -952,7 +931,7 @@ class ConceptDataset:
 
         masks: dict[str, np.ndarray] = {}
         all_splits = {
-            "train": self.training,
+            "train": self.train,
             "validation": self.validation,
             "test": self.test,
         }
@@ -1018,7 +997,7 @@ class ConceptDataset:
         rng_generated = coerce_rng(rng)
         masks: dict[str, np.ndarray] = {}
         splits = {
-            "train": self.training,
+            "train": self.train,
             "validation": self.validation,
             "test": self.test,
         }
@@ -1087,7 +1066,7 @@ class ConceptDataset:
         noisy_labels["full"] = full_labels
 
         splits = {
-            "train": self.training,
+            "train": self.train,
             "validation": self.validation,
             "test": self.test,
         }

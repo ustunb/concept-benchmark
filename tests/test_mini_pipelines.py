@@ -43,7 +43,7 @@ def _train_cbm(ds, epochs=1):
     cd = ConceptDetector()
     cbm = ConceptBasedModel(concept_detector=cd)
     cbm.fit(
-        train_dataset=ds.training,
+        train_dataset=ds.train,
         valid_dataset=ds.validation,
         freeze_backbone=False,
         concept_embed_params={"device": "cpu", "batch_size": 8, "num_workers": 0},
@@ -108,12 +108,12 @@ def test_robot_alignment_end_to_end():
     ds = _tabular_dataset(n=50, k=4)
     cbm = _train_cbm(ds)
 
-    concept_preds_train = ds.training.C.astype(np.float32)
+    concept_preds_train = ds.train.C.astype(np.float32)
     concept_preds_test = cbm.concept_detector.predict(ds.test).astype(np.float32)
 
     result = retrain_aligned(
         concept_preds_train=concept_preds_train,
-        y_train=ds.training.y.astype(int),
+        y_train=ds.train.y.astype(int),
         concept_preds_test=concept_preds_test,
         y_test=ds.test.y.astype(int),
         concept_names=list(ds.test.concepts),
@@ -162,3 +162,78 @@ def test_sudoku_selective():
         sel_acc = (proba.argmax(axis=1)[kept] == ds.test.y[kept]).mean()
         assert 0 <= sel_acc <= 1
     assert 0 <= coverage <= 1
+
+
+# ── End-to-end from DatasetGenerator (no cached artifacts) ───────────
+
+
+def test_robot_generator_to_cbm_end_to_end():
+    """Generate a real robot dataset, train a CBM, and verify predictions.
+
+    This test uses the actual DatasetGenerator (not synthetic arrays),
+    so it validates the full path from config → data generation →
+    training → prediction without requiring any cached files on disk.
+    """
+    from concept_benchmark.robot import DatasetGenerator
+    from experiments.models import RobotConceptClassifier
+
+    ds = DatasetGenerator(seed=99, render_images=False).generate()
+    ds.drop_concepts(["has_elbows", "hand_shape"])
+    ds.sample(test_size=200, val_size=100, train_size=200, seed=99)
+
+    cd = ConceptDetector(
+        model=RobotConceptClassifier(num_concepts=ds.train.n_concepts, input_size=32)
+    )
+    cbm = ConceptBasedModel(concept_detector=cd)
+    cbm.fit(
+        train_dataset=ds.train,
+        valid_dataset=ds.validation,
+        freeze_backbone=False,
+        concept_fit_params={
+            "epochs": 2,
+            "lr": 1e-3,
+            "device": "cpu",
+            "batch_size": 32,
+            "num_workers": 0,
+            "pin_memory": False,
+        },
+    )
+
+    preds = cbm.predict(ds.test)
+    assert preds.shape == (ds.test.n,)
+    assert set(preds).issubset({0, 1})
+
+    # With only 2 epochs on 200 samples, accuracy won't match paper,
+    # but it should be better than random (>55%) given the strong
+    # signal in the default label formula.
+    acc = float(np.mean(preds == ds.test.y))
+    assert acc > 0.55, f"Expected >55% accuracy, got {acc:.1%}"
+
+
+def test_sudoku_generator_to_cbm_end_to_end():
+    """Generate a real sudoku dataset, train a CBM, and verify predictions."""
+    from concept_benchmark.sudoku import DatasetGenerator
+    from experiments.models import GroupPoolingConceptSudokuCNN
+
+    ds = DatasetGenerator(seed=99, n_boards=50, data_type="tabular").generate()
+    ds.sample(test_size=10, val_size=10, stratify=ds.y, seed=99)
+
+    cd = ConceptDetector(model=GroupPoolingConceptSudokuCNN())
+    cbm = ConceptBasedModel(concept_detector=cd)
+    cbm.fit(
+        train_dataset=ds.train,
+        valid_dataset=ds.validation,
+        freeze_backbone=False,
+        concept_fit_params={
+            "epochs": 2,
+            "lr": 1e-3,
+            "device": "cpu",
+            "batch_size": 16,
+            "num_workers": 0,
+            "pin_memory": False,
+        },
+    )
+
+    preds = cbm.predict(ds.test)
+    assert preds.shape == (ds.test.n,)
+    assert set(preds).issubset({0, 1})

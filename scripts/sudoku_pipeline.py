@@ -114,7 +114,7 @@ def train_cs(
     cd = ConceptDetector(model=model)
     cbm = ConceptBasedModel(concept_detector=cd, should_propagate=True)
     cbm.fit(
-        train_dataset=data.training,
+        train_dataset=data.train,
         valid_dataset=data.validation,
         freeze_backbone=False,
         concept_embed_params={"shuffle": False, **loader_config},
@@ -160,7 +160,7 @@ def train_dnn(
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
     loader_config = get_loader_config()
-    train_loader = data.training.loader(shuffle=True, **loader_config)
+    train_loader = data.train.loader(shuffle=True, **loader_config)
     valid_loader = data.validation.loader(shuffle=False, **loader_config)
     test_loader = data.test.loader(shuffle=False, **loader_config)
 

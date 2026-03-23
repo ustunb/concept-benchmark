@@ -23,7 +23,7 @@ def test_constructor_tabular_basics(tab_small):
     assert ds.n == len(ds.X)
     assert ds.n_concepts == ds.C.shape[1]
     assert ds.n_classes == len(ds.classes)
-    assert ds.training.n == ds.n and ds.validation.n == 0 and ds.test.n == 0
+    assert ds.train.n == ds.n and ds.validation.n == 0 and ds.test.n == 0
     repr(ds)  # smoke
 
 
@@ -47,7 +47,7 @@ def test_set_cvindices_and_split(tab_small_cv):
     ds, fid = tab_small_cv
     ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
     n = ds.n
-    tr = set(np.where(ds.training.indices)[0])
+    tr = set(np.where(ds.train.indices)[0])
     va = set(np.where(ds.validation.indices)[0])
     te = set(np.where(ds.test.indices)[0])
     assert tr and va and te
@@ -83,11 +83,11 @@ def test_equality_changes_with_cvindices_change(tab_small_cv):
 def test_embed_updates_full_and_preserves_splits(tab_medium_cv):
     ds, fid = tab_medium_cv
     ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
-    n_tr, n_va, n_te = ds.training.n, ds.validation.n, ds.test.n
+    n_tr, n_va, n_te = ds.train.n, ds.validation.n, ds.test.n
     model = MeanEmbedder()
     embed_ds = ds.embed(model, batch_size=4, shuffle=False, device="cpu", num_workers=0)
     assert ds._full.meta.get("data_type") == "tabular"
-    assert (embed_ds.training.n, embed_ds.validation.n, embed_ds.test.n) == (
+    assert (embed_ds.train.n, embed_ds.validation.n, embed_ds.test.n) == (
         n_tr,
         n_va,
         n_te,
@@ -105,7 +105,7 @@ def test_reset_restores_full_and_clears_splits(tab_medium_cv):
     ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
     assert ds.validation.n > 0 and ds.test.n > 0
     ds.reset()
-    assert ds.training.n == ds.n and ds.validation.n == 0 and ds.test.n == 0
+    assert ds.train.n == ds.n and ds.validation.n == 0 and ds.test.n == 0
 
 
 # ---------- Negative paths ----------
@@ -119,25 +119,25 @@ def test_split_requires_known_fold_id(tab_small):
 def test_sample_concept_missingness_mcar_reproducible(tab_small_cv):
     ds, fid = tab_small_cv
     ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
-    original = ds.training.base_concepts.copy()
+    original = ds.train.base_concepts.copy()
 
     masks_a = ds.sample_concept_missingness(p=0.2, mechanism="mcar", rng=123)
     masks_b = ds.sample_concept_missingness(p=0.2, mechanism="mcar", rng=123)
 
     assert set(masks_a.keys()) == {"train", "validation", "test"}
-    assert masks_a["train"].shape == ds.training.base_concepts.shape
+    assert masks_a["train"].shape == ds.train.base_concepts.shape
     assert masks_a["validation"].shape == ds.validation.base_concepts.shape
     assert masks_a["test"].shape == ds.test.base_concepts.shape
     np.testing.assert_array_equal(masks_a["train"], masks_b["train"])
     assert np.isclose(masks_a["train"].mean(), 0.2, atol=0.1)
-    np.testing.assert_array_equal(ds.training.base_concepts, original)
-    np.testing.assert_array_equal(ds.training.C, original)
+    np.testing.assert_array_equal(ds.train.base_concepts, original)
+    np.testing.assert_array_equal(ds.train.C, original)
 
 
 def test_sample_concept_missingness_enable_toggle(tab_small_cv):
     ds, fid = tab_small_cv
     ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
-    original = ds.training.base_concepts.copy()
+    original = ds.train.base_concepts.copy()
 
     masks = ds.sample_concept_missingness(
         p=0.3,
@@ -149,14 +149,14 @@ def test_sample_concept_missingness_enable_toggle(tab_small_cv):
     train_mask = masks["train"]
 
     assert ds.has_concept_missing is True
-    assert train_mask.shape == ds.training.base_concepts.shape
+    assert train_mask.shape == ds.train.base_concepts.shape
     assert masks["validation"].shape == ds.validation.base_concepts.shape
     assert masks["test"].shape == ds.test.base_concepts.shape
-    assert np.all(ds.training.C[train_mask] == -1.0)
-    np.testing.assert_array_equal(ds.training.C[~train_mask], original[~train_mask])
-    np.testing.assert_array_equal(ds.training.base_concepts, original)
+    assert np.all(ds.train.C[train_mask] == -1.0)
+    np.testing.assert_array_equal(ds.train.C[~train_mask], original[~train_mask])
+    np.testing.assert_array_equal(ds.train.base_concepts, original)
     ds.has_concept_missing = False
-    np.testing.assert_array_equal(ds.training.C, original)
+    np.testing.assert_array_equal(ds.train.C, original)
 
 
 def test_split_specific_concept_missing_toggle(tab_small_cv):
@@ -164,18 +164,18 @@ def test_split_specific_concept_missing_toggle(tab_small_cv):
     ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
     ds.sample_concept_missingness(p=0.5, rng=0, mechanism="mcar", fill_value=-1.0)
     ds.has_concept_missing = False
-    ds.training.has_concept_missing = True
-    assert ds.training.has_concept_missing is True
+    ds.train.has_concept_missing = True
+    assert ds.train.has_concept_missing is True
     assert ds.validation.has_concept_missing is False
-    assert np.any(ds.training.C == -1.0)
+    assert np.any(ds.train.C == -1.0)
     assert np.all(ds.validation.C != -1.0)
-    ds.training.has_concept_missing = False
-    np.testing.assert_array_equal(ds.training.C, ds.training.base_concepts)
+    ds.train.has_concept_missing = False
+    np.testing.assert_array_equal(ds.train.C, ds.train.base_concepts)
 
 
 def test_sample_concept_missingness_mnar_respects_probabilities(tab_medium_cv):
     ds, _ = tab_medium_cv
-    original = ds.training.base_concepts.copy()
+    original = ds.train.base_concepts.copy()
 
     masks = ds.sample_concept_missingness(
         p=0.4,
@@ -185,22 +185,22 @@ def test_sample_concept_missingness_mnar_respects_probabilities(tab_medium_cv):
     )
 
     train_mask = masks["train"]
-    concepts = ds.training.base_concepts
+    concepts = ds.train.base_concepts
 
     present_mask = train_mask[concepts == 1]
     absent_mask = train_mask[concepts == 0]
 
     assert present_mask.size > 0 and absent_mask.size > 0
     assert present_mask.mean() > absent_mask.mean()
-    np.testing.assert_array_equal(ds.training.base_concepts, original)
-    np.testing.assert_array_equal(ds.training.C, original)
+    np.testing.assert_array_equal(ds.train.base_concepts, original)
+    np.testing.assert_array_equal(ds.train.C, original)
 
 
 # ---------- Concept noise ----------
 def test_sample_concept_noise_reproducible_and_toggle(tab_small_cv):
     ds, fid = tab_small_cv
     ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
-    original = ds.training.base_concepts.copy()
+    original = ds.train.base_concepts.copy()
 
     masks_a = ds.sample_concept_noise(p=0.25, rng=42)
     masks_b = ds.sample_concept_noise(p=0.25, rng=42)
@@ -208,17 +208,17 @@ def test_sample_concept_noise_reproducible_and_toggle(tab_small_cv):
     assert set(masks_a.keys()) == {"train", "validation", "test"}
     np.testing.assert_array_equal(masks_a["train"], masks_b["train"])
     ds.has_concept_noise = True
-    noisy = ds.training.C
+    noisy = ds.train.C
     expected = np.where(masks_a["train"], 1 - original, original)
     np.testing.assert_array_equal(noisy, expected)
     ds.has_concept_noise = False
-    np.testing.assert_array_equal(ds.training.C, original)
+    np.testing.assert_array_equal(ds.train.C, original)
 
 
 def test_sample_concept_noise_asymmetric(tab_small_cv):
     ds, fid = tab_small_cv
     ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
-    base = ds.training.base_concepts.copy()
+    base = ds.train.base_concepts.copy()
 
     masks = ds.sample_concept_noise(
         p=0.0,
@@ -231,7 +231,7 @@ def test_sample_concept_noise_asymmetric(tab_small_cv):
     assert mask[base == 0].any()
 
     ds.has_concept_noise = True
-    noisy = ds.training.C
+    noisy = ds.train.C
     np.testing.assert_array_equal(noisy[base == 1], base[base == 1])
     ds.has_concept_noise = False
 
@@ -239,7 +239,7 @@ def test_sample_concept_noise_asymmetric(tab_small_cv):
 def test_concept_noise_then_missingness_order(tab_small_cv):
     ds, fid = tab_small_cv
     ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
-    base = ds.training.base_concepts.copy()
+    base = ds.train.base_concepts.copy()
 
     noise_masks = ds.sample_concept_noise(p=1.0, rng=0)
     missing_masks = ds.sample_concept_missingness(
@@ -252,7 +252,7 @@ def test_concept_noise_then_missingness_order(tab_small_cv):
     ds.has_concept_noise = True
     ds.has_concept_missing = True
 
-    noisy_then_missing = ds.training.C
+    noisy_then_missing = ds.train.C
 
     expected_noisy = np.where(noise_masks["train"], 1 - base, base)
     expected = expected_noisy.astype(np.float32)
@@ -261,7 +261,7 @@ def test_concept_noise_then_missingness_order(tab_small_cv):
     np.testing.assert_array_equal(noisy_then_missing, expected)
     ds.has_concept_noise = False
     ds.has_concept_missing = False
-    np.testing.assert_array_equal(ds.training.C, base)
+    np.testing.assert_array_equal(ds.train.C, base)
 
 
 def test_split_specific_concept_noise_toggle(tab_small_cv):
@@ -269,20 +269,20 @@ def test_split_specific_concept_noise_toggle(tab_small_cv):
     ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
     ds.sample_concept_noise(p=1.0, rng=42)
     ds.has_concept_noise = False
-    ds.training.has_concept_noise = True
-    assert ds.training.has_concept_noise is True
+    ds.train.has_concept_noise = True
+    assert ds.train.has_concept_noise is True
     assert ds.validation.has_concept_noise is False
-    assert np.all(ds.training.C != ds.training.base_concepts)
+    assert np.all(ds.train.C != ds.train.base_concepts)
     assert np.all(ds.validation.C == ds.validation.base_concepts)
-    ds.training.has_concept_noise = False
-    assert np.all(ds.training.C == ds.training.base_concepts)
+    ds.train.has_concept_noise = False
+    assert np.all(ds.train.C == ds.train.base_concepts)
 
 
 # ---------- Label noise ----------
 def test_sample_label_noise_reproducible_and_toggle(tab_small_cv):
     ds, fid = tab_small_cv
     ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
-    base_labels = ds.training.base_labels.copy()
+    base_labels = ds.train.base_labels.copy()
 
     noisy_a = ds.sample_label_noise(p=0.4, rng=2023)
     noisy_b = ds.sample_label_noise(p=0.4, rng=2023)
@@ -290,21 +290,21 @@ def test_sample_label_noise_reproducible_and_toggle(tab_small_cv):
     assert set(noisy_a.keys()) == {"full", "train", "validation", "test"}
     np.testing.assert_array_equal(noisy_a["train"], noisy_b["train"])
     assert ds.has_label_noise is False
-    assert ds.training.has_label_noise is False
-    np.testing.assert_array_equal(ds.training.y, base_labels)
+    assert ds.train.has_label_noise is False
+    np.testing.assert_array_equal(ds.train.y, base_labels)
 
     ds.has_label_noise = True
-    np.testing.assert_array_equal(ds.training.y, noisy_a["train"])
-    assert ds.training.has_label_noise is True
+    np.testing.assert_array_equal(ds.train.y, noisy_a["train"])
+    assert ds.train.has_label_noise is True
     ds.has_label_noise = False
-    np.testing.assert_array_equal(ds.training.y, base_labels)
-    assert ds.training.has_label_noise is False
+    np.testing.assert_array_equal(ds.train.y, base_labels)
+    assert ds.train.has_label_noise is False
 
 
 def test_sample_label_noise_with_flip_matrix(tab_small_cv):
     ds, fid = tab_small_cv
     ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
-    base_labels = ds.training.base_labels.copy()
+    base_labels = ds.train.base_labels.copy()
     flip_matrix = [[0.0, 1.0], [1.0, 0.0]]
 
     noisy = ds.sample_label_noise(
@@ -315,13 +315,13 @@ def test_sample_label_noise_with_flip_matrix(tab_small_cv):
     )
 
     assert ds.has_label_noise is True
-    assert ds.training.has_label_noise is True
-    assert np.all(ds.training.y != base_labels)
-    np.testing.assert_array_equal(ds.training.y, 1 - base_labels)
+    assert ds.train.has_label_noise is True
+    assert np.all(ds.train.y != base_labels)
+    np.testing.assert_array_equal(ds.train.y, 1 - base_labels)
 
     ds.has_label_noise = False
-    np.testing.assert_array_equal(ds.training.y, base_labels)
-    assert ds.training.has_label_noise is False
+    np.testing.assert_array_equal(ds.train.y, base_labels)
+    assert ds.train.has_label_noise is False
 
 
 def test_split_specific_label_noise_toggle(tab_small_cv):
@@ -329,11 +329,11 @@ def test_split_specific_label_noise_toggle(tab_small_cv):
     ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
     ds.sample_label_noise(p=0.5, rng=1)
     ds.has_label_noise = False
-    ds.training.has_label_noise = True
-    assert ds.training.has_label_noise is True
+    ds.train.has_label_noise = True
+    assert ds.train.has_label_noise is True
     assert ds.validation.has_label_noise is False
     assert ds.test.has_label_noise is False
-    assert np.any(ds.training.y != ds.training.base_labels)
+    assert np.any(ds.train.y != ds.train.base_labels)
     assert np.all(ds.validation.y == ds.validation.base_labels)
 
 
@@ -341,8 +341,7 @@ def test_split_specific_label_noise_toggle(tab_small_cv):
 def test_getitem_train_returns_training(tab_small_cv):
     ds, fid = tab_small_cv
     ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
-    assert ds["train"] is ds.training
-    assert ds["training"] is ds.training
+    assert ds["train"] is ds.train
 
 
 def test_getitem_val_returns_validation(tab_small_cv):
@@ -369,7 +368,6 @@ def test_keys(tab_small):
 
 def test_contains(tab_small):
     assert "train" in tab_small
-    assert "training" in tab_small
     assert "val" in tab_small
     assert "validation" in tab_small
     assert "test" in tab_small
@@ -377,10 +375,6 @@ def test_contains(tab_small):
 
 
 # ---------- Aliases ----------
-def test_train_alias(tab_small):
-    assert tab_small.train is tab_small.training
-
-
 def test_val_alias(tab_small):
     assert tab_small.val is tab_small.validation
 
@@ -424,7 +418,7 @@ class TestSample:
         ds.sample(test_size=0.2, val_size=0.2, seed=42)
         assert ds.test.n == 20
         assert ds.validation.n == 20
-        assert ds.training.n == 60
+        assert ds.train.n == 60
         assert ds.__check_rep__()
 
     def test_basic_random_split_ints(self):
@@ -432,7 +426,7 @@ class TestSample:
         ds.sample(test_size=15, val_size=10, seed=7)
         assert ds.test.n == 15
         assert ds.validation.n == 10
-        assert ds.training.n == 75
+        assert ds.train.n == 75
         assert ds.__check_rep__()
 
     def test_train_size_limits_training(self):
@@ -440,16 +434,16 @@ class TestSample:
         ds.sample(test_size=20, val_size=20, train_size=30, seed=1)
         assert ds.test.n == 20
         assert ds.validation.n == 20
-        assert ds.training.n == 30
+        assert ds.train.n == 30
         # Some samples discarded
-        total = ds.training.n + ds.validation.n + ds.test.n
+        total = ds.train.n + ds.validation.n + ds.test.n
         assert total < ds.n
         assert ds.__check_rep__()
 
     def test_no_overlap_between_splits(self):
         ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
         ds.sample(test_size=0.2, val_size=0.2, seed=99)
-        tr = set(np.where(ds.training.indices)[0])
+        tr = set(np.where(ds.train.indices)[0])
         va = set(np.where(ds.validation.indices)[0])
         te = set(np.where(ds.test.indices)[0])
         assert tr.isdisjoint(va)
@@ -460,7 +454,7 @@ class TestSample:
         ds, _ = self._make(n=200, d=4, k=3, n_classes=2)
         ds.sample(test_size=0.2, val_size=0.2, stratify=ds.y, seed=10)
         overall = np.mean(ds.y)
-        train_mean = np.mean(ds.training.y)
+        train_mean = np.mean(ds.train.y)
         test_mean = np.mean(ds.test.y)
         val_mean = np.mean(ds.validation.y)
         assert abs(train_mean - overall) < 0.1
@@ -474,7 +468,7 @@ class TestSample:
         ds.sample(test_size=0.2, val_size=0.2, groups=groups, seed=5)
 
         # Check no group appears in multiple splits
-        train_idx = np.where(ds.training.indices)[0]
+        train_idx = np.where(ds.train.indices)[0]
         val_idx = np.where(ds.validation.indices)[0]
         test_idx = np.where(ds.test.indices)[0]
 
@@ -491,7 +485,7 @@ class TestSample:
         groups = np.repeat(np.arange(20), 5)
         ds.sample(test_size=0.2, val_size=0.2, groups=groups, stratify=ds.y, seed=5)
         # No group leakage
-        train_idx = np.where(ds.training.indices)[0]
+        train_idx = np.where(ds.train.indices)[0]
         val_idx = np.where(ds.validation.indices)[0]
         test_idx = np.where(ds.test.indices)[0]
         train_g = set(groups[train_idx].tolist())
@@ -517,7 +511,7 @@ class TestSample:
         )
         # At least 30% of training should have z0=1
         z0_col = ds.concepts.index("z0")
-        z0_frac = np.mean(ds.training.C[:, z0_col])
+        z0_frac = np.mean(ds.train.C[:, z0_col])
         assert (
             z0_frac >= 0.2
         )  # constraint targets 0.3; best-effort oversampling from 10% base rate
@@ -529,7 +523,7 @@ class TestSample:
         ds2.sample(test_size=0.2, val_size=0.2, seed=42)
         np.testing.assert_array_equal(ds1.X, ds2.X)
         np.testing.assert_array_equal(ds1.C, ds2.C)
-        np.testing.assert_array_equal(ds1.training.y, ds2.training.y)
+        np.testing.assert_array_equal(ds1.train.y, ds2.train.y)
         np.testing.assert_array_equal(ds1.test.y, ds2.test.y)
 
     def test_returns_self_for_chaining(self):
@@ -554,7 +548,7 @@ class TestSample:
             p=0.3, mechanism="mcar", rng=99, enable=True
         )
         assert "train" in masks
-        assert masks["train"].shape == ds.training.base_concepts.shape
+        assert masks["train"].shape == ds.train.base_concepts.shape
 
     def test_missingness_splits_param_training_only(self):
         ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
@@ -572,7 +566,7 @@ class TestSample:
         original_k = ds.n_concepts
         ds.drop_concepts(["z0"])
         assert ds.n_concepts == original_k - 1
-        assert ds.training.C.shape[1] == original_k - 1
+        assert ds.train.C.shape[1] == original_k - 1
         assert ds.validation.C.shape[1] == original_k - 1
         assert ds.test.C.shape[1] == original_k - 1
         assert ds.__check_rep__()

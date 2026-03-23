@@ -7,14 +7,14 @@ from concept_benchmark.data import ConceptImageDatasetSample
 
 
 def test_len_and_repr(img_small):
-    s = img_small.training
+    s = img_small.train
     assert isinstance(s, ConceptImageDatasetSample)
     assert len(s) == s.n
     repr(s)  # smoke
 
 
 def test_getitem_returns_pil_and_int_tensors(img_small):
-    s = img_small.training
+    s = img_small.train
     image, c, y = s[0]
     assert isinstance(image, Image.Image)
     assert isinstance(c, torch.Tensor) and c.dtype == torch.float32 and c.ndim == 1
@@ -52,7 +52,7 @@ def test_transform_to_tensor_and_loader_batching(img_small):
 
 
 def test_missing_image_warns_and_returns_path(img_with_missing):
-    s = img_with_missing.training
+    s = img_with_missing.train
     # In our factory, the missing path is appended at the end
     idx_missing = len(s) - 1
     with pytest.warns(RuntimeWarning, match="cannot open image, returning path"):

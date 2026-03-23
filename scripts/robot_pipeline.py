@@ -168,7 +168,7 @@ def train_cbm(
             mechanism=missing_mechanism,
             rng=np.random.default_rng(config.seed),
         )
-        data.training.has_concept_missing = True
+        data.train.has_concept_missing = True
 
     _macos = platform.system() == "Darwin"
     loader_config = {
@@ -181,13 +181,13 @@ def train_cbm(
 
     cd = ConceptDetector(
         model=RobotConceptClassifier(
-            num_concepts=data.training.n_concepts,
+            num_concepts=data.train.n_concepts,
             input_size=config.input_size,
         )
     )
     cbm = ConceptBasedModel(concept_detector=cd)
     cbm.fit(
-        train_dataset=data.training,
+        train_dataset=data.train,
         valid_dataset=data.validation,
         freeze_backbone=False,
         concept_embed_params={"shuffle": False, **loader_config},
@@ -301,14 +301,14 @@ def train_cbm_subjective(
     # Offset seed so noise RNG is independent of data-generation RNG.
     # This specific offset (+555) reproduces the paper's noise patterns.
     rng = np.random.default_rng(config.seed + 555)
-    concept_names = list(noisy_data.training.concepts)
+    concept_names = list(noisy_data.train.concepts)
     concept_spec = config.concepts
 
     # Apply group-level noise to training and validation splits
-    noisy_data.training = _clone_sample_with_C(
-        noisy_data.training,
+    noisy_data.train = _clone_sample_with_C(
+        noisy_data.train,
         _apply_concept_noise_grouped(
-            noisy_data.training.C,
+            noisy_data.train.C,
             concept_names,
             concept_spec,
             config.subjective_noise_rate,
@@ -374,12 +374,12 @@ def train_lfcbm(
     # Extract image paths from dataset — X contains bare filenames like
     # "robot_003.png", so we prepend the image directory.
     image_dir = data_dir / "robot_images"
-    train_paths = [str(image_dir / p) for p in data.training.X]
+    train_paths = [str(image_dir / p) for p in data.train.X]
     valid_paths = [str(image_dir / p) for p in data.validation.X]
 
     stats = lfcbm.fit(
         train_X=train_paths,
-        train_y=data.training.y.astype(int),
+        train_y=data.train.y.astype(int),
         valid_X=valid_paths,
         valid_y=data.validation.y.astype(int),
         concept_set=concept_set,
@@ -422,7 +422,7 @@ def train_dnn(
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
 
     loader_config = get_loader_config()
-    train_loader = data.training.loader(shuffle=True, **loader_config)
+    train_loader = data.train.loader(shuffle=True, **loader_config)
     valid_loader = data.validation.loader(shuffle=False, **loader_config)
     test_loader = data.test.loader(shuffle=False, **loader_config)
 
@@ -1093,12 +1093,12 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
         lf = LabelFreeCBM(cfg)
 
         image_dir = data_dir / "robot_images"
-        train_paths = [str(image_dir / p) for p in data.training.X]
+        train_paths = [str(image_dir / p) for p in data.train.X]
         valid_paths = [str(image_dir / p) for p in data.validation.X]
 
         stats = lf.fit(
             train_X=train_paths,
-            train_y=data.training.y.astype(int),
+            train_y=data.train.y.astype(int),
             valid_X=valid_paths,
             valid_y=data.validation.y.astype(int),
             concept_set=concept_set,
@@ -1359,7 +1359,7 @@ def align(
 
     return run_alignment(
         concept_based_model=model,
-        train_dataset=data.training,
+        train_dataset=data.train,
         test_dataset=data.test,
         monotonicity_constraints=config.get_alignment_constraints(),
         save_path=config.get_alignment_results_path(),
