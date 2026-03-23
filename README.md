@@ -68,6 +68,7 @@ The robot benchmark classifies fictional robots — **Glorps** vs. **Drents** �
 
 ```python
 from concept_benchmark.robots import DatasetGenerator
+from concept_benchmark.transforms import ConceptDropGenerator
 
 dataset = DatasetGenerator(
     seed=1014,
@@ -76,11 +77,11 @@ dataset = DatasetGenerator(
 ).generate()
 
 # Drop some concepts to get a 12-concept setup
-dataset.drop_concepts([
+dataset = ConceptDropGenerator(dataset, [
     "has_elbows", "hand_shape", "foot_shape",
     "foot_shape_flat_rounded", "foot_shape_flat_lshaped",
     "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
-])
+]).generate()
 dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
 
 print(dataset.train.C.shape)   # (3800, 12) — concept annotations
@@ -124,7 +125,7 @@ from experiments.models import (
 # Step 1: train concept detector (images → concepts)
 n_concepts = dataset.train.n_concepts
 cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=n_concepts, input_size=32))
-cd.fit(dataset.train, dataset.validation,
+cd.fit(dataset.train, dataset.val,
        fit_params={"epochs": 50, "lr": 1e-3, "patience": 10})
 
 # Step 2: train label predictor (concepts → label)
@@ -154,6 +155,10 @@ results = pd.DataFrame({
 })
 fig, ax = plot_intervention_curve(results, baseline_accuracy=0.8746)
 ```
+
+<p align="center">
+  <img src="docs/assets/intervention_curve.png" width="500" alt="Intervention curve example">
+</p>
 
 ### Sudoku Validation
 
@@ -201,6 +206,9 @@ To reproduce the paper results — including all intervention regimes, alignment
 ```bash
 python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes   # see --help for all flags
 python scripts/sudoku_pipeline.py --seed 171
+
+# Add plot to generate figures from results
+python scripts/robot_pipeline.py --seed 1014 --stages setup cbm dnn intervene align collect plot
 ```
 
 <details>
@@ -215,7 +223,7 @@ This guide shows how to evaluate your own concept bottleneck model on the benchm
 Generate a dataset as shown in the [Quick Start](#robot-classification), then access the splits:
 
 ```python
-train, val, test = dataset.train, dataset.validation, dataset.test
+train, val, test = dataset.train, dataset.val, dataset.test
 ```
 
 Each split is a `ConceptDatasetSample` with these attributes:
@@ -274,31 +282,31 @@ You can re-split at any time by calling `sample()` again.
 
 #### Concept missingness
 
-Simulate missing concept annotations (e.g., incomplete labels from crowdsourcing). Missingness is applied as a composable layer on top of splits — the underlying data is unchanged:
+Simulate missing concept annotations (e.g., incomplete labels from crowdsourcing). Use the generator transforms to produce a new dataset with missingness applied:
 
 ```python
+from concept_benchmark.transforms import ConceptMissingnessGenerator
+
 dataset.sample(test_size=0.2, val_size=0.2, seed=42)
 
 # MCAR: each concept label independently missing with probability p
-dataset.sample_concept_missingness(p=0.2, mechanism="mcar", rng=99, enable=True)
+dataset = ConceptMissingnessGenerator(dataset, p=0.2, mechanism="mcar", rng=99).generate()
 
 # MNAR: missingness depends on concept value (present concepts more likely observed)
-dataset.sample_concept_missingness(
-    p=0.2, mechanism="mnar", rng=99, enable=True,
+dataset = ConceptMissingnessGenerator(
+    dataset, p=0.2, mechanism="mnar", rng=99,
     mnar_config={"present_prob": 0.8, "absent_prob": 0.1},
-)
-
-# Apply to training only (validation/test keep full annotations)
-dataset.sample_concept_missingness(
-    p=0.2, mechanism="mcar", rng=99, splits={"train"}, enable=True,
-)
-
-# Toggle missingness on/off without resampling
-dataset.has_concept_missing = False   # disable — C returns clean values
-dataset.has_concept_missing = True    # re-enable — C returns masked values
+).generate()
 ```
 
-Similarly, `sample_concept_noise()` adds symmetric or asymmetric label flips, and `sample_label_noise()` corrupts target labels.
+Similarly, `ConceptNoiseGenerator` adds symmetric or asymmetric label flips, and `LabelNoiseGenerator` corrupts target labels:
+
+```python
+from concept_benchmark.transforms import ConceptNoiseGenerator, LabelNoiseGenerator
+
+dataset = ConceptNoiseGenerator(dataset, noise_rate=0.1, rng=99).generate()
+dataset = LabelNoiseGenerator(dataset, noise_rate=0.05, rng=99).generate()
+```
 
 ### Wrapping your concept detector
 
@@ -405,7 +413,7 @@ For running interventions and alignment on your model, see the [Evaluation](#eva
 All parameters below can be passed to `DatasetGenerator(...)` (imported from `concept_benchmark.robots`). Common parameters apply to both image and text modalities; scope-specific parameters are ignored when the other modality is selected.
 
 ```python
-from concept_benchmark.robots import DatasetGenerator, LabelFormula
+from concept_benchmark.robots import DatasetGenerator, LabelFormula, F
 
 dataset = DatasetGenerator(
     # ── Common (image + text) ──
@@ -429,11 +437,14 @@ dataset = DatasetGenerator(
         #               pointy_square, pointy_3sided, pointy_4sided
     },
     label_formula=LabelFormula(       # scoring rule for class assignment
-        mouth_type=("closed", 5.0),   #   score = 5·[mouth=closed] + 8·[foot=pointy] - 5·[knees=true] + 2
-        foot_shape=("pointy", 8.0),
-        has_knees=("true", -5.0),
-        intercept=2.0,
+        score=(                       #   score = 5·[mouth=closed] + 8·[foot=pointy] - 5·[knees=true] + 2
+            5 * F("mouth_type").closed
+            + 8 * F("foot_shape").pointy
+            - 5 * F("has_knees").true
+            + 2
+        ),
         temperature=4.2,              #   P(Glorp) = σ(4.2 × score)
+        stochastic=True,
     ),
     concept_preset="foot_subtypes",  # "ground_truth" or "foot_subtypes" (expands foot_shape into subtypes)
     renders_per_robot=4,             # samples per unique robot config (image: 4, text: 1)
@@ -452,8 +463,10 @@ dataset = DatasetGenerator(
 After generating, you can drop concepts and split into train/val/test:
 
 ```python
+from concept_benchmark.transforms import ConceptDropGenerator
+
 # Remove concepts from the concept set
-dataset.drop_concepts(["has_elbows", "hand_shape"])
+dataset = ConceptDropGenerator(dataset, ["has_elbows", "hand_shape"]).generate()
 
 # Split into train/val/test
 dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
@@ -463,8 +476,9 @@ For the paper's skewed splits (ensuring minimum representation of rare concept p
 
 ```python
 from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
+from concept_benchmark.transforms import ConceptDropGenerator
 
-dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["foot_subtypes"])
+dataset = ConceptDropGenerator(dataset, PRESET_EXCLUDED_CONCEPTS["foot_subtypes"]).generate()
 # drops: has_elbows, hand_shape, foot_shape, foot_shape_flat_rounded,
 #        foot_shape_flat_lshaped, foot_shape_pointy_trapezoid, foot_shape_pointy_3sided
 
@@ -480,6 +494,9 @@ dataset.sample(
 
 ```bash
 python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes
+
+# Add plot to generate figures from results
+python scripts/robot_pipeline.py --seed 1014 --stages setup cbm dnn intervene align collect plot
 ```
 
 Run `python scripts/robot_pipeline.py --help` for the full list of options (including training, intervention, and regime parameters).
@@ -558,7 +575,15 @@ from concept_benchmark.benchmark import (
 | `plot_selective_classification(dnn_metrics, cbm_metrics)` | Grouped bar chart comparing DNN vs CBM on selective metrics |
 | `plot_alignment_comparison(results_dict)` | Horizontal bar chart of CBM vs aligned CBM gain |
 
-All plot functions return `(fig, ax)` and accept an optional `ax` parameter for composing multiple plots. See [docs/evaluation.md](docs/evaluation.md) for detailed usage examples.
+All plot functions return `(fig, ax)` and accept an optional `ax` parameter for composing multiple plots.
+
+<p align="center">
+  <img src="docs/assets/intervention_curve.png" width="500" alt="Intervention curve">
+</p>
+
+<p align="center">
+  <img src="docs/assets/regime_comparison.png" width="500" alt="Regime comparison">
+</p>
 
 ### Interventions
 

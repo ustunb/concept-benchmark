@@ -7,7 +7,8 @@ A concept bottleneck model (CBM) first predicts interpretable *concepts* from in
 The robot benchmark classifies fictional robots — **Glorps** vs. **Drents** — from their body features:
 
 ```python
-from concept_benchmark.robots import DatasetGenerator, LabelFormula
+from concept_benchmark.robots import DatasetGenerator, LabelFormula, F
+from concept_benchmark.transforms import ConceptDropGenerator
 
 dataset = DatasetGenerator(
     seed=1014,                       # reproducibility
@@ -15,20 +16,23 @@ dataset = DatasetGenerator(
     image_size="medium",             # "small" (8px), "medium" (32px, default), or "large" (600px)
     render_images=True,              # set False to skip image rendering for quick exploration
     label_formula=LabelFormula(      # scoring rule for class assignment
-        mouth_type=("closed", 5.0),  #   score = 5·[mouth=closed] + 8·[foot=pointy] - 5·[knees=true] + 2
-        foot_shape=("pointy", 8.0),
-        has_knees=("true", -5.0),
-        intercept=2.0,
+        score=(                      #   score = 5·[mouth=closed] + 8·[foot=pointy] - 5·[knees=true] + 2
+            5 * F("mouth_type").closed
+            + 8 * F("foot_shape").pointy
+            - 5 * F("has_knees").true
+            + 2
+        ),
         temperature=4.2,             # P(Glorp) = σ(4.2 × score)
+        stochastic=True,
     ),
 ).generate()
 
 # Drop some concepts to get a 12-concept setup
-dataset.drop_concepts([
+dataset = ConceptDropGenerator(dataset, [
     "has_elbows", "hand_shape", "foot_shape",
     "foot_shape_flat_rounded", "foot_shape_flat_lshaped",
     "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
-])
+]).generate()
 dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
 
 print(dataset.train.C.shape)   # (3800, 12) — concept annotations
@@ -65,6 +69,7 @@ Train a CBM — concept detector (images → concepts) and label predictor (conc
 ```python
 import numpy as np
 from concept_benchmark.robots import DatasetGenerator
+from concept_benchmark.transforms import ConceptDropGenerator
 from concept_benchmark.utils import set_deterministic_seed
 from experiments.models import (
     ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier,
@@ -74,17 +79,17 @@ set_deterministic_seed(1014)
 
 dataset = DatasetGenerator(
     seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
-dataset.drop_concepts([
+dataset = ConceptDropGenerator(dataset, [
     "has_elbows", "hand_shape", "foot_shape",
     "foot_shape_flat_rounded", "foot_shape_flat_lshaped",
     "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
-])
+]).generate()
 dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
 
 # Step 1: train concept detector (images → concepts)
 n_concepts = dataset.train.n_concepts
 cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=n_concepts, input_size=32))
-cd.fit(dataset.train, dataset.validation,
+cd.fit(dataset.train, dataset.val,
        fit_params={"epochs": 50, "lr": 1e-3, "patience": 10})
 
 # Step 2: train label predictor (concepts → label)
@@ -114,6 +119,10 @@ results = pd.DataFrame({
 })
 fig, ax = plot_intervention_curve(results, baseline_accuracy=0.8746)
 ```
+
+<p align="center">
+  <img src="docs/assets/intervention_curve.png" width="500" alt="Intervention curve example">
+</p>
 
 ## Sudoku Validation
 
@@ -163,4 +172,7 @@ To reproduce the paper results — including all intervention regimes, alignment
 ```bash
 python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes   # see --help for all flags
 python scripts/sudoku_pipeline.py --seed 171
+
+# Add plot to generate figures from results
+python scripts/robot_pipeline.py --seed 1014 --stages setup cbm dnn intervene align collect plot
 ```
