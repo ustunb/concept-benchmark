@@ -9,9 +9,9 @@ This guide shows how to evaluate your own concept bottleneck model on the benchm
 Generate a dataset and access it in the format your model expects:
 
 ```python
-from concept_benchmark import DatasetGenerator
+from concept_benchmark.robot import DatasetGenerator
 
-dataset = DatasetGenerator("robot", seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
+dataset = DatasetGenerator(seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
 dataset.drop_concepts(["has_elbows", "hand_shape"])
 dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
 train, val, test = dataset.train, dataset.validation, dataset.test

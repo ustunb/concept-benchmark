@@ -20,7 +20,7 @@ Note: ``uv sync`` makes ``experiments/`` importable automatically.
 import numpy as np
 from sklearn.metrics import accuracy_score
 
-from concept_benchmark import DatasetGenerator
+from concept_benchmark.sudoku import DatasetGenerator
 from concept_benchmark.utils import set_deterministic_seed
 from experiments.intervention import ConceptInterventionRunner, InterventionConfig
 from experiments.kflip import KFlipInterventionStrategy
@@ -52,11 +52,10 @@ print(f"Using device: {device}")
 # ---------------------------------------------------------------------------
 print("Generating Sudoku dataset (1000 boards, max_cell_swaps=9)...")
 dataset = DatasetGenerator(
-    "sudoku",
     seed=SEED,
     n_boards=1000,
-    max_cell_swaps=9,        # cells swapped in invalid boards (higher = subtler)
-    valid_board_ratio=0.5,   # 50% valid, 50% invalid
+    max_cell_swaps=9,  # cells swapped in invalid boards (higher = subtler)
+    valid_board_ratio=0.5,  # 50% valid, 50% invalid
     data_type="tabular",  # use "image" to render board PNGs for explore()
 ).generate()
 dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=SEED)
@@ -73,10 +72,14 @@ print(f"  Concepts:    {train.concepts[:5]} ... ({train.n_concepts} total)")
 print("\nTraining ConceptDetector (GroupPoolingConceptSudokuCNN)...")
 cd = ConceptDetector(model=GroupPoolingConceptSudokuCNN())
 cd.fit(
-    train, val,
+    train,
+    val,
     fit_params={
-        "epochs": 100, "lr": 1e-3, "patience": 20,
-        "device": str(device), **loader_config,
+        "epochs": 100,
+        "lr": 1e-3,
+        "patience": 20,
+        "device": str(device),
+        **loader_config,
     },
 )
 print("  Done.")

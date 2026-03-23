@@ -4,16 +4,17 @@ Provides a unified ``DatasetGenerator`` API that wraps data creation
 and seed management into a single call.  After ``generate()``, call
 ``sample()`` to split into train/val/test:
 
-    >>> from concept_benchmark import DatasetGenerator
+    >>> from concept_benchmark.robot import DatasetGenerator
     >>> from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
-    >>> gen = DatasetGenerator("robot", seed=1014, render_images=False)
+    >>> gen = DatasetGenerator(seed=1014, render_images=False)
     >>> dataset = gen.generate()
     >>> dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["ground_truth"])
     >>> dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
     >>> dataset.train.C.shape
     (3800, 7)
 
-    >>> dataset = DatasetGenerator("sudoku", seed=171, data_type="tabular").generate()
+    >>> from concept_benchmark.sudoku import DatasetGenerator
+    >>> dataset = DatasetGenerator(seed=171, data_type="tabular").generate()
     >>> dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=171)
     >>> dataset.train.C.shape
     (600, 27)
@@ -116,7 +117,6 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
     )
     from concept_benchmark.synthetic.robot_text.dataset import build_text_dataset
     from concept_benchmark.synthetic.helper.robot_catalog import collapse_robot_subtypes
-    from concept_benchmark.synthetic.helper.utils import build_model_expression
 
     set_deterministic_seed(config.seed)
 
@@ -134,20 +134,10 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
         catalog_for_labels, robot_features=list(config.concepts.keys())
     )
 
-    # Build expression from structured params (same as image pipeline)
-    expr = build_model_expression(
-        config.label_features,
-        model_type="deterministic",
-        weights=config.label_weights,
-        intercept=config.label_intercept,
-    )
-
-    model_type = "stochastic" if config.use_stochastic_labels else "deterministic"
     catalog_df["label"] = compute_label(
         catalog_for_labels,
-        expr,
-        label_model_type=model_type,
-        alpha=config.label_temperature if model_type == "stochastic" else 1.0,
+        config.label_formula,
+        stochastic=config.use_stochastic_labels,
         seed=config.seed,
     )
 
@@ -194,8 +184,10 @@ class DatasetGenerator:
     Follows the HuggingFace ``load_dataset`` pattern — the first argument
     selects the benchmark, remaining kwargs configure it:
 
-        >>> DatasetGenerator("robot", seed=1014, render_images=False).generate()
-        >>> DatasetGenerator("sudoku", seed=171, data_type="tabular").generate()
+        >>> from concept_benchmark.robot import DatasetGenerator
+        >>> DatasetGenerator(seed=1014, render_images=False).generate()
+        >>> from concept_benchmark.sudoku import DatasetGenerator
+        >>> DatasetGenerator(seed=171, data_type="tabular").generate()
 
     Parameters
     ----------

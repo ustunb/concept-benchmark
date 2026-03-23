@@ -16,15 +16,16 @@ Usage:
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 
-from concept_benchmark import DatasetGenerator
+from concept_benchmark.robot import DatasetGenerator
 
 # ---------------------------------------------------------------------------
 # 1. Generate dataset (render_images=False skips image rendering for speed)
 # ---------------------------------------------------------------------------
 print("Generating robot dataset...")
-gen = DatasetGenerator("robot", seed=1014, render_images=False)
+gen = DatasetGenerator(seed=1014, render_images=False)
 dataset = gen.generate()
 from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
+
 dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["ground_truth"])
 dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
 
@@ -74,7 +75,7 @@ print("\nOracle interventions (correct k wrong concepts):")
 for k in [1, 3, 7]:
     C_intervened = C_noisy.copy()
     # Identify wrong positions and fix the first k per sample
-    diff = (C_noisy != test.C)
+    diff = C_noisy != test.C
     for i in range(len(test.C)):
         wrong_idx = np.where(diff[i])[0]
         fix = wrong_idx[:k]

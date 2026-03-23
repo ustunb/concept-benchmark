@@ -72,10 +72,9 @@ A concept bottleneck model (CBM) first predicts interpretable *concepts* from in
 The robot benchmark classifies fictional robots — **Glorps** vs. **Drents** — from their body features:
 
 ```python
-from concept_benchmark import DatasetGenerator
+from concept_benchmark.robot import DatasetGenerator
 
 dataset = DatasetGenerator(
-    "robot",
     seed=1014,
     concept_preset="foot_subtypes",  # expand foot_shape into subtypes (default: "ground_truth")
     render_images=True,              # set False to skip rendering for quick exploration
@@ -152,10 +151,9 @@ For a complete walkthrough including interventions and alignment, see `examples/
 The Sudoku benchmark determines whether a 9×9 board is valid. 27 concepts capture row, column, and block validity — a board is valid iff all 27 are true:
 
 ```python
-from concept_benchmark import DatasetGenerator
+from concept_benchmark.sudoku import DatasetGenerator
 
 dataset = DatasetGenerator(
-    "sudoku",
     seed=171,             # reproducibility
     n_boards=1000,        # number of boards
     max_cell_swaps=9,     # cells swapped in invalid boards (higher = subtler errors)
@@ -393,13 +391,12 @@ This benchmark targets decision-support settings where a human uses the model's 
 
 #### Parameters
 
-All parameters below can be passed to `DatasetGenerator("robot", ...)`. Common parameters apply to both image and text modalities; scope-specific parameters are ignored when the other modality is selected.
+All parameters below can be passed to `DatasetGenerator(...)` (imported from `concept_benchmark.robot`). Common parameters apply to both image and text modalities; scope-specific parameters are ignored when the other modality is selected.
 
 ```python
-from concept_benchmark import DatasetGenerator
+from concept_benchmark.robot import DatasetGenerator, LabelFormula
 
 dataset = DatasetGenerator(
-    "robot",
     # ── Common (image + text) ──
     seed=1014,                       # random seed (default: 1014 for image, 1337 for text)
     data_type="image",               # "image" (default) or "text"
@@ -421,15 +418,13 @@ dataset = DatasetGenerator(
         #               pointy_square, pointy_3sided, pointy_4sided
     },
     use_stochastic_labels=True,      # True (probabilistic) or False (deterministic threshold)
-    label_formula={                  # scoring rule for class assignment
-        "terms": {
-            "mouth_type": {"value": "closed", "weight": 5.0},
-            "foot_shape": {"value": "pointy", "weight": 8.0},
-            "has_knees":  {"value": "true",   "weight": -5.0},
-        },
-        "intercept": 2.0,
-        "temperature": 4.2,
-    },
+    label_formula=LabelFormula(       # scoring rule for class assignment
+        mouth_type=("closed", 5.0),   #   score = 5·[mouth=closed] + 8·[foot=pointy] - 5·[knees=true] + 2
+        foot_shape=("pointy", 8.0),
+        has_knees=("true", -5.0),
+        intercept=2.0,
+        temperature=4.2,              #   P(Glorp) = σ(4.2 × score)
+    ),
     concept_preset="foot_subtypes",  # "ground_truth" or "foot_subtypes" (expands foot_shape into subtypes)
     renders_per_robot=4,             # samples per unique robot config (image: 4, text: 1)
     expand_concepts=["foot_shape"],                 # which features expand into subconcepts
@@ -490,10 +485,9 @@ This benchmark targets automation settings where the system handles routine case
 #### Parameters
 
 ```python
-from concept_benchmark import DatasetGenerator
+from concept_benchmark.sudoku import DatasetGenerator
 
 dataset = DatasetGenerator(
-    "sudoku",
     seed=171,                  # random seed
     data_type="image",         # "image" (renders board PNGs) or "tabular" (digit vectors)
     render_images=True,        # set False to skip rendering PNGs (faster, image only)
