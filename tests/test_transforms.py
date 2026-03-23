@@ -185,3 +185,119 @@ def test_noise_before_sampling():
 
     assert noisy.train is not None
     assert noisy.train.n > 0
+
+
+# ── Idempotency ─────────────────────────────────────────────────────
+
+
+def test_noise_idempotent():
+    """Same seed produces same result every time."""
+    ds = _make_dataset()
+    r1 = ConceptNoiseGenerator(ds, p=0.3, seed=42).generate()
+    r2 = ConceptNoiseGenerator(ds, p=0.3, seed=42).generate()
+    np.testing.assert_array_equal(r1.train.C, r2.train.C)
+
+
+def test_missingness_idempotent():
+    ds = _make_dataset()
+    r1 = ConceptMissingnessGenerator(ds, p=0.3, seed=99, fill_value=-1.0).generate()
+    r2 = ConceptMissingnessGenerator(ds, p=0.3, seed=99, fill_value=-1.0).generate()
+    np.testing.assert_array_equal(r1.train.C, r2.train.C)
+
+
+def test_label_noise_idempotent():
+    ds = _make_dataset()
+    r1 = LabelNoiseGenerator(ds, p=0.5, seed=7).generate()
+    r2 = LabelNoiseGenerator(ds, p=0.5, seed=7).generate()
+    np.testing.assert_array_equal(r1.train.y, r2.train.y)
+
+
+def test_drop_idempotent():
+    ds = _make_dataset()
+    r1 = ConceptDropGenerator(ds, ["c0"]).generate()
+    r2 = ConceptDropGenerator(ds, ["c0"]).generate()
+    np.testing.assert_array_equal(r1.train.C, r2.train.C)
+
+
+# ── Shape preservation ──────────────────────────────────────────────
+
+
+def test_noise_preserves_shape():
+    ds = _make_dataset()
+    result = ConceptNoiseGenerator(ds, p=0.5, seed=0).generate()
+    assert result.train.C.shape == ds.train.C.shape
+    assert result.test.C.shape == ds.test.C.shape
+    assert result.train.y.shape == ds.train.y.shape
+
+
+def test_missingness_preserves_shape():
+    ds = _make_dataset()
+    result = ConceptMissingnessGenerator(ds, p=0.3, seed=0).generate()
+    assert result.train.C.shape == ds.train.C.shape
+
+
+def test_label_noise_preserves_shape():
+    ds = _make_dataset()
+    result = LabelNoiseGenerator(ds, p=0.3, seed=0).generate()
+    assert result.train.y.shape == ds.train.y.shape
+
+
+def test_drop_reduces_concepts():
+    ds = _make_dataset(k=4)
+    result = ConceptDropGenerator(ds, ["c0", "c1"]).generate()
+    assert result.n_concepts == 2
+    assert result.train.C.shape[1] == 2
+
+
+# ── Edge cases ──────────────────────────────────────────────────────
+
+
+def test_drop_all_but_one():
+    ds = _make_dataset(k=3)
+    result = ConceptDropGenerator(ds, ["c0", "c1"]).generate()
+    assert result.n_concepts == 1
+
+
+def test_drop_nonexistent_raises():
+    ds = _make_dataset()
+    import pytest
+
+    with pytest.raises(ValueError, match="not found"):
+        ConceptDropGenerator(ds, ["nonexistent"]).generate()
+
+
+def test_noise_different_seeds_differ():
+    ds = _make_dataset()
+    r1 = ConceptNoiseGenerator(ds, p=0.5, seed=1).generate()
+    r2 = ConceptNoiseGenerator(ds, p=0.5, seed=2).generate()
+    assert not np.array_equal(r1.train.C, r2.train.C)
+
+
+def test_missingness_fills_with_value():
+    ds = _make_dataset()
+    result = ConceptMissingnessGenerator(
+        ds, p=0.5, seed=0, fill_value=-99.0
+    ).generate()
+    assert np.any(result.train.C == -99.0)
+
+
+# ── Repr ────────────────────────────────────────────────────────────
+
+
+def test_repr_contains_key_info():
+    ds = _make_dataset()
+    r = repr(ConceptNoiseGenerator(ds, p=0.1, seed=42))
+    assert "p=0.1" in r
+    assert "seed=42" in r
+    assert "samples" in r
+
+    r = repr(ConceptDropGenerator(ds, ["c0"]))
+    assert "dropping" in r
+    assert "c0" in r
+
+    r = repr(ConceptMissingnessGenerator(ds, p=0.2, mechanism="mcar"))
+    assert "p=0.2" in r
+    assert "mcar" in r
+
+    r = repr(LabelNoiseGenerator(ds, p=0.05))
+    assert "p=0.05" in r
