@@ -6,6 +6,8 @@ They serve as a safety net during refactoring.
 """
 
 import sys
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -15,7 +17,6 @@ from concept_benchmark.ext.fileutils import load
 import experiments.models as _exp_models
 import experiments.train as _exp_train
 from experiments.models import RobotClassifierCNN
-from concept_benchmark.paths import results_dir
 
 # Backward compatibility: allow unpickling models saved under old module paths.
 for _old, _new in [
@@ -99,10 +100,10 @@ class TestDNNAccuracy:
 class TestResultsCSV:
     @pytest.fixture(scope="class")
     def results_df(self):
-        candidates = sorted(results_dir.glob("robot_ideal_seed1014_*_results.csv"))
-        if not candidates:
-            pytest.skip("robot_ideal_seed1014 collect CSV not found")
-        return pd.read_csv(candidates[-1])
+        csv_path = Path(__file__).parent / "data" / "ideal_results_reference.csv"
+        if not csv_path.exists():
+            pytest.skip("Reference ideal results CSV not found at tests/data/")
+        return pd.read_csv(csv_path)
 
     def test_dnn_accuracy_in_csv(self, results_df):
         row = results_df[
@@ -121,13 +122,10 @@ class TestResultsCSV:
         assert abs(row.iloc[0]["accuracy"] - 0.8673) < 0.001
 
     def test_cbm_no_int_accuracy_subconcept(self):
-        # Subconcept results live in a separate collect CSV
-        candidates = sorted(results_dir.glob("robot_subconcept_seed1014_*_results.csv"))
-        if not candidates:
-            pytest.skip(
-                "subconcept collect CSV not found (run pipeline with --concept-preset foot_subtypes)"
-            )
-        sub_df = pd.read_csv(candidates[-1])
+        csv_path = Path(__file__).parent / "data" / "subconcept_results_reference.csv"
+        if not csv_path.exists():
+            pytest.skip("Reference subconcept results CSV not found at tests/data/")
+        sub_df = pd.read_csv(csv_path)
         row = sub_df[
             (sub_df["model"] == "cbm")
             & (sub_df["dataset"] == "subconcept")
@@ -187,10 +185,9 @@ class TestResultsCSV:
 class TestInterventionCSV:
     @pytest.fixture(scope="class")
     def ideal_interv_df(self):
-        cfg = RobotBenchmarkConfig.default_ideal()
-        csv_path = cfg.get_results_path("cbm")
+        csv_path = Path(__file__).parent / "data" / "ideal_intervention_reference.csv"
         if not csv_path.exists():
-            pytest.skip("Ideal CBM results CSV not found")
+            pytest.skip("Reference ideal intervention CSV not found at tests/data/")
         df = pd.read_csv(csv_path)
         # Filter to baseline regime if column present
         if "regime" in df.columns:
@@ -219,9 +216,9 @@ class TestAlignment:
     def ideal_alignment(self):
         import json
 
-        path = results_dir / "robot_image_stochastic_ideal_alignment.json"
+        path = Path(__file__).parent / "data" / "ideal_alignment_reference.json"
         if not path.exists():
-            pytest.skip("Ideal alignment results not found")
+            pytest.skip("Reference ideal alignment JSON not found at tests/data/")
         with open(path) as f:
             return json.load(f)
 
@@ -229,9 +226,9 @@ class TestAlignment:
     def subconcept_alignment(self):
         import json
 
-        path = results_dir / "robot_image_stochastic_subconcept_alignment.json"
+        path = Path(__file__).parent / "data" / "subconcept_alignment_reference.json"
         if not path.exists():
-            pytest.skip("Subconcept alignment results not found")
+            pytest.skip("Reference subconcept alignment JSON not found at tests/data/")
         with open(path) as f:
             return json.load(f)
 
@@ -260,11 +257,9 @@ class TestRegimeCSV:
 
     @pytest.fixture(scope="class")
     def regime_df(self):
-        csv_path = results_dir / "robot_image_stochastic_subconcept_cbm_results.csv"
+        csv_path = Path(__file__).parent / "data" / "regime_results_reference.csv"
         if not csv_path.exists():
-            pytest.skip(
-                "Regime results CSV not found; run pipeline with --regimes first"
-            )
+            pytest.skip("Reference regime CSV not found at tests/data/")
         df = pd.read_csv(csv_path)
         return df[df["threshold"] == 0.2]
 

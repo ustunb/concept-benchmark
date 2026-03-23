@@ -1,0 +1,8 @@
+dataset,model,budget,threshold,accuracy,gain,predictions_intervened_on,avg_concepts_per_sample,predictions_changed
+ideal,dnn,,,0.8746,0.0,,,
+ideal,cbm,0,,0.8673,-0.0073,,,
+ideal,cbm,1,0.2,0.9736,0.099,3244,1.0,1417
+ideal,cbm,3,0.2,0.9769,0.1023,3284,2.42,1450
+ideal,cbm,7,0.2,0.9769,0.1023,3284,3.75,1450
+ideal,aligned_cbm,0,,0.8657,-0.0089,,,
+ideal,aligned_cbm,3,0.2,0.8716,-0.003,706,1.53,215

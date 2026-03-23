@@ -1,0 +1,7 @@
+dataset,model,budget,threshold,accuracy,gain,predictions_intervened_on,avg_concepts_per_sample,predictions_changed
+subconcept,dnn,,,0.8746,0.0,,,
+subconcept,cbm,0,,0.7812,-0.0934,,,
+subconcept,cbm,1,0.2,0.9212,0.0466,3191,1.0,1558
+subconcept,cbm,3,0.2,0.9439,0.0693,3216,2.72,2223
+subconcept,aligned_cbm,0,,0.7656,-0.109,,,
+subconcept,aligned_cbm,3,0.2,0.7949,-0.0797,535,2.95,309

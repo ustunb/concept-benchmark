@@ -1,0 +1,9 @@
+budget,threshold,accuracy,predictions_intervened_on,predictions_changed,total_concept_confirmations,total_concept_edits_made,regime,data_name,n,missing_fraction,missing_mechanism
+0,0.2,0.8673,0,0,0,0,baseline,ideal,10000,0.0,mcar
+1,0.2,0.9736,3244,1417,3244,1417,baseline,ideal,10000,0.0,mcar
+3,0.2,0.9769,3284,1450,7963,1506,baseline,ideal,10000,0.0,mcar
+7,0.2,0.9769,3284,1450,12324,1506,baseline,ideal,10000,0.0,mcar
+0,0.4,0.8673,0,0,0,0,baseline,ideal,10000,0.0,mcar
+1,0.4,0.9709,2365,1174,2365,1174,baseline,ideal,10000,0.0,mcar
+3,0.4,0.9739,2370,1204,6184,1235,baseline,ideal,10000,0.0,mcar
+7,0.4,0.9739,2370,1204,9707,1235,baseline,ideal,10000,0.0,mcar
