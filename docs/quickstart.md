@@ -101,6 +101,20 @@ print(f"CBM accuracy: {accuracy:.4f}")
 
 For a complete walkthrough including interventions and alignment, see `examples/robot_pipeline_example.py`.
 
+Visualize intervention results:
+
+```python
+# Plot accuracy vs intervention budget
+from concept_benchmark.benchmark import plot_intervention_curve
+import pandas as pd
+
+results = pd.DataFrame({
+    "budget": [0, 1, 3, 7],
+    "accuracy": [0.8673, 0.9734, 0.9767, 0.9767],
+})
+fig, ax = plot_intervention_curve(results, baseline_accuracy=0.8746)
+```
+
 ## Sudoku Validation
 
 The Sudoku benchmark determines whether a 9×9 board is valid. 27 concepts capture row, column, and block validity — a board is valid iff all 27 are true:

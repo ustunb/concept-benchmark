@@ -141,6 +141,20 @@ print(f"CBM accuracy: {accuracy:.4f}")
 
 For a complete walkthrough including interventions and alignment, see `examples/robot_pipeline_example.py`.
 
+Visualize intervention results:
+
+```python
+# Plot accuracy vs intervention budget
+from concept_benchmark.benchmark import plot_intervention_curve
+import pandas as pd
+
+results = pd.DataFrame({
+    "budget": [0, 1, 3, 7],
+    "accuracy": [0.8673, 0.9734, 0.9767, 0.9767],
+})
+fig, ax = plot_intervention_curve(results, baseline_accuracy=0.8746)
+```
+
 ### Sudoku Validation
 
 The Sudoku benchmark determines whether a 9×9 board is valid. 27 concepts capture row, column, and block validity — a board is valid iff all 27 are true:
@@ -189,7 +203,8 @@ python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes   # 
 python scripts/sudoku_pipeline.py --seed 171
 ```
 
-## Benchmark Your Own Model
+<details>
+<summary><h2 style="display:inline">Benchmark Your Own Model</h2></summary>
 
 This guide shows how to evaluate your own concept bottleneck model on the benchmarks provided by this package. All examples below use the robot benchmark, but the same approach works for sudoku.
 
@@ -374,6 +389,8 @@ print(f"CBM accuracy: {accuracy:.4f}")
 
 For running interventions and alignment on your model, see the [Evaluation](#evaluation) section and [`examples/robot_pipeline_example.py`](examples/robot_pipeline_example.py).
 
+</details>
+
 ## Benchmarks
 
 ### Robot Classification
@@ -508,6 +525,40 @@ Run `python scripts/sudoku_pipeline.py --help` for the full list of options (inc
 
 <details>
 <summary><h2 style="display:inline">Evaluation</h2></summary>
+
+### Metrics and Plots
+
+The `concept_benchmark.benchmark` module provides standalone metric functions and plotting utilities for evaluating CBMs:
+
+```python
+from concept_benchmark.benchmark import (
+    accuracy, gain, selective_accuracy, coverage,
+    plot_intervention_curve, plot_regime_comparison,
+)
+```
+
+**Metrics:**
+
+| Function | Description |
+|----------|-------------|
+| `accuracy(y_pred, y_true)` | Fraction of correct predictions |
+| `delta_accuracy(y_after, y_before, y_true)` | Improvement in accuracy from interventions |
+| `gain(y_pred, y_true, baseline_accuracy)` | Accuracy gain over a baseline model (e.g. DNN) |
+| `selective_accuracy(y_pred, y_true, confidence, threshold)` | Accuracy on non-abstained samples |
+| `coverage(confidence, threshold)` | Fraction of samples where the model does not abstain |
+| `net_work_automated(confidence, threshold, n_interventions, n_concepts)` | Net fraction of work automated after intervention cost |
+
+**Plots:**
+
+| Function | Description |
+|----------|-------------|
+| `plot_intervention_curve(results_df, baseline_accuracy=...)` | Line plot of accuracy vs intervention budget *k* |
+| `plot_regime_comparison(regime_df)` | Horizontal bar chart of mean delta-accuracy per regime |
+| `plot_concept_discovery(ideal_df, subconcept_df, dnn_accuracy)` | Clustered bar chart of ideal vs subconcept accuracy |
+| `plot_selective_classification(dnn_metrics, cbm_metrics)` | Grouped bar chart comparing DNN vs CBM on selective metrics |
+| `plot_alignment_comparison(results_dict)` | Horizontal bar chart of CBM vs aligned CBM gain |
+
+All plot functions return `(fig, ax)` and accept an optional `ax` parameter for composing multiple plots. See [docs/evaluation.md](docs/evaluation.md) for detailed usage examples.
 
 ### Interventions
 

@@ -671,6 +671,10 @@ def run(
         logger.info("=== [%d/%d] Collect ===", _si["collect"], n_stages)
         collect_results([config])
 
+    if "plot" in stages:
+        logger.info("=== [%d/%d] Plot ===", _si.get("plot", n_stages), n_stages)
+        _plot_results(config)
+
     logger.info("Pipeline complete!")
 
 
@@ -900,6 +904,43 @@ def compute_selective_results(
 
 # ── CLI entry point ──────────────────────────────────────────────────
 
+
+def _plot_results(config) -> None:
+    """Generate figures from collected results."""
+    from concept_benchmark.benchmark.plots import plot_selective_classification
+    from concept_benchmark.paths import results_dir
+
+    out_dir = results_dir / "figures"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Try to load collect CSV for selective metrics
+    collect_candidates = sorted(
+        results_dir.glob(f"sudoku_seed{config.seed}_*_results.csv")
+    )
+    if collect_candidates:
+        import pandas as pd
+
+        df = pd.read_csv(collect_candidates[-1])
+        dnn_row = df[df["model"] == "dnn"]
+        cs_row = df[(df["model"] == "cs") & (df["budget"] == 0)]
+        if len(dnn_row) and len(cs_row):
+            dnn_metrics = {
+                "selective_acc": float(dnn_row.iloc[0].get("selective_acc", 0)),
+                "coverage": float(dnn_row.iloc[0].get("selective_cov", 0)),
+            }
+            cbm_metrics = {
+                "selective_acc": float(cs_row.iloc[0].get("selective_acc", 0)),
+                "coverage": float(cs_row.iloc[0].get("selective_cov", 0)),
+            }
+            fig, _ = plot_selective_classification(dnn_metrics, cbm_metrics)
+            fig.savefig(
+                out_dir / "sudoku_selective_classification.png",
+                dpi=150,
+                bbox_inches="tight",
+            )
+            logger.info("Saved %s", out_dir / "sudoku_selective_classification.png")
+
+
 SUDOKU_STAGES = (
     "setup",
     "ocr",
@@ -909,6 +950,7 @@ SUDOKU_STAGES = (
     "selective",
     "align",
     "collect",
+    "plot",
 )
 
 

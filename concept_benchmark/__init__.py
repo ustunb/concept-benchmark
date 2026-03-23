@@ -17,7 +17,7 @@ Quick start::
     print(dataset)
 """
 
-from . import config, robots, sudoku, synthetic, transforms, utils
+from . import benchmark, config, robots, sudoku, synthetic, transforms, utils
 from .data import ConceptDataset, ConceptDatasetSample
 from .formula import F, LabelFormula
 from .generators import DatasetGenerator
@@ -25,6 +25,7 @@ from .generators import DatasetGenerator
 utils.patch_macos_dataloader()
 
 __all__ = [
+    "benchmark",
     "config",
     "robots",
     "sudoku",

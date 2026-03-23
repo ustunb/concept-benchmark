@@ -1702,10 +1702,56 @@ def run(
         logger.info("=== [%d/%d] Collect ===", _si["collect"], n_stages)
         collect_results([config])
 
+    if "plot" in stages:
+        logger.info("=== [%d/%d] Plot ===", _si.get("plot", n_stages), n_stages)
+        plot_results(config)
+
+
+def plot_results(config: RobotBenchmarkConfig) -> None:
+    """Generate figures from collected results and save to results/figures/."""
+    from concept_benchmark.benchmark.plots import (
+        plot_intervention_curve,
+        plot_regime_comparison,
+    )
+
+    out_dir = results_dir / "figures"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Intervention curve
+    results_path = config.get_results_path("cbm")
+    if results_path.exists():
+        interv_df = pd.read_csv(results_path)
+        if "regime" in interv_df.columns:
+            baseline = interv_df[
+                (interv_df["regime"] == "baseline") & (interv_df["threshold"] == 0.2)
+            ]
+        else:
+            baseline = interv_df[interv_df["threshold"] == 0.2]
+        if len(baseline) > 0:
+            fig, _ = plot_intervention_curve(baseline)
+            label = (
+                "subconcept" if config.concept_preset == "foot_subtypes" else "ideal"
+            )
+            fig.savefig(
+                out_dir / f"robot_{label}_intervention_curve.png",
+                dpi=150,
+                bbox_inches="tight",
+            )
+            logger.info("Saved %s", out_dir / f"robot_{label}_intervention_curve.png")
+
+        # Regime comparison (if multiple regimes)
+        if "regime" in interv_df.columns and interv_df["regime"].nunique() > 1:
+            regime_df = interv_df[interv_df["threshold"] == 0.2]
+            fig, _ = plot_regime_comparison(regime_df)
+            fig.savefig(
+                out_dir / "robot_regime_comparison.png", dpi=150, bbox_inches="tight"
+            )
+            logger.info("Saved %s", out_dir / "robot_regime_comparison.png")
+
 
 # ── CLI entry point ──────────────────────────────────────────────────
 
-ROBOT_STAGES = ("setup", "cbm", "dnn", "intervene", "align", "collect")
+ROBOT_STAGES = ("setup", "cbm", "dnn", "intervene", "align", "collect", "plot")
 
 
 def _parse_args(argv=None):
