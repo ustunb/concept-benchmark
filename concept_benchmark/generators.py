@@ -268,6 +268,15 @@ class DatasetGenerator:
                 f"Available parameters: {', '.join(valid)}"
             ) from None
 
+    def __repr__(self) -> str:
+        params = [f"benchmark={self.benchmark!r}"]
+        params.append(f"seed={self.config.seed}")
+        if hasattr(self.config, "concept_preset"):
+            params.append(f"concept_preset={self.config.concept_preset!r}")
+        if hasattr(self.config, "data_type"):
+            params.append(f"data_type={self.config.data_type!r}")
+        return f"DatasetGenerator({', '.join(params)})"
+
     @classmethod
     def from_config(
         cls, config: RobotBenchmarkConfig | SudokuBenchmarkConfig

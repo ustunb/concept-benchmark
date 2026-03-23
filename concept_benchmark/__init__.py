@@ -17,7 +17,7 @@ Quick start::
     print(dataset)
 """
 
-from . import config, robots, sudoku, synthetic, utils
+from . import config, robots, sudoku, synthetic, transforms, utils
 from .data import ConceptDataset, ConceptDatasetSample
 from .formula import F, LabelFormula
 from .generators import DatasetGenerator
@@ -29,6 +29,7 @@ __all__ = [
     "robots",
     "sudoku",
     "synthetic",
+    "transforms",
     "utils",
     "ConceptDataset",
     "ConceptDatasetSample",

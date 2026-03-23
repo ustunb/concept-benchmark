@@ -193,6 +193,20 @@ def _deep_equal(a, b) -> bool:
         return repr(a) == repr(b)
 
 
+def _data_preview(sample, max_rows: int = 3, indent: str = "  ") -> str:
+    """Return a pandas-style data preview string for a dataset sample."""
+    try:
+        df = sample.to_dataframe()
+        n_rows, n_cols = len(df), len(df.columns)
+        preview = df.head(max_rows).to_string()
+        # Indent each line
+        preview = "\n".join(indent + line for line in preview.split("\n"))
+        preview += f"\n{indent}[{n_rows} rows \u00d7 {n_cols} columns]"
+        return preview
+    except Exception:
+        return f"{indent}(preview unavailable)"
+
+
 class ConceptDataset:
     """Container for concept-annotated datasets with train/val/test splits.
 
@@ -477,13 +491,29 @@ class ConceptDataset:
         return chk
 
     def __repr__(self):
-        data_type = self._full.meta.get("data_type", "unknown")
-        return (
-            f"ConceptDataset({data_type}, n_concepts={self.n_concepts}, n_classes={self.n_classes})\n"
-            f"  train: {self.train.n} samples\n"
-            f"  val:   {self.validation.n} samples\n"
-            f"  test:  {self.test.n} samples"
-        )
+        dt = self._full.meta.get("data_type", "unknown")
+        concepts = list(self.concepts)
+        if len(concepts) > 5:
+            concepts_str = str(concepts[:5])[:-1] + ", ...]"
+        else:
+            concepts_str = str(concepts)
+
+        lines = [
+            f"ConceptDataset({dt}, {self.n} samples, {self.n_concepts} concepts, {self.n_classes} classes)",
+            f"  concepts: {concepts_str}",
+        ]
+
+        has_splits = self.train.n > 0 and self.test.n > 0
+        if has_splits:
+            lines.append(
+                f"  splits:   train={self.train.n}, val={self.validation.n}, test={self.test.n}"
+            )
+
+        # Show data preview from the first available split (or _full)
+        lines.append("")
+        sample = self.train if has_splits else self._full
+        lines.append(_data_preview(sample))
+        return "\n".join(lines)
 
     def __copy__(self):
         cpy = ConceptDataset(
@@ -1440,15 +1470,13 @@ class ConceptDatasetSample(Dataset):
         return x, c, y
 
     def __repr__(self):
-        return (
-            "ConceptDatasetSample<n={n}, n_concepts={nc}, n_classes={nl}, "
-            "data_type={dt}>"
-        ).format(
-            n=self.n,
-            nc=self.n_concepts,
-            nl=self.n_classes,
-            dt=self.meta.get("data_type"),
-        )
+        dt = self.meta.get("data_type", "unknown")
+        lines = [
+            f"ConceptDatasetSample({dt}, {self.n} samples, {self.n_concepts} concepts)",
+            "",
+            _data_preview(self),
+        ]
+        return "\n".join(lines)
 
     @property
     def n_concepts(self):
@@ -1791,16 +1819,12 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         return chk
 
     def __repr__(self):
-        return (
-            "ConceptImageDatasetSample<n={n}, n_concepts={nc}, n_classes={nl}, "
-            "data_type={dt}, base_dir={bd}>"
-        ).format(
-            n=self.n,
-            nc=self.n_concepts,
-            nl=self.n_classes,
-            dt=self.meta.get("data_type"),
-            bd=self.base_dir,
-        )
+        lines = [
+            f"ConceptImageDatasetSample(image, {self.n} samples, {self.n_concepts} concepts)",
+            "",
+            _data_preview(self),
+        ]
+        return "\n".join(lines)
 
     def filter(self, indices):
         """Return a filtered copy, preserving *preprocess* and *base_dir*.

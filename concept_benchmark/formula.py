@@ -576,4 +576,7 @@ class LabelFormula:
 
     def __repr__(self) -> str:
         mode = "stochastic" if self.stochastic else "deterministic"
-        return f"LabelFormula(score={self._score_expr}, temperature={self.temperature}, {mode})"
+        return (
+            f"LabelFormula({mode}, temperature={self.temperature})\n"
+            f"  {self._score_expr}"
+        )

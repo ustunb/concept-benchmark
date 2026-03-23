@@ -396,9 +396,9 @@ def test_description(tab_small):
 def test_repr_multiline(tab_small):
     r = repr(tab_small)
     assert "ConceptDataset(" in r
-    assert "train:" in r
-    assert "val:" in r
-    assert "test:" in r
+    assert "samples" in r
+    assert "concepts" in r
+    assert "rows" in r  # data preview footer
 
 
 # ---------- sample() method ----------
