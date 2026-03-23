@@ -25,6 +25,7 @@ import logging
 
 import yaml
 
+from concept_benchmark.formula import LabelFormula
 from concept_benchmark.paths import data_dir, results_dir
 
 logger = logging.getLogger(__name__)
@@ -124,33 +125,6 @@ ROBOT_VALID_REGIMES = frozenset(
 ROBOT_TEXT_VALID_REGIMES = frozenset({"baseline", "expert", "subjective", "machine"})
 
 
-# ── Label formula validation ──────────────────────────────────────────
-
-
-def _validate_label_formula(d: dict) -> None:
-    """Validate that label_formula has the correct nested-dict structure."""
-    if "terms" not in d:
-        raise ValueError(
-            'label_formula must have a "terms" key. Expected format:\n'
-            '  {"terms": {"feature": {"value": "v", "weight": 1.0}}, '
-            '"intercept": 0.0, "temperature": 1.0}'
-        )
-    for feat, spec in d["terms"].items():
-        if not isinstance(spec, dict) or "value" not in spec or "weight" not in spec:
-            raise ValueError(
-                f"label_formula terms[{feat!r}] must have 'value' and 'weight' keys, "
-                f"got {spec!r}"
-            )
-    for key in ("intercept", "temperature"):
-        if key in d:
-            try:
-                float(d[key])
-            except (TypeError, ValueError):
-                raise ValueError(
-                    f"label_formula[{key!r}] must be numeric, got {d[key]!r}"
-                )
-
-
 # ── Shared utilities ──────────────────────────────────────────────────
 
 
@@ -228,18 +202,14 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     # Labeling rule: score = Σ w_i · 1[f_i = v_i] + intercept
     #   deterministic: Glorp if score >= 0
     #   stochastic:    P(Glorp) = σ(temperature × score), then Bernoulli sample
-    # Nested dict: {"terms": {"feature": {"value": "v", "weight": w}},
-    #               "intercept": float, "temperature": float}
-    label_formula: dict = field(
-        default_factory=lambda: {
-            "terms": {
-                "mouth_type": {"value": "closed", "weight": 5.0},
-                "foot_shape": {"value": "pointy", "weight": 8.0},
-                "has_knees": {"value": "true", "weight": -5.0},
-            },
-            "intercept": 2.0,
-            "temperature": 4.2,
-        }
+    label_formula: LabelFormula = field(
+        default_factory=lambda: LabelFormula(
+            mouth_type=("closed", 5.0),
+            foot_shape=("pointy", 8.0),
+            has_knees=("true", -5.0),
+            intercept=2.0,
+            temperature=4.2,
+        )
     )
     expand_concepts: list[str] = field(
         default_factory=lambda: ["foot_shape"],
@@ -315,7 +285,8 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             raise ValueError(
                 f"data_type must be 'image' or 'text', got {self.data_type!r}"
             )
-        _validate_label_formula(self.label_formula)
+        if isinstance(self.label_formula, dict):
+            self.label_formula = LabelFormula.from_dict(self.label_formula)
         if self.data_type == "text":
             self._auto_configure_text()
         self._validate_common()
@@ -347,22 +318,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 f"concept_preset must be 'ground_truth' or 'foot_subtypes', "
                 f"got {self.concept_preset!r}"
             )
-        _valid_features = frozenset(self.concepts.keys())
-        for feature, spec in self.label_formula["terms"].items():
-            if feature not in _valid_features:
-                raise ValueError(
-                    f"Unknown feature {feature!r} in label_formula. "
-                    f"Valid features: {sorted(_valid_features)}"
-                )
-            value = spec["value"]
-            valid_values = self.concepts[feature]
-            if value not in valid_values and not any(
-                v.startswith(f"{value}_") for v in valid_values
-            ):
-                raise ValueError(
-                    f"Invalid value {value!r} for feature {feature!r}. "
-                    f"Valid values: {valid_values}"
-                )
+        self.label_formula.validate_against(self.concepts)
 
         if self.seed < 0:
             raise ValueError(f"seed must be non-negative, got {self.seed}")
@@ -421,30 +377,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         """Pixel resolution for the current image_size."""
         return IMAGE_SIZE_TO_PIXELS[self.image_size]
 
-    @property
-    def label_features(self) -> dict[str, str]:
-        """Feature→value mapping extracted from label_formula."""
-        return {
-            feat: spec["value"] for feat, spec in self.label_formula["terms"].items()
-        }
-
-    @property
-    def label_weights(self) -> dict[str, float]:
-        """Feature→weight mapping extracted from label_formula."""
-        return {
-            feat: spec["weight"] for feat, spec in self.label_formula["terms"].items()
-        }
-
-    @property
-    def label_intercept(self) -> float:
-        """Intercept from label_formula (default 0.0)."""
-        return float(self.label_formula.get("intercept", 0.0))
-
-    @property
-    def label_temperature(self) -> float:
-        """Sigmoid temperature from label_formula (default 1.0)."""
-        return float(self.label_formula.get("temperature", 1.0))
-
     @classmethod
     def default_ideal(cls) -> RobotBenchmarkConfig:
         """Config matching the paper's ideal robot benchmark."""
@@ -460,6 +392,19 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         if self.data_type == "text":
             raise ValueError("input_size is not defined for text data_type")
         return self.pixel_resolution
+
+    def _prepare_asdict(self) -> dict:
+        """Return a JSON/YAML-safe dict, serializing label_formula."""
+        d = asdict(self)
+        d["label_formula"] = self.label_formula.to_dict()
+        return d
+
+    @classmethod
+    def _restore_from_yaml_dict(cls, d: dict) -> dict:
+        """Convert label_formula dict back to LabelFormula on load."""
+        if "label_formula" in d and isinstance(d["label_formula"], dict):
+            d["label_formula"] = LabelFormula.from_dict(d["label_formula"])
+        return d
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a dict compatible with DEFAULT_ROBOT_SETTINGS.
@@ -482,10 +427,10 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             "additional_features": list(self.expand_concepts),
             "subconcept": self.concept_preset == "foot_subtypes",
             "model_type": self._labeling_tag,
-            "model_features": dict(self.label_features),
-            "model_weights": dict(self.label_weights),
-            "model_intercept": self.label_intercept,
-            "model_scalar": self.label_temperature,
+            "model_features": dict(self.label_formula.features),
+            "model_weights": dict(self.label_formula.weights),
+            "model_intercept": self.label_formula.intercept,
+            "model_scalar": self.label_formula.temperature,
         }
 
     def setup_fingerprint(self) -> str:

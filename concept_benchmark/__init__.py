@@ -23,6 +23,7 @@ Quick start::
 
 from . import config, synthetic, utils
 from .data import ConceptDataset, ConceptDatasetSample
+from .formula import LabelFormula
 from .generators import DatasetGenerator
 
 utils.patch_macos_dataloader()
@@ -34,4 +35,5 @@ __all__ = [
     "ConceptDataset",
     "ConceptDatasetSample",
     "DatasetGenerator",
+    "LabelFormula",
 ]

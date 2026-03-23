@@ -5,9 +5,9 @@ import copy
 
 import numpy as np
 import pandas as pd
-from scipy.special import expit  # noqa: F401 — used by eval() in stochastic labeling
 
 from concept_benchmark.data import ConceptDataset
+from concept_benchmark.formula import LabelFormula
 
 from .helper.robot_catalog import (
     ALL_ROBOT_FEATURES,
@@ -16,22 +16,6 @@ from .helper.robot_catalog import (
     generate_robot_catalog,
 )
 from .helper import textgen as text_helper
-from .helper.utils import build_label_function, model_to_logistic, unlist0
-
-_SAFE_EVAL_GLOBALS = {
-    "__builtins__": {},
-    "expit": expit,
-    "np": np,
-    "abs": abs,
-    "max": max,
-    "min": min,
-    "int": int,
-    "float": float,
-    "str": str,
-    "bool": bool,
-    "any": any,
-    "all": all,
-}
 
 
 def create_synthetic_dataset(data_type: str = "image", **kwargs) -> ConceptDataset:
@@ -306,11 +290,14 @@ def create_robot_image_dataset(
 
     if not concepts:
         raise ValueError("'concepts' dictionary must be provided and non-empty")
-    model_features = extra_params.get("model_features", {})
-    if not model and not model_features:
+    if model:
         raise ValueError(
-            "Either 'model' expression or 'model_features' must be provided"
+            "The 'model' string parameter has been removed. "
+            "Use 'model_features' (a dict of feature->value) instead."
         )
+    model_features = extra_params.get("model_features", {})
+    if not model_features:
+        raise ValueError("'model_features' must be provided and non-empty")
 
     num_combinations = int(np.prod([len(v) for v in concepts.values()]))
     total_robots = num_robots or num_combinations * samples_per_instance
@@ -337,37 +324,19 @@ def create_robot_image_dataset(
     catalog_df[OUTCOME_NAME] = OUTCOME_MISSING
     df = catalog_df
 
-    # Specify true labels
-    if model_features:
-        # New structured path — direct computation, no eval()
-        glorp_model_true = build_label_function(
-            model_features,
-            model_type=model_type,
-            weights=extra_params.get("model_weights"),
-            intercept=extra_params.get("model_intercept", 0.0),
-            scalar=extra_params.get("model_scalar", 1.0),
-        )
-    elif model:
-        # Legacy string path (backward compat for tests / custom usage)
-        if model_type == "deterministic":
-            glorp_model_true = lambda row: eval(
-                unlist0(model), _SAFE_EVAL_GLOBALS, {"row": row}
-            )  # noqa: S307 — intentional eval of synthetic config formulas
-        elif model_type == "stochastic":
-            glorp_model_true = lambda row: eval(  # noqa: S307 — intentional eval of synthetic config formulas
-                model_to_logistic(
-                    model,
-                    scalar=extra_params.get("scalar", 1.0),
-                    weights=extra_params.get("weights", {}),
-                    intercept=extra_params.get("intercept", None),
-                ),
-                _SAFE_EVAL_GLOBALS,
-                {"row": row},
-            )
-        else:
-            raise ValueError("Invalid model_type. Use 'deterministic' or 'stochastic'.")
+    # Specify true labels via LabelFormula
+    weights = extra_params.get("model_weights") or {}
+    formula = LabelFormula(
+        intercept=extra_params.get("model_intercept", 0.0),
+        temperature=extra_params.get("model_scalar", 1.0),
+        **{feat: (val, weights.get(feat, 1.0)) for feat, val in model_features.items()},
+    )
+    if model_type == "stochastic":
+        glorp_model_true = formula.probability
+    elif model_type == "deterministic":
+        glorp_model_true = formula.label
     else:
-        raise ValueError("Either 'model' or 'model_features' must be provided")
+        raise ValueError("Invalid model_type. Use 'deterministic' or 'stochastic'.")
 
     catalog_df[OUTCOME_NAME] = catalog_df.apply(glorp_model_true, axis=1)
 
@@ -465,7 +434,7 @@ def create_robot_image_dataset(
         "image_dir": image_dir,
         "resolution": eff_resolution,
         "color_mode": color_mode,
-        "labeling_function": model or repr(model_features),
+        "labeling_function": formula,
         "num_robots": total_robots,
         "robot_ids": catalog_df["id"].values,
         "catalog_df": catalog_df,

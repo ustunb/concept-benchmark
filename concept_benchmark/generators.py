@@ -116,7 +116,6 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
     )
     from concept_benchmark.synthetic.robot_text.dataset import build_text_dataset
     from concept_benchmark.synthetic.helper.robot_catalog import collapse_robot_subtypes
-    from concept_benchmark.synthetic.helper.utils import build_model_expression
 
     set_deterministic_seed(config.seed)
 
@@ -134,20 +133,10 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
         catalog_for_labels, robot_features=list(config.concepts.keys())
     )
 
-    # Build expression from structured params (same as image pipeline)
-    expr = build_model_expression(
-        config.label_features,
-        model_type="deterministic",
-        weights=config.label_weights,
-        intercept=config.label_intercept,
-    )
-
-    model_type = "stochastic" if config.use_stochastic_labels else "deterministic"
     catalog_df["label"] = compute_label(
         catalog_for_labels,
-        expr,
-        label_model_type=model_type,
-        alpha=config.label_temperature if model_type == "stochastic" else 1.0,
+        config.label_formula,
+        stochastic=config.use_stochastic_labels,
         seed=config.seed,
     )
 

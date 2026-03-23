@@ -93,10 +93,13 @@ class TestRobotConfigValidation:
                 "temperature": 3.0,
             }
         )
-        assert cfg.label_features == {"mouth_type": "closed", "has_knees": "true"}
-        assert cfg.label_weights == {"mouth_type": 5.0, "has_knees": -2.0}
-        assert cfg.label_intercept == 1.0
-        assert cfg.label_temperature == 3.0
+        assert cfg.label_formula.features == {
+            "mouth_type": "closed",
+            "has_knees": "true",
+        }
+        assert cfg.label_formula.weights == {"mouth_type": 5.0, "has_knees": -2.0}
+        assert cfg.label_formula.intercept == 1.0
+        assert cfg.label_formula.temperature == 3.0
 
     def test_label_formula_rejects_missing_terms(self):
         with pytest.raises(ValueError, match='"terms" key'):
@@ -184,9 +187,12 @@ class TestRobotTextConfigValidation:
                 "intercept": 1.0,
             },
         )
-        assert cfg.label_features == {"mouth_type": "open", "foot_shape": "pointy"}
-        assert cfg.label_weights == {"mouth_type": 3.0, "foot_shape": 8.0}
-        assert cfg.label_intercept == 1.0
+        assert cfg.label_formula.features == {
+            "mouth_type": "open",
+            "foot_shape": "pointy",
+        }
+        assert cfg.label_formula.weights == {"mouth_type": 3.0, "foot_shape": 8.0}
+        assert cfg.label_formula.intercept == 1.0
 
 
 class TestYAMLRoundTrip:

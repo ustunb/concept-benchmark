@@ -2,7 +2,6 @@
 This file contains helper functions that we use throughout the project
 """
 
-import re
 import numpy as np
 import colorir
 from colorir import StackPalette
@@ -61,123 +60,6 @@ def unlist0(obj):
         return obj[0]
     else:
         return obj
-
-
-def build_label_function(
-    model_features: dict,
-    *,
-    model_type: str = "stochastic",
-    weights: dict | None = None,
-    intercept: float = 0.0,
-    scalar: float = 1.0,
-):
-    """Build a row-level label function from structured feature spec.
-
-    Both modes compute:  score = Σ w_i · 1[f_i = v_i] + intercept
-
-    Deterministic: returns ``'glorp'`` if score >= 0 else ``'drent'``
-    Stochastic:    returns ``expit(scalar * score)`` (probability for Bernoulli sampling)
-
-    Returns a callable ``(row) -> label_or_probability``.
-    """
-    from scipy.special import expit
-
-    weights = weights or {}
-    # Pre-compute feature/value/weight tuples for fast iteration
-    terms = [
-        (feat, str(val), float(weights.get(feat, 1.0)))
-        for feat, val in model_features.items()
-    ]
-    intercept = float(intercept)
-    scalar = float(scalar)
-
-    if model_type == "deterministic":
-
-        def _label_fn(row):
-            score = sum(w * int(row[f] == v) for f, v, w in terms) + intercept
-            return "glorp" if score >= 0 else "drent"
-    elif model_type == "stochastic":
-
-        def _label_fn(row):
-            score = sum(w * int(row[f] == v) for f, v, w in terms) + intercept
-            return float(expit(scalar * score))
-    else:
-        raise ValueError(f"Invalid model_type: {model_type!r}")
-
-    return _label_fn
-
-
-def build_model_expression(
-    model_features: dict,
-    *,
-    model_type: str = "stochastic",
-    weights: dict | None = None,
-    intercept: float = 0.0,
-    scalar: float = 1.0,
-) -> str:
-    """Build a row-level label expression string from structured feature spec.
-
-    .. deprecated::
-        Use :func:`build_label_function` instead, which avoids ``eval()``.
-
-    Both modes compute:  score = Σ w_i · 1[f_i = v_i] + intercept
-
-    Deterministic: ``'glorp' if score >= 0 else 'drent'``
-    Stochastic:    ``expit(scalar * score)``  (probability for Bernoulli sampling)
-    """
-    weights = weights or {}
-    terms = []
-    for feat, val in model_features.items():
-        w = weights.get(feat, 1.0)
-        terms.append(f"{w}*int(row['{feat}']=='{val}')")
-    score_expr = " + ".join(terms) + f" + {intercept}"
-
-    if model_type == "deterministic":
-        return f"'glorp' if ({score_expr}) >= 0 else 'drent'"
-    elif model_type == "stochastic":
-        if scalar != 1.0:
-            score_expr = f"({score_expr}) * {scalar}"
-        return f"expit({score_expr})"
-    else:
-        raise ValueError(f"Invalid model_type: {model_type!r}")
-
-
-def model_to_logistic(model: str, weights: dict, scalar=1.0, intercept=None) -> str:
-    """
-    Extracts the arithmetic expression inside the first (...) before a comparison operator and the number after the
-    comparison operator >= then constructs a new expression that subtracts the number from the arithmetic expression
-    and returns it wrapped in the logistic function.
-    """
-    # find whatever is inside (...) before a comparison operator
-    match = re.search(r"\((.+?)\s*>=", model)
-    if not match:
-        raise ValueError("Model string not in expected format.")
-
-    num = re.search(r">=\s*([-\d.]+)", model)
-    expr = match.group(1).strip()[:-1]
-
-    # extract feature names, that are stored inside row parentheses row["feature"]
-    matches = re.findall(r"row\['(.*?)'\]==(['\"].*?['\"])", expr)
-    for feature, value in matches:
-        if feature not in weights:
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "Weight for feature '%s' not found in weights dictionary.", feature
-            )
-            weight = 1
-        else:
-            weight = weights[feature]
-        old_pattern = f"int(row['{feature}']=={value})"
-        new_pattern = f"{weight}*int(row['{feature}']=={value})"
-        expr = expr.replace(old_pattern, new_pattern)
-
-    intercept = intercept if intercept is not None else num.group(1)
-    expr += " - " + str(intercept)
-
-    if scalar != 1.0:
-        expr = f"({expr}) * {scalar}"
-    return f"expit({expr})"
 
 
 def apply_subjective_noise(C, rate=0.0, seed=0):

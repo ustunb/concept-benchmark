@@ -49,7 +49,9 @@ def test_robot_image_generation_and_training(tmp_path):
         output_directory=tmp_path / "robot_imgs",
         draw=True,
         color_mode="greyscale",
-        model="'glorp' if row['mouth_type']=='open' else 'drent'",
+        model_features={"mouth_type": "open"},
+        model_weights={"mouth_type": 1.0},
+        model_intercept=-0.5,
         model_type="deterministic",
     )
     ds.transform = transforms.Compose([transforms.ToTensor()])

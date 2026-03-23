@@ -84,15 +84,15 @@ class TestRobotDatasetGenerator:
                 "intercept": 1.0,
             },
         )
-        assert gen.config.label_features == {
+        assert gen.config.label_formula.features == {
             "mouth_type": "open",
             "has_knees": "true",
         }
-        assert gen.config.label_weights == {
+        assert gen.config.label_formula.weights == {
             "mouth_type": 3.0,
             "has_knees": -2.0,
         }
-        assert gen.config.label_intercept == 1.0
+        assert gen.config.label_formula.intercept == 1.0
 
     def test_label_formula_without_intercept(self):
         gen = DatasetGenerator(
@@ -104,7 +104,7 @@ class TestRobotDatasetGenerator:
                 },
             },
         )
-        assert gen.config.label_intercept == 0.0
+        assert gen.config.label_formula.intercept == 0.0
 
     def test_label_formula_via_config_matches_kwargs(self):
         """Verify that label_formula via config matches DatasetGenerator kwargs."""
@@ -145,7 +145,7 @@ class TestRobotDatasetGenerator:
         assert gen.benchmark == "robot"
 
     def test_label_formula_rejects_unknown_feature(self):
-        with pytest.raises(ValueError, match="Unknown feature 'nonexistent'"):
+        with pytest.raises(ValueError, match="not found in concepts"):
             DatasetGenerator(
                 "robot",
                 render_images=False,
@@ -157,7 +157,7 @@ class TestRobotDatasetGenerator:
             )
 
     def test_label_formula_rejects_invalid_value(self):
-        with pytest.raises(ValueError, match="Invalid value 'nonexistent'"):
+        with pytest.raises(ValueError, match="not valid for feature"):
             DatasetGenerator(
                 "robot",
                 render_images=False,
@@ -180,7 +180,7 @@ class TestRobotDatasetGenerator:
                 "temperature": 10.0,
             },
         )
-        assert gen.config.label_temperature == 10.0
+        assert gen.config.label_formula.temperature == 10.0
 
     def test_label_formula_accepts_prefix_value(self):
         gen = DatasetGenerator(
@@ -192,8 +192,8 @@ class TestRobotDatasetGenerator:
                 },
             },
         )
-        assert gen.config.label_features == {"foot_shape": "pointy"}
-        assert gen.config.label_weights == {"foot_shape": 8.0}
+        assert gen.config.label_formula.features == {"foot_shape": "pointy"}
+        assert gen.config.label_formula.weights == {"foot_shape": 8.0}
 
 
 # ── Sudoku via DatasetGenerator ──────────────────────────────────────

@@ -7,7 +7,7 @@ A concept bottleneck model (CBM) first predicts interpretable *concepts* from in
 The robot benchmark classifies fictional robots — **Glorps** vs. **Drents** — from their body features:
 
 ```python
-from concept_benchmark import DatasetGenerator
+from concept_benchmark import DatasetGenerator, LabelFormula
 
 dataset = DatasetGenerator(
     "robot",
@@ -16,15 +16,13 @@ dataset = DatasetGenerator(
     use_stochastic_labels=True,      # probabilistic labeling (or False for deterministic)
     image_size="medium",             # "small" (8px), "medium" (32px, default), or "large" (600px)
     render_images=True,              # set False to skip image rendering for quick exploration
-    label_formula={                  # scoring rule for class assignment
-        "terms": {
-            "mouth_type": {"value": "closed", "weight": 5.0},
-            "foot_shape": {"value": "pointy", "weight": 8.0},
-            "has_knees":  {"value": "true",   "weight": -5.0},
-        },
-        "intercept": 2.0,
-        "temperature": 4.2,          # sigmoid temperature for stochastic labels
-    },
+    label_formula=LabelFormula(      # scoring rule for class assignment
+        mouth_type=("closed", 5.0),  #   score = 5·[mouth=closed] + 8·[foot=pointy] - 5·[knees=true] + 2
+        foot_shape=("pointy", 8.0),
+        has_knees=("true", -5.0),
+        intercept=2.0,
+        temperature=4.2,             # P(Glorp) = σ(4.2 × score)
+    ),
 ).generate()
 
 # Drop some concepts to get a 12-concept setup
