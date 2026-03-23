@@ -63,18 +63,18 @@ def test_robot_image_generation_and_training(tmp_path):
 
     # Step 2: Split into train/val/test
     ds.sample(test_size=4, val_size=4, seed=42)
-    assert ds.training is not None
+    assert ds.train is not None
     assert ds.validation is not None
     assert ds.test is not None
 
     # Step 3: Train a tiny CBM (1 epoch)
-    n_concepts = ds.training.n_concepts
+    n_concepts = ds.train.n_concepts
     cd = ConceptDetector(
         model=RobotConceptClassifier(num_concepts=n_concepts, input_size=8)
     )
     cbm = ConceptBasedModel(concept_detector=cd)
     cbm.fit(
-        train_dataset=ds.training,
+        train_dataset=ds.train,
         valid_dataset=ds.validation,
         freeze_backbone=False,
         concept_embed_params={"device": "cpu", "batch_size": 4, "num_workers": 0},

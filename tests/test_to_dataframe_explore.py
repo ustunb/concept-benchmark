@@ -12,7 +12,7 @@ from concept_benchmark.data import ConceptDatasetSample
 
 def test_to_dataframe_default_matches_old(tab_small):
     """include_X=False (default) returns same columns as before."""
-    sample = tab_small.training
+    sample = tab_small.train
     df_default = sample.to_dataframe()
     df_explicit = sample.to_dataframe(include_X=False)
     pd.testing.assert_frame_equal(df_default, df_explicit)
@@ -24,7 +24,7 @@ def test_to_dataframe_default_matches_old(tab_small):
 
 
 def test_to_dataframe_include_X_tabular_columns(tab_small):
-    sample = tab_small.training
+    sample = tab_small.train
     df = sample.to_dataframe(include_X=True)
     d = sample.X.shape[1]
     expected_x_cols = [f"x_{j}" for j in range(d)]
@@ -33,7 +33,7 @@ def test_to_dataframe_include_X_tabular_columns(tab_small):
 
 
 def test_to_dataframe_include_X_tabular_values(tab_small):
-    sample = tab_small.training
+    sample = tab_small.train
     df = sample.to_dataframe(include_X=True)
     d = sample.X.shape[1]
     x_cols = [f"x_{j}" for j in range(d)]
@@ -41,7 +41,7 @@ def test_to_dataframe_include_X_tabular_values(tab_small):
 
 
 def test_to_dataframe_include_X_tabular_row_count(tab_small):
-    sample = tab_small.training
+    sample = tab_small.train
     df = sample.to_dataframe(include_X=True)
     assert len(df) == sample.n
 
@@ -66,7 +66,7 @@ def test_to_dataframe_include_X_text():
 
 
 def test_to_dataframe_include_X_image(img_small):
-    sample = img_small.training
+    sample = img_small.train
     df = sample.to_dataframe(include_X=True)
     assert "image" in df.columns
     # Paths should be resolved via base_dir
@@ -79,7 +79,7 @@ def test_to_dataframe_include_X_image(img_small):
 
 def test_to_dataframe_image_without_X(img_small):
     """Image to_dataframe(include_X=False) should NOT have image column."""
-    sample = img_small.training
+    sample = img_small.train
     df = sample.to_dataframe(include_X=False)
     assert "image" not in df.columns
     expected_cols = list(sample.concepts) + ["label", "class"]
@@ -105,6 +105,6 @@ def test_explore_raises_import_error(tab_small, monkeypatch):
 
     monkeypatch.setattr("builtins.__import__", mock_import)
 
-    sample = tab_small.training
+    sample = tab_small.train
     with pytest.raises(ImportError, match="concept-benchmark\\[explore\\]"):
         sample.explore()

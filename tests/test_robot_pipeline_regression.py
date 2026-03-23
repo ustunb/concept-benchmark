@@ -57,8 +57,8 @@ def device():
 
 class TestDatasetShape:
     def test_ideal_dataset_has_training_split(self, dataset):
-        assert hasattr(dataset, "training")
-        assert dataset.training.n > 0
+        assert hasattr(dataset, "train")
+        assert dataset.train.n > 0
 
     def test_ideal_dataset_has_test_split(self, dataset):
         assert hasattr(dataset, "test")

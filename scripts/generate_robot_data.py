@@ -65,10 +65,10 @@ def main(argv=None):
 
     logger.info(
         "Dataset: %d train, %d val, %d test, %d concepts",
-        dataset.training.n,
+        dataset.train.n,
         dataset.validation.n,
         dataset.test.n,
-        dataset.training.C.shape[1],
+        dataset.train.C.shape[1],
     )
 
     if args.output:

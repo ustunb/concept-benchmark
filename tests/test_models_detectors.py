@@ -80,10 +80,10 @@ def test_detector_calibrate_after_fit_changes_predictions(tabular_train_valid):
             "batch_size": 8,
         },
     )
-    pr_uncal = det.predict(valid, should_calibrate=False)
+    pr_uncal = det.predict_proba(valid, should_calibrate=False)
     # Calibrate afterwards
     det.calibrate(valid)
-    pr_cal = det.predict(valid, should_calibrate=True)
+    pr_cal = det.predict_proba(valid, should_calibrate=True)
     _proba_checks(pr_uncal, len(valid), k)
     _proba_checks(pr_cal, len(valid), k)
     assert not np.allclose(pr_uncal, pr_cal)

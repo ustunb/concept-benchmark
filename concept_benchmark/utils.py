@@ -165,7 +165,7 @@ def create_skewed_splits_full(
     )
 
     dataset.drop_concepts(drop_concepts)
-    dataset.training = _create_sample(total_size, train_indices, dataset)
+    dataset.train = _create_sample(total_size, train_indices, dataset)
     dataset.validation = _create_sample(total_size, val_indices, dataset)
     dataset.test = _create_sample(total_size, test_indices, dataset)
     dataset._apply_noise_settings()
