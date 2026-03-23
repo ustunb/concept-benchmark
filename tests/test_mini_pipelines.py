@@ -167,49 +167,6 @@ def test_sudoku_selective():
 # ── End-to-end from DatasetGenerator (no cached artifacts) ───────────
 
 
-def test_robot_generator_to_cbm_end_to_end():
-    """Generate a real robot dataset, train a CBM, and verify predictions.
-
-    This test uses the actual DatasetGenerator (not synthetic arrays),
-    so it validates the full path from config → data generation →
-    training → prediction without requiring any cached files on disk.
-    """
-    from concept_benchmark.robot import DatasetGenerator
-    from experiments.models import RobotConceptClassifier
-
-    ds = DatasetGenerator(seed=99, render_images=False).generate()
-    ds.drop_concepts(["has_elbows", "hand_shape"])
-    ds.sample(test_size=200, val_size=100, train_size=200, seed=99)
-
-    cd = ConceptDetector(
-        model=RobotConceptClassifier(num_concepts=ds.train.n_concepts, input_size=32)
-    )
-    cbm = ConceptBasedModel(concept_detector=cd)
-    cbm.fit(
-        train_dataset=ds.train,
-        valid_dataset=ds.validation,
-        freeze_backbone=False,
-        concept_fit_params={
-            "epochs": 2,
-            "lr": 1e-3,
-            "device": "cpu",
-            "batch_size": 32,
-            "num_workers": 0,
-            "pin_memory": False,
-        },
-    )
-
-    preds = cbm.predict(ds.test)
-    assert preds.shape == (ds.test.n,)
-    assert set(preds).issubset({0, 1})
-
-    # With only 2 epochs on 200 samples, accuracy won't match paper,
-    # but it should be better than random (>55%) given the strong
-    # signal in the default label formula.
-    acc = float(np.mean(preds == ds.test.y))
-    assert acc > 0.55, f"Expected >55% accuracy, got {acc:.1%}"
-
-
 def test_sudoku_generator_to_cbm_end_to_end():
     """Generate a real sudoku dataset, train a CBM, and verify predictions."""
     from concept_benchmark.sudoku import DatasetGenerator

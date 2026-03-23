@@ -27,11 +27,10 @@ for _old, _new in [
         sys.modules[_old] = _new
 
 
-# Skip entire module if artifacts are not present
+# Model-loading tests need cached artifacts; reference CSV tests don't.
 _ideal_cfg = RobotBenchmarkConfig.default_ideal()
 _has_artifacts = _ideal_cfg.get_dataset_path().exists()
-
-pytestmark = pytest.mark.skipif(
+_needs_artifacts = pytest.mark.skipif(
     not _has_artifacts,
     reason="Robot demo artifacts not found; run the pipeline first.",
 )
@@ -55,6 +54,7 @@ def device():
 # ── Dataset shape checks ──────────────────────────────────────────────
 
 
+@_needs_artifacts
 class TestDatasetShape:
     def test_ideal_dataset_has_training_split(self, dataset):
         assert hasattr(dataset, "train")
@@ -72,6 +72,7 @@ class TestDatasetShape:
 # ── CBM accuracy ──────────────────────────────────────────────────────
 
 
+@_needs_artifacts
 class TestCBMAccuracy:
     def test_ideal_cbm_accuracy(self, ideal_config):
         cbm = load(ideal_config.get_model_path("cbm"))
@@ -83,6 +84,7 @@ class TestCBMAccuracy:
 # ── DNN accuracy ──────────────────────────────────────────────────────
 
 
+@_needs_artifacts
 class TestDNNAccuracy:
     def test_ideal_dnn_accuracy(self, ideal_config, dataset, device):
         dnn_weights = load(ideal_config.get_model_path("dnn"))
