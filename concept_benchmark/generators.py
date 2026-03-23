@@ -4,7 +4,7 @@ Provides a unified ``DatasetGenerator`` API that wraps data creation
 and seed management into a single call.  After ``generate()``, call
 ``sample()`` to split into train/val/test:
 
-    >>> from concept_benchmark.robot import DatasetGenerator
+    >>> from concept_benchmark.robots import DatasetGenerator
     >>> from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
     >>> gen = DatasetGenerator(seed=1014, render_images=False)
     >>> dataset = gen.generate()
@@ -137,7 +137,7 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
     catalog_df["label"] = compute_label(
         catalog_for_labels,
         config.label_formula,
-        stochastic=config.use_stochastic_labels,
+        stochastic=config.label_formula.stochastic,
         seed=config.seed,
     )
 
@@ -184,7 +184,7 @@ class DatasetGenerator:
     Follows the HuggingFace ``load_dataset`` pattern — the first argument
     selects the benchmark, remaining kwargs configure it:
 
-        >>> from concept_benchmark.robot import DatasetGenerator
+        >>> from concept_benchmark.robots import DatasetGenerator
         >>> DatasetGenerator(seed=1014, render_images=False).generate()
         >>> from concept_benchmark.sudoku import DatasetGenerator
         >>> DatasetGenerator(seed=171, data_type="tabular").generate()
@@ -210,7 +210,6 @@ class DatasetGenerator:
         data_type: str = ...,
         concepts: dict[str, list] | None = ...,
         label_formula: dict | None = ...,
-        use_stochastic_labels: bool = ...,
         concept_preset: str = ...,
         expand_concepts: list[str] | None = ...,
         renders_per_robot: int = ...,

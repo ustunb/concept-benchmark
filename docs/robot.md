@@ -1,6 +1,5 @@
 # Robot Classification
 
-This benchmark targets decision-support settings where a human uses the model's concept predictions to improve their own decisions. The task is to predict the species of a fictional robot — **Glorp** or **Drent** — from its body features. Each robot has 9 binary features (mouth type, foot shape, knee presence, etc.). The default labeling rule is: Glorp if mouth is closed, foot is pointy, and robot has knees (all three); Drent otherwise. The labeling function can be deterministic or stochastic (probabilistic), controlled via `use_stochastic_labels`. Which features matter and which are kept (via `concept_preset`) are configurable, mimicking real-world settings where the true relationship between features and labels is unknown. Available as image and text modalities.
 
 ```{image} assets/robot_concepts.png
 :width: 400px
@@ -10,10 +9,10 @@ This benchmark targets decision-support settings where a human uses the model's 
 
 ## Parameters
 
-All parameters below can be passed to `DatasetGenerator(...)` (imported from `concept_benchmark.robot`). Common parameters apply to both image and text modalities; scope-specific parameters are ignored when the other modality is selected.
+All parameters below can be passed to `DatasetGenerator(...)` (imported from `concept_benchmark.robots`). Common parameters apply to both image and text modalities; scope-specific parameters are ignored when the other modality is selected.
 
 ```python
-from concept_benchmark.robot import DatasetGenerator, LabelFormula
+from concept_benchmark.robots import DatasetGenerator, LabelFormula
 
 dataset = DatasetGenerator(
     # ── Common (image + text) ──
@@ -36,7 +35,6 @@ dataset = DatasetGenerator(
         #               flat_lshaped, pointy_trapezoid, pointy_rounded,
         #               pointy_square, pointy_3sided, pointy_4sided
     },
-    use_stochastic_labels=True,      # True (probabilistic) or False (deterministic threshold)
     label_formula=LabelFormula(       # scoring rule for class assignment
         mouth_type=("closed", 5.0),   #   score = 5·[mouth=closed] + 8·[foot=pointy] - 5·[knees=true] + 2
         foot_shape=("pointy", 8.0),

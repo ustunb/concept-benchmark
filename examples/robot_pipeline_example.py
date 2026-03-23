@@ -21,7 +21,7 @@ Note: ``uv sync`` makes ``experiments/`` importable automatically.
 
 import numpy as np
 
-from concept_benchmark.robot import DatasetGenerator
+from concept_benchmark.robots import DatasetGenerator
 from concept_benchmark.utils import set_deterministic_seed
 from experiments.intervention import ConceptInterventionRunner, InterventionConfig
 from experiments.kflip import KFlipInterventionStrategy
@@ -58,7 +58,6 @@ print("Generating robot image dataset (concept_preset='foot_subtypes', 12 concep
 gen = DatasetGenerator(
     seed=SEED,
     concept_preset="foot_subtypes",  # 12 fine-grained concepts (default: "ground_truth" = 7)
-    use_stochastic_labels=True,  # probabilistic labeling
     # render_images=True is the default — renders robot images
 )
 dataset = gen.generate()

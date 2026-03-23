@@ -25,7 +25,7 @@ import logging
 
 import yaml
 
-from concept_benchmark.formula import LabelFormula
+from concept_benchmark.formula import F, LabelFormula
 from concept_benchmark.paths import data_dir, results_dir
 
 logger = logging.getLogger(__name__)
@@ -198,17 +198,16 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     concepts: dict[str, list] = field(
         default_factory=lambda: copy.deepcopy(ROBOT_CONCEPTS)
     )
-    use_stochastic_labels: bool = True
-    # Labeling rule: score = Σ w_i · 1[f_i = v_i] + intercept
-    #   deterministic: Glorp if score >= 0
-    #   stochastic:    P(Glorp) = σ(temperature × score), then Bernoulli sample
     label_formula: LabelFormula = field(
         default_factory=lambda: LabelFormula(
-            mouth_type=("closed", 5.0),
-            foot_shape=("pointy", 8.0),
-            has_knees=("true", -5.0),
-            intercept=2.0,
+            score=(
+                5 * F("mouth_type").closed
+                + 8 * F("foot_shape").pointy
+                - 5 * F("has_knees").true
+                + 2
+            ),
             temperature=4.2,
+            stochastic=True,
         )
     )
     expand_concepts: list[str] = field(
@@ -365,7 +364,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     @property
     def _labeling_tag(self) -> str:
         """``'stochastic'`` or ``'deterministic'`` for filename construction."""
-        return "stochastic" if self.use_stochastic_labels else "deterministic"
+        return "stochastic" if self.label_formula.stochastic else "deterministic"
 
     @property
     def _preset_suffix(self) -> str:

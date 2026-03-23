@@ -7,12 +7,11 @@ A concept bottleneck model (CBM) first predicts interpretable *concepts* from in
 The robot benchmark classifies fictional robots — **Glorps** vs. **Drents** — from their body features:
 
 ```python
-from concept_benchmark.robot import DatasetGenerator, LabelFormula
+from concept_benchmark.robots import DatasetGenerator, LabelFormula
 
 dataset = DatasetGenerator(
     seed=1014,                       # reproducibility
     concept_preset="foot_subtypes",  # expand foot_shape into subtypes (default: "ground_truth")
-    use_stochastic_labels=True,      # probabilistic labeling (or False for deterministic)
     image_size="medium",             # "small" (8px), "medium" (32px, default), or "large" (600px)
     render_images=True,              # set False to skip image rendering for quick exploration
     label_formula=LabelFormula(      # scoring rule for class assignment
@@ -65,7 +64,7 @@ Train a CBM — concept detector (images → concepts) and label predictor (conc
 
 ```python
 import numpy as np
-from concept_benchmark.robot import DatasetGenerator
+from concept_benchmark.robots import DatasetGenerator
 from concept_benchmark.utils import set_deterministic_seed
 from experiments.models import (
     ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier,

@@ -16,7 +16,7 @@ Usage:
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 
-from concept_benchmark.robot import DatasetGenerator
+from concept_benchmark.robots import DatasetGenerator
 
 # ---------------------------------------------------------------------------
 # 1. Generate dataset (render_images=False skips image rendering for speed)

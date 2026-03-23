@@ -326,21 +326,22 @@ def create_robot_image_dataset(
 
     # Specify true labels via LabelFormula
     weights = extra_params.get("model_weights") or {}
-    formula = LabelFormula(
+    is_stochastic = model_type == "stochastic"
+    formula = LabelFormula.from_weights(
+        features=model_features,
+        weights=weights,
         intercept=extra_params.get("model_intercept", 0.0),
         temperature=extra_params.get("model_scalar", 1.0),
-        **{feat: (val, weights.get(feat, 1.0)) for feat, val in model_features.items()},
+        stochastic=is_stochastic,
     )
-    if model_type == "stochastic":
+    if is_stochastic:
         glorp_model_true = formula.probability
-    elif model_type == "deterministic":
-        glorp_model_true = formula.label
     else:
-        raise ValueError("Invalid model_type. Use 'deterministic' or 'stochastic'.")
+        glorp_model_true = formula.label
 
     catalog_df[OUTCOME_NAME] = catalog_df.apply(glorp_model_true, axis=1)
 
-    if model_type == "deterministic":
+    if not is_stochastic:
         # change "glorp" to 1 and "drent" to 0
         catalog_df[OUTCOME_NAME] = catalog_df[OUTCOME_NAME].apply(
             lambda x: 1 if x == "glorp" else 0

@@ -202,7 +202,7 @@ class ConceptDataset:
     Create splits with :meth:`sample` and access them as ``dataset.train``,
     ``dataset.val``, ``dataset.test``::
 
-        from concept_benchmark.robot import DatasetGenerator
+        from concept_benchmark.robots import DatasetGenerator
 
         ds = DatasetGenerator(seed=1014, render_images=False).generate()
         ds.sample(test_size=0.2, val_size=0.2, seed=1014)
