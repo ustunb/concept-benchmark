@@ -76,7 +76,12 @@ class ConstrainedFrontEndModel(FrontEndModel):
             self.model.fit(C, y)
             return
 
-        import cvxpy as cp
+        try:
+            import cvxpy as cp
+        except ImportError:
+            raise ImportError(
+                "Alignment requires cvxpy. Install with: pip install concept-benchmark[pipeline]"
+            ) from None
 
         n_samples, n_features = C.shape
         y_bin = (y == 1).astype(int)

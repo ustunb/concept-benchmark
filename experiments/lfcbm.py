@@ -184,7 +184,13 @@ class _CLIPEncoder:
             self._encode_text = self._encode_text_openclip
             self._encode_image = self._encode_image_openclip
         except ImportError:
-            import clip  # type: ignore
+            try:
+                import clip  # type: ignore
+            except ImportError:
+                raise ImportError(
+                    "LFCBM requires open-clip-torch or clip. "
+                    "Install with: pip install concept-benchmark[pipeline]"
+                ) from None
 
             self.backend = "clip"
             name = self.model_name.replace("-", "/")
