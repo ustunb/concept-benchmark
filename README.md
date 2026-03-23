@@ -41,20 +41,15 @@ sudo dnf install cairo-devel pkg-config python3-devel
 Then install the package:
 
 ```bash
-# Dataset generation only
 pip install concept-benchmark
-
-# Includes model training and evaluation dependencies
-pip install concept-benchmark[pipeline]
 ```
 
-Or install from source:
+**Dataset generation** works out of the box with `pip install`. **Model training, interventions, and evaluation** (`experiments/` package) require cloning the repo:
 
 ```bash
 git clone https://github.com/ustunb/concept-benchmark.git
 cd concept-benchmark
-uv sync                            # recommended
-# or: pip install -e ".[pipeline]"
+uv sync
 ```
 
 Verify the installation:

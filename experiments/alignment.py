@@ -80,7 +80,7 @@ class ConstrainedFrontEndModel(FrontEndModel):
             import cvxpy as cp
         except ImportError:
             raise ImportError(
-                "Alignment requires cvxpy. Install with: pip install concept-benchmark[pipeline]"
+                "Alignment requires cvxpy. Install with: pip install cvxpy"
             ) from None
 
         n_samples, n_features = C.shape

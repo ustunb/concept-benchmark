@@ -43,12 +43,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pipeline = [
-    "open-clip-torch>=2.20.0",
-    "transformers>=4.55.2",
-    "cvxpy>=1.4.0",
-    "google-genai>=1.0.0",
-]
 explore = ["renumics-spotlight>=1.6"]
 
 [project.urls]

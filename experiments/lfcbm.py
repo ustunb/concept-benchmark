@@ -189,7 +189,7 @@ class _CLIPEncoder:
             except ImportError:
                 raise ImportError(
                     "LFCBM requires open-clip-torch or clip. "
-                    "Install with: pip install concept-benchmark[pipeline]"
+                    "Install with: pip install open-clip-torch"
                 ) from None
 
             self.backend = "clip"

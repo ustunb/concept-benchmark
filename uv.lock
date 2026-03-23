@@ -649,12 +649,6 @@ dependencies = [
 explore = [
     { name = "renumics-spotlight" },
 ]
-pipeline = [
-    { name = "cvxpy" },
-    { name = "google-genai" },
-    { name = "open-clip-torch" },
-    { name = "transformers" },
-]
 
 [package.dev-dependencies]
 dev = [
@@ -675,12 +669,9 @@ explore = [
 [package.metadata]
 requires-dist = [
     { name = "colorir", specifier = ">=2.0.0" },
-    { name = "cvxpy", marker = "extra == 'pipeline'", specifier = ">=1.4.0" },
     { name = "dill", specifier = ">=0.3.8" },
-    { name = "google-genai", marker = "extra == 'pipeline'", specifier = ">=1.0.0" },
     { name = "matplotlib", specifier = ">=3.10.3" },
     { name = "numpy", specifier = ">=2.2.6" },
-    { name = "open-clip-torch", marker = "extra == 'pipeline'", specifier = ">=2.20.0" },
     { name = "pandas", specifier = ">=2.3.1" },
     { name = "pero", specifier = ">=0.18.0" },
     { name = "pillow", specifier = ">=10.0.0" },
@@ -693,9 +684,8 @@ requires-dist = [
     { name = "torch", specifier = ">=2.7.1" },
     { name = "torchvision", specifier = ">=0.23.0" },
     { name = "tqdm", specifier = ">=4.67.1" },
-    { name = "transformers", marker = "extra == 'pipeline'", specifier = ">=4.55.2" },
 ]
-provides-extras = ["pipeline", "explore"]
+provides-extras = ["explore"]
 
 [package.metadata.requires-dev]
 dev = [
