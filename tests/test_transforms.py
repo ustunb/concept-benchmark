@@ -275,9 +275,7 @@ def test_noise_different_seeds_differ():
 
 def test_missingness_fills_with_value():
     ds = _make_dataset()
-    result = ConceptMissingnessGenerator(
-        ds, p=0.5, seed=0, fill_value=-99.0
-    ).generate()
+    result = ConceptMissingnessGenerator(ds, p=0.5, seed=0, fill_value=-99.0).generate()
     assert np.any(result.train.C == -99.0)
 
 

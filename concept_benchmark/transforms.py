@@ -115,7 +115,9 @@ class ConceptNoiseGenerator:
             f"  input: {ds.n} samples, {ds.n_concepts} concepts",
         ]
         if ds.train.n > 0 and ds.test.n > 0:
-            lines.append(f"  splits: train={ds.train.n}, val={ds.validation.n}, test={ds.test.n}")
+            lines.append(
+                f"  splits: train={ds.train.n}, val={ds.validation.n}, test={ds.test.n}"
+            )
         return "\n".join(lines)
 
     def generate(self) -> ConceptDataset:
@@ -187,7 +189,9 @@ class ConceptMissingnessGenerator:
             f"  input: {ds.n} samples, {ds.n_concepts} concepts",
         ]
         if ds.train.n > 0 and ds.test.n > 0:
-            lines.append(f"  splits: train={ds.train.n}, val={ds.validation.n}, test={ds.test.n}")
+            lines.append(
+                f"  splits: train={ds.train.n}, val={ds.validation.n}, test={ds.test.n}"
+            )
         return "\n".join(lines)
 
     def generate(self) -> ConceptDataset:
@@ -247,7 +251,9 @@ class LabelNoiseGenerator:
             f"  input: {ds.n} samples, {ds.n_classes} classes",
         ]
         if ds.train.n > 0 and ds.test.n > 0:
-            lines.append(f"  splits: train={ds.train.n}, val={ds.validation.n}, test={ds.test.n}")
+            lines.append(
+                f"  splits: train={ds.train.n}, val={ds.validation.n}, test={ds.test.n}"
+            )
         return "\n".join(lines)
 
     def generate(self) -> ConceptDataset:

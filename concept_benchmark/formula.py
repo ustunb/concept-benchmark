@@ -432,7 +432,9 @@ class LabelFormula:
         terms = []
         intercept = 0.0
         nodes = (
-            list(self._score_expr.children) if isinstance(self._score_expr, _Sum) else [self._score_expr]
+            list(self._score_expr.children)
+            if isinstance(self._score_expr, _Sum)
+            else [self._score_expr]
         )
         for node in nodes:
             if isinstance(node, _Const):
@@ -481,7 +483,11 @@ class LabelFormula:
         if "terms" not in d:
             raise ValueError('LabelFormula dict must have "score" or "terms" key.')
         for f, spec in d["terms"].items():
-            if not isinstance(spec, dict) or "value" not in spec or "weight" not in spec:
+            if (
+                not isinstance(spec, dict)
+                or "value" not in spec
+                or "weight" not in spec
+            ):
                 raise ValueError(
                     f"Each term must be a dict with 'value' and 'weight' keys, "
                     f"got {spec!r} for feature {f!r}"
