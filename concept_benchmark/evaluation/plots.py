@@ -513,11 +513,10 @@ def plot_concept_discovery(
     ax.set_ylabel("Accuracy", fontsize=style.FONT_SIZE)
     ax.yaxis.set_major_formatter(style.pct_formatter())
 
-    # Dynamic y-range: floor at min bar - padding, ceiling at max(data+padding, 100%)
+    # Y-axis starts at 0, ceiling at max(data+padding, 100%)
     all_vals = ideal_accs + sub_accs
-    y_floor = min(all_vals) - 8
     y_ceil = max(max(all_vals) + 8, 100)
-    ax.set_ylim(y_floor, y_ceil)
+    ax.set_ylim(0, y_ceil)
 
     leg = ax.legend(
         loc="upper center",
