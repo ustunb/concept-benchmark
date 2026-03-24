@@ -15,11 +15,15 @@ Example::
 
 from __future__ import annotations
 
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 
 from . import style
+
+
+# ── Helpers ──────────────────────────────────────────────────────────
 
 
 def _ensure_ax(ax, figsize=(6, 4)):
@@ -29,6 +33,62 @@ def _ensure_ax(ax, figsize=(6, 4)):
     else:
         fig = ax.figure
     return fig, ax
+
+
+def _pad_axes(ax, *, top=0.08, bottom=0.02, left=0.05, right=0.05):
+    """Pad axes limits by a fraction of the current data range.
+
+    Call AFTER all data is plotted but BEFORE annotations that might clip.
+    """
+    ymin, ymax = ax.get_ylim()
+    yrange = max(ymax - ymin, 1)
+    ax.set_ylim(ymin - yrange * bottom, ymax + yrange * top)
+
+    xmin, xmax = ax.get_xlim()
+    xrange = max(xmax - xmin, 1)
+    ax.set_xlim(xmin - xrange * left, xmax + xrange * right)
+
+
+def _annotate_bar_v(ax, x, height, text, *, min_gap_pct=2.0):
+    """Annotate a vertical bar above its top, avoiding clipping.
+
+    Places text above the bar.  If two annotations would overlap
+    (heights within *min_gap_pct* of each other), nudges the shorter one.
+    """
+    ax.annotate(
+        text,
+        (x, height),
+        ha="center",
+        va="bottom",
+        fontsize=style.FONT_SIZE_ANNOT,
+        xytext=(0, 4),
+        textcoords="offset points",
+        clip_on=False,
+    )
+
+
+def _annotate_bar_h(ax, value, y, text):
+    """Annotate a horizontal bar at its end, always outside the bar."""
+    if value >= 0:
+        ha, offset = "left", (6, 0)
+    else:
+        ha, offset = "right", (-6, 0)
+    ax.annotate(
+        text,
+        (value, y),
+        ha=ha,
+        va="center",
+        fontsize=style.FONT_SIZE_ANNOT,
+        xytext=offset,
+        textcoords="offset points",
+        clip_on=False,
+    )
+
+
+def _lighten_color(color, alpha=0.4):
+    """Return a lighter version of a color by blending with white."""
+    rgb = mcolors.to_rgb(color)
+    return tuple(c * alpha + 1.0 * (1 - alpha) for c in rgb)
 
 
 # ── Intervention curve ───────────────────────────────────────────────
@@ -63,33 +123,44 @@ def plot_intervention_curve(
     color = color or style.COLOR_ACCURACY
 
     budgets = results["budget"].values
-    values = results[metric].values * 100  # to percentage
+    values = results[metric].values * 100
 
     ax.plot(budgets, values, marker="o", color=color, linewidth=2, label=label)
 
-    for x, y in zip(budgets, values):
+    baseline_val = baseline_accuracy * 100 if baseline_accuracy is not None else None
+
+    for bx, by in zip(budgets, values):
+        # If close to baseline, put annotation below to avoid overlap
+        if baseline_val is not None and abs(by - baseline_val) < 2.0:
+            offset = (0, -14)
+            va = "top"
+        else:
+            offset = (0, 10)
+            va = "bottom"
         ax.annotate(
-            f"{y:.1f}%",
-            (x, y),
+            f"{by:.1f}%",
+            (bx, by),
             textcoords="offset points",
-            xytext=(0, 10),
+            xytext=offset,
             fontsize=style.FONT_SIZE_ANNOT,
             ha="center",
+            va=va,
             clip_on=False,
         )
 
-    if baseline_accuracy is not None:
-        bval = baseline_accuracy * 100
-        ax.axhline(bval, color=style.COLOR_BASELINE, linestyle="--", linewidth=1.5, label="DNN baseline")
+    if baseline_val is not None:
+        ax.axhline(
+            baseline_val,
+            color=style.COLOR_BASELINE,
+            linestyle="--",
+            linewidth=1.5,
+            label="DNN baseline",
+        )
 
     ax.set_xlabel("Intervention budget (k)", fontsize=style.FONT_SIZE)
     ax.set_ylabel(metric.replace("_", " ").title() + " (%)", fontsize=style.FONT_SIZE)
     ax.yaxis.set_major_formatter(style.pct_formatter())
-
-    # Pad y-axis to avoid clipping annotations
-    ymin, ymax = ax.get_ylim()
-    ax.set_ylim(ymin - 1, ymax + 3)
-
+    _pad_axes(ax, top=0.10, bottom=0.03, left=0.0, right=0.02)
     style.apply_style(ax)
 
     if label or baseline_accuracy is not None:
@@ -121,7 +192,7 @@ def plot_regime_comparison(
     ax : Axes, optional
         Existing axes to plot on.
     """
-    fig, ax = _ensure_ax(ax, figsize=(7, 4))
+    fig, ax = _ensure_ax(ax, figsize=(8, 4))
     budgets = budgets or [1, 2, 5]
 
     regimes = regime_order or sorted(regime_df["regime"].unique())
@@ -129,7 +200,10 @@ def plot_regime_comparison(
     means, mins, maxs, labels = [], [], [], []
     for regime in regimes:
         rdf = regime_df[regime_df["regime"] == regime]
-        k0_acc = rdf[rdf["budget"] == 0]["accuracy"].values[0]
+        k0_rows = rdf[rdf["budget"] == 0]
+        if len(k0_rows) == 0:
+            continue
+        k0_acc = k0_rows["accuracy"].values[0]
         gains = []
         for k in budgets:
             row = rdf[rdf["budget"] == k]
@@ -140,6 +214,10 @@ def plot_regime_comparison(
             mins.append(min(gains) * 100)
             maxs.append(max(gains) * 100)
             labels.append(regime.title())
+
+    if not means:
+        style.apply_style(ax)
+        return fig, ax
 
     y_pos = np.arange(len(labels))
     colors = [style.COLOR_GAIN if m >= 0 else style.VERMILLION for m in means]
@@ -154,17 +232,7 @@ def plot_regime_comparison(
     ax.axvline(0, color="black", linewidth=0.8)
 
     for i, m in enumerate(means):
-        # Always annotate on the outer end of the bar
-        ax.annotate(
-            f"{m:+.1f}%",
-            (m, i),
-            textcoords="offset points",
-            xytext=(8, 0) if m >= 0 else (-8, 0),
-            fontsize=style.FONT_SIZE_ANNOT,
-            ha="left" if m >= 0 else "right",
-            va="center",
-            clip_on=False,
-        )
+        _annotate_bar_h(ax, m, i, f"{m:+.1f}%")
 
     ax.set_xlabel(
         f"\u0394Accuracy (%, mean over k\u2208{{{','.join(map(str, budgets))}}})",
@@ -173,10 +241,7 @@ def plot_regime_comparison(
     ax.xaxis.set_major_formatter(style.pct_formatter())
     style.apply_style(ax)
     ax.invert_yaxis()
-
-    # Pad x-axis so annotations don't clip
-    xmin, xmax = ax.get_xlim()
-    ax.set_xlim(xmin - 5, xmax + 5)
+    _pad_axes(ax, top=0.0, bottom=0.0, left=0.08, right=0.08)
 
     return fig, ax
 
@@ -220,39 +285,21 @@ def plot_selective_classification(
     cbm_vals = [cbm_metrics.get(m, 0) * 100 for m in metric_names]
 
     colors = [metric_colors.get(m, style.BLUE) for m in metric_names]
-    light_colors = [c + "80" for c in colors]  # alpha via hex
+    light = [_lighten_color(c) for c in colors]
 
-    ax.bar(
-        x - width / 2,
-        dnn_vals,
-        width,
-        color=light_colors,
-        edgecolor=colors,
-        label="DNN",
-    )
+    ax.bar(x - width / 2, dnn_vals, width, color=light, edgecolor=colors, label="DNN")
     ax.bar(x + width / 2, cbm_vals, width, color=colors, label="CBM")
 
-    for i, (d, c) in enumerate(zip(dnn_vals, cbm_vals)):
-        ax.annotate(
-            f"{d:.1f}%",
-            (i - width / 2, d),
-            ha="center",
-            va="bottom",
-            fontsize=style.FONT_SIZE_ANNOT,
-        )
-        ax.annotate(
-            f"{c:.1f}%",
-            (i + width / 2, c),
-            ha="center",
-            va="bottom",
-            fontsize=style.FONT_SIZE_ANNOT,
-        )
+    for i, (dv, cv) in enumerate(zip(dnn_vals, cbm_vals)):
+        _annotate_bar_v(ax, i - width / 2, dv, f"{dv:.1f}%")
+        _annotate_bar_v(ax, i + width / 2, cv, f"{cv:.1f}%")
 
     ax.set_xticks(x)
     ax.set_xticklabels(
         [m.replace("_", " ").title() for m in metric_names], fontsize=style.FONT_SIZE
     )
     ax.yaxis.set_major_formatter(style.pct_formatter())
+    _pad_axes(ax, top=0.10, bottom=0.0, left=0.0, right=0.0)
     ax.legend(fontsize=style.FONT_SIZE_LEGEND)
     style.apply_style(ax)
 
@@ -276,7 +323,7 @@ def plot_alignment_comparison(
     ax : Axes, optional
         Existing axes to plot on.
     """
-    fig, ax = _ensure_ax(ax, figsize=(7, 3))
+    fig, ax = _ensure_ax(ax, figsize=(8, 3))
 
     labels = list(results.keys())
     cbm_gains = [results[k]["cbm_gain"] * 100 for k in labels]
@@ -290,29 +337,16 @@ def plot_alignment_comparison(
         y + height / 2, aligned_gains, height, color=style.GREY, label="Aligned CBM"
     )
 
-    for i, (c, a) in enumerate(zip(cbm_gains, aligned_gains)):
-        ax.annotate(
-            f"{c:+.1f}%",
-            (c, i - height / 2),
-            textcoords="offset points",
-            xytext=(5, 0),
-            va="center",
-            fontsize=style.FONT_SIZE_ANNOT,
-        )
-        ax.annotate(
-            f"{a:+.1f}%",
-            (a, i + height / 2),
-            textcoords="offset points",
-            xytext=(5, 0),
-            va="center",
-            fontsize=style.FONT_SIZE_ANNOT,
-        )
+    for i, (cg, ag) in enumerate(zip(cbm_gains, aligned_gains)):
+        _annotate_bar_h(ax, cg, i - height / 2, f"{cg:+.1f}%")
+        _annotate_bar_h(ax, ag, i + height / 2, f"{ag:+.1f}%")
 
     ax.set_yticks(y)
     ax.set_yticklabels([name.title() for name in labels], fontsize=style.FONT_SIZE)
     ax.axvline(0, color="black", linewidth=0.8)
     ax.set_xlabel("Gain at k=3 (%)", fontsize=style.FONT_SIZE)
     ax.xaxis.set_major_formatter(style.pct_formatter())
+    _pad_axes(ax, top=0.0, bottom=0.0, left=0.08, right=0.08)
     ax.legend(fontsize=style.FONT_SIZE_LEGEND)
     style.apply_style(ax)
 
@@ -381,37 +415,15 @@ def plot_concept_discovery(
         label="DNN baseline",
     )
 
-    for i, (a, b) in enumerate(zip(ideal_accs, sub_accs)):
-        ax.annotate(
-            f"{a:.1f}%",
-            (i - width / 2, a),
-            ha="center",
-            va="bottom",
-            fontsize=style.FONT_SIZE_ANNOT,
-            xytext=(0, 3),
-            textcoords="offset points",
-            clip_on=False,
-        )
-        ax.annotate(
-            f"{b:.1f}%",
-            (i + width / 2, b),
-            ha="center",
-            va="bottom",
-            fontsize=style.FONT_SIZE_ANNOT,
-            xytext=(0, 3),
-            textcoords="offset points",
-            clip_on=False,
-        )
+    for i, (ia, sa) in enumerate(zip(ideal_accs, sub_accs)):
+        _annotate_bar_v(ax, i - width / 2, ia, f"{ia:.1f}%")
+        _annotate_bar_v(ax, i + width / 2, sa, f"{sa:.1f}%")
 
     ax.set_xticks(x)
     ax.set_xticklabels([f"k={k}" for k in budgets], fontsize=style.FONT_SIZE)
     ax.set_ylabel("Accuracy (%)", fontsize=style.FONT_SIZE)
     ax.yaxis.set_major_formatter(style.pct_formatter())
-
-    # Pad y-axis for annotations
-    ymin, ymax = ax.get_ylim()
-    ax.set_ylim(ymin, ymax + 3)
-
+    _pad_axes(ax, top=0.10, bottom=0.0, left=0.0, right=0.0)
     ax.legend(fontsize=style.FONT_SIZE_LEGEND)
     style.apply_style(ax)
 
