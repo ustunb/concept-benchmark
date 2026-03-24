@@ -293,11 +293,11 @@ from concept_benchmark.transforms import ConceptMissingnessGenerator
 dataset.sample(test_size=0.2, val_size=0.2, seed=42)
 
 # MCAR: each concept label independently missing with probability p
-dataset = ConceptMissingnessGenerator(dataset, p=0.2, mechanism="mcar", rng=99).generate()
+dataset = ConceptMissingnessGenerator(dataset, p=0.2, mechanism="mcar", seed=99).generate()
 
 # MNAR: missingness depends on concept value (present concepts more likely observed)
 dataset = ConceptMissingnessGenerator(
-    dataset, p=0.2, mechanism="mnar", rng=99,
+    dataset, p=0.2, mechanism="mnar", seed=99,
     mnar_config={"present_prob": 0.8, "absent_prob": 0.1},
 ).generate()
 ```
@@ -307,8 +307,8 @@ Similarly, `ConceptNoiseGenerator` adds symmetric or asymmetric label flips, and
 ```python
 from concept_benchmark.transforms import ConceptNoiseGenerator, LabelNoiseGenerator
 
-dataset = ConceptNoiseGenerator(dataset, noise_rate=0.1, rng=99).generate()
-dataset = LabelNoiseGenerator(dataset, noise_rate=0.05, rng=99).generate()
+dataset = ConceptNoiseGenerator(dataset, p=0.1, seed=99).generate()
+dataset = LabelNoiseGenerator(dataset, p=0.05, seed=99).generate()
 ```
 
 ### Wrapping your concept detector
