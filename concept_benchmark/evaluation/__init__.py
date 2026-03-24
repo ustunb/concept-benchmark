@@ -2,14 +2,14 @@
 
 Metrics::
 
-    from concept_benchmark.benchmark import accuracy, gain, selective_accuracy
+    from concept_benchmark.evaluation import accuracy, gain, selective_accuracy
 
     acc = accuracy(y_pred, y_true)
     g = gain(y_pred, y_true, baseline_accuracy=0.87)
 
 Plots::
 
-    from concept_benchmark.benchmark import plot_intervention_curve
+    from concept_benchmark.evaluation import plot_intervention_curve
 
     fig, ax = plot_intervention_curve(results_df)
 """

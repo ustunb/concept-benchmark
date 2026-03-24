@@ -1,4 +1,4 @@
-"""Smoke tests for concept_benchmark.benchmark.plots.
+"""Smoke tests for concept_benchmark.evaluation.plots.
 
 These verify that each plot function runs without error and returns
 (fig, ax). No visual comparison — just crash-free execution.
@@ -11,7 +11,7 @@ matplotlib.use("Agg")  # non-interactive backend for CI
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from concept_benchmark.benchmark.plots import (
+from concept_benchmark.evaluation.plots import (
     plot_alignment_comparison,
     plot_concept_discovery,
     plot_intervention_curve,

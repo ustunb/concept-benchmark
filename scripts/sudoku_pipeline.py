@@ -907,7 +907,7 @@ def compute_selective_results(
 
 def _plot_results(config) -> None:
     """Generate figures from collected results."""
-    from concept_benchmark.benchmark.plots import plot_selective_classification
+    from concept_benchmark.evaluation.plots import plot_selective_classification
     from concept_benchmark.paths import results_dir
 
     out_dir = results_dir / "figures"

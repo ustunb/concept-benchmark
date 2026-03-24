@@ -66,7 +66,7 @@ def set_paper_style() -> None:
 
     Call once before creating any plots::
 
-        from concept_benchmark.benchmark.style import set_paper_style
+        from concept_benchmark.evaluation.style import set_paper_style
         set_paper_style()
     """
     plt.rcParams.update(_PAPER_RC)

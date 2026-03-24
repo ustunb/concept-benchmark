@@ -110,7 +110,7 @@ Visualize intervention results:
 
 ```python
 # Plot accuracy vs intervention budget
-from concept_benchmark.benchmark import plot_intervention_curve
+from concept_benchmark.evaluation import plot_intervention_curve
 import pandas as pd
 
 results = pd.DataFrame({

@@ -1709,7 +1709,7 @@ def run(
 
 def plot_results(config: RobotBenchmarkConfig) -> None:
     """Generate figures from collected results and save to results/figures/."""
-    from concept_benchmark.benchmark.plots import (
+    from concept_benchmark.evaluation.plots import (
         plot_intervention_curve,
         plot_regime_comparison,
     )

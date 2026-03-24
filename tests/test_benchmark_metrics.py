@@ -1,9 +1,9 @@
-"""Tests for concept_benchmark.benchmark.metrics."""
+"""Tests for concept_benchmark.evaluation.metrics."""
 
 import numpy as np
 import pytest
 
-from concept_benchmark.benchmark.metrics import (
+from concept_benchmark.evaluation.metrics import (
     accuracy,
     coverage,
     delta_accuracy,

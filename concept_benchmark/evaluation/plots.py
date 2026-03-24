@@ -8,7 +8,7 @@ placed above/beside bars without overlapping.
 
 Example::
 
-    from concept_benchmark.benchmark.plots import plot_intervention_curve
+    from concept_benchmark.evaluation.plots import plot_intervention_curve
     import pandas as pd
 
     df = pd.DataFrame({"budget": [0, 1, 3], "accuracy": [0.78, 0.92, 0.94]})

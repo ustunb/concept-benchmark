@@ -118,7 +118,7 @@ Train CBMs on both concept sets and compare (requires cloning the repo):
 ```python
 from concept_benchmark.robots import DatasetGenerator
 from concept_benchmark.transforms import ConceptDropGenerator
-from concept_benchmark.benchmark import accuracy, plot_concept_discovery
+from concept_benchmark.evaluation import accuracy, plot_concept_discovery
 from experiments.models import ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier
 import pandas as pd
 
@@ -204,7 +204,7 @@ Train a concept-supervised model and evaluate selective classification (requires
 
 ```python
 from concept_benchmark.sudoku import DatasetGenerator
-from concept_benchmark.benchmark import plot_selective_classification
+from concept_benchmark.evaluation import plot_selective_classification
 from experiments.models import ConceptDetector, FrontEndModel, ConceptBasedModel, GroupPoolingConceptSudokuCNN
 from experiments.utils import determine_device, get_loader_config
 import numpy as np
@@ -586,10 +586,10 @@ For running interventions and alignment on your model, see the [Interventions an
 
 ### Metrics and Plots
 
-The `concept_benchmark.benchmark` module provides standalone metric functions and plotting utilities for evaluating CBMs:
+The `concept_benchmark.evaluation` module provides standalone metric functions and plotting utilities for evaluating CBMs:
 
 ```python
-from concept_benchmark.benchmark import (
+from concept_benchmark.evaluation import (
     accuracy, gain, selective_accuracy, coverage,
     plot_intervention_curve, plot_regime_comparison,
 )
