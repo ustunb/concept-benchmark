@@ -462,7 +462,7 @@ def plot_concept_discovery(
         color=style.BLUE,
         edgecolor="white",
         linewidth=0.5,
-        label="Ideal (7 concepts)",
+        label="True Concepts",
     )
     bars_sub = ax.bar(
         x + width / 2,
@@ -471,7 +471,7 @@ def plot_concept_discovery(
         color=style.BLUE_LIGHT,
         edgecolor="white",
         linewidth=0.5,
-        label="Subconcept (12 concepts)",
+        label="Human Concepts",
     )
 
     baseline_y = dnn_accuracy * 100
@@ -513,8 +513,11 @@ def plot_concept_discovery(
     ax.set_ylabel("Accuracy", fontsize=style.FONT_SIZE)
     ax.yaxis.set_major_formatter(style.pct_formatter())
 
-    # Wide y-range (matching paper) so labels don't land on the baseline
-    ax.set_ylim(70, 105)
+    # Dynamic y-range: floor at min bar - padding, ceiling at max(data+padding, 100%)
+    all_vals = ideal_accs + sub_accs
+    y_floor = min(all_vals) - 8
+    y_ceil = max(max(all_vals) + 8, 100)
+    ax.set_ylim(y_floor, y_ceil)
 
     leg = ax.legend(
         loc="upper center",
