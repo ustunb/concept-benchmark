@@ -72,23 +72,24 @@ def plot_intervention_curve(
             f"{y:.1f}%",
             (x, y),
             textcoords="offset points",
-            xytext=(0, 8),
+            xytext=(0, 10),
             fontsize=style.FONT_SIZE_ANNOT,
             ha="center",
+            clip_on=False,
         )
 
     if baseline_accuracy is not None:
-        ax.axhline(
-            baseline_accuracy * 100,
-            color=style.COLOR_BASELINE,
-            linestyle="--",
-            linewidth=1.5,
-            label="DNN baseline",
-        )
+        bval = baseline_accuracy * 100
+        ax.axhline(bval, color=style.COLOR_BASELINE, linestyle="--", linewidth=1.5, label="DNN baseline")
 
     ax.set_xlabel("Intervention budget (k)", fontsize=style.FONT_SIZE)
     ax.set_ylabel(metric.replace("_", " ").title() + " (%)", fontsize=style.FONT_SIZE)
     ax.yaxis.set_major_formatter(style.pct_formatter())
+
+    # Pad y-axis to avoid clipping annotations
+    ymin, ymax = ax.get_ylim()
+    ax.set_ylim(ymin - 1, ymax + 3)
+
     style.apply_style(ax)
 
     if label or baseline_accuracy is not None:
@@ -153,14 +154,16 @@ def plot_regime_comparison(
     ax.axvline(0, color="black", linewidth=0.8)
 
     for i, m in enumerate(means):
+        # Always annotate on the outer end of the bar
         ax.annotate(
             f"{m:+.1f}%",
             (m, i),
             textcoords="offset points",
-            xytext=(8 if m >= 0 else -8, 0),
+            xytext=(8, 0) if m >= 0 else (-8, 0),
             fontsize=style.FONT_SIZE_ANNOT,
             ha="left" if m >= 0 else "right",
             va="center",
+            clip_on=False,
         )
 
     ax.set_xlabel(
@@ -170,6 +173,10 @@ def plot_regime_comparison(
     ax.xaxis.set_major_formatter(style.pct_formatter())
     style.apply_style(ax)
     ax.invert_yaxis()
+
+    # Pad x-axis so annotations don't clip
+    xmin, xmax = ax.get_xlim()
+    ax.set_xlim(xmin - 5, xmax + 5)
 
     return fig, ax
 
@@ -381,6 +388,9 @@ def plot_concept_discovery(
             ha="center",
             va="bottom",
             fontsize=style.FONT_SIZE_ANNOT,
+            xytext=(0, 3),
+            textcoords="offset points",
+            clip_on=False,
         )
         ax.annotate(
             f"{b:.1f}%",
@@ -388,12 +398,20 @@ def plot_concept_discovery(
             ha="center",
             va="bottom",
             fontsize=style.FONT_SIZE_ANNOT,
+            xytext=(0, 3),
+            textcoords="offset points",
+            clip_on=False,
         )
 
     ax.set_xticks(x)
     ax.set_xticklabels([f"k={k}" for k in budgets], fontsize=style.FONT_SIZE)
     ax.set_ylabel("Accuracy (%)", fontsize=style.FONT_SIZE)
     ax.yaxis.set_major_formatter(style.pct_formatter())
+
+    # Pad y-axis for annotations
+    ymin, ymax = ax.get_ylim()
+    ax.set_ylim(ymin, ymax + 3)
+
     ax.legend(fontsize=style.FONT_SIZE_LEGEND)
     style.apply_style(ax)
 

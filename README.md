@@ -113,52 +113,55 @@ dataset.train.explore()  # opens in the browser
   <img src="docs/assets/robot_samples.png" width="600" alt="Sample Glorps and Drents with concept annotations">
 </p>
 
-Train a CBM — concept detector (images → concepts) and label predictor (concepts → label):
+Train CBMs on both concept sets and compare (requires cloning the repo):
 
 ```python
-import numpy as np
-from experiments.models import (
-    ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier,
-)
-
-# Using `dataset` from the generation step above
-# Step 1: train concept detector (images → concepts)
-n_concepts = dataset.train.n_concepts
-cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=n_concepts, input_size=32))
-cd.fit(dataset.train, dataset.val,
-       fit_params={"epochs": 50, "lr": 1e-3, "patience": 10})
-
-# Step 2: train label predictor (concepts → label)
-fe = FrontEndModel()
-fe.fit(dataset.train.C, dataset.train.y)
-
-# Step 3: combine into a CBM and evaluate
-cbm = ConceptBasedModel(concept_detector=cd, label_predictor=fe)
-predictions = cbm.predict(dataset.test)
-accuracy = np.mean(predictions == dataset.test.y)
-print(f"CBM accuracy: {accuracy:.4f}")
-# CBM accuracy: 0.7812
-```
-
-For a complete walkthrough including interventions and alignment, see `examples/robot_pipeline_example.py`.
-
-Visualize intervention results:
-
-```python
-# Plot accuracy vs intervention budget
-from concept_benchmark.benchmark import plot_intervention_curve
+from concept_benchmark.robots import DatasetGenerator
+from concept_benchmark.transforms import ConceptDropGenerator
+from concept_benchmark.benchmark import accuracy, plot_concept_discovery
+from experiments.models import ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier
 import pandas as pd
 
-results = pd.DataFrame({
-    "budget": [0, 1, 3, 7],
-    "accuracy": [0.8673, 0.9734, 0.9767, 0.9767],
-})
-fig, ax = plot_intervention_curve(results, baseline_accuracy=0.8746)
+def train_and_evaluate(concept_preset, drop_list):
+    """Generate data, train CBM, return accuracy."""
+    ds = DatasetGenerator(seed=1014, concept_preset=concept_preset).generate()
+    ds = ConceptDropGenerator(ds, drop_list).generate()
+    ds.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
+
+    cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=ds.train.n_concepts, input_size=32))
+    cbm = ConceptBasedModel(concept_detector=cd)
+    cbm.fit(ds.train, ds.val, concept_fit_params={"epochs": 50, "lr": 1e-3, "patience": 10})
+    return accuracy(cbm.predict(ds.test), ds.test.y)
+
+# Step 1: Train on ideal concepts (7 concepts)
+ideal_acc = train_and_evaluate("ground_truth", [
+    "has_elbows", "hand_shape",
+    "foot_shape_flat_rounded", "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
+    "foot_shape_flat_lshaped", "foot_shape_pointy_4sided", "foot_shape_pointy_square",
+    "foot_shape_pointy_rounded", "foot_shape_flat_5sided", "foot_shape_flat_square",
+    "foot_shape_flat_trapezoid",
+])
+print(f"Ideal CBM: {ideal_acc:.4f}")      # 0.8673
+
+# Step 2: Train on subconcepts (12 concepts)
+sub_acc = train_and_evaluate("foot_subtypes", [
+    "has_elbows", "hand_shape", "foot_shape",
+    "foot_shape_flat_rounded", "foot_shape_flat_lshaped",
+    "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
+])
+print(f"Subconcept CBM: {sub_acc:.4f}")    # 0.7812
+
+# Step 3: Plot the comparison
+ideal_df = pd.DataFrame({"budget": [0], "accuracy": [ideal_acc]})
+sub_df = pd.DataFrame({"budget": [0], "accuracy": [sub_acc]})
+fig, ax = plot_concept_discovery(ideal_df, sub_df, dnn_accuracy=0.8746, budgets=[0])
 ```
 
 <p align="center">
-  <img src="docs/assets/intervention_curve.png" width="500" alt="Intervention curve example">
+  <img src="docs/assets/concept_discovery.png" width="500" alt="Concept discovery: ideal vs subconcept accuracy">
 </p>
+
+For a complete walkthrough including interventions, alignment, and regime comparisons, see `examples/robot_pipeline_example.py`.
 
 ### Sudoku Validation
 
