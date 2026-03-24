@@ -223,6 +223,8 @@ fe.fit(dataset.train.C, dataset.train.y)
 cbm = ConceptBasedModel(concept_detector=cd, label_predictor=fe)
 
 # Selective classification — abstain when uncertain
+# Binary concept predictions → frontend probability → confidence score
+# (for concept-level uncertainty propagation, use cd.predict_proba() instead)
 C_pred = cd.predict(dataset.test).astype(np.float32)
 label_proba = fe.predict_proba(C_pred)[:, 1]
 y_pred = fe.predict(C_pred)
@@ -507,12 +509,12 @@ class MyConceptDetector(ConceptDetector):
         super().__init__()
         self._my_model = my_model
 
-    def predict(self, dataset, **kwargs):
+    def predict_proba(self, dataset, **kwargs):
         """Must return (N, n_concepts) float array in [0, 1]."""
         return self._my_model.predict_concept_probs(dataset.X)
 ```
 
-**Key point:** `predict()` receives a `ConceptDatasetSample`, not raw arrays. Access inputs via `dataset.X`.
+**Key point:** Override `predict_proba()` — it receives a `ConceptDatasetSample`, not raw arrays. Access inputs via `dataset.X`. The base class `predict()` calls `predict_proba()` and thresholds at 0.5 automatically.
 
 #### Using a PyTorch module directly
 
