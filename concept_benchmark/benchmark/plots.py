@@ -109,15 +109,13 @@ def plot_intervention_curve(
         )
 
     ax.set_xlabel("Intervention budget (k)", fontsize=style.FONT_SIZE)
-    ax.set_ylabel(metric.replace("_", " ").title() + " (%)",
-                   fontsize=style.FONT_SIZE)
+    ax.set_ylabel(metric.replace("_", " ").title() + " (%)", fontsize=style.FONT_SIZE)
     ax.yaxis.set_major_formatter(style.pct_formatter())
     _pad_axes(ax, top=0.12, bottom=0.08, left=0.08, right=0.05)
     style.apply_style(ax)
 
     if label or baseline_accuracy is not None:
-        ax.legend(fontsize=style.FONT_SIZE_LEGEND, loc="upper left",
-                  framealpha=0.9)
+        ax.legend(fontsize=style.FONT_SIZE_LEGEND, loc="upper left", framealpha=0.9)
 
     # Tight y-range: small margin around actual data (no empty space).
     all_y = list(values)
@@ -389,8 +387,11 @@ def plot_alignment_comparison(
     )
 
     ax.set_yticks(y)
-    ax.set_yticklabels([name.title() for name in labels], fontsize=style.FONT_SIZE,
-                       fontfamily="monospace")
+    ax.set_yticklabels(
+        [name.title() for name in labels],
+        fontsize=style.FONT_SIZE,
+        fontfamily="monospace",
+    )
     ax.axvline(0, color="black", linewidth=0.8)
     ax.set_xlabel("Gain in Accuracy over DNN", fontsize=style.FONT_SIZE)
     ax.xaxis.set_major_formatter(style.pct_formatter())
@@ -478,9 +479,12 @@ def plot_concept_discovery(
     )
     # Inline label on the dashed line (right side, like the paper)
     ax.text(
-        1.0, baseline_y, f"  DNN ({baseline_y:.1f}%)",
+        1.0,
+        baseline_y,
+        f"  DNN ({baseline_y:.1f}%)",
         transform=ax.get_yaxis_transform(),
-        va="center", ha="left",
+        va="center",
+        ha="left",
         fontsize=style.FONT_SIZE_ANNOT,
         color=style.GREY,
         clip_on=False,
