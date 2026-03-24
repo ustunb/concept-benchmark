@@ -20,7 +20,7 @@ The package includes two benchmarks:
 2. [Quick Start](#quick-start)
 3. [Benchmarks](#benchmarks)
 4. [Benchmark Your Own Model](#benchmark-your-own-model)
-5. [Interventions and Alignment](#interventions-and-alignment) (collapsible — custom strategies, regimes, alignment)
+5. [Interventions and Alignment](#interventions-and-alignment)
 6. [Citation](#citation)
 
 ## Installation
