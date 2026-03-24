@@ -135,7 +135,7 @@ def plot_intervention_curve(
         if i < n - 1:
             next_val = values[i + 1]
             if next_val - by > 3:
-                xytext, ha, va = (0, -8), "center", "top"
+                xytext, ha, va = (0, -12), "center", "top"
             else:
                 xytext, ha, va = (0, 8), "center", "bottom"
         else:
@@ -144,7 +144,7 @@ def plot_intervention_curve(
         # If annotation is close to baseline, push it away from the line
         if bval is not None and abs(by - bval) < 2:
             if by <= bval:
-                xytext, ha, va = (0, -8), "center", "top"
+                xytext, ha, va = (0, -12), "center", "top"
             else:
                 xytext, ha, va = (0, 14), "center", "bottom"
 
