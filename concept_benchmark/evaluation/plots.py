@@ -126,14 +126,18 @@ def plot_intervention_curve(
     ax.set_ylim(data_min - margin * 1.5, data_max + margin * 3)
 
     # If-then annotation placement per point:
-    # - If next value is much higher → place above (line goes up steeply)
+    # - If next value is much higher → place below (line goes up, label out of the way)
     # - If next value is similar/lower → place above
     # - Last point → place right
-    # - If label would sit on the baseline dashed line → push below instead
+    # - If label would sit on the baseline dashed line → push away
     n = len(budgets)
     for i, (bx, by) in enumerate(zip(budgets, values)):
         if i < n - 1:
-            xytext, ha, va = (0, 8), "center", "bottom"
+            next_val = values[i + 1]
+            if next_val - by > 3:
+                xytext, ha, va = (0, -8), "center", "top"
+            else:
+                xytext, ha, va = (0, 8), "center", "bottom"
         else:
             xytext, ha, va = (10, 0), "left", "center"
 
