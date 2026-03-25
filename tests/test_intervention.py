@@ -421,6 +421,7 @@ class TestRunner:
         from concept_benchmark.data import ConceptDatasetSample
         from experiments.models import ConceptBasedModel
 
+        instance_ids = np.array([7, 3], dtype=int)
         C_pred = np.array(
             [
                 [0.20, 0.80, 0.40],
@@ -460,16 +461,17 @@ class TestRunner:
             InterventionConfig(max_concepts_per_instance=1, random_state=0),
             sample,
             concept_proba=C_pred,
+            instance_ids=instance_ids,
         )
 
         assert len(fe.calls) == 3
-        np.testing.assert_array_equal(fe.calls[0]["row_indices"], np.array([0, 1]))
+        np.testing.assert_array_equal(fe.calls[0]["row_indices"], instance_ids)
         np.testing.assert_allclose(fe.calls[0]["effective"], C_pred)
-        np.testing.assert_array_equal(fe.calls[1]["row_indices"], np.array([0, 1]))
+        np.testing.assert_array_equal(fe.calls[1]["row_indices"], instance_ids)
         np.testing.assert_allclose(fe.calls[1]["effective"], C_pred)
 
         expected_after = np.where(mask, C_true, C_pred)
-        np.testing.assert_array_equal(fe.calls[2]["row_indices"], np.array([0, 1]))
+        np.testing.assert_array_equal(fe.calls[2]["row_indices"], instance_ids)
         np.testing.assert_allclose(fe.calls[2]["baseline_concepts"], C_pred)
         np.testing.assert_allclose(fe.calls[2]["effective"], expected_after)
         np.testing.assert_allclose(result.C_intervened, expected_after)

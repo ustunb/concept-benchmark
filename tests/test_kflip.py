@@ -241,6 +241,7 @@ class TestKFlip:
         assert proposal.mask.shape == (6, k)
 
     def test_aligned_replay_metadata_supports_expanded_candidate_rows(self):
+        instance_ids = np.array([5, 2], dtype=int)
         batch = InterventionBatch(
             C_pred=np.array(
                 [
@@ -257,6 +258,7 @@ class TestKFlip:
                 dtype=np.float32,
             ),
             y_true=np.array([0, 1], dtype=np.int32),
+            instance_ids=instance_ids,
         )
         fe = _RecordingAlignedFrontEnd()
         model = ConceptBasedModel(label_predictor=fe)
@@ -271,6 +273,7 @@ class TestKFlip:
         )
 
         assert proposal.mask.shape == batch.C_pred.shape
+        np.testing.assert_array_equal(fe.calls[0]["row_indices"], instance_ids)
         expanded_calls = [
             call
             for call in fe.calls
@@ -282,9 +285,13 @@ class TestKFlip:
         candidate_call = expanded_calls[0]
         row_indices = candidate_call["row_indices"]
         assert len(np.unique(row_indices)) < len(row_indices)
+        assert set(np.unique(row_indices)) == {2, 5}
+        assert not set(np.unique(row_indices)) == {0, 1}
+        row_lookup = {instance_id: pos for pos, instance_id in enumerate(instance_ids)}
+        expected_rows = np.array([row_lookup[idx] for idx in row_indices], dtype=int)
         np.testing.assert_allclose(
             candidate_call["baseline_concepts"],
-            batch.C_pred[row_indices],
+            batch.C_pred[expected_rows],
         )
         np.testing.assert_allclose(
             candidate_call["effective"],

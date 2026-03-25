@@ -93,6 +93,11 @@ class KFlipInterventionStrategy(InterventionStrategy):
                 False,
             )
         )
+        source_rows = (
+            np.asarray(batch.instance_ids, dtype=int)
+            if batch.instance_ids is not None
+            else np.arange(n_samples, dtype=int)
+        )
         base_cont = batch.C_pred.astype(np.float32)
         base_Z = (P >= 0.5).astype(np.float32)  # 'hard' mode
 
@@ -100,7 +105,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
         base_probs = predict_label_proba_from_concepts(
             model,
             base_cont if supports_aligned else base_Z,
-            row_indices=np.arange(n_samples, dtype=int) if supports_aligned else None,
+            row_indices=source_rows if supports_aligned else None,
             baseline_concepts=base_cont if supports_aligned else None,
         )  # (N,K)
         base_lbl = base_probs.argmax(axis=1)
@@ -263,7 +268,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
                     Z_chunk[:, subset] = AS
 
                     repeated_rows = (
-                        np.repeat(np.arange(s, s + m, dtype=int), A)
+                        np.repeat(source_rows[s : s + m], A)
                         if supports_aligned
                         else None
                     )

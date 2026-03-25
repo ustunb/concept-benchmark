@@ -92,6 +92,22 @@ def _supports_aligned_concept_replay(model: ConceptBasedModel) -> bool:
     )
 
 
+def _aligned_replay_row_indices(batch: "InterventionBatch") -> np.ndarray:
+    row_indices = (
+        np.asarray(batch.instance_ids, dtype=int)
+        if batch.instance_ids is not None
+        else np.arange(batch.n_samples, dtype=int)
+    )
+    if row_indices.ndim != 1:
+        raise ValueError("Aligned replay row indices must be a 1D integer array.")
+    if row_indices.shape[0] != batch.n_samples:
+        raise ValueError(
+            "Aligned replay row indices must match the batch size, got "
+            f"{row_indices.shape[0]} and {batch.n_samples}."
+        )
+    return row_indices
+
+
 def _prime_aligned_replay_context(
     model: ConceptBasedModel,
     dataset: ConceptDatasetSample,
@@ -99,7 +115,7 @@ def _prime_aligned_replay_context(
 ) -> None:
     if not _supports_aligned_concept_replay(model):
         return
-    row_indices = np.arange(batch.n_samples, dtype=int)
+    row_indices = _aligned_replay_row_indices(batch)
     predict_label_proba_from_concepts(
         model,
         batch.C_pred,
@@ -393,10 +409,11 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
 
         supports_aligned = _supports_aligned_concept_replay(model)
         if supports_aligned:
+            row_indices = _aligned_replay_row_indices(batch)
             y_prob = predict_label_proba_from_concepts(
                 model,
                 batch.C_pred,
-                row_indices=np.arange(batch.n_samples, dtype=int),
+                row_indices=row_indices,
                 baseline_concepts=batch.C_pred,
             )
         elif hasattr(model, "predict_proba_from_concepts"):
@@ -468,7 +485,7 @@ class OrderedCBMStrategy(InterventionStrategy):
 
         n_samples, n_concepts = batch.C_pred.shape
         supports_aligned = _supports_aligned_concept_replay(model)
-        row_indices = np.arange(n_samples, dtype=int)
+        row_indices = _aligned_replay_row_indices(batch)
         y_prob_orig = predict_label_proba_from_concepts(
             model,
             batch.C_pred,
@@ -521,12 +538,11 @@ class OrderedCBMStrategy(InterventionStrategy):
 
         supports_aligned = _supports_aligned_concept_replay(model)
         if config.select_only_abstained and config.abstention_threshold is not None:
+            row_indices = _aligned_replay_row_indices(batch)
             y_prob = predict_label_proba_from_concepts(
                 model,
                 batch.C_pred,
-                row_indices=np.arange(batch.n_samples, dtype=int)
-                if supports_aligned
-                else None,
+                row_indices=row_indices if supports_aligned else None,
                 baseline_concepts=batch.C_pred if supports_aligned else None,
             )
             predicted = np.argmax(y_prob, axis=1)
@@ -567,12 +583,11 @@ class RandomInterventionStrategy(InterventionStrategy):
     ) -> StrategyProposal:
         supports_aligned = _supports_aligned_concept_replay(model)
         if config.select_only_abstained and config.abstention_threshold is not None:
+            row_indices = _aligned_replay_row_indices(batch)
             y_prob = predict_label_proba_from_concepts(
                 model,
                 batch.C_pred,
-                row_indices=np.arange(batch.n_samples, dtype=int)
-                if supports_aligned
-                else None,
+                row_indices=row_indices if supports_aligned else None,
                 baseline_concepts=batch.C_pred if supports_aligned else None,
             )
             predicted = np.argmax(y_prob, axis=1)
@@ -644,10 +659,11 @@ class ScoreIntervention(InterventionStrategy):
         concepts_before = (
             batch.C_pred if supports_aligned else (batch.C_pred >= 0.5).astype(int)
         )
+        row_indices = _aligned_replay_row_indices(batch)
         p_before = predict_label_proba_from_concepts(
             model,
             concepts_before,
-            row_indices=np.arange(n_samples, dtype=int) if supports_aligned else None,
+            row_indices=row_indices if supports_aligned else None,
             baseline_concepts=batch.C_pred if supports_aligned else None,
         )
         y_pred_before = np.argmax(p_before, axis=1)
@@ -689,9 +705,7 @@ class ScoreIntervention(InterventionStrategy):
             p_after = predict_label_proba_from_concepts(
                 model,
                 all_flipped,
-                row_indices=np.arange(n_samples, dtype=int)
-                if supports_aligned
-                else None,
+                row_indices=row_indices if supports_aligned else None,
                 baseline_concepts=batch.C_pred if supports_aligned else None,
                 intervention_mask=intervention_mask,
             )
@@ -751,6 +765,7 @@ class ScoreIntervention(InterventionStrategy):
         m: int,
     ) -> dict[str, Any]:
         supports_aligned = _supports_aligned_concept_replay(model)
+        row_indices = _aligned_replay_row_indices(batch)
         overall_acc_before: float | None = None
         acc_non_intervened_before: float | None = None
         confusion_selected_before: np.ndarray | None = None
@@ -803,7 +818,7 @@ class ScoreIntervention(InterventionStrategy):
         p_after = predict_label_proba_from_concepts(
             model,
             concepts_after,
-            row_indices=np.arange(batch.n_samples, dtype=int) if supports_aligned else None,
+            row_indices=row_indices if supports_aligned else None,
             baseline_concepts=batch.C_pred if supports_aligned else None,
             intervention_mask=overwrite_mask if supports_aligned else None,
         )
@@ -912,7 +927,7 @@ class ConceptInterventionRunner:
         overwrite_mask = proposal.mask & ~np.isnan(batch.C_true)
         C_intervened = np.where(overwrite_mask, batch.C_true, batch.C_pred)
         supports_aligned = _supports_aligned_concept_replay(self.model)
-        row_indices = np.arange(batch.n_samples, dtype=int)
+        row_indices = _aligned_replay_row_indices(batch)
 
         if supports_aligned:
             y_prob_before = predict_label_proba_from_concepts(
