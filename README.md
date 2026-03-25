@@ -58,6 +58,36 @@ Verify the installation:
 python3 -c "import concept_benchmark; print('OK')"
 ```
 
+### Optional Official CEM / ProbCBM Baselines
+
+The repo can also run the official `mateoespinosa/cem` implementations for:
+
+- `cem` (`cem.models.cem.ConceptEmbeddingModel`)
+- `probcbm` (`cem.models.probcbm.ProbCBM`)
+
+These dependencies are optional and are only needed when you explicitly select
+`--cbm-family cem` or `--cbm-family probcbm`.
+
+```bash
+./scripts/install_cem_repo.sh
+```
+
+If you prefer the manual path:
+
+```bash
+git clone https://github.com/mateoespinosa/cem.git third_party/cem
+python -m pip install "pytorch-lightning>=1.6,<2.0" "torchmetrics<1.0"
+python -m pip install -r third_party/cem/requirements.txt
+python -m pip install -e third_party/cem
+```
+
+Notes:
+
+- Existing CBM / DNN / conceptual-safeguards paths do not require these packages.
+- Robot support is implemented for the benchmark pipeline.
+- Sudoku support is currently limited to the tabular variant for `cem` / `probcbm`.
+- Alignment and plotting remain on the original `cbm` path.
+
 ## Quick Start
 
 A concept bottleneck model (CBM) first predicts interpretable *concepts* from inputs (e.g., "has pointy feet"), then uses those concepts to predict the final label. This two-stage design lets users inspect and correct the model's reasoning at test time — an operation called an *intervention*. This package gives you synthetic datasets where the ground-truth concepts are known, so you can measure exactly how much interventions help under different conditions.
@@ -254,6 +284,10 @@ To reproduce the paper results — including all intervention regimes, alignment
 ```bash
 python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes   # see --help for all flags
 python scripts/sudoku_pipeline.py --seed 171
+python scripts/robot_pipeline.py --seed 1014 --cbm-family cem
+python scripts/robot_pipeline.py --seed 1014 --cbm-family probcbm
+python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family cem --stages setup cs intervene
+python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family probcbm --stages setup cs intervene
 
 # Add plot to generate figures from results
 python scripts/robot_pipeline.py --seed 1014 --stages setup cbm dnn intervene align collect plot
@@ -354,6 +388,8 @@ dataset.sample(
 
 ```bash
 python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes
+python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes --cbm-family cem
+python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes --cbm-family probcbm
 
 # Add plot to generate figures from results
 python scripts/robot_pipeline.py --seed 1014 --stages setup cbm dnn intervene align collect plot
@@ -396,6 +432,8 @@ dataset = DatasetGenerator(
 
 ```bash
 python scripts/sudoku_pipeline.py --seed 171
+python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family cem --stages setup cs intervene
+python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family probcbm --stages setup cs intervene
 ```
 
 Run `python scripts/sudoku_pipeline.py --help` for the full list of options (including training, intervention, and evaluation parameters).

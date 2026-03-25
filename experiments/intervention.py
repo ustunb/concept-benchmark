@@ -43,6 +43,17 @@ class InterventionError(RuntimeError):
     """Raised when a strategy or configuration cannot be executed."""
 
 
+def predict_label_proba_from_concepts(
+    model: ConceptBasedModel,
+    concepts: np.ndarray,
+) -> np.ndarray:
+    """Predict label probabilities from concept values with optional model override."""
+
+    if hasattr(model, "predict_proba_from_concepts"):
+        return model.predict_proba_from_concepts(concepts)
+    return model.label_predictor.predict_proba(concepts)
+
+
 @dataclass
 class InterventionBatch:
     """Container for a batch of concept predictions and associated metadata."""
@@ -325,7 +336,10 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
                 "Conceptual safeguards require abstention_threshold to be specified in the config."
             )
 
-        y_prob = model._propagate_predict_proba_mc(batch.C_pred)
+        if hasattr(model, "predict_proba_from_concepts"):
+            y_prob = model.predict_proba_from_concepts(batch.C_pred)
+        else:
+            y_prob = model._propagate_predict_proba_mc(batch.C_pred)
         predicted = np.argmax(y_prob, axis=1)
         confidences = y_prob[np.arange(batch.n_samples), predicted]
         abstain_mask = (confidences >= config.abstention_threshold) & (
@@ -390,7 +404,7 @@ class OrderedCBMStrategy(InterventionStrategy):
             )
 
         n_samples, n_concepts = batch.C_pred.shape
-        y_prob_orig = model.label_predictor.predict_proba(batch.C_pred)
+        y_prob_orig = predict_label_proba_from_concepts(model, batch.C_pred)
         y_pred_orig = np.argmax(y_prob_orig, axis=1)
         y_error_orig = (y_pred_orig != batch.y_true).astype(int)
 
@@ -398,7 +412,7 @@ class OrderedCBMStrategy(InterventionStrategy):
         for concept_idx in range(n_concepts):
             C_intervened = batch.C_pred.copy()
             C_intervened[:, concept_idx] = batch.C_true[:, concept_idx]
-            y_prob_tti = model.label_predictor.predict_proba(C_intervened)
+            y_prob_tti = predict_label_proba_from_concepts(model, C_intervened)
             y_pred_tti = np.argmax(y_prob_tti, axis=1)
             y_error_tti = (y_pred_tti != batch.y_true).astype(int)
             error_deltas[:, concept_idx] = y_error_tti - y_error_orig
@@ -426,7 +440,7 @@ class OrderedCBMStrategy(InterventionStrategy):
             order = np.asarray(self.state["ordering"])
 
         if config.select_only_abstained and config.abstention_threshold is not None:
-            y_prob = model.label_predictor.predict_proba(batch.C_pred)
+            y_prob = predict_label_proba_from_concepts(model, batch.C_pred)
             predicted = np.argmax(y_prob, axis=1)
             confidences = y_prob[np.arange(batch.n_samples), predicted]
             abstain_mask = (confidences >= config.abstention_threshold) & (
@@ -464,7 +478,7 @@ class RandomInterventionStrategy(InterventionStrategy):
         config: InterventionConfig,
     ) -> StrategyProposal:
         if config.select_only_abstained and config.abstention_threshold is not None:
-            y_prob = model.label_predictor.predict_proba(batch.C_pred)
+            y_prob = predict_label_proba_from_concepts(model, batch.C_pred)
             predicted = np.argmax(y_prob, axis=1)
             confidences = y_prob[np.arange(batch.n_samples), predicted]
             abstain_mask = (confidences >= config.abstention_threshold) & (
@@ -531,7 +545,7 @@ class ScoreIntervention(InterventionStrategy):
         mask = np.zeros_like(batch.C_pred, dtype=bool)
 
         concepts_before = (batch.C_pred >= 0.5).astype(int)
-        p_before = model.label_predictor.predict_proba(concepts_before)
+        p_before = predict_label_proba_from_concepts(model, concepts_before)
         y_pred_before = np.argmax(p_before, axis=1)
 
         scores = np.zeros(n_samples, dtype=float)
@@ -564,7 +578,7 @@ class ScoreIntervention(InterventionStrategy):
         ):
             all_flipped = concepts_before.copy()
             all_flipped[:, combo_indices] = 1 - all_flipped[:, combo_indices]
-            p_after = model.label_predictor.predict_proba(all_flipped)
+            p_after = predict_label_proba_from_concepts(model, all_flipped)
             scores_combo = np.max(np.abs(p_after - p_before), axis=1)
             improve = scores_combo > scores
             scores[improve] = scores_combo[improve]
@@ -667,7 +681,7 @@ class ScoreIntervention(InterventionStrategy):
         overwrite_mask = mask & ~np.isnan(batch.C_true)
         C_intervened = np.where(overwrite_mask, batch.C_true, batch.C_pred)
         concepts_after = (C_intervened >= 0.5).astype(int)
-        p_after = model.label_predictor.predict_proba(concepts_after)
+        p_after = predict_label_proba_from_concepts(model, concepts_after)
         y_pred_after = np.argmax(p_after, axis=1)
 
         overall_acc_after: float | None = None
@@ -772,10 +786,15 @@ class ConceptInterventionRunner:
         # Determine how to get predictions from the downstream model.
         # Conceptual safeguards operate on concept probabilities, others on binarized concepts.
         if isinstance(strategy, ConceptualSafeguardsStrategy):
-            predict_proba_fn = self.model._propagate_predict_proba_mc
+            if hasattr(self.model, "predict_proba_from_concepts"):
+                predict_proba_fn = self.model.predict_proba_from_concepts
+            else:
+                predict_proba_fn = self.model._propagate_predict_proba_mc
             concepts_before = batch.C_pred
         else:
-            predict_proba_fn = self.model.label_predictor.predict_proba
+            predict_proba_fn = lambda concepts: predict_label_proba_from_concepts(
+                self.model, concepts
+            )
             concepts_before = batch.C_pred >= 0.5
 
         # Evaluate the model before and after the intervention.

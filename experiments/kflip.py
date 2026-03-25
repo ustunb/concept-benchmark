@@ -14,6 +14,7 @@ from experiments.intervention import (
     InterventionConfig,
     StrategyProposal,
     InterventionError,
+    predict_label_proba_from_concepts,
 )
 
 
@@ -87,7 +88,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
         base_Z = (P >= 0.5).astype(np.float32)  # 'hard' mode
 
         # baseline labels
-        base_probs = model.label_predictor.predict_proba(base_Z)  # (N,K)
+        base_probs = predict_label_proba_from_concepts(model, base_Z)  # (N,K)
         base_lbl = base_probs.argmax(axis=1)
         n_classes = int(base_probs.shape[1])
 
@@ -246,7 +247,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
                     AS = np.tile(assign, (m, 1))  # (m*A, subset_size)
                     Z_chunk[:, subset] = AS
 
-                    Y = model.label_predictor.predict_proba(Z_chunk)  # (m*A, j)
+                    Y = predict_label_proba_from_concepts(model, Z_chunk)  # (m*A, j)
                     Y_lbl = Y.argmax(axis=1).reshape(m, A)  # (m, A)
 
                     flip_mask = Y_lbl != base_lbl[s : s + m][:, None]  # (m, A)

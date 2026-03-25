@@ -353,7 +353,7 @@ class LabelFreeCBM:
         torch.manual_seed(int(cfg.seed))
         np.random.seed(int(cfg.seed))
 
-        self.encoder = _CLIPEncoder(cfg.clip_model, cfg.clip_pretrained, cfg.device)
+        self.encoder: _CLIPEncoder | None = None
         self.concept_set: LFConceptSet | None = None
 
         # Learned artefacts
@@ -382,6 +382,15 @@ class LabelFreeCBM:
         for k in ("_img_train", "_img_valid", "_img_test", "_txt_concepts"):
             if k not in self.__dict__:
                 self.__dict__[k] = None
+
+    def _get_encoder(self) -> _CLIPEncoder:
+        if self.encoder is None:
+            self.encoder = _CLIPEncoder(
+                self.cfg.clip_model,
+                self.cfg.clip_pretrained,
+                self.cfg.device,
+            )
+        return self.encoder
 
     # --------- Fit / Transform ---------
 
@@ -413,15 +422,17 @@ class LabelFreeCBM:
 
         self._img_train = _maybe(
             cache / "clip_img_train.npy",
-            lambda: self.encoder.encode_images(train_X, self.cfg.batch_size),
+            lambda: self._get_encoder().encode_images(train_X, self.cfg.batch_size),
         )
         self._img_valid = _maybe(
             cache / "clip_img_valid.npy",
-            lambda: self.encoder.encode_images(valid_X, self.cfg.batch_size),
+            lambda: self._get_encoder().encode_images(valid_X, self.cfg.batch_size),
         )
         self._txt_concepts = _maybe(
             cache / "clip_txt_concepts.npy",
-            lambda: self.encoder.encode_texts(concept_set.texts, self.cfg.batch_size),
+            lambda: self._get_encoder().encode_texts(
+                concept_set.texts, self.cfg.batch_size
+            ),
         )
 
         # 2) CLIP similarity matrix P (train/valid)
@@ -552,7 +563,7 @@ class LabelFreeCBM:
     def transform(self, X: Sequence[str | Path]) -> np.ndarray:
         if self.Wc is None:
             raise RuntimeError("Wc not learned. Call fit() first.")
-        img = self.encoder.encode_images(X, self.cfg.batch_size)  # (N, D)
+        img = self._get_encoder().encode_images(X, self.cfg.batch_size)  # (N, D)
         Wk = self.Wc.detach().cpu().numpy()  # (Mk, D)
         fc = img @ Wk.T  # (N, Mk)
         return fc.astype(np.float32)

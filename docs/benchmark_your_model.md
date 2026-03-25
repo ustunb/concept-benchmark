@@ -206,6 +206,26 @@ print(f"Change:   {stats['accuracy_change']:+.4f}")
 
 ## Comparing to baselines
 
+The repo also includes built-in wrappers for the official `cem` and `probcbm`
+baselines from `mateoespinosa/cem`. These wrappers expose the same practical
+surface used above:
+
+- `predict(dataset)`
+- `predict_proba(dataset, return_concepts=True)`
+- intervention-time label recomputation from edited concepts
+
+For the robot benchmark:
+
+```bash
+./scripts/install_cem_repo.sh
+python scripts/robot_pipeline.py --seed 1014 --cbm-family cem
+python scripts/robot_pipeline.py --seed 1014 --cbm-family probcbm
+```
+
+For sudoku, the current integration is intentionally narrow: `cem` and
+`probcbm` are wired into the tabular pipeline path, while OCR/image-specific
+selective/alignment flows remain on the original `cbm` implementation.
+
 Use the same seed for apples-to-apples comparison with the built-in models. Expected results for the robot benchmark (seed=1014, concept_preset="foot_subtypes"):
 
 | Model | k=0 | k=1 | k=3 | k=12 (max) |

@@ -37,6 +37,11 @@ from concept_benchmark.utils import (
 from concept_benchmark.config import RobotBenchmarkConfig
 from concept_benchmark.generators import DatasetGenerator
 from concept_benchmark.ext.fileutils import load, save
+from experiments.cem_integration import (
+    CEMDependencyError,
+    train_cem_model,
+    train_probcbm_model,
+)
 from experiments.models import (
     ConceptBasedModel,
     ConceptDetector,
@@ -79,6 +84,10 @@ class FEOnProbs(FrontEndModel):
         P = np.clip(P, 1e-6, 1 - 1e-6)
         Z = np.log(P / (1.0 - P))
         return self.model.predict_proba(Z)
+
+
+def _selected_cbm_key(config: RobotBenchmarkConfig) -> str:
+    return str(getattr(config, "cbm_family", "cbm"))
 
 
 # Lazy import to avoid circular deps — intervention modules
@@ -205,6 +214,40 @@ def train_cbm(
     if save_key is not None:
         save(cbm, config.get_model_path(save_key), overwrite=True)
     return cbm
+
+
+def _train_official_cem_family(
+    config: RobotBenchmarkConfig,
+    *,
+    family: str,
+    data=None,
+    save_key: str | None = None,
+) -> ConceptBasedModel:
+    set_deterministic_seed(config.seed)
+    patch_macos_dataloader()
+    device = determine_device()
+
+    if data is None:
+        data = load(config.get_dataset_path())
+
+    loader_config = get_loader_config()
+    trainer_fn = train_cem_model if family == "cem" else train_probcbm_model
+    model = trainer_fn(
+        train_dataset=data.train,
+        valid_dataset=data.validation,
+        benchmark="robot",
+        config=config,
+        device=device,
+        num_workers=loader_config["num_workers"],
+        pin_memory=loader_config["pin_memory"],
+    )
+
+    test_pred = model.predict(data.test)
+    logger.info("Test Accuracy: %s", np.mean(test_pred == data.test.y))
+
+    if save_key is not None:
+        save(model, config.get_model_path(save_key), overwrite=True)
+    return model
 
 
 def _build_concept_groups(concept_names, concept_spec):
@@ -1227,6 +1270,11 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
     else:
         raise ValueError(f"Unknown regime: {regime!r}")
 
+    if _selected_cbm_key(config) != "cbm" and regime not in {"baseline", "expert"}:
+        raise NotImplementedError(
+            f"Regime {regime!r} is currently only supported for cbm_family='cbm'."
+        )
+
     if c_preds is None:
         c_preds = regime_model.concept_detector.predict_proba(data.test)
     # For machine regime (FEOnProbs), pass continuous probs directly;
@@ -1239,17 +1287,7 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
             ).mean()
         )
     else:
-        acc_det = float(
-            (
-                np.argmax(
-                    regime_model.label_predictor.predict_proba(
-                        (c_preds >= 0.5).astype(int)
-                    ),
-                    axis=1,
-                )
-                == data.test.y.astype(int)
-            ).mean()
-        )
+        acc_det = float((regime_model.predict(data.test) == data.test.y.astype(int)).mean())
 
     COLS = ["budget", "threshold"] + METRIC_COLS
     df_lst = []
@@ -1303,7 +1341,7 @@ def run_interventions(
     if data is None:
         data = load(config.get_dataset_path())
     if model is None:
-        model = load(config.get_model_path("cbm"))
+        model = load(config.get_model_path(_selected_cbm_key(config)))
 
     budgets = sorted(
         set(
@@ -1329,10 +1367,11 @@ def run_interventions(
     results_df["data_name"] = (
         "subconcept" if config.concept_preset == "foot_subtypes" else "ideal"
     )
+    results_df["model_family"] = _selected_cbm_key(config)
     results_df["n"] = data.test.n
     results_df["missing_fraction"] = missing_fraction
     results_df["missing_mechanism"] = missing_mechanism
-    results_df.to_csv(config.get_results_path("cbm"), index=False)
+    results_df.to_csv(config.get_results_path(_selected_cbm_key(config)), index=False)
     return results_df
 
 
@@ -1352,6 +1391,12 @@ def align(
     Returns dict with original_accuracy, aligned_accuracy, accuracy_change,
     predictions_changed, aligned_weights.
     """
+    if _selected_cbm_key(config) != "cbm":
+        logger.info(
+            "Alignment is only supported for cbm_family='cbm'; skipping %s.",
+            _selected_cbm_key(config),
+        )
+        return {}
     if data is None:
         data = load(config.get_dataset_path())
     if model is None:
@@ -1397,6 +1442,7 @@ def collect_results(
     # ── Per-config: DNN, CBM, interventions, alignment ───────────────
     for cfg in configs:
         label = _dataset_label(cfg)
+        model_key = _selected_cbm_key(cfg)
 
         # Load this config's dataset
         data = load(cfg.get_dataset_path())
@@ -1425,9 +1471,9 @@ def collect_results(
             )
 
         # CBM no-intervention (k=0)
-        cbm_path = cfg.get_model_path("cbm")
+        cbm_path = cfg.get_model_path(model_key)
         if not cbm_path.exists():
-            logger.warning("CBM not found for %s, skipping: %s", label, cbm_path)
+            logger.warning("%s model not found for %s, skipping: %s", model_key, label, cbm_path)
             continue
         cbm = load(cbm_path)
         cbm_acc = float((cbm.predict(data.test) == data.test.y).mean())
@@ -1435,7 +1481,7 @@ def collect_results(
         rows.append(
             {
                 "dataset": label,
-                "model": "cbm",
+                "model": model_key,
                 "budget": 0,
                 "threshold": "",
                 "accuracy": round(cbm_acc, 4),
@@ -1447,7 +1493,7 @@ def collect_results(
         )
 
         # CBM with interventions (k>0)
-        results_path = cfg.get_results_path("cbm")
+        results_path = cfg.get_results_path(model_key)
         if results_path.exists():
             interv_df = pd.read_csv(results_path)
             # Filter to baseline regime if column present
@@ -1464,7 +1510,7 @@ def collect_results(
                 rows.append(
                     {
                         "dataset": label,
-                        "model": "cbm",
+                        "model": model_key,
                         "budget": budget,
                         "threshold": 0.2,
                         "accuracy": round(acc, 4),
@@ -1477,7 +1523,7 @@ def collect_results(
 
         # Aligned CBM
         align_path = cfg.get_alignment_results_path()
-        if align_path.exists():
+        if model_key == "cbm" and align_path.exists():
             with open(align_path) as f:
                 align_data = json.load(f)
             aligned_acc = float(align_data["aligned_accuracy"])
@@ -1632,7 +1678,9 @@ def run(
             logger.info("Setup data is up to date (fingerprint matches), skipping")
 
     # Model fingerprint: retrain if config changed since last training
-    model_fp_path = config.get_model_path("cbm").with_suffix(".fingerprint")
+    model_fp_path = config.get_model_path(_selected_cbm_key(config)).with_suffix(
+        ".fingerprint"
+    )
     current_model_fp = config.model_fingerprint()
     cached_model_fp = (
         model_fp_path.read_text().strip() if model_fp_path.exists() else None
@@ -1652,15 +1700,25 @@ def run(
 
     if "cbm" in stages:
         logger.info("=== [%d/%d] Train CBM ===", _si["cbm"], n_stages)
-        if _should_train("cbm"):
-            train_cbm(
-                config,
-                missing_fraction=missing_fraction,
-                missing_mechanism=missing_mechanism,
-            )
+        selected_key = _selected_cbm_key(config)
+        if _should_train(selected_key):
+            if selected_key == "cbm":
+                train_cbm(
+                    config,
+                    missing_fraction=missing_fraction,
+                    missing_mechanism=missing_mechanism,
+                )
+            elif selected_key in {"cem", "probcbm"}:
+                _train_official_cem_family(config, family=selected_key, save_key=selected_key)
+            else:
+                raise ValueError(f"Unsupported cbm_family: {selected_key!r}")
         else:
-            logger.info("Using existing CBM: %s", config.get_model_path("cbm"))
-        if "subjective" in config.intervention_regimes:
+            logger.info(
+                "Using existing %s model: %s",
+                selected_key,
+                config.get_model_path(selected_key),
+            )
+        if selected_key == "cbm" and "subjective" in config.intervention_regimes:
             if _should_train("cbm_subjective"):
                 train_cbm_subjective(config)
             else:
@@ -1668,7 +1726,7 @@ def run(
                     "Using existing subjective CBM: %s",
                     config.get_model_path("cbm_subjective"),
                 )
-        if "machine" in config.intervention_regimes:
+        if selected_key == "cbm" and "machine" in config.intervention_regimes:
             if _should_train("lfcbm"):
                 train_lfcbm(config)
             else:
@@ -1709,6 +1767,12 @@ def run(
 
 def plot_results(config: RobotBenchmarkConfig) -> None:
     """Generate figures from collected results and save to results/figures/."""
+    if _selected_cbm_key(config) != "cbm":
+        logger.info(
+            "Plotting is only implemented for cbm_family='cbm'; skipping %s.",
+            _selected_cbm_key(config),
+        )
+        return
     import json
     import matplotlib
 
@@ -1865,6 +1929,12 @@ def _parse_args(argv=None):
         default="ground_truth",
     )
     parser.add_argument(
+        "--cbm-family",
+        choices=["cbm", "cem", "probcbm"],
+        default=None,
+        help="Concept-model family to train/evaluate (default: config or cbm).",
+    )
+    parser.add_argument(
         "--missing-fraction",
         type=float,
         default=None,
@@ -1918,6 +1988,8 @@ def main(argv=None):
 
     if args.budgets:
         config.intervention_budgets = parse_budgets(args.budgets)
+    if args.cbm_family:
+        config.cbm_family = args.cbm_family
     if args.regimes:
         config.intervention_regimes = args.regimes
     if args.strategy:

@@ -119,6 +119,7 @@ IMAGE_SIZE_TO_PIXELS = {
 MISSING_PROPORTION = 0.2
 
 VALID_STRATEGIES = frozenset({"up_to_k", "exactly_k"})
+VALID_CBM_FAMILIES = frozenset({"cbm", "cem", "probcbm"})
 ROBOT_VALID_REGIMES = frozenset(
     {"baseline", "expert", "subjective", "machine", "llm", "clip"}
 )
@@ -220,6 +221,18 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     learning_rate: float = field(default=1e-3, metadata={"scope": "image"})
     patience: int = field(default=10, metadata={"scope": "image"})
     batch_size: int = field(default=32, metadata={"scope": "image"})
+    cbm_family: str = "cbm"
+    cem_emb_size: int = 16
+    cem_training_intervention_prob: float = 0.25
+    cem_concept_loss_weight: float = 1.0
+    cem_task_loss_weight: float = 1.0
+    cem_max_epochs: int | None = None
+    probcbm_hidden_dim: int = 8
+    probcbm_class_hidden_dim: int = 64
+    probcbm_latent_dim: int = 8
+    probcbm_n_samples_inference: int = 1
+    probcbm_intervention_prob: float = 0.25
+    probcbm_max_epochs: int | None = None
 
     # Intervention
     intervention_budgets: list[int] = field(default_factory=lambda: [1, 3])
@@ -318,6 +331,11 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 f"got {self.concept_preset!r}"
             )
         self.label_formula.validate_against(self.concepts)
+        if self.cbm_family not in VALID_CBM_FAMILIES:
+            raise ValueError(
+                f"cbm_family must be one of {sorted(VALID_CBM_FAMILIES)}, "
+                f"got {self.cbm_family!r}"
+            )
 
         if self.seed < 0:
             raise ValueError(f"seed must be non-negative, got {self.seed}")
@@ -458,6 +476,18 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 "clip_concepts_file",
                 "llm_provider",
                 "llm_model",
+                "cbm_family",
+                "cem_emb_size",
+                "cem_training_intervention_prob",
+                "cem_concept_loss_weight",
+                "cem_task_loss_weight",
+                "cem_max_epochs",
+                "probcbm_hidden_dim",
+                "probcbm_class_hidden_dim",
+                "probcbm_latent_dim",
+                "probcbm_n_samples_inference",
+                "probcbm_intervention_prob",
+                "probcbm_max_epochs",
             }
             for k in _exclude:
                 d.pop(k, None)
@@ -529,7 +559,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         if self.data_type == "text":
             return results_dir / f"robot_text_{model_class}_seed{self.seed}_results.csv"
         filename = f"robot_{self.data_type}_{self._labeling_tag}"
-        if model_class == "cbm":
+        if model_class in {"cbm", "cem", "probcbm"}:
             filename += self._preset_suffix
         filename += f"_{model_class}_results.csv"
         return results_dir / filename
@@ -603,6 +633,18 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     batch_size: int = 32
     cs_epochs: int = 100
     cs_patience: int = 20
+    cbm_family: str = "cbm"
+    cem_emb_size: int = 16
+    cem_training_intervention_prob: float = 0.25
+    cem_concept_loss_weight: float = 1.0
+    cem_task_loss_weight: float = 1.0
+    cem_max_epochs: int | None = None
+    probcbm_hidden_dim: int = 8
+    probcbm_class_hidden_dim: int = 64
+    probcbm_latent_dim: int = 8
+    probcbm_n_samples_inference: int = 1
+    probcbm_intervention_prob: float = 0.25
+    probcbm_max_epochs: int | None = None
 
     # Intervention
     intervention_budgets: list[int] = field(default_factory=lambda: [1, 3, 27])
@@ -627,6 +669,11 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
         if self.font_style not in ("handwritten", "printed"):
             raise ValueError(
                 f"font_style must be 'handwritten' or 'printed', got {self.font_style!r}"
+            )
+        if self.cbm_family not in VALID_CBM_FAMILIES:
+            raise ValueError(
+                f"cbm_family must be one of {sorted(VALID_CBM_FAMILIES)}, "
+                f"got {self.cbm_family!r}"
             )
         if self.seed < 0:
             raise ValueError(f"seed must be non-negative, got {self.seed}")

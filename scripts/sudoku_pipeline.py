@@ -30,6 +30,7 @@ from concept_benchmark.utils import (
 )
 from concept_benchmark.config import SudokuBenchmarkConfig
 from concept_benchmark.ext.fileutils import load, save
+from experiments.cem_integration import train_cem_model, train_probcbm_model
 from experiments.models import (
     ConceptBasedModel,
     ConceptDetector,
@@ -41,6 +42,11 @@ from experiments.intervention import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _selected_cs_key(config: SudokuBenchmarkConfig) -> str:
+    family = str(getattr(config, "cbm_family", "cbm"))
+    return "cs" if family == "cbm" else family
 
 
 # ── Stage: setup_dataset ──────────────────────────────────────────────
@@ -94,6 +100,28 @@ def train_cs(
         tab_dir = config.get_dataset_path(data_type="tabular")
         data = load(tab_dir / "sudoku_dataset.pkl")
         data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
+
+    model_key = _selected_cs_key(config)
+    if model_key != "cs":
+        if config.data_type != "tabular":
+            raise NotImplementedError(
+                "Sudoku CEM/ProbCBM support is implemented only for the tabular variant."
+            )
+        loader_config = get_loader_config()
+        trainer_fn = train_cem_model if model_key == "cem" else train_probcbm_model
+        model = trainer_fn(
+            train_dataset=data.train,
+            valid_dataset=data.validation,
+            benchmark="sudoku",
+            config=config,
+            device=device,
+            num_workers=loader_config["num_workers"],
+            pin_memory=loader_config["pin_memory"],
+        )
+        test_pred = model.predict(data.test)
+        logger.info("Test Accuracy: %s", np.mean(test_pred == data.test.y))
+        save(model, config.get_model_path(model_key, data_type="tabular"), overwrite=True)
+        return model
 
     # Missingness can be applied here if needed:
     # data.sample_concept_missingness(p=0.2, mechanism="mcar", rng=config.seed)
@@ -246,7 +274,7 @@ def run_interventions(
         data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
     if cs_model is None:
-        cs_model = load(config.get_model_path("cs", data_type="tabular"))
+        cs_model = load(config.get_model_path(_selected_cs_key(config), data_type="tabular"))
         cs_model._random_state = config.seed
 
     # Find selective accuracy threshold on validation set
@@ -312,9 +340,14 @@ def run_interventions(
 
     cs_intervention_df = pd.DataFrame(rows)
 
-    csv_path = config.get_results_path(
-        "interventions", data_type="tabular"
-    ).with_suffix(".csv")
+    results_key = (
+        f"{_selected_cs_key(config)}_interventions"
+        if _selected_cs_key(config) != "cs"
+        else "interventions"
+    )
+    csv_path = config.get_results_path(results_key, data_type="tabular").with_suffix(
+        ".csv"
+    )
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     cs_intervention_df.to_csv(csv_path, index=False)
     logger.info("Saved intervention results to %s", csv_path)
@@ -535,6 +568,11 @@ def run(
             "collect",
         ]
 
+    if _selected_cs_key(config) != "cs" and config.data_type != "tabular":
+        raise ValueError(
+            "Sudoku CEM/ProbCBM support currently requires --data-type tabular."
+        )
+
     # Early validation: check that dataset directory exists if we need it
     _needs_data = {"cs", "dnn", "intervene", "selective", "align", "collect"}
     if _needs_data & set(stages) and "setup" not in stages:
@@ -550,8 +588,9 @@ def run(
     n_stages = len(stages)
     _si = {s: i for i, s in enumerate(stages, 1)}
     logger.info(
-        "=== Sudoku Benchmark === seed=%d, stages=%s, device=%s",
+        "=== Sudoku Benchmark === seed=%d, cbm_family=%s, stages=%s, device=%s",
         config.seed,
+        _selected_cs_key(config),
         stages,
         device,
     )
@@ -584,7 +623,9 @@ def run(
             logger.info("Setup data is up to date (fingerprint matches), skipping")
 
     # Model fingerprint: retrain if config changed since last training
-    model_fp_path = config.get_model_path("cs").with_suffix(".fingerprint")
+    model_fp_path = config.get_model_path(_selected_cs_key(config)).with_suffix(
+        ".fingerprint"
+    )
     current_model_fp = config.model_fingerprint()
     cached_model_fp = (
         model_fp_path.read_text().strip() if model_fp_path.exists() else None
@@ -609,10 +650,15 @@ def run(
 
     if "cs" in stages:
         logger.info("=== [%d/%d] Train CS ===", _si["cs"], n_stages)
-        if model_stale or not config.get_model_path("cs").exists():
+        selected_cs_key = _selected_cs_key(config)
+        if model_stale or not config.get_model_path(selected_cs_key).exists():
             train_cs(config)
         else:
-            logger.info("Using existing CS model: %s", config.get_model_path("cs"))
+            logger.info(
+                "Using existing %s model: %s",
+                selected_cs_key,
+                config.get_model_path(selected_cs_key),
+            )
 
     if "dnn" in stages:
         logger.info("=== [%d/%d] Train DNN ===", _si["dnn"], n_stages)
@@ -642,7 +688,7 @@ def run(
             test_size=0.2, val_size=0.2, stratify=_shared_data.y, seed=config.seed
         )
 
-        cs_path = config.get_model_path("cs", data_type="tabular")
+        cs_path = config.get_model_path(_selected_cs_key(config), data_type="tabular")
         if cs_path.exists():
             _shared_cs = load(cs_path)
             _shared_cs._random_state = config.seed
@@ -658,22 +704,46 @@ def run(
 
     if "selective" in stages:
         logger.info("=== [%d/%d] Selective ===", _si["selective"], n_stages)
-        sel_df = compute_selective_results(
-            config, cs_model=_shared_cs, dnn_weights=_shared_dnn, data=_shared_data
-        )
-        logger.info("=== Selective Metrics ===\n%s", sel_df.to_string(index=False))
+        if _selected_cs_key(config) != "cs":
+            logger.info(
+                "Selective evaluation is only implemented for cbm_family='cbm'; skipping %s.",
+                _selected_cs_key(config),
+            )
+        else:
+            sel_df = compute_selective_results(
+                config, cs_model=_shared_cs, dnn_weights=_shared_dnn, data=_shared_data
+            )
+            logger.info("=== Selective Metrics ===\n%s", sel_df.to_string(index=False))
 
     if "align" in stages:
         logger.info("=== [%d/%d] Align ===", _si["align"], n_stages)
-        align(config, cs_model=_shared_cs, data=_shared_data)
+        if _selected_cs_key(config) != "cs":
+            logger.info(
+                "Alignment is only implemented for cbm_family='cbm'; skipping %s.",
+                _selected_cs_key(config),
+            )
+        else:
+            align(config, cs_model=_shared_cs, data=_shared_data)
 
     if "collect" in stages:
         logger.info("=== [%d/%d] Collect ===", _si["collect"], n_stages)
-        collect_results([config])
+        if _selected_cs_key(config) != "cs":
+            logger.info(
+                "Collect is only implemented for cbm_family='cbm'; skipping %s.",
+                _selected_cs_key(config),
+            )
+        else:
+            collect_results([config])
 
     if "plot" in stages:
         logger.info("=== [%d/%d] Plot ===", _si.get("plot", n_stages), n_stages)
-        _plot_results(config)
+        if _selected_cs_key(config) != "cs":
+            logger.info(
+                "Plotting is only implemented for cbm_family='cbm'; skipping %s.",
+                _selected_cs_key(config),
+            )
+        else:
+            _plot_results(config)
 
     logger.info("Pipeline complete!")
 
@@ -979,6 +1049,13 @@ def _parse_args(argv=None):
     parser.add_argument(
         "--data-type", type=str, default=None, choices=["tabular", "image"]
     )
+    parser.add_argument(
+        "--cbm-family",
+        type=str,
+        default=None,
+        choices=["cbm", "cem", "probcbm"],
+        help="Concept-model family to train/evaluate (tabular support only for cem/probcbm).",
+    )
     parser.add_argument("--handwriting", action="store_true", default=None)
     parser.add_argument("--no-handwriting", action="store_true")
     parser.add_argument("--force-setup", action="store_true")
@@ -1007,6 +1084,8 @@ def main(argv=None):
         config.font_style = "handwritten"
     if args.data_type is not None:
         config.data_type = args.data_type
+    if args.cbm_family is not None:
+        config.cbm_family = args.cbm_family
 
     run(config, stages=args.stages, force_setup=args.force_setup)
 

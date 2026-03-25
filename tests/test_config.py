@@ -51,6 +51,14 @@ class TestRobotConfigValidation:
         cfg = RobotBenchmarkConfig(intervention_strategy="exactly_k")
         assert cfg.intervention_strategy == "exactly_k"
 
+    def test_accepts_cem_family(self):
+        cfg = RobotBenchmarkConfig(cbm_family="cem")
+        assert cfg.cbm_family == "cem"
+
+    def test_rejects_bad_cbm_family(self):
+        with pytest.raises(ValueError, match="cbm_family must be one of"):
+            RobotBenchmarkConfig(cbm_family="bogus")
+
     def test_concept_preset_foot_subtypes(self):
         cfg = RobotBenchmarkConfig(concept_preset="foot_subtypes")
         assert cfg.concept_preset == "foot_subtypes"
@@ -134,6 +142,10 @@ class TestSudokuConfigValidation:
     def test_explicit_tabular_data_type(self):
         cfg = SudokuBenchmarkConfig(data_type="tabular")
         assert cfg.data_type == "tabular"
+
+    def test_accepts_probcbm_family(self):
+        cfg = SudokuBenchmarkConfig(cbm_family="probcbm")
+        assert cfg.cbm_family == "probcbm"
 
 
 class TestRobotTextConfigValidation:
