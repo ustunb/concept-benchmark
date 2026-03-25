@@ -11,10 +11,13 @@ from experiments.intervention import (
     InterventionBatch,
     InterventionConfig,
     InterventionError,
+    InterventionStrategy,
     OrderedCBMStrategy,
     RandomInterventionStrategy,
     ScoreIntervention,
+    StrategyProposal,
 )
+from experiments.models import FrontEndModel
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -39,6 +42,71 @@ def _make_cbm(k=4, seed=42):
     y = rng.integers(0, 2, size=40).astype(np.int32)
     fe.fit(C, y)
     return ConceptBasedModel(label_predictor=fe)
+
+
+class _RecordingAlignedFrontEnd(FrontEndModel):
+    supports_aligned_concept_replay = True
+    _kflip_fast_path = False
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls: list[dict[str, np.ndarray | None]] = []
+
+    def fit(self, C: np.ndarray, y: np.ndarray, fit_params: dict | None = None) -> None:
+        super().fit(C, y, fit_params=fit_params)
+
+    @staticmethod
+    def _label_probs(concepts: np.ndarray) -> np.ndarray:
+        score = concepts.sum(axis=1)
+        prob1 = 1.0 / (1.0 + np.exp(-score))
+        return np.column_stack([1.0 - prob1, prob1]).astype(np.float32)
+
+    def predict_proba(self, C: np.ndarray) -> np.ndarray:
+        raise AssertionError("Aligned replay should use predict_proba_from_concepts.")
+
+    def predict_proba_from_concepts(
+        self,
+        concepts: np.ndarray,
+        *,
+        row_indices: np.ndarray | None = None,
+        baseline_concepts: np.ndarray | None = None,
+        intervention_mask: np.ndarray | None = None,
+        **_: dict,
+    ) -> np.ndarray:
+        concepts = np.asarray(concepts, dtype=np.float32)
+        if baseline_concepts is None:
+            baseline_concepts = concepts
+        else:
+            baseline_concepts = np.asarray(baseline_concepts, dtype=np.float32)
+        if intervention_mask is None:
+            effective = concepts
+        else:
+            effective = np.where(
+                np.asarray(intervention_mask, dtype=bool), concepts, baseline_concepts
+            )
+        self.calls.append(
+            {
+                "concepts": concepts.copy(),
+                "row_indices": None
+                if row_indices is None
+                else np.asarray(row_indices, dtype=int).copy(),
+                "baseline_concepts": baseline_concepts.copy(),
+                "intervention_mask": None
+                if intervention_mask is None
+                else np.asarray(intervention_mask, dtype=bool).copy(),
+                "effective": effective.copy(),
+            }
+        )
+        return self._label_probs(effective)
+
+
+class _FixedMaskStrategy(InterventionStrategy):
+    def __init__(self, mask: np.ndarray) -> None:
+        super().__init__(name="fixed_mask")
+        self._mask = np.asarray(mask, dtype=bool)
+
+    def propose(self, model, batch, config) -> StrategyProposal:
+        return StrategyProposal(mask=self._mask.copy())
 
 
 # ── InterventionConfig ───────────────────────────────────────────────
@@ -258,11 +326,69 @@ class TestRunner:
         result = runner.run(strat, config, sample, concept_proba=C_pred)
         n = sample.n
         assert result.C_pred.shape[0] == n
-        assert result.C_intervened.shape[0] == n
-        assert result.mask.shape[0] == n
-        assert result.y_prob_before.shape[0] == n
-        assert result.y_prob_after.shape[0] == n
-        assert result.y_pred_after.shape[0] == n
+
+    def test_run_preserves_continuous_non_intervened_concepts_for_aligned_replay(self):
+        from concept_benchmark.data import ConceptDatasetSample
+        from experiments.models import ConceptBasedModel
+
+        C_pred = np.array(
+            [
+                [0.20, 0.80, 0.40],
+                [0.75, 0.25, 0.60],
+            ],
+            dtype=np.float32,
+        )
+        C_true = np.array(
+            [
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 1.0],
+            ],
+            dtype=np.float32,
+        )
+        sample = ConceptDatasetSample(
+            X=np.zeros((2, 2), dtype=np.float32),
+            C=C_true.astype(np.int8),
+            y=np.array([0, 1], dtype=np.int32),
+            meta={
+                "classes": ["c0", "c1"],
+                "concepts": ["z0", "z1", "z2"],
+                "data_type": "tabular",
+            },
+        )
+
+        fe = _RecordingAlignedFrontEnd()
+        model = ConceptBasedModel(concept_detector=None, label_predictor=fe)
+        mask = np.array(
+            [
+                [True, False, False],
+                [False, True, False],
+            ],
+            dtype=bool,
+        )
+        result = ConceptInterventionRunner(model).run(
+            _FixedMaskStrategy(mask),
+            InterventionConfig(max_concepts_per_instance=1, random_state=0),
+            sample,
+            concept_proba=C_pred,
+        )
+
+        assert len(fe.calls) == 2
+        np.testing.assert_array_equal(fe.calls[0]["row_indices"], np.array([0, 1]))
+        np.testing.assert_allclose(fe.calls[0]["effective"], C_pred)
+
+        expected_after = np.where(mask, C_true, C_pred)
+        np.testing.assert_array_equal(fe.calls[1]["row_indices"], np.array([0, 1]))
+        np.testing.assert_allclose(fe.calls[1]["baseline_concepts"], C_pred)
+        np.testing.assert_allclose(fe.calls[1]["effective"], expected_after)
+        np.testing.assert_allclose(result.C_intervened, expected_after)
+        np.testing.assert_allclose(
+            result.y_prob_after,
+            _RecordingAlignedFrontEnd._label_probs(expected_after),
+        )
+        assert result.mask.shape[0] == sample.n
+        assert result.y_prob_before.shape[0] == sample.n
+        assert result.y_prob_after.shape[0] == sample.n
+        assert result.y_pred_after.shape[0] == sample.n
 
     def test_applies_ground_truth(self):
         model, sample = self._make_runner_data(n=10, k=3)

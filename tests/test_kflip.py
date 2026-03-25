@@ -32,6 +32,61 @@ def _make_batch(n=10, k=4, seed=0):
     return InterventionBatch(C_pred=C_pred, C_true=C_true, y_true=y_true)
 
 
+class _RecordingAlignedFrontEnd(FrontEndModel):
+    supports_aligned_concept_replay = True
+    _kflip_fast_path = False
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls: list[dict[str, np.ndarray | None]] = []
+
+    @staticmethod
+    def _label_probs(concepts: np.ndarray) -> np.ndarray:
+        score = 1.2 * concepts[:, 0] - 0.8 * concepts[:, 1]
+        if concepts.shape[1] > 2:
+            score = score + 0.3 * concepts[:, 2]
+        prob1 = 1.0 / (1.0 + np.exp(-score))
+        return np.column_stack([1.0 - prob1, prob1]).astype(np.float32)
+
+    def predict_proba(self, C: np.ndarray) -> np.ndarray:
+        raise AssertionError("KFlip should use aligned replay for this frontend.")
+
+    def predict_proba_from_concepts(
+        self,
+        concepts: np.ndarray,
+        *,
+        row_indices: np.ndarray | None = None,
+        baseline_concepts: np.ndarray | None = None,
+        intervention_mask: np.ndarray | None = None,
+        **_: dict,
+    ) -> np.ndarray:
+        concepts = np.asarray(concepts, dtype=np.float32)
+        if baseline_concepts is None:
+            baseline_concepts = concepts
+        else:
+            baseline_concepts = np.asarray(baseline_concepts, dtype=np.float32)
+        if intervention_mask is None:
+            effective = concepts
+        else:
+            effective = np.where(
+                np.asarray(intervention_mask, dtype=bool), concepts, baseline_concepts
+            )
+        self.calls.append(
+            {
+                "concepts": concepts.copy(),
+                "row_indices": None
+                if row_indices is None
+                else np.asarray(row_indices, dtype=int).copy(),
+                "baseline_concepts": baseline_concepts.copy(),
+                "intervention_mask": None
+                if intervention_mask is None
+                else np.asarray(intervention_mask, dtype=bool).copy(),
+                "effective": effective.copy(),
+            }
+        )
+        return self._label_probs(effective)
+
+
 class TestKFlip:
     def test_requires_positive_k(self):
         model = _make_model()
@@ -184,3 +239,58 @@ class TestKFlip:
         strat = KFlipInterventionStrategy(limit_subsets=3)
         proposal = strat.propose(model, batch, config)
         assert proposal.mask.shape == (6, k)
+
+    def test_aligned_replay_metadata_supports_expanded_candidate_rows(self):
+        batch = InterventionBatch(
+            C_pred=np.array(
+                [
+                    [0.20, 0.80],
+                    [0.75, 0.35],
+                ],
+                dtype=np.float32,
+            ),
+            C_true=np.array(
+                [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                ],
+                dtype=np.float32,
+            ),
+            y_true=np.array([0, 1], dtype=np.int32),
+        )
+        fe = _RecordingAlignedFrontEnd()
+        model = ConceptBasedModel(label_predictor=fe)
+        proposal = KFlipInterventionStrategy(batch_size=4).propose(
+            model,
+            batch,
+            InterventionConfig(
+                max_concepts_per_instance=1,
+                score_threshold=0.0,
+                random_state=0,
+            ),
+        )
+
+        assert proposal.mask.shape == batch.C_pred.shape
+        expanded_calls = [
+            call
+            for call in fe.calls
+            if call["row_indices"] is not None
+            and call["row_indices"].shape[0] > batch.n_samples
+        ]
+        assert expanded_calls, "Expected expanded candidate replay calls."
+
+        candidate_call = expanded_calls[0]
+        row_indices = candidate_call["row_indices"]
+        assert len(np.unique(row_indices)) < len(row_indices)
+        np.testing.assert_allclose(
+            candidate_call["baseline_concepts"],
+            batch.C_pred[row_indices],
+        )
+        np.testing.assert_allclose(
+            candidate_call["effective"],
+            np.where(
+                candidate_call["intervention_mask"],
+                candidate_call["concepts"],
+                candidate_call["baseline_concepts"],
+            ),
+        )

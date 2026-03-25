@@ -622,15 +622,24 @@ def run(
         else:
             logger.info("Setup data is up to date (fingerprint matches), skipping")
 
-    # Model fingerprint: retrain if config changed since last training
-    model_fp_path = config.get_model_path(_selected_cs_key(config)).with_suffix(
-        ".fingerprint"
-    )
-    current_model_fp = config.model_fingerprint()
-    cached_model_fp = (
-        model_fp_path.read_text().strip() if model_fp_path.exists() else None
-    )
-    model_stale = cached_model_fp != current_model_fp
+    def _model_fp_path(model_key: str) -> Path:
+        return config.get_model_path(model_key).with_suffix(".fingerprint")
+
+    def _current_model_fp(model_key: str) -> str:
+        return config.model_fingerprint(model_key)
+
+    def _model_stale(model_key: str) -> bool:
+        model_fp_path = _model_fp_path(model_key)
+        current_model_fp = _current_model_fp(model_key)
+        cached_model_fp = (
+            model_fp_path.read_text().strip() if model_fp_path.exists() else None
+        )
+        return cached_model_fp != current_model_fp
+
+    def _write_model_fingerprint(model_key: str) -> None:
+        model_fp_path = _model_fp_path(model_key)
+        model_fp_path.parent.mkdir(parents=True, exist_ok=True)
+        model_fp_path.write_text(_current_model_fp(model_key))
 
     if "ocr" in stages:
         if config.data_type == "tabular":
@@ -641,8 +650,9 @@ def run(
             )
         else:
             logger.info("=== [%d/%d] Train OCR ===", _si["ocr"], n_stages)
-            if model_stale or not config.get_model_path("ocr").exists():
+            if _model_stale("ocr") or not config.get_model_path("ocr").exists():
                 train_ocr(config)
+                _write_model_fingerprint("ocr")
             else:
                 logger.info(
                     "Using existing OCR model: %s", config.get_model_path("ocr")
@@ -651,8 +661,9 @@ def run(
     if "cs" in stages:
         logger.info("=== [%d/%d] Train CS ===", _si["cs"], n_stages)
         selected_cs_key = _selected_cs_key(config)
-        if model_stale or not config.get_model_path(selected_cs_key).exists():
+        if _model_stale(selected_cs_key) or not config.get_model_path(selected_cs_key).exists():
             train_cs(config)
+            _write_model_fingerprint(selected_cs_key)
         else:
             logger.info(
                 "Using existing %s model: %s",
@@ -662,15 +673,11 @@ def run(
 
     if "dnn" in stages:
         logger.info("=== [%d/%d] Train DNN ===", _si["dnn"], n_stages)
-        if model_stale or not config.get_model_path("dnn").exists():
+        if _model_stale("dnn") or not config.get_model_path("dnn").exists():
             train_dnn(config)
+            _write_model_fingerprint("dnn")
         else:
             logger.info("Using existing DNN: %s", config.get_model_path("dnn"))
-
-    # Save model fingerprint after training stages
-    if any(s in stages for s in ("ocr", "cs", "dnn")) and model_stale:
-        model_fp_path.parent.mkdir(parents=True, exist_ok=True)
-        model_fp_path.write_text(current_model_fp)
 
     # Pre-load shared data and models for intervene/selective/align stages
     _eval_stages = {"intervene", "selective", "align"}

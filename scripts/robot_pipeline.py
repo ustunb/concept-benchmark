@@ -97,10 +97,14 @@ _intervention_imported = False
 def _ensure_intervention_imports():
     global _intervention_imported
     if not _intervention_imported:
-        global ConceptInterventionRunner, InterventionConfig, KFlipInterventionStrategy
+        global ConceptInterventionRunner
+        global InterventionConfig
+        global KFlipInterventionStrategy
+        global predict_label_proba_from_concepts
         from experiments.intervention import (
             ConceptInterventionRunner,
             InterventionConfig,
+            predict_label_proba_from_concepts,
         )
         from experiments.kflip import KFlipInterventionStrategy
 
@@ -581,6 +585,10 @@ def _test_interventions(
     # Create a CBM wrapper for the intervention framework
     cbm = ConceptBasedModel(concept_detector=None, label_predictor=fe)
     runner = ConceptInterventionRunner(cbm)
+    supports_aligned = bool(
+        getattr(cbm, "supports_aligned_concept_replay", False)
+        or getattr(fe, "supports_aligned_concept_replay", False)
+    )
     llm_cache = None
     _intervention_cache = None
 
@@ -997,8 +1005,17 @@ def _test_interventions(
 
             overwrite_mask = mask & ~np.isnan(C_true_llm)
             C_after = np.where(overwrite_mask, C_true_llm, C_before)
-            C_final_binary = (C_after >= 0.5).astype(int)
-            y_prob_after = fe.predict_proba(C_final_binary)
+            if supports_aligned:
+                y_prob_after = predict_label_proba_from_concepts(
+                    cbm,
+                    C_after,
+                    row_indices=np.arange(C_after.shape[0], dtype=int),
+                    baseline_concepts=C_before,
+                    intervention_mask=overwrite_mask,
+                )
+            else:
+                C_final_binary = (C_after >= 0.5).astype(int)
+                y_prob_after = fe.predict_proba(C_final_binary)
             y_pred_after = np.argmax(y_prob_after, axis=1)
 
             result = SimpleNamespace(
@@ -1030,8 +1047,17 @@ def _test_interventions(
             result.C_intervened = C_after
 
             # Recompute downstream prediction after error injection
-            C_final_binary = (result.C_intervened >= 0.5).astype(int)
-            result.y_prob_after = fe.predict_proba(C_final_binary)
+            if supports_aligned:
+                result.y_prob_after = predict_label_proba_from_concepts(
+                    cbm,
+                    result.C_intervened,
+                    row_indices=np.arange(result.C_intervened.shape[0], dtype=int),
+                    baseline_concepts=result.C_pred,
+                    intervention_mask=result.mask,
+                )
+            else:
+                C_final_binary = (result.C_intervened >= 0.5).astype(int)
+                result.y_prob_after = fe.predict_proba(C_final_binary)
             result.y_pred_after = np.argmax(result.y_prob_after, axis=1)
 
         # Extract intervention statistics
@@ -1677,18 +1703,20 @@ def run(
         else:
             logger.info("Setup data is up to date (fingerprint matches), skipping")
 
-    # Model fingerprint: retrain if config changed since last training
-    model_fp_path = config.get_model_path(_selected_cbm_key(config)).with_suffix(
-        ".fingerprint"
-    )
-    current_model_fp = config.model_fingerprint()
-    cached_model_fp = (
-        model_fp_path.read_text().strip() if model_fp_path.exists() else None
-    )
-    model_stale = cached_model_fp != current_model_fp
+    def _model_fp_path(model_key: str) -> Path:
+        return config.get_model_path(model_key).with_suffix(".fingerprint")
+
+    def _current_model_fp(model_key: str) -> str:
+        return config.model_fingerprint(model_key)
 
     def _should_train(model_key: str) -> bool:
         model_path = config.get_model_path(model_key)
+        model_fp_path = _model_fp_path(model_key)
+        current_model_fp = _current_model_fp(model_key)
+        cached_model_fp = (
+            model_fp_path.read_text().strip() if model_fp_path.exists() else None
+        )
+        model_stale = cached_model_fp != current_model_fp
         if config.force_retrain:
             return True
         if not model_path.exists():
@@ -1697,6 +1725,11 @@ def run(
             logger.info("Config changed since last training — retraining %s", model_key)
             return True
         return False
+
+    def _write_model_fingerprint(model_key: str) -> None:
+        model_fp_path = _model_fp_path(model_key)
+        model_fp_path.parent.mkdir(parents=True, exist_ok=True)
+        model_fp_path.write_text(_current_model_fp(model_key))
 
     if "cbm" in stages:
         logger.info("=== [%d/%d] Train CBM ===", _si["cbm"], n_stages)
@@ -1712,6 +1745,7 @@ def run(
                 _train_official_cem_family(config, family=selected_key, save_key=selected_key)
             else:
                 raise ValueError(f"Unsupported cbm_family: {selected_key!r}")
+            _write_model_fingerprint(selected_key)
         else:
             logger.info(
                 "Using existing %s model: %s",
@@ -1721,6 +1755,7 @@ def run(
         if selected_key == "cbm" and "subjective" in config.intervention_regimes:
             if _should_train("cbm_subjective"):
                 train_cbm_subjective(config)
+                _write_model_fingerprint("cbm_subjective")
             else:
                 logger.info(
                     "Using existing subjective CBM: %s",
@@ -1729,6 +1764,7 @@ def run(
         if selected_key == "cbm" and "machine" in config.intervention_regimes:
             if _should_train("lfcbm"):
                 train_lfcbm(config)
+                _write_model_fingerprint("lfcbm")
             else:
                 logger.info("Using existing LFCBM: %s", config.get_model_path("lfcbm"))
 
@@ -1736,13 +1772,9 @@ def run(
         logger.info("=== [%d/%d] Train DNN ===", _si["dnn"], n_stages)
         if _should_train("dnn"):
             train_dnn(config)
+            _write_model_fingerprint("dnn")
         else:
             logger.info("Using existing DNN: %s", config.get_model_path("dnn"))
-
-    # Save model fingerprint after training stages
-    if ("cbm" in stages or "dnn" in stages) and model_stale:
-        model_fp_path.parent.mkdir(parents=True, exist_ok=True)
-        model_fp_path.write_text(current_model_fp)
 
     if "intervene" in stages:
         logger.info("=== [%d/%d] Intervene ===", _si["intervene"], n_stages)

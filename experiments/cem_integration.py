@@ -15,6 +15,7 @@ import copy
 import importlib
 import inspect
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -54,6 +55,29 @@ class _PredictionCache:
     pos_embeddings: torch.Tensor | None = None
     neg_embeddings: torch.Tensor | None = None
     probcbm_pred_embeddings: torch.Tensor | None = None
+
+
+def _slice_prediction_cache(
+    cache: _PredictionCache,
+    row_indices: np.ndarray,
+) -> _PredictionCache:
+    tensor_index = torch.as_tensor(row_indices, dtype=torch.long)
+    return _PredictionCache(
+        dataset_id=cache.dataset_id,
+        concept_probs=cache.concept_probs[row_indices],
+        label_probs=cache.label_probs[row_indices],
+        pos_embeddings=(
+            None if cache.pos_embeddings is None else cache.pos_embeddings.index_select(0, tensor_index)
+        ),
+        neg_embeddings=(
+            None if cache.neg_embeddings is None else cache.neg_embeddings.index_select(0, tensor_index)
+        ),
+        probcbm_pred_embeddings=(
+            None
+            if cache.probcbm_pred_embeddings is None
+            else cache.probcbm_pred_embeddings.index_select(0, tensor_index)
+        ),
+    )
 
 
 def _ensure_local_cem_checkout_on_path() -> None:
@@ -408,6 +432,7 @@ class _OfficialConceptDetectorAdapter(ConceptDetector):
 
 class _OfficialFrontEndAdapter(FrontEndModel):
     _kflip_fast_path = False
+    supports_aligned_concept_replay = True
 
     def __init__(self, owner: "_OfficialBenchmarkModelBase") -> None:
         super().__init__()
@@ -424,9 +449,13 @@ class _OfficialFrontEndAdapter(FrontEndModel):
     def predict_proba(self, C: np.ndarray) -> np.ndarray:
         return self._owner.predict_proba_from_concepts(C)
 
+    def predict_proba_from_concepts(self, C: np.ndarray, **kwargs) -> np.ndarray:
+        return self._owner.predict_proba_from_concepts(C, **kwargs)
+
 
 class _OfficialBenchmarkModelBase(ConceptBasedModel):
     family = "official"
+    supports_aligned_concept_replay = True
 
     def __init__(
         self,
@@ -518,6 +547,10 @@ class _OfficialBenchmarkModelBase(ConceptBasedModel):
         concepts: np.ndarray,
         *,
         dataset: ConceptDatasetSample | None = None,
+        row_indices: np.ndarray | None = None,
+        source_indices: np.ndarray | None = None,
+        baseline_concepts: np.ndarray | None = None,
+        intervention_mask: np.ndarray | None = None,
     ) -> np.ndarray:
         if dataset is not None:
             self._predict_dataset(dataset, cache=True)
@@ -530,12 +563,107 @@ class _OfficialBenchmarkModelBase(ConceptBasedModel):
         concepts = np.asarray(concepts, dtype=np.float32)
         if concepts.ndim == 1:
             concepts = concepts.reshape(1, -1)
-        if concepts.shape != cache.concept_probs.shape:
+        if concepts.ndim != 2 or concepts.shape[1] != self.n_concepts:
             raise ValueError(
-                "Concept matrix must match the cached prediction shape, got "
-                f"{concepts.shape} and expected {cache.concept_probs.shape}."
+                "Concept matrix must have shape (N, n_concepts), got "
+                f"{concepts.shape} for n_concepts={self.n_concepts}."
             )
-        return self._predict_from_cached_concepts(concepts, cache)
+        if row_indices is not None and source_indices is not None:
+            raise ValueError("Pass only one of row_indices or source_indices.")
+        if source_indices is not None:
+            row_indices = source_indices
+
+        if row_indices is None:
+            if concepts.shape != cache.concept_probs.shape:
+                raise ValueError(
+                    "Row-aligned replay requires row_indices/source_indices when the concept "
+                    "matrix does not cover the full cached dataset in the original row order. "
+                    f"Got {concepts.shape} and expected {cache.concept_probs.shape}."
+                )
+            if baseline_concepts is None:
+                if not np.allclose(
+                    concepts,
+                    cache.concept_probs,
+                    atol=1e-6,
+                    rtol=1e-6,
+                ):
+                    raise ValueError(
+                        "Full-dataset replay without dataset/row_indices is only safe when "
+                        "replaying the cached concept predictions exactly. Pass dataset=..., "
+                        "or pass row_indices/source_indices together with baseline_concepts "
+                        "for modified concept matrices."
+                    )
+            else:
+                baseline_candidate = np.asarray(baseline_concepts, dtype=np.float32)
+                if baseline_candidate.ndim == 1:
+                    baseline_candidate = baseline_candidate.reshape(1, -1)
+                if baseline_candidate.shape != cache.concept_probs.shape:
+                    raise ValueError(
+                        "Full-dataset baseline_concepts must match the cached concept matrix "
+                        f"shape, got {baseline_candidate.shape} and expected "
+                        f"{cache.concept_probs.shape}."
+                    )
+                if not np.allclose(
+                    baseline_candidate,
+                    cache.concept_probs,
+                    atol=1e-6,
+                    rtol=1e-6,
+                ):
+                    raise ValueError(
+                        "baseline_concepts must align with the cached dataset rows in their "
+                        "original order. Pass dataset=... to refresh the cache or pass explicit "
+                        "row_indices/source_indices for subset/repeated replay."
+                    )
+            row_indices = np.arange(cache.concept_probs.shape[0], dtype=int)
+        else:
+            row_indices = np.asarray(row_indices)
+            if row_indices.ndim != 1:
+                raise ValueError("row_indices must be a 1D integer array.")
+            if row_indices.shape[0] != concepts.shape[0]:
+                raise ValueError(
+                    "row_indices length must match the number of concept rows, got "
+                    f"{row_indices.shape[0]} and {concepts.shape[0]}."
+                )
+            if not np.issubdtype(row_indices.dtype, np.integer):
+                raise ValueError("row_indices must contain integers.")
+            if row_indices.size and (
+                np.any(row_indices < 0)
+                or np.any(row_indices >= cache.concept_probs.shape[0])
+            ):
+                raise ValueError(
+                    "row_indices must refer to rows in the cached dataset, got "
+                    f"min={int(row_indices.min())} max={int(row_indices.max())} "
+                    f"for cached_rows={cache.concept_probs.shape[0]}."
+                )
+            row_indices = row_indices.astype(int, copy=False)
+
+        if baseline_concepts is None:
+            baseline_concepts = cache.concept_probs[row_indices]
+        else:
+            baseline_concepts = np.asarray(baseline_concepts, dtype=np.float32)
+            if baseline_concepts.ndim == 1:
+                baseline_concepts = baseline_concepts.reshape(1, -1)
+            if baseline_concepts.shape != concepts.shape:
+                raise ValueError(
+                    "baseline_concepts must match the concept matrix shape, got "
+                    f"{baseline_concepts.shape} and expected {concepts.shape}."
+                )
+
+        if intervention_mask is not None:
+            intervention_mask = np.asarray(intervention_mask, dtype=bool)
+            if intervention_mask.shape != concepts.shape:
+                raise ValueError(
+                    "intervention_mask must match the concept matrix shape, got "
+                    f"{intervention_mask.shape} and expected {concepts.shape}."
+                )
+
+        row_cache = _slice_prediction_cache(cache, row_indices)
+        return self._predict_from_cached_concepts(
+            concepts,
+            row_cache,
+            baseline_concepts=baseline_concepts,
+            intervention_mask=intervention_mask,
+        )
 
     def _predict_dataset(
         self,
@@ -585,18 +713,21 @@ class _OfficialBenchmarkModelBase(ConceptBasedModel):
         self._prediction_cache = None
         self._dependency_error_message = _format_install_message()
 
-        official_model = None
         try:
             official_model = self._rebuild_model(
                 model_init_kwargs=self.model_init_kwargs,
                 backbone_spec=self.backbone_spec,
             )
+        except Exception as exc:
+            if isinstance(exc, (ImportError, ModuleNotFoundError, CEMDependencyError)):
+                self._dependency_error_message = _format_install_message(exc)
+                official_model = None
+            else:
+                raise
+        if official_model is not None:
             official_model.load_state_dict(state["model_state_dict"])
             official_model.eval()
             official_model.cpu()
-        except Exception as exc:
-            self._dependency_error_message = _format_install_message(exc)
-            official_model = None
 
         self.official_model = official_model
         concept_detector = _OfficialConceptDetectorAdapter(self)
@@ -618,6 +749,9 @@ class _OfficialBenchmarkModelBase(ConceptBasedModel):
         self,
         concepts: np.ndarray,
         cache: _PredictionCache,
+        *,
+        baseline_concepts: np.ndarray,
+        intervention_mask: np.ndarray | None,
     ) -> np.ndarray:
         raise NotImplementedError
 
@@ -678,6 +812,9 @@ class CEMBenchmarkModel(_OfficialBenchmarkModelBase):
         self,
         concepts: np.ndarray,
         cache: _PredictionCache,
+        *,
+        baseline_concepts: np.ndarray,
+        intervention_mask: np.ndarray | None,
     ) -> np.ndarray:
         model = self._require_official_model()
         pos = cache.pos_embeddings
@@ -687,6 +824,12 @@ class CEMBenchmarkModel(_OfficialBenchmarkModelBase):
 
         device = self._inference_device()
         concept_tensor = torch.as_tensor(concepts, dtype=torch.float32, device=device)
+        baseline_tensor = torch.as_tensor(
+            baseline_concepts, dtype=torch.float32, device=device
+        )
+        if intervention_mask is not None:
+            mask_tensor = torch.as_tensor(intervention_mask, dtype=torch.bool, device=device)
+            concept_tensor = torch.where(mask_tensor, concept_tensor, baseline_tensor)
         pos = pos.to(device)
         neg = neg.to(device)
 
@@ -756,6 +899,9 @@ class ProbCBMBenchmarkModel(_OfficialBenchmarkModelBase):
         self,
         concepts: np.ndarray,
         cache: _PredictionCache,
+        *,
+        baseline_concepts: np.ndarray,
+        intervention_mask: np.ndarray | None,
     ) -> np.ndarray:
         model = self._require_official_model()
         pred_embeddings = cache.probcbm_pred_embeddings
@@ -767,7 +913,7 @@ class ProbCBMBenchmarkModel(_OfficialBenchmarkModelBase):
         device = self._inference_device()
         concept_tensor = torch.as_tensor(concepts, dtype=torch.float32, device=device)
         baseline_probs = torch.as_tensor(
-            cache.concept_probs, dtype=torch.float32, device=device
+            baseline_concepts, dtype=torch.float32, device=device
         )
         pred_embeddings = pred_embeddings.to(device)
 
@@ -783,7 +929,14 @@ class ProbCBMBenchmarkModel(_OfficialBenchmarkModelBase):
             + (1.0 - concept_tensor).unsqueeze(-1).unsqueeze(-1)
             * neg_proto.unsqueeze(0).unsqueeze(2)
         )
-        changed = (torch.abs(concept_tensor - baseline_probs) > 1e-6).unsqueeze(-1).unsqueeze(-1)
+        if intervention_mask is not None:
+            changed = torch.as_tensor(
+                intervention_mask, dtype=torch.bool, device=device
+            ).unsqueeze(-1).unsqueeze(-1)
+        else:
+            changed = (
+                ~torch.isclose(concept_tensor, baseline_probs, atol=1e-6, rtol=1e-6)
+            ).unsqueeze(-1).unsqueeze(-1)
         concept_embeddings_for_class = torch.where(changed, replacement, pred_embeddings)
 
         concept_embeddings_for_class = (
@@ -936,7 +1089,7 @@ def train_probcbm_model(
     num_workers: int | None = None,
     pin_memory: bool | None = None,
 ) -> ProbCBMBenchmarkModel:
-    """Train an official ProbCBM using the official model class and Lightning."""
+    """Train an official ProbCBM, preferring the upstream helper when available."""
 
     deps = require_cem_dependencies(include_probcbm_training_helper=True)
     device = determine_device() if device is None else torch.device(device)
@@ -976,15 +1129,45 @@ def train_probcbm_model(
         "learning_rate": _resolve_learning_rate(config),
         "optimizer": "adam",
     }
-    model = deps.ProbCBM(**model_init_kwargs)
-
-    trainer = _build_trainer(
-        pl_module=deps.pl,
-        max_epochs=_resolve_epochs(config, benchmark=benchmark, family="probcbm"),
-        patience=_resolve_patience(config, benchmark=benchmark),
-        device=device,
-    )
-    trainer.fit(model, train_loader, valid_loader)
+    used_official_helper = deps.train_prob_cbm is not None
+    if used_official_helper:
+        helper_config = copy.deepcopy(model_init_kwargs)
+        helper_config["architecture"] = "ProbCBM"
+        helper_config["max_epochs"] = _resolve_epochs(
+            config, benchmark=benchmark, family="probcbm"
+        )
+        helper_config["check_val_every_n_epoch"] = 1
+        helper_config["early_stopping_best_model"] = False
+        with tempfile.TemporaryDirectory(dir=_REPO_ROOT) as tmpdir:
+            model, helper_metrics = deps.train_prob_cbm(
+                input_shape=np.asarray(train_dataset.X[0]).shape,
+                n_concepts=train_dataset.n_concepts,
+                n_tasks=train_dataset.n_classes,
+                config=helper_config,
+                train_dl=train_loader,
+                val_dl=valid_loader,
+                run_name="ProbCBM",
+                result_dir=tmpdir,
+                split=0,
+                seed=int(getattr(config, "seed", 0)),
+                save_model=False,
+                logger=False,
+                enable_checkpointing=False,
+                **_device_to_pl_args(device),
+            )
+        trainer_epochs = int(helper_metrics.get("num_epochs", helper_config["max_epochs"]))
+    else:
+        # Fallback for environments where the upstream helper cannot be imported
+        # because optional helper-only deps (for example TensorFlow) are absent.
+        model = deps.ProbCBM(**model_init_kwargs)
+        trainer = _build_trainer(
+            pl_module=deps.pl,
+            max_epochs=_resolve_epochs(config, benchmark=benchmark, family="probcbm"),
+            patience=_resolve_patience(config, benchmark=benchmark),
+            device=device,
+        )
+        trainer.fit(model, train_loader, valid_loader)
+        trainer_epochs = trainer.current_epoch + 1
     model.eval()
     model.cpu()
 
@@ -999,7 +1182,8 @@ def train_probcbm_model(
         model_init_kwargs=wrapped_kwargs,
         eval_config=loader_cfg,
         training_summary={
-            "max_epochs": trainer.current_epoch + 1,
+            "max_epochs": trainer_epochs,
+            "used_official_train_prob_cbm": used_official_helper,
             "official_train_prob_cbm_available": deps.train_prob_cbm is not None,
         },
     )

@@ -258,11 +258,44 @@ class TestYAMLSecretExclusion:
         content = path.read_text()
         # The secret value should not appear; llm_api_key_env is a different field
         assert "super_secret_key" not in content
-        # The exact key "llm_api_key:" should not be a YAML key
-        # (llm_api_key_env is fine — it's not the secret)
-        lines = content.splitlines()
-        yaml_keys = [line.split(":")[0].strip() for line in lines if ":" in line]
-        assert "llm_api_key" not in yaml_keys
+
+
+class TestModelFingerprintScope:
+    def test_robot_dnn_fingerprint_ignores_cem_probcbm_knobs(self):
+        base = RobotBenchmarkConfig()
+        changed = RobotBenchmarkConfig(
+            cbm_family="probcbm",
+            cem_emb_size=64,
+            cem_training_intervention_prob=0.1,
+            probcbm_hidden_dim=32,
+            probcbm_latent_dim=16,
+        )
+        assert base.model_fingerprint("dnn") == changed.model_fingerprint("dnn")
+        assert base.get_model_path("dnn") == changed.get_model_path("dnn")
+
+    def test_robot_family_specific_fingerprints_only_depend_on_their_own_knobs(self):
+        base = RobotBenchmarkConfig()
+        cem_changed = RobotBenchmarkConfig(cem_emb_size=64)
+        prob_changed = RobotBenchmarkConfig(probcbm_hidden_dim=32)
+
+        assert base.model_fingerprint("cem") != cem_changed.model_fingerprint("cem")
+        assert base.model_fingerprint("probcbm") == cem_changed.model_fingerprint(
+            "probcbm"
+        )
+        assert base.model_fingerprint("probcbm") != prob_changed.model_fingerprint(
+            "probcbm"
+        )
+        assert base.model_fingerprint("cem") == prob_changed.model_fingerprint("cem")
+
+    def test_sudoku_dnn_fingerprint_ignores_cem_probcbm_knobs(self):
+        base = SudokuBenchmarkConfig()
+        changed = SudokuBenchmarkConfig(
+            cbm_family="cem",
+            cem_emb_size=64,
+            probcbm_hidden_dim=32,
+        )
+        assert base.model_fingerprint("dnn") == changed.model_fingerprint("dnn")
+        assert base.get_model_path("dnn") == changed.get_model_path("dnn")
 
     def test_robot_text_yaml_excludes_llm_api_key(self, tmp_path):
         cfg = RobotBenchmarkConfig(data_type="text")

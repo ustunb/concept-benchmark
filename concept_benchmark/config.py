@@ -120,6 +120,25 @@ MISSING_PROPORTION = 0.2
 
 VALID_STRATEGIES = frozenset({"up_to_k", "exactly_k"})
 VALID_CBM_FAMILIES = frozenset({"cbm", "cem", "probcbm"})
+_CEM_FINGERPRINT_FIELDS = frozenset(
+    {
+        "cem_emb_size",
+        "cem_training_intervention_prob",
+        "cem_concept_loss_weight",
+        "cem_task_loss_weight",
+        "cem_max_epochs",
+    }
+)
+_PROBCBM_FINGERPRINT_FIELDS = frozenset(
+    {
+        "probcbm_hidden_dim",
+        "probcbm_class_hidden_dim",
+        "probcbm_latent_dim",
+        "probcbm_n_samples_inference",
+        "probcbm_intervention_prob",
+        "probcbm_max_epochs",
+    }
+)
 ROBOT_VALID_REGIMES = frozenset(
     {"baseline", "expert", "subjective", "machine", "llm", "clip"}
 )
@@ -499,7 +518,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         d.pop("train_dnn", None)  # not a data param
         return _dict_sha256(d)
 
-    def model_fingerprint(self) -> str:
+    def model_fingerprint(self, model_class: str | None = None) -> str:
         """Hash of all parameters that affect model training."""
         d = self._prepare_asdict()
         # Remove params that don't affect training
@@ -532,6 +551,17 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         )
         for k in exclude:
             d.pop(k, None)
+        if model_class is not None:
+            d.pop("cbm_family", None)
+            if model_class in {"cbm", "cbm_subjective", "lfcbm", "dnn"}:
+                for k in _CEM_FINGERPRINT_FIELDS | _PROBCBM_FINGERPRINT_FIELDS:
+                    d.pop(k, None)
+            elif model_class == "cem":
+                for k in _PROBCBM_FINGERPRINT_FIELDS:
+                    d.pop(k, None)
+            elif model_class == "probcbm":
+                for k in _CEM_FINGERPRINT_FIELDS:
+                    d.pop(k, None)
         return _dict_sha256(d)
 
     def get_dataset_path(self) -> Path:
@@ -711,7 +741,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
         d.pop("temp_train_data_path", None)
         return _dict_sha256(d)
 
-    def model_fingerprint(self) -> str:
+    def model_fingerprint(self, model_class: str | None = None) -> str:
         """Hash of all parameters that affect model training."""
         d = self._prepare_asdict()
         # Remove params that don't affect training
@@ -723,6 +753,17 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
             "alignment_weights",
         ):
             d.pop(k, None)
+        if model_class is not None:
+            d.pop("cbm_family", None)
+            if model_class in {"cs", "dnn", "ocr"}:
+                for k in _CEM_FINGERPRINT_FIELDS | _PROBCBM_FINGERPRINT_FIELDS:
+                    d.pop(k, None)
+            elif model_class == "cem":
+                for k in _PROBCBM_FINGERPRINT_FIELDS:
+                    d.pop(k, None)
+            elif model_class == "probcbm":
+                for k in _CEM_FINGERPRINT_FIELDS:
+                    d.pop(k, None)
         return _dict_sha256(d)
 
     def get_dataset_path(self, data_type: str | None = None) -> Path:
