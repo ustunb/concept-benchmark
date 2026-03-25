@@ -13,6 +13,7 @@ from experiments.intervention import (
     InterventionError,
     InterventionStrategy,
     OrderedCBMStrategy,
+    predict_label_proba_from_concepts,
     RandomInterventionStrategy,
     ScoreIntervention,
     StrategyProposal,
@@ -107,6 +108,95 @@ class _FixedMaskStrategy(InterventionStrategy):
 
     def propose(self, model, batch, config) -> StrategyProposal:
         return StrategyProposal(mask=self._mask.copy())
+
+
+class _PrimingSensitiveAlignedFrontEnd(FrontEndModel):
+    supports_aligned_concept_replay = True
+    _kflip_fast_path = False
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.primed_dataset_id: int | None = None
+        self.calls: list[dict[str, np.ndarray | int | None]] = []
+
+    @staticmethod
+    def _label_probs(concepts: np.ndarray) -> np.ndarray:
+        score = 0.6 * concepts[:, 0] - 0.3 * concepts[:, 1]
+        if concepts.shape[1] > 2:
+            score = score + 0.2 * concepts[:, 2]
+        prob1 = 1.0 / (1.0 + np.exp(-score))
+        return np.column_stack([1.0 - prob1, prob1]).astype(np.float32)
+
+    def predict_proba(self, C: np.ndarray) -> np.ndarray:
+        raise AssertionError("Aligned replay test should not use predict_proba.")
+
+    def predict_proba_from_concepts(
+        self,
+        concepts: np.ndarray,
+        *,
+        dataset=None,
+        row_indices: np.ndarray | None = None,
+        baseline_concepts: np.ndarray | None = None,
+        intervention_mask: np.ndarray | None = None,
+        **_: dict,
+    ) -> np.ndarray:
+        concepts = np.asarray(concepts, dtype=np.float32)
+        if dataset is not None:
+            self.primed_dataset_id = id(dataset)
+        elif self.primed_dataset_id is None:
+            raise RuntimeError("cache not primed")
+
+        if baseline_concepts is None:
+            baseline_concepts = concepts
+        else:
+            baseline_concepts = np.asarray(baseline_concepts, dtype=np.float32)
+        if intervention_mask is None:
+            effective = concepts
+        else:
+            effective = np.where(
+                np.asarray(intervention_mask, dtype=bool), concepts, baseline_concepts
+            )
+        self.calls.append(
+            {
+                "dataset_id": None if dataset is None else id(dataset),
+                "row_indices": None
+                if row_indices is None
+                else np.asarray(row_indices, dtype=int).copy(),
+                "effective": effective.copy(),
+            }
+        )
+        return self._label_probs(effective)
+
+
+class _ReplayDuringPrepareStrategy(InterventionStrategy):
+    def __init__(self) -> None:
+        super().__init__(name="replay_prepare")
+
+    def prepare(self, model, batch, config) -> None:
+        super().prepare(model, batch, config)
+        predict_label_proba_from_concepts(
+            model,
+            batch.C_pred,
+            row_indices=np.arange(batch.n_samples, dtype=int),
+            baseline_concepts=batch.C_pred,
+        )
+
+    def propose(self, model, batch, config) -> StrategyProposal:
+        return StrategyProposal(mask=np.zeros_like(batch.C_pred, dtype=bool))
+
+
+class _ReplayDuringProposeStrategy(InterventionStrategy):
+    def __init__(self) -> None:
+        super().__init__(name="replay_propose")
+
+    def propose(self, model, batch, config) -> StrategyProposal:
+        predict_label_proba_from_concepts(
+            model,
+            batch.C_pred,
+            row_indices=np.arange(batch.n_samples, dtype=int),
+            baseline_concepts=batch.C_pred,
+        )
+        return StrategyProposal(mask=np.zeros_like(batch.C_pred, dtype=bool))
 
 
 # ── InterventionConfig ───────────────────────────────────────────────
@@ -372,14 +462,16 @@ class TestRunner:
             concept_proba=C_pred,
         )
 
-        assert len(fe.calls) == 2
+        assert len(fe.calls) == 3
         np.testing.assert_array_equal(fe.calls[0]["row_indices"], np.array([0, 1]))
         np.testing.assert_allclose(fe.calls[0]["effective"], C_pred)
+        np.testing.assert_array_equal(fe.calls[1]["row_indices"], np.array([0, 1]))
+        np.testing.assert_allclose(fe.calls[1]["effective"], C_pred)
 
         expected_after = np.where(mask, C_true, C_pred)
-        np.testing.assert_array_equal(fe.calls[1]["row_indices"], np.array([0, 1]))
-        np.testing.assert_allclose(fe.calls[1]["baseline_concepts"], C_pred)
-        np.testing.assert_allclose(fe.calls[1]["effective"], expected_after)
+        np.testing.assert_array_equal(fe.calls[2]["row_indices"], np.array([0, 1]))
+        np.testing.assert_allclose(fe.calls[2]["baseline_concepts"], C_pred)
+        np.testing.assert_allclose(fe.calls[2]["effective"], expected_after)
         np.testing.assert_allclose(result.C_intervened, expected_after)
         np.testing.assert_allclose(
             result.y_prob_after,
@@ -404,3 +496,84 @@ class TestRunner:
                 result.C_intervened[where_mask],
                 sample.base_concepts[where_mask],
             )
+
+    def test_prepare_primes_aligned_replay_context_before_strategy_prepare(self):
+        from concept_benchmark.data import ConceptDatasetSample
+        from experiments.models import ConceptBasedModel
+
+        sample = ConceptDatasetSample(
+            X=np.zeros((3, 2), dtype=np.float32),
+            C=np.array(
+                [[1, 0, 0], [0, 1, 1], [1, 1, 0]],
+                dtype=np.int8,
+            ),
+            y=np.array([0, 1, 0], dtype=np.int32),
+            meta={
+                "classes": ["c0", "c1"],
+                "concepts": ["z0", "z1", "z2"],
+                "data_type": "tabular",
+            },
+        )
+        concept_proba = np.array(
+            [
+                [0.2, 0.8, 0.4],
+                [0.7, 0.3, 0.6],
+                [0.6, 0.5, 0.1],
+            ],
+            dtype=np.float32,
+        )
+
+        fe = _PrimingSensitiveAlignedFrontEnd()
+        model = ConceptBasedModel(concept_detector=None, label_predictor=fe)
+        ConceptInterventionRunner(model).prepare(
+            _ReplayDuringPrepareStrategy(),
+            InterventionConfig(max_concepts_per_instance=1, random_state=0),
+            sample,
+            concept_proba=concept_proba,
+        )
+
+        assert fe.primed_dataset_id == id(sample)
+        assert len(fe.calls) >= 2
+        assert fe.calls[0]["dataset_id"] == id(sample)
+        assert fe.calls[1]["dataset_id"] is None
+
+    def test_run_primes_aligned_replay_context_before_strategy_propose(self):
+        from concept_benchmark.data import ConceptDatasetSample
+        from experiments.models import ConceptBasedModel
+
+        sample = ConceptDatasetSample(
+            X=np.zeros((3, 2), dtype=np.float32),
+            C=np.array(
+                [[1, 0, 0], [0, 1, 1], [1, 1, 0]],
+                dtype=np.int8,
+            ),
+            y=np.array([0, 1, 0], dtype=np.int32),
+            meta={
+                "classes": ["c0", "c1"],
+                "concepts": ["z0", "z1", "z2"],
+                "data_type": "tabular",
+            },
+        )
+        concept_proba = np.array(
+            [
+                [0.2, 0.8, 0.4],
+                [0.7, 0.3, 0.6],
+                [0.6, 0.5, 0.1],
+            ],
+            dtype=np.float32,
+        )
+
+        fe = _PrimingSensitiveAlignedFrontEnd()
+        model = ConceptBasedModel(concept_detector=None, label_predictor=fe)
+        result = ConceptInterventionRunner(model).run(
+            _ReplayDuringProposeStrategy(),
+            InterventionConfig(max_concepts_per_instance=1, random_state=0),
+            sample,
+            concept_proba=concept_proba,
+        )
+
+        assert fe.primed_dataset_id == id(sample)
+        assert len(fe.calls) >= 4
+        assert fe.calls[0]["dataset_id"] == id(sample)
+        assert fe.calls[1]["dataset_id"] is None
+        assert result.mask.shape == concept_proba.shape

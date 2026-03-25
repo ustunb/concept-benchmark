@@ -92,6 +92,23 @@ def _supports_aligned_concept_replay(model: ConceptBasedModel) -> bool:
     )
 
 
+def _prime_aligned_replay_context(
+    model: ConceptBasedModel,
+    dataset: ConceptDatasetSample,
+    batch: "InterventionBatch",
+) -> None:
+    if not _supports_aligned_concept_replay(model):
+        return
+    row_indices = np.arange(batch.n_samples, dtype=int)
+    predict_label_proba_from_concepts(
+        model,
+        batch.C_pred,
+        dataset=dataset,
+        row_indices=row_indices,
+        baseline_concepts=batch.C_pred,
+    )
+
+
 @dataclass
 class InterventionBatch:
     """Container for a batch of concept predictions and associated metadata."""
@@ -854,6 +871,7 @@ class ConceptInterventionRunner:
             labels=labels,
             instance_ids=instance_ids,
         )
+        _prime_aligned_replay_context(self.model, validation_dataset, batch)
         strategy.prepare(self.model, batch, config)
 
     def run(
@@ -881,6 +899,7 @@ class ConceptInterventionRunner:
             labels=labels,
             instance_ids=instance_ids,
         )
+        _prime_aligned_replay_context(self.model, dataset, batch)
 
         # Propose interventions based on the strategy.
         proposal = strategy.propose(self.model, batch, config)
