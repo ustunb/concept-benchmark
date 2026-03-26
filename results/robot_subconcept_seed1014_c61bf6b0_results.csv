@@ -1,0 +1,5 @@
+dataset,model,budget,threshold,accuracy,gain,predictions_intervened_on,avg_concepts_per_sample,predictions_changed
+subconcept,dnn,,,0.8746,0.0,,,
+subconcept,cem,0,,0.8691,-0.0055,,,
+subconcept,cem,1,0.2,0.9371,0.0625,2509,1.0,1358
+subconcept,cem,3,0.2,0.9206,0.046,2933,1.95,1543
