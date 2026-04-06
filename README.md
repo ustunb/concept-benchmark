@@ -143,6 +143,50 @@ dataset.train.explore()  # opens in the browser
   <img src="docs/assets/robot_samples.png" width="600" alt="Sample Glorps and Drents with concept annotations">
 </p>
 
+#### Controlled Semantic Space, Continuous Render Space
+
+The robot benchmark now has two levels of variation:
+
+- `semantic_id`: the finite, interpretable concept combination that determines the concept vector and label.
+- `render_id`: nuisance-only variation such as translation, scale, mild rotation, arm angle, stance, head tilt, foot orientation, stroke jitter, and small palette perturbations.
+
+Legacy behavior is still the default:
+
+```python
+legacy = DatasetGenerator("robot", seed=1014).generate()
+```
+
+Opt into broader image variety without changing the semantics:
+
+```python
+continuous = DatasetGenerator(
+    "robot",
+    seed=1014,
+    render_space_mode="continuous_light",   # or "continuous_heavy"
+    renders_per_robot=6,
+    validate_renders=True,
+    validation_checks={
+        "hands_body_clearance": "off",      # disable one collision rule only
+    },
+    group_split_by_semantic_id=True,        # prevent same semantic robot across splits
+).generate()
+```
+
+Notes:
+
+- `render_space_mode="legacy"` preserves the existing paper-style behavior.
+- `continuous_light` is conservative enough for the default 32x32 images.
+- `continuous_heavy` is a stronger stress test and is better suited to larger renders.
+- `validation_checks` lets you disable individual rules without disabling the whole validator.
+- `group_split_by_semantic_id=True` is opt-in, so paper-default splits stay unchanged.
+- For text data, `include_pose_text=True` adds only minimal neutral descriptors such as `arms angled slightly upward` or `standing with a wider stance`. It is off by default.
+
+Preview the render space without training:
+
+```bash
+python scripts/preview_robot_render_space.py --mode continuous_light --output-dir results/robot_preview
+```
+
 Train CBMs on both concept sets and compare (requires cloning the repo):
 
 ```python

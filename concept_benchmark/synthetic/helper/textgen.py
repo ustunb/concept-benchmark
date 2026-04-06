@@ -257,6 +257,71 @@ DEFAULT_TEMPLATES = [
 ]
 
 
+def pose_metadata_from_row(
+    row: dict | pd.Series,
+    *,
+    mode: str = "neutral",
+) -> dict[str, str]:
+    """Return coarse pose buckets and a minimal optional descriptor."""
+
+    if mode != "neutral":
+        raise ValueError(f"Unsupported pose_text_mode {mode!r}")
+
+    data = row.to_dict() if isinstance(row, pd.Series) else dict(row)
+    arm = float(data.get("arm_angle_offset_deg", 0.0) or 0.0)
+    stance = float(data.get("leg_spread_deg", 0.0) or 0.0)
+    lean_signal = (
+        float(data.get("global_rotation_deg", 0.0) or 0.0)
+        + 0.5 * float(data.get("head_tilt_deg", 0.0) or 0.0)
+        + 120.0 * float(data.get("head_offset_x_frac", 0.0) or 0.0)
+    )
+
+    arm_bucket = "neutral"
+    if arm >= 12.0:
+        arm_bucket = "up"
+    elif arm <= -12.0:
+        arm_bucket = "down"
+
+    stance_bucket = "neutral"
+    if stance >= 8.0:
+        stance_bucket = "wide"
+    elif stance <= -8.0:
+        stance_bucket = "narrow"
+
+    lean_bucket = "neutral"
+    if lean_signal >= 6.0:
+        lean_bucket = "left"
+    elif lean_signal <= -6.0:
+        lean_bucket = "right"
+
+    phrases = []
+    if lean_bucket == "left":
+        phrases.append("leaning a bit to the left")
+    elif lean_bucket == "right":
+        phrases.append("leaning a bit to the right")
+
+    if arm_bucket == "up":
+        phrases.append("arms angled slightly upward")
+    elif arm_bucket == "down":
+        phrases.append("arms angled slightly downward")
+
+    if stance_bucket == "wide":
+        phrases.append("standing with a wider stance")
+    elif stance_bucket == "narrow":
+        phrases.append("standing with a narrower stance")
+
+    descriptor = ""
+    if phrases:
+        descriptor = " and ".join(phrases[:2])
+
+    return {
+        "arm_pose_bucket": arm_bucket,
+        "stance_bucket": stance_bucket,
+        "lean_bucket": lean_bucket,
+        "pose_descriptor": descriptor,
+    }
+
+
 def create_synthetic_dataset(
     source,
     templates: Sequence[str] | None = None,

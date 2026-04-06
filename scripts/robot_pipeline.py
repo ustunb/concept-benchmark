@@ -135,10 +135,14 @@ def setup_dataset(config: RobotBenchmarkConfig):
     train_size = 3800
     remaining = data.n - test_size
     n_val = int((remaining - train_size) * 0.2)
+    groups = None
+    if config.group_split_by_semantic_id:
+        groups = data.meta.get("split_groups")
     data.sample(
         test_size=test_size,
         val_size=n_val,
         train_size=train_size,
+        groups=groups,
         sampling_constraints=ROBOT_SAMPLING_CONSTRAINTS,
         seed=config.seed,
     )

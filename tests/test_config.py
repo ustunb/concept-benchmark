@@ -7,6 +7,7 @@ from dataclasses import fields
 import pytest
 from concept_benchmark.config import (
     RobotBenchmarkConfig,
+    RobotValidationChecksConfig,
     SudokuBenchmarkConfig,
 )
 
@@ -89,6 +90,53 @@ class TestRobotConfigValidation:
     def test_rejects_bad_image_size(self):
         with pytest.raises(ValueError, match="image_size must be"):
             RobotBenchmarkConfig(image_size="huge")
+
+    def test_continuous_render_preset_is_loaded(self):
+        cfg = RobotBenchmarkConfig(render_space_mode="continuous_light")
+        assert cfg.render_space_mode == "continuous_light"
+        assert cfg.render_nuisance.translate_x_frac != [0.0, 0.0]
+        assert cfg.render_nuisance.left_arm_angle_delta_deg == [0.0, 0.0]
+        assert cfg.render_nuisance.right_arm_angle_delta_deg == [0.0, 0.0]
+
+    def test_rejects_bad_render_space_mode(self):
+        with pytest.raises(ValueError, match="render_space_mode must be one of"):
+            RobotBenchmarkConfig(render_space_mode="sideways")
+
+    def test_validation_checks_auto_resolve_by_mode(self):
+        checks = RobotValidationChecksConfig()
+        assert checks.resolved_checks("legacy")["hands_head_clearance"] is False
+        assert checks.resolved_checks("continuous_light")["hands_head_clearance"] is True
+
+    def test_validation_thresholds_do_not_affect_fingerprint_when_check_disabled(self):
+        base = RobotBenchmarkConfig(
+            render_space_mode="continuous_light",
+            validation_checks={
+                "hands_head_clearance": "off",
+                "hands_head_clearance_frac": 0.015,
+            },
+        )
+        changed = RobotBenchmarkConfig(
+            render_space_mode="continuous_light",
+            validation_checks={
+                "hands_head_clearance": "off",
+                "hands_head_clearance_frac": 0.25,
+            },
+        )
+        assert base.setup_fingerprint() == changed.setup_fingerprint()
+
+    def test_validation_thresholds_affect_fingerprint_when_check_enabled(self):
+        base = RobotBenchmarkConfig(
+            render_space_mode="continuous_light",
+            validation_checks={"hands_head_clearance": "on"},
+        )
+        changed = RobotBenchmarkConfig(
+            render_space_mode="continuous_light",
+            validation_checks={
+                "hands_head_clearance": "on",
+                "hands_head_clearance_frac": 0.25,
+            },
+        )
+        assert base.setup_fingerprint() != changed.setup_fingerprint()
 
     def test_label_formula_nested_format(self):
         cfg = RobotBenchmarkConfig(
@@ -226,6 +274,13 @@ class TestYAMLRoundTrip:
             seed=42,
             concept_preset="foot_subtypes",
             intervention_regimes=["baseline", "expert"],
+            render_space_mode="continuous_light",
+            group_split_by_semantic_id=True,
+            validation_checks={
+                "hands_head_clearance": "off",
+                "feet_body_clearance": "on",
+                "feet_body_clearance_frac": 0.02,
+            },
         )
         self._assert_roundtrip(cfg, RobotBenchmarkConfig, tmp_path)
 
@@ -244,6 +299,8 @@ class TestYAMLRoundTrip:
             template_complexity="medium",
             concept_preset="foot_subtypes",
             intervention_regimes=["baseline", "subjective"],
+            include_pose_text=True,
+            render_space_mode="continuous_light",
         )
         self._assert_roundtrip(cfg, RobotBenchmarkConfig, tmp_path)
 

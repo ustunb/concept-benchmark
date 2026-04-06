@@ -101,13 +101,13 @@ def _group_split(
 
     if stratify is not None:
         # Majority label per group
-        group_labels: dict[int, list] = {}
+        group_labels: dict[object, list] = {}
         for i in range(n):
-            group_labels.setdefault(int(groups[i]), []).append(int(stratify[i]))
+            group_labels.setdefault(groups[i], []).append(int(stratify[i]))
         group_majority = {g: int(round(np.mean(ls))) for g, ls in group_labels.items()}
         by_class: dict[int, list] = {}
         for g in unique_groups:
-            by_class.setdefault(group_majority[int(g)], []).append(g)
+            by_class.setdefault(group_majority[g], []).append(g)
         test_g, val_g = [], []
         for cls in sorted(by_class):
             arr = np.array(by_class[cls])

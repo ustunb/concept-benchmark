@@ -48,6 +48,8 @@ def create_robot_text_dataset(
     templates: Sequence[str] | None = None,
     variants_per_row: int = 3,
     include_color: bool = True,
+    include_pose_text: bool = False,
+    pose_text_mode: str = "neutral",
     rng_seed: int = 0,
     head_col: str = "head_shape",
     body_col: str = "body_shape",
@@ -236,6 +238,12 @@ def create_robot_text_dataset(
             for tpl in rng.choice(base_tpls, size=variants_per_row, replace=True):
                 s = text_helper._rewrite_modifiers(tpl)
                 out = s.format_map(sfill)
+                if include_pose_text:
+                    pose = text_helper.pose_metadata_from_row(row, mode=pose_text_mode)[
+                        "pose_descriptor"
+                    ]
+                    if pose:
+                        out = f"{out.rstrip()} {pose[0].upper() + pose[1:]}."
                 if drop_unknown:
                     out = text_helper._clean_unknown(out)
                 out = text_helper._polish_text(out)
@@ -245,6 +253,12 @@ def create_robot_text_dataset(
             for tpl in rng.choice(templates, size=variants_per_row, replace=True):
                 s = text_helper._rewrite_modifiers(tpl)
                 out = s.format_map(sfill)
+                if include_pose_text:
+                    pose = text_helper.pose_metadata_from_row(row, mode=pose_text_mode)[
+                        "pose_descriptor"
+                    ]
+                    if pose:
+                        out = f"{out.rstrip()} {pose[0].upper() + pose[1:]}."
                 if drop_unknown:
                     out = text_helper._clean_unknown(out)
                 out = text_helper._polish_text(out)
@@ -339,7 +353,11 @@ def create_robot_image_dataset(
     else:
         glorp_model_true = formula.label
 
-    catalog_df[OUTCOME_NAME] = catalog_df.apply(glorp_model_true, axis=1)
+    label_df = catalog_df.copy()
+    for name, values in concepts.items():
+        if name not in label_df.columns and len(values) == 1:
+            label_df[name] = values[0]
+    catalog_df[OUTCOME_NAME] = label_df.apply(glorp_model_true, axis=1)
 
     if not is_stochastic:
         # change "glorp" to 1 and "drent" to 0
@@ -363,6 +381,10 @@ def create_robot_image_dataset(
 
     copy_features = copy.deepcopy(ALL_ROBOT_FEATURES)
     copy_features.update(new_concepts)
+    binary_source_df = catalog_df.copy()
+    for feat in concepts:
+        if feat not in binary_source_df.columns and len(concepts[feat]) == 1:
+            binary_source_df[feat] = concepts[feat][0]
 
     # Compute positive value and binarized column for every feature once
     pos_map = {}
@@ -373,7 +395,10 @@ def create_robot_image_dataset(
         )[1]
         pos_map[feat] = pos_val
         _binary_cache[feat] = (
-            (catalog_df[feat].astype(str).str.split("_").str[0] == str(pos_val))
+            (
+                binary_source_df[feat].astype(str).str.split("_").str[0]
+                == str(pos_val)
+            )
             .astype(np.int32)
             .to_numpy()
         )
@@ -438,6 +463,14 @@ def create_robot_image_dataset(
         "labeling_function": formula,
         "num_robots": total_robots,
         "robot_ids": catalog_df["id"].values,
+        "semantic_ids": catalog_df.get("semantic_id", pd.Series(dtype=object)).to_numpy(),
+        "render_ids": catalog_df.get("render_id", pd.Series(dtype=object)).to_numpy(),
+        "instance_ids": catalog_df.get("instance_id", pd.Series(dtype=object)).to_numpy(),
+        "split_groups": (
+            catalog_df["semantic_id"].to_numpy()
+            if "semantic_id" in catalog_df.columns
+            else catalog_df["id"].to_numpy()
+        ),
         "catalog_df": catalog_df,
     }
 
