@@ -103,10 +103,6 @@ def train_cs(
 
     model_key = _selected_cs_key(config)
     if model_key != "cs":
-        if config.data_type != "tabular":
-            raise NotImplementedError(
-                "Sudoku CEM/ProbCBM support is implemented only for the tabular variant."
-            )
         loader_config = get_loader_config()
         trainer_fn = train_cem_model if model_key == "cem" else train_probcbm_model
         model = trainer_fn(
@@ -284,61 +280,92 @@ def run_interventions(
         cs_y, cs_probs, config.target_accuracy, decision_threshold
     )
 
-    if cs_t is None:
-        raise ValueError(
-            "Could not find a tau for conceptual safeguards at the target accuracy."
-        )
-
-    # Test set selective metrics
     cs_test_probs, cs_test_y = _cs_val_probs(cs_model, data.test)
-    cs_sel_acc, cs_sel_cov = _selective_metrics(
-        cs_test_y, cs_test_probs, cs_t, decision_threshold
-    )
-
-    # Run interventions at different budgets
-    cs_runner = ConceptInterventionRunner(cs_model)
-    cs_strategy = ConceptualSafeguardsStrategy()
-
-    no_interv = {
-        "budget": 0,
-        "accuracy": cs_sel_acc,
-        "predictions_intervened_on": 0,
-        "total_concept_checks": 0,
-        "total_concept_edits_made": 0,
-        "selective_accuracy_after": cs_sel_acc,
-        "coverage_after": cs_sel_cov,
-    }
-
-    rows = [no_interv]
     budgets = [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
-    for budget in budgets:
-        interv_cfg = InterventionConfig(
-            abstention_threshold=cs_t,
-            max_concepts_per_instance=budget,
-            random_state=config.seed,
+
+    if cs_t is None:
+        logger.warning(
+            "Model %s cannot reach target selective accuracy %.2f on validation; "
+            "skipping interventions and reporting raw accuracy with no improvement.",
+            _selected_cs_key(config),
+            config.target_accuracy,
         )
-        result = cs_runner.run(cs_strategy, interv_cfg, data.test)
-        acc_intervened = float((result.y_pred_after == data.test.y).mean())
-        predictions_intervened_on = int(np.sum(np.any(result.mask, axis=1)))
-        total_concept_checks = int(np.sum(result.mask))
-        pred_binary = (result.C_pred >= 0.5).astype(int)
-        final_binary = (result.C_intervened >= 0.5).astype(int)
-        total_concept_edits_made = int(np.sum(pred_binary != final_binary))
-        selective_acc_after = result.strategy_metrics.get("selective_acc_after", None)
-        coverage_after = result.strategy_metrics.get("coverage_after", None)
-        rows.append(
+        raw_acc = float(
+            ((cs_test_probs >= decision_threshold).astype(int) == cs_test_y.astype(int)).mean()
+        )
+        rows: list[dict] = [
             {
-                "budget": budget,
-                "accuracy": acc_intervened,
-                "predictions_intervened_on": predictions_intervened_on,
-                "total_concept_checks": total_concept_checks,
-                "total_concept_edits_made": total_concept_edits_made,
-                "selective_accuracy_after": selective_acc_after,
-                "coverage_after": coverage_after,
+                "budget": 0,
+                "accuracy": raw_acc,
+                "predictions_intervened_on": 0,
+                "total_concept_checks": 0,
+                "total_concept_edits_made": 0,
+                "selective_accuracy_after": float("nan"),
+                "coverage_after": 0.0,
             }
+        ]
+        for budget in budgets:
+            rows.append(
+                {
+                    "budget": budget,
+                    "accuracy": raw_acc,
+                    "predictions_intervened_on": 0,
+                    "total_concept_checks": 0,
+                    "total_concept_edits_made": 0,
+                    "selective_accuracy_after": float("nan"),
+                    "coverage_after": 0.0,
+                }
+            )
+        cs_intervention_df = pd.DataFrame(rows)
+    else:
+        # Test set selective metrics
+        cs_sel_acc, cs_sel_cov = _selective_metrics(
+            cs_test_y, cs_test_probs, cs_t, decision_threshold
         )
 
-    cs_intervention_df = pd.DataFrame(rows)
+        # Run interventions at different budgets
+        cs_runner = ConceptInterventionRunner(cs_model)
+        cs_strategy = ConceptualSafeguardsStrategy()
+
+        rows = [
+            {
+                "budget": 0,
+                "accuracy": cs_sel_acc,
+                "predictions_intervened_on": 0,
+                "total_concept_checks": 0,
+                "total_concept_edits_made": 0,
+                "selective_accuracy_after": cs_sel_acc,
+                "coverage_after": cs_sel_cov,
+            }
+        ]
+        for budget in budgets:
+            interv_cfg = InterventionConfig(
+                abstention_threshold=cs_t,
+                max_concepts_per_instance=budget,
+                random_state=config.seed,
+            )
+            result = cs_runner.run(cs_strategy, interv_cfg, data.test)
+            acc_intervened = float((result.y_pred_after == data.test.y).mean())
+            predictions_intervened_on = int(np.sum(np.any(result.mask, axis=1)))
+            total_concept_checks = int(np.sum(result.mask))
+            pred_binary = (result.C_pred >= 0.5).astype(int)
+            final_binary = (result.C_intervened >= 0.5).astype(int)
+            total_concept_edits_made = int(np.sum(pred_binary != final_binary))
+            selective_acc_after = result.strategy_metrics.get("selective_acc_after", None)
+            coverage_after = result.strategy_metrics.get("coverage_after", None)
+            rows.append(
+                {
+                    "budget": budget,
+                    "accuracy": acc_intervened,
+                    "predictions_intervened_on": predictions_intervened_on,
+                    "total_concept_checks": total_concept_checks,
+                    "total_concept_edits_made": total_concept_edits_made,
+                    "selective_accuracy_after": selective_acc_after,
+                    "coverage_after": coverage_after,
+                }
+            )
+
+        cs_intervention_df = pd.DataFrame(rows)
 
     results_key = (
         f"{_selected_cs_key(config)}_interventions"
@@ -437,9 +464,11 @@ def collect_results(
     for cfg in configs:
         label = _dataset_label(cfg)
         target = cfg.target_accuracy
+        cs_key = _selected_cs_key(cfg)
+        selective_key = "selective" if cs_key == "cs" else f"{cs_key}_selective"
 
-        # ── Selective CSV: DNN + CS at the default target_accuracy ────
-        sel_csv = cfg.get_results_path("selective", data_type="tabular").with_suffix(
+        # ── Selective CSV: DNN + CS/CEM/ProbCBM at the default target_accuracy ────
+        sel_csv = cfg.get_results_path(selective_key, data_type="tabular").with_suffix(
             ".csv"
         )
         if sel_csv.exists():
@@ -448,7 +477,7 @@ def collect_results(
             if "tau" in sel_df.columns:
                 sel_df = sel_df.rename(columns={"tau": "target_accuracy"})
 
-            for model in ["dnn", "cs"]:
+            for model in ["dnn", cs_key]:
                 model_df = sel_df[
                     (sel_df["model"] == model) & (sel_df["target_accuracy"] == target)
                 ]
@@ -460,7 +489,7 @@ def collect_results(
                     {
                         "dataset": label,
                         "model": model,
-                        "budget": 0 if model == "cs" else "",
+                        "budget": 0 if model == cs_key else "",
                         "target_accuracy": target,
                         "raw_test_acc": round(float(r["raw_test_acc"]), 4),
                         "selective_acc": round(float(sel_acc), 4)
@@ -473,9 +502,12 @@ def collect_results(
                     }
                 )
 
-        # ── Intervention CSV: CS at k > 0 ────────────────────────────
+        # ── Intervention CSV: CS / CEM / ProbCBM at k > 0 ────────────
+        interv_key = (
+            "interventions" if cs_key == "cs" else f"{cs_key}_interventions"
+        )
         interv_csv = cfg.get_results_path(
-            "interventions", data_type="tabular"
+            interv_key, data_type="tabular"
         ).with_suffix(".csv")
         if interv_csv.exists():
             interv_df = pd.read_csv(interv_csv)
@@ -491,7 +523,7 @@ def collect_results(
                 rows.append(
                     {
                         "dataset": label,
-                        "model": "cs",
+                        "model": cs_key,
                         "budget": budget,
                         "target_accuracy": target,
                         "raw_test_acc": "",
@@ -568,10 +600,13 @@ def run(
             "collect",
         ]
 
-    if _selected_cs_key(config) != "cs" and config.data_type != "tabular":
-        raise ValueError(
-            "Sudoku CEM/ProbCBM support currently requires --data-type tabular."
+    if _selected_cs_key(config) != "cs" and "align" in stages:
+        logger.info(
+            "Alignment does not apply to cbm_family=%s (no per-concept frontend weights); "
+            "dropping 'align' from the stage list.",
+            _selected_cs_key(config),
         )
+        stages = [s for s in stages if s != "align"]
 
     # Early validation: check that dataset directory exists if we need it
     _needs_data = {"cs", "dnn", "intervene", "selective", "align", "collect"}
@@ -711,16 +746,10 @@ def run(
 
     if "selective" in stages:
         logger.info("=== [%d/%d] Selective ===", _si["selective"], n_stages)
-        if _selected_cs_key(config) != "cs":
-            logger.info(
-                "Selective evaluation is only implemented for cbm_family='cbm'; skipping %s.",
-                _selected_cs_key(config),
-            )
-        else:
-            sel_df = compute_selective_results(
-                config, cs_model=_shared_cs, dnn_weights=_shared_dnn, data=_shared_data
-            )
-            logger.info("=== Selective Metrics ===\n%s", sel_df.to_string(index=False))
+        sel_df = compute_selective_results(
+            config, cs_model=_shared_cs, dnn_weights=_shared_dnn, data=_shared_data
+        )
+        logger.info("=== Selective Metrics ===\n%s", sel_df.to_string(index=False))
 
     if "align" in stages:
         logger.info("=== [%d/%d] Align ===", _si["align"], n_stages)
@@ -734,13 +763,7 @@ def run(
 
     if "collect" in stages:
         logger.info("=== [%d/%d] Collect ===", _si["collect"], n_stages)
-        if _selected_cs_key(config) != "cs":
-            logger.info(
-                "Collect is only implemented for cbm_family='cbm'; skipping %s.",
-                _selected_cs_key(config),
-            )
-        else:
-            collect_results([config])
+        collect_results([config])
 
     if "plot" in stages:
         logger.info("=== [%d/%d] Plot ===", _si.get("plot", n_stages), n_stages)
@@ -937,9 +960,10 @@ def compute_selective_results(
             }
         )
 
-    # ---- CS selective metrics ----
+    # ---- CS / CEM / ProbCBM selective metrics ----
+    model_key = _selected_cs_key(config)
     if cs_model is None:
-        cs_model = load(config.get_model_path("cs", data_type="tabular"))
+        cs_model = load(config.get_model_path(model_key, data_type="tabular"))
         cs_model._random_state = config.seed
 
     cs_val_probs, cs_val_y = _cs_val_probs(cs_model, data.validation)
@@ -958,7 +982,7 @@ def compute_selective_results(
         )
         rows.append(
             {
-                "model": "cs",
+                "model": model_key,
                 "target_accuracy": tau,
                 "raw_test_acc": cs_raw_acc,
                 "selective_acc": sel_acc,
@@ -968,8 +992,9 @@ def compute_selective_results(
 
     df = pd.DataFrame(rows)
 
-    # Save CSV
-    csv_path = config.get_results_path("selective", data_type="tabular").with_suffix(
+    # Save CSV with a family-aware key so CBM / CEM / ProbCBM do not collide.
+    selective_key = "selective" if model_key == "cs" else f"{model_key}_selective"
+    csv_path = config.get_results_path(selective_key, data_type="tabular").with_suffix(
         ".csv"
     )
     csv_path.parent.mkdir(parents=True, exist_ok=True)

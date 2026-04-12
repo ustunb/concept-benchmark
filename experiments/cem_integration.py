@@ -263,22 +263,56 @@ class TabularBackbone(nn.Module):
 
 
 class SudokuTabularBackbone(nn.Module):
-    """Structured MLP for sudoku tabular boards."""
+    """Group-pooling backbone for sudoku tabular boards.
+
+    Mirrors the structure of ``GroupPoolingConceptSudokuCNN`` so that
+    CEM/ProbCBM operate on the same per-row / per-column / per-block
+    features the regular CBM consumes. The backbone produces a single
+    global feature vector of size ``output_dim`` for CEM's per-concept
+    embedding layer.
+    """
 
     _NUM_DIGITS = 10
+    _N_GROUPS = 27  # 9 rows + 9 cols + 9 blocks
 
-    def __init__(self, *, output_dim: int, hidden_dim: int = 256) -> None:
+    def __init__(
+        self,
+        *,
+        output_dim: int,
+        embedding_dim: int = 16,
+        hidden_dim: int = 64,
+    ) -> None:
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(81 * self._NUM_DIGITS, hidden_dim),
+        self.embedding = nn.Linear(self._NUM_DIGITS, embedding_dim, bias=False)
+        self.group_head = nn.Sequential(
+            nn.Linear(2 * embedding_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, output_dim),
         )
+        self.project = nn.Linear(self._N_GROUPS * hidden_dim, output_dim)
+
+    @staticmethod
+    def _pool_groups(x: torch.Tensor, dim: int) -> torch.Tensor:
+        mean = x.mean(dim=dim)
+        maxv = x.amax(dim=dim)
+        return torch.cat([mean, maxv], dim=-1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = F.one_hot(x.long(), self._NUM_DIGITS).float()
-        x = x.view(x.size(0), -1)
-        return self.net(x)
+        x = self.embedding(x)  # (N, 81, D)
+        x = x.view(x.size(0), 9, 9, -1)  # (N, 9, 9, D)
+
+        row_feats = self._pool_groups(x, dim=2)  # (N, 9, 2D)
+        col_feats = self._pool_groups(x, dim=1)  # (N, 9, 2D)
+
+        blocks = x.view(x.size(0), 3, 3, 3, 3, x.size(-1))
+        blocks = blocks.permute(0, 1, 3, 2, 4, 5).contiguous()
+        block_cells = blocks.view(x.size(0), 9, 9, x.size(-1))
+        block_feats = self._pool_groups(block_cells, dim=2)  # (N, 9, 2D)
+
+        groups = torch.cat([row_feats, col_feats, block_feats], dim=1)  # (N, 27, 2D)
+        per_group = self.group_head(groups)  # (N, 27, hidden_dim)
+        flat = per_group.view(per_group.size(0), -1)  # (N, 27*hidden_dim)
+        return self.project(flat)
 
 
 def _default_cem_output_dim(config: Any | None) -> int:
@@ -293,10 +327,14 @@ def _infer_backbone_spec(
     config: Any | None,
 ) -> dict[str, Any]:
     data_type = sample.meta.get("data_type", "tabular")
-    if benchmark == "sudoku" and data_type == "image":
-        raise NotImplementedError(
-            "Sudoku CEM/ProbCBM support is implemented only for the tabular variant."
-        )
+
+    # Sudoku CBM/CEM/ProbCBM always operate on the tabular (one-hot board)
+    # representation, even when the dataset was generated from images via OCR.
+    if benchmark == "sudoku":
+        return {
+            "kind": "sudoku_tabular",
+            "default_output_dim": _default_cem_output_dim(config),
+        }
 
     if data_type == "image":
         input_size = int(sample.meta.get("resolution", 32))
@@ -313,11 +351,6 @@ def _infer_backbone_spec(
         }
 
     x0 = np.asarray(sample.X[0])
-    if benchmark == "sudoku":
-        return {
-            "kind": "sudoku_tabular",
-            "default_output_dim": _default_cem_output_dim(config),
-        }
     return {
         "kind": "tabular",
         "input_dim": int(x0.reshape(-1).shape[0]),
@@ -385,7 +418,16 @@ def _stack_tensors(chunks: list[torch.Tensor] | None) -> torch.Tensor | None:
 def _device_to_pl_args(device: torch.device) -> dict[str, Any]:
     if device.type == "cuda":
         return {"accelerator": "gpu", "devices": 1}
+    # pytorch-lightning <2.0 does not support MPS; fall back to CPU
     return {"accelerator": "cpu", "devices": 1}
+
+
+def _effective_pl_device(device: torch.device) -> torch.device:
+    """Return the device pytorch-lightning will actually use."""
+    if device.type == "cuda":
+        return device
+    # PL <2.0 doesn't support MPS — always CPU
+    return torch.device("cpu")
 
 
 def _build_trainer(
@@ -521,8 +563,8 @@ class _OfficialBenchmarkModelBase(ConceptBasedModel):
     def _inference_device(self) -> torch.device:
         configured = self.eval_config.get("device")
         if configured is None:
-            return determine_device()
-        return torch.device(configured)
+            return _effective_pl_device(determine_device())
+        return _effective_pl_device(torch.device(configured))
 
     def predict_proba(
         self,
