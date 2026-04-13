@@ -9,8 +9,6 @@ from __future__ import annotations
 
 __all__ = [
     "RobotBenchmarkConfig",
-    "RobotRenderNuisanceConfig",
-    "RobotValidationChecksConfig",
     "SudokuBenchmarkConfig",
     "PRESET_EXCLUDED_CONCEPTS",
     "TEXT_PRESET_EXCLUDED_CONCEPTS",
@@ -112,8 +110,6 @@ ROBOT_SAMPLING_CONSTRAINTS = [
     {"concepts": {"foot_shape_flat_5sided": 1}, "min_fraction": 0.49},
 ]
 
-ROBOT_VALIDATION_CHECK_MODES = frozenset({"auto", "on", "off"})
-
 IMAGE_SIZE_TO_PIXELS = {
     "large": 600,
     "medium": 32,
@@ -147,10 +143,6 @@ ROBOT_VALID_REGIMES = frozenset(
     {"baseline", "expert", "subjective", "machine", "llm", "clip"}
 )
 ROBOT_TEXT_VALID_REGIMES = frozenset({"baseline", "expert", "subjective", "machine"})
-ROBOT_RENDER_SPACE_MODES = frozenset(
-    {"legacy", "continuous_light", "continuous_heavy"}
-)
-ROBOT_POSE_TEXT_MODES = frozenset({"neutral"})
 
 
 # ── Shared utilities ──────────────────────────────────────────────────
@@ -208,241 +200,6 @@ class _BenchmarkConfigBase:
 
 
 @dataclass
-class RobotRenderNuisanceConfig:
-    """Ranges for nuisance-only robot render variation.
-
-    Each field stores a ``[min, max]`` range. The ranges are interpreted by the
-    robot renderer and do not affect semantic concepts or labels.
-    """
-
-    translate_x_frac: list[float] = field(default_factory=lambda: [0.0, 0.0])
-    translate_y_frac: list[float] = field(default_factory=lambda: [0.0, 0.0])
-    global_scale: list[float] = field(default_factory=lambda: [1.0, 1.0])
-    global_rotation_deg: list[float] = field(default_factory=lambda: [0.0, 0.0])
-    body_aspect_x: list[float] = field(default_factory=lambda: [1.0, 1.0])
-    body_aspect_y: list[float] = field(default_factory=lambda: [1.0, 1.0])
-    head_aspect_x: list[float] = field(default_factory=lambda: [1.0, 1.0])
-    head_aspect_y: list[float] = field(default_factory=lambda: [1.0, 1.0])
-    arm_angle_offset_deg: list[float] = field(default_factory=lambda: [0.0, 0.0])
-    arm_length_scale: list[float] = field(default_factory=lambda: [1.0, 1.0])
-    arm_y_offset_frac: list[float] = field(default_factory=lambda: [0.0, 0.0])
-    left_arm_angle_delta_deg: list[float] = field(default_factory=lambda: [0.0, 0.0])
-    right_arm_angle_delta_deg: list[float] = field(default_factory=lambda: [0.0, 0.0])
-    left_arm_length_scale: list[float] = field(default_factory=lambda: [1.0, 1.0])
-    right_arm_length_scale: list[float] = field(default_factory=lambda: [1.0, 1.0])
-    left_arm_y_offset_frac: list[float] = field(default_factory=lambda: [0.0, 0.0])
-    right_arm_y_offset_frac: list[float] = field(default_factory=lambda: [0.0, 0.0])
-    leg_spread_deg: list[float] = field(default_factory=lambda: [0.0, 0.0])
-    leg_length_scale: list[float] = field(default_factory=lambda: [1.0, 1.0])
-    head_offset_x_frac: list[float] = field(default_factory=lambda: [0.0, 0.0])
-    head_offset_y_frac: list[float] = field(default_factory=lambda: [0.0, 0.0])
-    head_tilt_deg: list[float] = field(default_factory=lambda: [0.0, 0.0])
-    foot_rotation_deg: list[float] = field(default_factory=lambda: [0.0, 0.0])
-    stroke_width_scale: list[float] = field(default_factory=lambda: [1.0, 1.0])
-    point_jitter_frac: list[float] = field(default_factory=lambda: [0.0, 0.0])
-    color_jitter: list[float] = field(default_factory=lambda: [0.0, 0.0])
-
-    @classmethod
-    def legacy(cls) -> RobotRenderNuisanceConfig:
-        return cls()
-
-    @classmethod
-    def continuous_light(cls) -> RobotRenderNuisanceConfig:
-        return cls(
-            translate_x_frac=[-0.04, 0.04],
-            translate_y_frac=[-0.03, 0.03],
-            global_scale=[0.94, 1.06],
-            global_rotation_deg=[-5.0, 5.0],
-            body_aspect_x=[0.95, 1.05],
-            body_aspect_y=[0.95, 1.05],
-            head_aspect_x=[0.94, 1.06],
-            head_aspect_y=[0.94, 1.06],
-            arm_angle_offset_deg=[-18.0, 22.0],
-            arm_length_scale=[0.95, 1.05],
-            arm_y_offset_frac=[-0.03, 0.03],
-            left_arm_angle_delta_deg=[0.0, 0.0],
-            right_arm_angle_delta_deg=[0.0, 0.0],
-            left_arm_length_scale=[1.0, 1.0],
-            right_arm_length_scale=[1.0, 1.0],
-            left_arm_y_offset_frac=[0.0, 0.0],
-            right_arm_y_offset_frac=[0.0, 0.0],
-            leg_spread_deg=[-8.0, 10.0],
-            leg_length_scale=[0.96, 1.04],
-            head_offset_x_frac=[-0.03, 0.03],
-            head_offset_y_frac=[-0.02, 0.02],
-            head_tilt_deg=[-6.0, 6.0],
-            foot_rotation_deg=[-10.0, 10.0],
-            stroke_width_scale=[0.9, 1.12],
-            point_jitter_frac=[0.0, 0.015],
-            color_jitter=[-0.04, 0.04],
-        )
-
-    @classmethod
-    def continuous_heavy(cls) -> RobotRenderNuisanceConfig:
-        return cls(
-            translate_x_frac=[-0.08, 0.08],
-            translate_y_frac=[-0.06, 0.06],
-            global_scale=[0.88, 1.12],
-            global_rotation_deg=[-10.0, 10.0],
-            body_aspect_x=[0.90, 1.10],
-            body_aspect_y=[0.90, 1.10],
-            head_aspect_x=[0.88, 1.12],
-            head_aspect_y=[0.88, 1.12],
-            arm_angle_offset_deg=[-35.0, 35.0],
-            arm_length_scale=[0.90, 1.10],
-            arm_y_offset_frac=[-0.06, 0.06],
-            left_arm_angle_delta_deg=[0.0, 0.0],
-            right_arm_angle_delta_deg=[0.0, 0.0],
-            left_arm_length_scale=[1.0, 1.0],
-            right_arm_length_scale=[1.0, 1.0],
-            left_arm_y_offset_frac=[0.0, 0.0],
-            right_arm_y_offset_frac=[0.0, 0.0],
-            leg_spread_deg=[-16.0, 18.0],
-            leg_length_scale=[0.90, 1.10],
-            head_offset_x_frac=[-0.05, 0.05],
-            head_offset_y_frac=[-0.04, 0.04],
-            head_tilt_deg=[-12.0, 12.0],
-            foot_rotation_deg=[-18.0, 18.0],
-            stroke_width_scale=[0.82, 1.20],
-            point_jitter_frac=[0.0, 0.03],
-            color_jitter=[-0.08, 0.08],
-        )
-
-    @classmethod
-    def for_mode(cls, mode: str) -> RobotRenderNuisanceConfig:
-        if mode == "legacy":
-            return cls.legacy()
-        if mode == "continuous_light":
-            return cls.continuous_light()
-        if mode == "continuous_heavy":
-            return cls.continuous_heavy()
-        raise ValueError(
-            f"render_space_mode must be one of {sorted(ROBOT_RENDER_SPACE_MODES)}, got {mode!r}"
-        )
-
-    def validate(self) -> None:
-        for name, value in asdict(self).items():
-            if not isinstance(value, list) or len(value) != 2:
-                raise ValueError(f"render_nuisance.{name} must be a 2-item list")
-            lo, hi = float(value[0]), float(value[1])
-            if lo > hi:
-                raise ValueError(
-                    f"render_nuisance.{name} must satisfy min <= max, got {value!r}"
-                )
-            setattr(self, name, [lo, hi])
-
-
-@dataclass
-class RobotValidationChecksConfig:
-    """Per-check validation controls for robot render acceptance."""
-
-    bbox_in_frame: bool = True
-    foreground_non_degenerate: bool = True
-    main_parts_visible: bool = True
-    mouth_visible: bool = True
-    hands_visible: bool = True
-    eyes_visible: bool = True
-    key_parts_not_clipped: bool = True
-    no_knees_when_absent: bool = True
-    no_elbows_when_absent: bool = True
-
-    hands_head_clearance: str = "auto"
-    hands_body_clearance: str = "auto"
-    feet_body_clearance: str = "auto"
-    elbows_head_clearance: str = "auto"
-    knees_body_clearance: str = "auto"
-
-    topology_mask_supersample: int = 4
-    hands_head_clearance_frac: float = 0.015
-    hands_body_clearance_frac: float = 0.010
-    feet_body_clearance_frac: float = 0.010
-    elbows_head_clearance_frac: float = 0.008
-    knees_body_clearance_frac: float = 0.008
-
-    _BASE_CHECK_FIELDS = (
-        "bbox_in_frame",
-        "foreground_non_degenerate",
-        "main_parts_visible",
-        "mouth_visible",
-        "hands_visible",
-        "eyes_visible",
-        "key_parts_not_clipped",
-        "no_knees_when_absent",
-        "no_elbows_when_absent",
-    )
-    _TOPOLOGY_CHECK_FIELDS = (
-        "hands_head_clearance",
-        "hands_body_clearance",
-        "feet_body_clearance",
-        "elbows_head_clearance",
-        "knees_body_clearance",
-    )
-    _CLEARANCE_THRESHOLD_FIELDS = {
-        "hands_head_clearance": "hands_head_clearance_frac",
-        "hands_body_clearance": "hands_body_clearance_frac",
-        "feet_body_clearance": "feet_body_clearance_frac",
-        "elbows_head_clearance": "elbows_head_clearance_frac",
-        "knees_body_clearance": "knees_body_clearance_frac",
-    }
-
-    @classmethod
-    def _resolve_check_mode(cls, mode: str, render_space_mode: str) -> bool:
-        if mode == "on":
-            return True
-        if mode == "off":
-            return False
-        if mode != "auto":
-            raise ValueError(
-                f"validation check mode must be one of {sorted(ROBOT_VALIDATION_CHECK_MODES)}, got {mode!r}"
-            )
-        return render_space_mode != "legacy"
-
-    def validate(self) -> None:
-        for name in self._BASE_CHECK_FIELDS:
-            value = getattr(self, name)
-            if not isinstance(value, bool):
-                raise ValueError(f"validation_checks.{name} must be a boolean")
-        for name in self._TOPOLOGY_CHECK_FIELDS:
-            value = str(getattr(self, name))
-            if value not in ROBOT_VALIDATION_CHECK_MODES:
-                raise ValueError(
-                    f"validation_checks.{name} must be one of {sorted(ROBOT_VALIDATION_CHECK_MODES)}, got {value!r}"
-                )
-            setattr(self, name, value)
-        if int(self.topology_mask_supersample) < 1:
-            raise ValueError(
-                "validation_checks.topology_mask_supersample must be positive"
-            )
-        self.topology_mask_supersample = int(self.topology_mask_supersample)
-        for name in self._CLEARANCE_THRESHOLD_FIELDS.values():
-            value = float(getattr(self, name))
-            if value < 0.0:
-                raise ValueError(f"validation_checks.{name} must be non-negative")
-            setattr(self, name, value)
-
-    def resolved_checks(self, render_space_mode: str) -> dict[str, bool]:
-        resolved = {
-            name: bool(getattr(self, name)) for name in self._BASE_CHECK_FIELDS
-        }
-        for name in self._TOPOLOGY_CHECK_FIELDS:
-            resolved[name] = self._resolve_check_mode(
-                str(getattr(self, name)),
-                render_space_mode=render_space_mode,
-            )
-        return resolved
-
-    def pruned_for_mode(self, render_space_mode: str) -> dict[str, Any]:
-        d = asdict(self)
-        resolved = self.resolved_checks(render_space_mode)
-        for check_name, threshold_name in self._CLEARANCE_THRESHOLD_FIELDS.items():
-            if not resolved[check_name]:
-                d.pop(threshold_name, None)
-        if not any(resolved[name] for name in self._TOPOLOGY_CHECK_FIELDS):
-            d.pop("topology_mask_supersample", None)
-        return d
-
-
-@dataclass
 class RobotBenchmarkConfig(_BenchmarkConfigBase):
     """Configuration for the robot classification benchmark.
 
@@ -477,14 +234,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         default_factory=lambda: ["foot_shape"],
     )
     color_mode: str = field(default="color", metadata={"scope": "image"})
-    render_space_mode: str = "legacy"
-    validate_renders: bool = True
-    max_render_validation_attempts: int = 8
-    group_split_by_semantic_id: bool = False
-    include_pose_text: bool = False
-    pose_text_mode: str = "neutral"
-    render_nuisance: RobotRenderNuisanceConfig | dict | None = None
-    validation_checks: RobotValidationChecksConfig | dict | None = None
 
     # Training (image)
     epochs: int = field(default=50, metadata={"scope": "image"})
@@ -569,18 +318,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             )
         if isinstance(self.label_formula, dict):
             self.label_formula = LabelFormula.from_dict(self.label_formula)
-        if isinstance(self.render_nuisance, dict):
-            self.render_nuisance = RobotRenderNuisanceConfig(**self.render_nuisance)
-        if self.render_nuisance is None:
-            self.render_nuisance = RobotRenderNuisanceConfig.for_mode(
-                self.render_space_mode
-            )
-        if isinstance(self.validation_checks, dict):
-            self.validation_checks = RobotValidationChecksConfig(
-                **self.validation_checks
-            )
-        if self.validation_checks is None:
-            self.validation_checks = RobotValidationChecksConfig()
         if self.data_type == "text":
             self._auto_configure_text()
         self._validate_common()
@@ -618,23 +355,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 f"cbm_family must be one of {sorted(VALID_CBM_FAMILIES)}, "
                 f"got {self.cbm_family!r}"
             )
-        if self.render_space_mode not in ROBOT_RENDER_SPACE_MODES:
-            raise ValueError(
-                f"render_space_mode must be one of {sorted(ROBOT_RENDER_SPACE_MODES)}, "
-                f"got {self.render_space_mode!r}"
-            )
-        if self.pose_text_mode not in ROBOT_POSE_TEXT_MODES:
-            raise ValueError(
-                f"pose_text_mode must be one of {sorted(ROBOT_POSE_TEXT_MODES)}, "
-                f"got {self.pose_text_mode!r}"
-            )
-        if self.max_render_validation_attempts < 1:
-            raise ValueError(
-                "max_render_validation_attempts must be positive, got "
-                f"{self.max_render_validation_attempts}"
-            )
-        self.render_nuisance.validate()
-        self.validation_checks.validate()
 
         if self.seed < 0:
             raise ValueError(f"seed must be non-negative, got {self.seed}")
@@ -703,16 +423,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         """Config matching the paper's subconcept robot benchmark."""
         return cls(concept_preset="foot_subtypes")
 
-    @classmethod
-    def continuous_light(cls, **kwargs) -> RobotBenchmarkConfig:
-        """Config preset for light continuous render variation."""
-        return cls(render_space_mode="continuous_light", **kwargs)
-
-    @classmethod
-    def continuous_heavy(cls, **kwargs) -> RobotBenchmarkConfig:
-        """Config preset for heavier continuous render variation."""
-        return cls(render_space_mode="continuous_heavy", **kwargs)
-
     @property
     def input_size(self) -> int:
         if self.data_type == "text":
@@ -730,47 +440,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         """Convert label_formula dict back to LabelFormula on load."""
         if "label_formula" in d and isinstance(d["label_formula"], dict):
             d["label_formula"] = LabelFormula.from_dict(d["label_formula"])
-        if "render_nuisance" in d and isinstance(d["render_nuisance"], dict):
-            d["render_nuisance"] = RobotRenderNuisanceConfig(**d["render_nuisance"])
-        if "validation_checks" in d and isinstance(d["validation_checks"], dict):
-            d["validation_checks"] = RobotValidationChecksConfig(
-                **d["validation_checks"]
-            )
-        return d
-
-    def _prune_irrelevant_robot_fields(self, d: dict[str, Any]) -> dict[str, Any]:
-        """Drop fields that cannot affect the configured robot dataset."""
-        render_irrelevant = self.render_space_mode == "legacy" or (
-            self.data_type == "text" and not self.include_pose_text
-        )
-        if render_irrelevant:
-            for key in (
-                "render_nuisance",
-                "validate_renders",
-                "max_render_validation_attempts",
-                "validation_checks",
-            ):
-                d.pop(key, None)
-        elif self.data_type == "text":
-            d.pop("validate_renders", None)
-            d.pop("max_render_validation_attempts", None)
-            d.pop("validation_checks", None)
-        elif not self.validate_renders:
-            d.pop("max_render_validation_attempts", None)
-            d.pop("validation_checks", None)
-        elif "validation_checks" in d:
-            checks = d["validation_checks"]
-            if not isinstance(checks, RobotValidationChecksConfig):
-                checks = RobotValidationChecksConfig(**checks)
-            d["validation_checks"] = checks.pruned_for_mode(self.render_space_mode)
-        if self.data_type != "text" or not self.include_pose_text:
-            d.pop("pose_text_mode", None)
-        if not self.group_split_by_semantic_id:
-            d.pop("group_split_by_semantic_id", None)
-        if self.data_type != "text":
-            d.pop("include_pose_text", None)
-        elif not self.include_pose_text:
-            d.pop("include_pose_text", None)
         return d
 
     def to_dict(self) -> dict[str, Any]:
@@ -798,12 +467,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             "model_weights": dict(self.label_formula.weights),
             "model_intercept": self.label_formula.intercept,
             "model_scalar": self.label_formula.temperature,
-            "render_space_mode": self.render_space_mode,
-            "validate_renders": self.validate_renders,
-            "max_render_validation_attempts": self.max_render_validation_attempts,
-            "group_split_by_semantic_id": self.group_split_by_semantic_id,
-            "render_nuisance": asdict(self.render_nuisance),
-            "validation_checks": asdict(self.validation_checks),
         }
 
     def setup_fingerprint(self) -> str:
@@ -847,14 +510,12 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             }
             for k in _exclude:
                 d.pop(k, None)
-            d = self._prune_irrelevant_robot_fields(d)
             return _dict_sha256(d)
 
         d = self.to_dict()
         d.pop("draw", None)  # meta-flag, not a data param
         d.pop("output_directory", None)  # derived from image_resolution
         d.pop("train_dnn", None)  # not a data param
-        d = self._prune_irrelevant_robot_fields(d)
         return _dict_sha256(d)
 
     def model_fingerprint(self, model_class: str | None = None) -> str:
@@ -890,7 +551,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         )
         for k in exclude:
             d.pop(k, None)
-        d = self._prune_irrelevant_robot_fields(d)
         if model_class is not None:
             d.pop("cbm_family", None)
             if model_class in {"cbm", "cbm_subjective", "lfcbm", "dnn"}:
@@ -969,7 +629,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         )
         for k in exclude:
             d.pop(k, None)
-        d = self._prune_irrelevant_robot_fields(d)
         return _dict_sha256(d, truncate=8)
 
     def get_collect_path(self) -> Path:

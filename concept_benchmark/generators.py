@@ -116,10 +116,7 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
         get_corpus_path,
     )
     from concept_benchmark.synthetic.robot_text.dataset import build_text_dataset
-    from concept_benchmark.synthetic.helper.robot_catalog import (
-        build_robot_instance_catalog,
-        collapse_robot_subtypes,
-    )
+    from concept_benchmark.synthetic.helper.robot_catalog import collapse_robot_subtypes
 
     set_deterministic_seed(config.seed)
 
@@ -128,22 +125,8 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
         config.concepts, config.expand_concepts
     )
 
-    if config.include_pose_text:
-        num_semantic = int(np.prod([len(v) for v in config.concepts.values()]))
-        catalog_df = build_robot_instance_catalog(
-            concepts=config.concepts,
-            num_robots=num_semantic * config.renders_per_robot,
-            resolution=config.pixel_resolution,
-            seed=config.seed,
-            render_space_mode=config.render_space_mode,
-            render_nuisance=config.render_nuisance,
-            validation_checks=config.validation_checks,
-            validate_renders=False,
-            max_render_validation_attempts=config.max_render_validation_attempts,
-        )
-    else:
-        # Enumerate all robot concept combinations
-        catalog_df = enumerate_robot_concepts(concepts=config.concepts, seed=config.seed)
+    # Enumerate all robot concept combinations
+    catalog_df = enumerate_robot_concepts(concepts=config.concepts, seed=config.seed)
 
     # Collapse subtypes for label computation only
     catalog_for_labels = catalog_df.copy()
@@ -163,19 +146,15 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
     ds = build_text_dataset(
         catalog_df=catalog_df,
         corpus_path=corpus_path,
-        variants_per_row=1 if config.include_pose_text else config.renders_per_robot,
+        variants_per_row=config.renders_per_robot,
         seed=config.seed,
         concept_names=all_concept_names,
-        include_pose_text=config.include_pose_text,
-        pose_text_mode=config.pose_text_mode,
     )
 
     # 3. Wrap in ConceptDataset (unsplit — caller uses sample())
     row_index = getattr(ds, "_row_index", np.arange(len(ds.y)))
     meta = dict(ds.meta)
     meta["row_index"] = row_index
-    if config.include_pose_text and "semantic_id" in catalog_df.columns:
-        meta["semantic_id"] = catalog_df.iloc[row_index]["semantic_id"].to_numpy()
     data = ConceptDataset(
         X=np.array(ds.X, dtype=object),
         C=ds.C,

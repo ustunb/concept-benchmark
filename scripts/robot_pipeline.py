@@ -135,14 +135,10 @@ def setup_dataset(config: RobotBenchmarkConfig):
     train_size = 3800
     remaining = data.n - test_size
     n_val = int((remaining - train_size) * 0.2)
-    groups = None
-    if config.group_split_by_semantic_id:
-        groups = data.meta.get("split_groups")
     data.sample(
         test_size=test_size,
         val_size=n_val,
         train_size=train_size,
-        groups=groups,
         sampling_constraints=ROBOT_SAMPLING_CONSTRAINTS,
         seed=config.seed,
     )
@@ -540,13 +536,22 @@ def train_dnn(
 
 
 def _test_interventions(
-    prob_test, settings: InterventionSettings, acc_det, fe, test, concept_names=None
+    prob_test,
+    settings: InterventionSettings,
+    acc_det,
+    fe,
+    test,
+    concept_names=None,
+    model=None,
 ):
     """Run interventions for each budget and return results dict.
 
-    Matches the original ``test_interventions`` from ``robot_concept_regimes.py``,
-    including the inline LLM path (compute-once at K=max, batched multi-image calls,
-    JSONL cache, flip-effect ranking, per-budget mask derivation).
+    Parameters
+    ----------
+    model : ConceptBasedModel, optional
+        Full model (e.g. CEM/ProbCBM) for aligned concept replay.
+        When provided, interventions replay through the model's learned
+        embeddings instead of binarizing concepts.
     """
     import hashlib
     import json
@@ -569,10 +574,9 @@ def _test_interventions(
         concept_names = list(concept_names)
 
     # Coerce concept_proba to match dataset concept ground truth shape,
-    # but only when the caller didn't supply its own concept space
-    # (LLM/CLIP regimes operate in the LFCBM concept space which may
-    # differ from GT dimensions).
-    if _coerce_to_gt and hasattr(test, "C"):
+    # but only when using the bare CBM path (not aligned replay).
+    # Aligned replay models operate in their own concept space.
+    if _coerce_to_gt and hasattr(test, "C") and model is None:
         n_gt = int(test.C.shape[1])
         n_pred = int(prob_test.shape[1])
         if n_pred != n_gt:
@@ -586,8 +590,20 @@ def _test_interventions(
         if len(concept_names) != prob_test.shape[1]:
             concept_names = concept_names[: prob_test.shape[1]]
 
-    # Create a CBM wrapper for the intervention framework
-    cbm = ConceptBasedModel(concept_detector=None, label_predictor=fe)
+    # Use the full model for aligned replay, or create a bare wrapper
+    if model is not None:
+        cbm = model
+        # Slice test dataset concepts to match model's concept space.
+        # The dataset may have more concepts (e.g., 19) than the model
+        # was trained on (e.g., 7). The runner needs matching shapes.
+        n_model = prob_test.shape[1]
+        if hasattr(test, "C") and test.C.shape[1] != n_model:
+            import copy
+
+            test = copy.copy(test)
+            test.C = test.C[:, :n_model]
+    else:
+        cbm = ConceptBasedModel(concept_detector=None, label_predictor=fe)
     runner = ConceptInterventionRunner(cbm)
     supports_aligned = bool(
         getattr(cbm, "supports_aligned_concept_replay", False)
@@ -1317,7 +1333,9 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
             ).mean()
         )
     else:
-        acc_det = float((regime_model.predict(data.test) == data.test.y.astype(int)).mean())
+        acc_det = float(
+            (regime_model.predict(data.test) == data.test.y.astype(int)).mean()
+        )
 
     COLS = ["budget", "threshold"] + METRIC_COLS
     df_lst = []
@@ -1329,6 +1347,11 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
             intervention_threshold=t,
             intervention_strategy=config.intervention_strategy,
         )
+        # Pass the full model for CEM/ProbCBM so aligned concept replay
+        # is used instead of bare binarization.
+        use_full_model = getattr(
+            regime_model, "supports_aligned_concept_replay", False
+        )
         _, _, r = _test_interventions(
             prob_test=c_preds,
             settings=isettings,
@@ -1336,6 +1359,7 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
             fe=regime_model.label_predictor,
             test=data.test,
             concept_names=regime_concept_names,
+            model=regime_model if use_full_model else None,
         )
         df_lst.append(
             pd.DataFrame(r)
@@ -1503,7 +1527,9 @@ def collect_results(
         # CBM no-intervention (k=0)
         cbm_path = cfg.get_model_path(model_key)
         if not cbm_path.exists():
-            logger.warning("%s model not found for %s, skipping: %s", model_key, label, cbm_path)
+            logger.warning(
+                "%s model not found for %s, skipping: %s", model_key, label, cbm_path
+            )
             continue
         cbm = load(cbm_path)
         cbm_acc = float((cbm.predict(data.test) == data.test.y).mean())
@@ -1746,7 +1772,9 @@ def run(
                     missing_mechanism=missing_mechanism,
                 )
             elif selected_key in {"cem", "probcbm"}:
-                _train_official_cem_family(config, family=selected_key, save_key=selected_key)
+                _train_official_cem_family(
+                    config, family=selected_key, save_key=selected_key
+                )
             else:
                 raise ValueError(f"Unsupported cbm_family: {selected_key!r}")
             _write_model_fingerprint(selected_key)
@@ -1803,12 +1831,6 @@ def run(
 
 def plot_results(config: RobotBenchmarkConfig) -> None:
     """Generate figures from collected results and save to results/figures/."""
-    if _selected_cbm_key(config) != "cbm":
-        logger.info(
-            "Plotting is only implemented for cbm_family='cbm'; skipping %s.",
-            _selected_cbm_key(config),
-        )
-        return
     import json
     import matplotlib
 
@@ -1825,7 +1847,8 @@ def plot_results(config: RobotBenchmarkConfig) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     variant = "subconcept" if config.concept_preset == "foot_subtypes" else "ideal"
-    results_path = config.get_results_path("cbm")
+    family = _selected_cbm_key(config)
+    results_path = config.get_results_path(family)
     if not results_path.exists():
         logger.info("No results CSV found at %s — skipping plots.", results_path)
         return
@@ -1841,13 +1864,10 @@ def plot_results(config: RobotBenchmarkConfig) -> None:
         baseline = interv_df[interv_df["threshold"] == 0.2]
     if len(baseline) > 0:
         fig, _ = plot_intervention_curve(baseline)
-        fig.savefig(
-            out_dir / f"robot_{variant}_intervention_curve.png",
-            dpi=150,
-            bbox_inches="tight",
-        )
+        fname = f"robot_{variant}_{family}_intervention_curve.png"
+        fig.savefig(out_dir / fname, dpi=150, bbox_inches="tight")
         plt.close(fig)
-        logger.info("Saved robot_%s_intervention_curve.png", variant)
+        logger.info("Saved %s", fname)
 
     # 2. Regime comparison (if multiple regimes)
     if "regime" in interv_df.columns and interv_df["regime"].nunique() > 1:
@@ -1892,13 +1912,10 @@ def plot_results(config: RobotBenchmarkConfig) -> None:
             fig, _ = plot_concept_discovery(
                 ideal_bl, sub_bl, dnn_accuracy=dnn_acc or 0.8746
             )
-            fig.savefig(
-                out_dir / "robot_concept_discovery.png",
-                dpi=150,
-                bbox_inches="tight",
-            )
+            fname = f"robot_{family}_concept_discovery.png"
+            fig.savefig(out_dir / fname, dpi=150, bbox_inches="tight")
             plt.close(fig)
-            logger.info("Saved robot_concept_discovery.png")
+            logger.info("Saved %s", fname)
 
     # 4. Alignment comparison (if alignment JSONs exist for both variants)
     align_path = results_path.with_name(

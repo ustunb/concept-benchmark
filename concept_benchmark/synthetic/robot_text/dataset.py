@@ -14,7 +14,6 @@ from concept_benchmark.synthetic.robot_text.corpus import (
     load_jsonl,
     render_from_corpus,
 )
-from concept_benchmark.synthetic.helper.textgen import pose_metadata_from_row
 
 
 def build_text_dataset(
@@ -24,8 +23,6 @@ def build_text_dataset(
     seed: int,
     concept_names: list[str] | None = None,
     row_variants: list[int] | None = None,
-    include_pose_text: bool = False,
-    pose_text_mode: str = "neutral",
 ) -> ConceptDatasetSample:
     """Build a text dataset from a concept catalog and JSONL corpus.
 
@@ -57,12 +54,6 @@ def build_text_dataset(
         )
         for v in range(repeats):
             text = render_from_corpus(row, corpus_spec, seed + v)
-            if include_pose_text:
-                pose = pose_metadata_from_row(row, mode=pose_text_mode)[
-                    "pose_descriptor"
-                ]
-                if pose:
-                    text = f"{text.rstrip()} {pose[0].upper() + pose[1:]}."
             X.append(text)
             C.append(concept_vector_from_row(row, names))
             y.append(1 if str(sr["label"]) == "glorp" else 0)
