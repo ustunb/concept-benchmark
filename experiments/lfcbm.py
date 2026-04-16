@@ -527,9 +527,9 @@ class LabelFreeCBM:
         for C in self.cfg.C_grid:
             clf = LogisticRegression(
                 solver="saga",
+                penalty="elasticnet",
                 l1_ratio=float(self.cfg.l1_ratio),
                 C=float(C),
-                multi_class="multinomial",
                 max_iter=5000,
                 random_state=int(self.cfg.seed),
             )

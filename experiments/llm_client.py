@@ -1,17 +1,27 @@
 """LLM client for concept intervention judgments.
 
-Supports Gemini, OpenAI, and Anthropic providers. Used by the LLM and CLIP
-intervention regimes to get machine judgments about concept presence in images.
+Supports API-backed providers (Gemini, OpenAI, Anthropic) plus optional local
+CLI loops (Codex exec, Claude print mode). Used by the automated intervention
+regimes to get machine judgments about concept presence in images.
 """
 
 from __future__ import annotations
 
-__all__ = ["make_llm_client", "judge_concept", "judge_concepts_batch"]
+__all__ = [
+    "is_retryable_llm_error",
+    "is_local_exec_provider",
+    "judge_concept",
+    "judge_concepts_batch",
+    "make_llm_client",
+]
 
 import base64
 import json
 import logging
 import os
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
@@ -23,9 +33,15 @@ if TYPE_CHECKING:
 class _LLMBase:
     """Base class for LLM providers."""
 
-    def __init__(self, model_name: str, api_key: str) -> None:
+    def __init__(
+        self,
+        model_name: str = "",
+        api_key: str = "",
+        config_overrides: Sequence[str] = (),
+    ) -> None:
         self.model_name = model_name
         self.api_key = api_key
+        self.config_overrides = tuple(config_overrides)
 
     def generate(self, prompt: str, image_paths: Sequence[str | Path] = ()) -> str:
         raise NotImplementedError
@@ -43,14 +59,21 @@ class _LLMRegistry:
         return deco
 
     @classmethod
-    def create(cls, name: str, model_name: str, api_key: str) -> _LLMBase:
+    def create(
+        cls,
+        name: str,
+        model_name: str,
+        api_key: str,
+        *,
+        config_overrides: Sequence[str] = (),
+    ) -> _LLMBase:
         kls = cls._providers.get(name.lower())
         if not kls:
             available = ", ".join(sorted(cls._providers.keys()))
             raise ValueError(
                 f"Unsupported LLM provider: {name!r}. Available: {available}"
             )
-        return kls(model_name, api_key)
+        return kls(model_name, api_key, config_overrides=config_overrides)
 
 
 def _encode_images_b64(image_paths: Sequence[str | Path]) -> list[tuple]:
@@ -71,6 +94,147 @@ def _encode_images_b64(image_paths: Sequence[str | Path]) -> list[tuple]:
             logging.getLogger(__name__).debug("Skipping unreadable image: %s", p)
             continue
     return out
+
+
+LOCAL_EXEC_PROVIDERS = frozenset({"codex", "codex_exec", "claude_exec"})
+
+
+def is_local_exec_provider(provider: str) -> bool:
+    return provider.strip().lower() in LOCAL_EXEC_PROVIDERS
+
+
+class _ExecCLIClient(_LLMBase):
+    """Base class for local CLI-backed LLM providers."""
+
+    executable_name = ""
+
+    def __init__(
+        self,
+        model_name: str = "",
+        api_key: str = "",
+        config_overrides: Sequence[str] = (),
+    ) -> None:
+        super().__init__(
+            model_name=model_name,
+            api_key=api_key,
+            config_overrides=config_overrides,
+        )
+        self.executable_path = shutil.which(self.executable_name)
+        if self.executable_path is None:
+            raise FileNotFoundError(
+                f"{self.executable_name} executable not found on PATH."
+            )
+
+    def _build_command(
+        self,
+        prompt: str,
+        image_paths: Sequence[str | Path],
+        output_path: str | None = None,
+    ) -> list[str]:
+        raise NotImplementedError
+
+    def _prepare_prompt(self, prompt: str, image_paths: Sequence[str | Path]) -> str:
+        return prompt
+
+    def generate(self, prompt: str, image_paths: Sequence[str | Path] = ()) -> str:
+        prompt_text = self._prepare_prompt(prompt, image_paths)
+        output_path = None
+        if self.executable_name == "codex":
+            fd, output_path = tempfile.mkstemp(prefix="codex_exec_", suffix=".txt")
+            os.close(fd)
+        cmd = self._build_command(prompt_text, image_paths, output_path=output_path)
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=300,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(
+                f"{self.executable_name} exec failed with exit code {result.returncode}: {detail}"
+            )
+        if output_path is not None:
+            try:
+                return Path(output_path).read_text(encoding="utf-8").strip()
+            finally:
+                Path(output_path).unlink(missing_ok=True)
+        return (result.stdout or "").strip()
+
+
+@_LLMRegistry.register("codex")
+@_LLMRegistry.register("codex_exec")
+class _CodexExecClient(_ExecCLIClient):
+    executable_name = "codex"
+
+    def _build_command(
+        self,
+        prompt: str,
+        image_paths: Sequence[str | Path],
+        output_path: str | None = None,
+    ) -> list[str]:
+        cmd = [
+            self.executable_path,
+            "exec",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "read-only",
+            "--color",
+            "never",
+            "-C",
+            str(Path.cwd()),
+        ]
+        if self.model_name:
+            cmd.extend(["-m", self.model_name])
+        for override in self.config_overrides:
+            cmd.extend(["-c", override])
+        for image_path in image_paths:
+            cmd.extend(["-i", str(image_path)])
+        if output_path is not None:
+            cmd.extend(["-o", output_path])
+        cmd.append(prompt)
+        return cmd
+
+
+@_LLMRegistry.register("claude_exec")
+class _ClaudeExecClient(_ExecCLIClient):
+    executable_name = "claude"
+
+    def _prepare_prompt(self, prompt: str, image_paths: Sequence[str | Path]) -> str:
+        if not image_paths:
+            return prompt
+        image_lines = "\n".join(f"- {Path(p).resolve()}" for p in image_paths)
+        return (
+            f"{prompt}\n\n"
+            "Image files are available locally at the following paths. "
+            "Use read-only inspection to analyze them. Do not modify any files.\n"
+            f"{image_lines}"
+        )
+
+    def _build_command(
+        self,
+        prompt: str,
+        image_paths: Sequence[str | Path],
+        output_path: str | None = None,
+    ) -> list[str]:
+        del image_paths, output_path
+        cmd = [
+            self.executable_path,
+            "-p",
+            "--output-format",
+            "text",
+            "--permission-mode",
+            "dontAsk",
+            "--tools",
+            "Bash,Read",
+            "--add-dir",
+            str(Path.cwd()),
+        ]
+        if self.model_name:
+            cmd.extend(["--model", self.model_name])
+        cmd.append(prompt)
+        return cmd
 
 
 @_LLMRegistry.register("gemini")
@@ -164,11 +328,13 @@ def make_llm_client(
     model: str,
     api_key: str | None = None,
     api_key_env: str = "",
+    reasoning_effort: str = "",
 ) -> _LLMBase:
     """Create an LLM client for the given provider.
 
     Args:
-        provider: One of "gemini", "openai", "anthropic".
+        provider: One of "gemini", "openai", "anthropic", "codex",
+            "codex_exec", or "claude_exec".
         model: Model name/ID for the provider.
         api_key: API key. If None, reads from api_key_env environment variable.
         api_key_env: Environment variable name containing the API key.
@@ -176,6 +342,17 @@ def make_llm_client(
     Returns:
         An LLM client with a .generate(prompt, image_paths) method.
     """
+    if is_local_exec_provider(provider):
+        config_overrides: list[str] = []
+        effort = reasoning_effort.strip()
+        if effort and provider.strip().lower() in {"codex", "codex_exec"}:
+            config_overrides.append(f'model_reasoning_effort="{effort}"')
+        return _LLMRegistry.create(
+            provider,
+            model,
+            api_key or "",
+            config_overrides=config_overrides,
+        )
     if api_key is None:
         api_key = os.environ.get(api_key_env, "")
     if not api_key:
@@ -184,6 +361,40 @@ def make_llm_client(
             f"or pass api_key directly."
         )
     return _LLMRegistry.create(provider, model, api_key)
+
+
+def is_retryable_llm_error(provider: str, exc: Exception) -> bool:
+    """Return whether *exc* is a transient provider error worth retrying."""
+    provider_name = provider.strip().lower()
+    exc_name = exc.__class__.__name__.lower()
+    status_code = getattr(exc, "status_code", None)
+
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return True
+
+    if status_code in {408, 409, 429, 500, 502, 503, 504}:
+        return True
+
+    retryable_names = {
+        "gemini": {"resourceexhausted"},
+        "openai": {
+            "apiconnectionerror",
+            "apierror",
+            "apitimeouterror",
+            "internalservererror",
+            "ratelimiterror",
+        },
+        "anthropic": {
+            "anthropicconnectionerror",
+            "anthropicerror",
+            "apiconnectionerror",
+            "apitimeouterror",
+            "internalservererror",
+            "overloadederror",
+            "ratelimiterror",
+        },
+    }
+    return exc_name in retryable_names.get(provider_name, set())
 
 
 CONCEPT_JUDGMENT_PROMPT = """Look at this robot image. For the following visual concept, answer YES or NO:

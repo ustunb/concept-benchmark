@@ -183,14 +183,23 @@ The package supports six intervention regimes that simulate different real-world
 | **expert** | Ground truth | Noisy human (80% acc) | Realistic human annotator |
 | **subjective** | Noisy CBM (20% label noise) | Noisy human (80% acc) | Concepts trained on noisy labels |
 | **machine** | LFCBM (GT descriptions) | Noisy human (80% acc) | Machine-discovered concepts |
-| **llm** | LFCBM (LLM descriptions) | LLM (Gemini) | Fully automated with LLM |
-| **clip** | LFCBM (CLIP keywords) | LLM (Gemini) | Fully automated with CLIP |
+| **llm** | LFCBM (LLM descriptions) | LLM (Gemini by default) | Fully automated with LLM |
+| **clip** | LFCBM (CLIP keywords) | LLM (Gemini by default) | Fully automated with CLIP |
 
 Run regimes via the pipeline script:
 
 ```bash
 python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
     --regimes baseline expert subjective machine
+```
+
+For resubmittal experiments, the pipeline also exposes an experimental `placeholder3` automated regime. It is not part of the locked paper table above and must be paired with an explicit concepts file. Intervention judgments can use the existing API-backed providers or local CLI loops with `codex_exec` / `claude_exec`:
+
+```bash
+python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
+    --regimes placeholder3 \
+    --placeholder3-concepts-file path/to/placeholder3.jsonl \
+    --llm-provider codex_exec
 ```
 
 For details on each regime, see the [Robot benchmark documentation](robot.md).

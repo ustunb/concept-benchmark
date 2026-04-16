@@ -44,9 +44,16 @@ class TestRobotConfigValidation:
                 "machine",
                 "llm",
                 "clip",
+                "placeholder3",
             ]
         )
-        assert len(cfg.intervention_regimes) == 6
+        assert len(cfg.intervention_regimes) == 7
+
+    def test_gemini_is_default_llm_provider(self):
+        cfg = RobotBenchmarkConfig()
+        assert cfg.llm_provider == "gemini"
+        assert cfg.llm_model == "gemini-3-flash-preview"
+        assert cfg.llm_api_key_env == "GEMINI_API_KEY"
 
     def test_exactly_k_strategy(self):
         cfg = RobotBenchmarkConfig(intervention_strategy="exactly_k")
@@ -274,6 +281,7 @@ class TestYAMLRoundTrip:
             seed=42,
             concept_preset="foot_subtypes",
             intervention_regimes=["baseline", "expert"],
+            placeholder3_concepts_file="concepts/placeholder3.jsonl",
             render_space_mode="continuous_light",
             group_split_by_semantic_id=True,
             validation_checks={
@@ -318,6 +326,18 @@ class TestYAMLSecretExclusion:
 
 
 class TestModelFingerprintScope:
+    def test_robot_model_fingerprint_ignores_automated_regime_paths(self):
+        base = RobotBenchmarkConfig()
+        changed = RobotBenchmarkConfig(
+            llm_concepts_file="custom/llm.jsonl",
+            clip_concepts_file="custom/clip.jsonl",
+            placeholder3_concepts_file="custom/placeholder3.jsonl",
+            llm_provider="anthropic",
+            llm_model="claude-3-5-sonnet",
+        )
+        assert base.model_fingerprint("cbm") == changed.model_fingerprint("cbm")
+        assert base.get_model_path("cbm") == changed.get_model_path("cbm")
+
     def test_robot_dnn_fingerprint_ignores_cem_probcbm_knobs(self):
         base = RobotBenchmarkConfig()
         changed = RobotBenchmarkConfig(
