@@ -739,7 +739,12 @@ def _test_interventions(
             import os
 
             api_key = str(llm_cfg.get("api_key", "")) or os.environ.get(api_key_env, "")
-            if not api_key and not is_local_exec_provider(provider):
+
+            # When cache_only=True, skip API key validation entirely —
+            # the cache provides all LLM votes, no live calls needed.
+            if cache_only:
+                api_key = api_key or "cache-only-no-key-needed"
+            elif not api_key and not is_local_exec_provider(provider):
                 raise SystemExit(
                     f"missing API key: set llm_api_key in config or {api_key_env} in env"
                 )
@@ -1016,6 +1021,14 @@ def _test_interventions(
                     len(tasks),
                 )
 
+                if cache_only and tasks:
+                    logger.warning(
+                        "cache_only=True but %d images have %d missing concept pairs. "
+                        "Using NaN for missing entries.",
+                        len(tasks), missing_pairs,
+                    )
+                    tasks = []  # skip LLM calls, proceed with what the cache has
+
                 bs = int(llm_cfg.get("batch_size") or 32)
                 if bs < 1:
                     bs = 1
@@ -1128,19 +1141,11 @@ def _test_interventions(
 
                 if n_batches > 0:
                     logger.info("LLM all %d batches complete.", n_batches)
-                if cache_only:
-                    if cache_all_concepts:
-                        logger.info(
-                            "LLM exhaustive cache-only mode complete; "
-                            "skipping intervention scoring."
-                        )
-                    else:
-                        logger.info(
-                            "LLM cache-only mode complete for threshold=%.3f, budget=%d; "
-                            "skipping intervention scoring.",
-                            settings.intervention_threshold,
-                            budget,
-                        )
+                if cache_only and cache_all_concepts:
+                    logger.info(
+                        "LLM exhaustive cache-only mode complete; "
+                        "skipping intervention scoring."
+                    )
                     return [budget], human_acc, {}
 
                 # rank concepts per instance by single-bit flip effect (reuse for budgets < K)
@@ -1403,6 +1408,7 @@ def _run_automated_regime(config, regime, model, data, budgets, thresholds):
             fe=backend["fe"],
             test=data.test,
             concept_names=backend["concept_names"],
+            cache_only=bool(config.llm_cache_only),
         )
         df = (
             pd.DataFrame(r)
@@ -1600,13 +1606,9 @@ def run_interventions(
     if data is None:
         data = load(config.get_dataset_path())
 
-    if config.llm_cache_only:
-        summary = prefill_automated_intervention_caches(config, data=data)
-        logger.info(
-            "Automated intervention cache-only mode complete for %d threshold/regime pair(s).",
-            len(summary),
-        )
-        return pd.DataFrame()
+    # When llm_cache_only is set, skip the prefill path and run normal
+    # evaluation — _test_interventions will read from cache instead of
+    # calling any LLM.
 
     if model is None:
         model = load(config.get_model_path(_selected_cbm_key(config)))
