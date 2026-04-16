@@ -58,6 +58,7 @@ def test_automated_intervention_settings_use_gemini_defaults():
         "batch_size": 100,
         "batch_sleep": 5.0,
         "workers": 1,
+        "cache_all_concepts": False,
     }
 
 

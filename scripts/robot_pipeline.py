@@ -164,6 +164,7 @@ def _automated_intervention_llm_settings(config: RobotBenchmarkConfig) -> dict[s
         "batch_size": batch_size,
         "batch_sleep": batch_sleep,
         "workers": workers,
+        "cache_all_concepts": bool(config.llm_cache_all_concepts),
     }
 
 
@@ -733,6 +734,7 @@ def _test_interventions(
                 )
 
             reasoning_effort = str(llm_cfg.get("reasoning_effort", "") or "")
+            cache_all_concepts = bool(llm_cfg.get("cache_all_concepts") or False)
             client = make_llm_client(
                 provider,
                 model_name,
@@ -889,19 +891,21 @@ def _test_interventions(
                     labels=test.y.astype(int),
                     instance_ids=None,
                 )
-                max_budget = max(int(b) for b in budgets)
-                maxK = int(min(max_budget, batch.C_pred.shape[1]))
-                config_max = InterventionConfig(
-                    max_concepts_per_instance=maxK,
-                    random_state=settings.seed,
-                    score_threshold=settings.intervention_threshold,
-                    intervention_noise_rate=1.0 - human_acc,
-                )
-                proposal_max = strategy.propose(cbm, batch, config_max)
-                mask_max = proposal_max.mask
-
                 C_before = batch.C_pred
                 y_prob_before = fe.predict_proba((C_before >= 0.5).astype(int))
+                if cache_all_concepts and cache_only:
+                    mask_max = np.ones_like(C_before, dtype=bool)
+                else:
+                    max_budget = max(int(b) for b in budgets)
+                    maxK = int(min(max_budget, batch.C_pred.shape[1]))
+                    config_max = InterventionConfig(
+                        max_concepts_per_instance=maxK,
+                        random_state=settings.seed,
+                        score_threshold=settings.intervention_threshold,
+                        intervention_noise_rate=1.0 - human_acc,
+                    )
+                    proposal_max = strategy.propose(cbm, batch, config_max)
+                    mask_max = proposal_max.mask
 
                 C_true_llm = np.full_like(C_before, np.nan, dtype=float)
 
@@ -946,9 +950,14 @@ def _test_interventions(
                                     continue
                     return d
 
-                def _flush_cache(d):
-                    with open(cache_path, "w", encoding="utf-8") as f:
-                        for i0, votes_idx in d.items():
+                def _append_cache_rows(row_ids):
+                    if not row_ids:
+                        return
+                    with open(cache_path, "a", encoding="utf-8") as f:
+                        for i0 in sorted(row_ids):
+                            votes_idx = _intervention_cache.get(i0)
+                            if votes_idx is None:
+                                continue
                             f.write(
                                 json.dumps(
                                     {
@@ -967,8 +976,9 @@ def _test_interventions(
                 tasks = []
                 total_pairs = 0
                 missing_pairs = 0
+                all_idxs = np.arange(C_before.shape[1], dtype=int)
                 for i in range(C_before.shape[0]):
-                    idxs = np.where(mask_max[i])[0]
+                    idxs = all_idxs if cache_all_concepts else np.where(mask_max[i])[0]
                     if idxs.size == 0:
                         continue
                     total_pairs += int(idxs.size)
@@ -986,8 +996,9 @@ def _test_interventions(
 
                 cached_pairs = total_pairs - missing_pairs
                 logger.info(
-                    "LLM intervention selection: total=%d, from_cache=%d, "
+                    "LLM %sselection: total=%d, from_cache=%d, "
                     "to_query=%d, images_needing_llm=%d",
+                    "exhaustive " if cache_all_concepts else "intervention ",
                     total_pairs,
                     cached_pairs,
                     missing_pairs,
@@ -1014,6 +1025,7 @@ def _test_interventions(
                     workers = 1
 
                 def _apply_llm_votes(chunk, votes_list):
+                    changed_rows = set()
                     for (i_idx, _pth, names, idxs), votes in zip(chunk, votes_list):
                         if i_idx not in _intervention_cache:
                             _intervention_cache[i_idx] = {}
@@ -1023,7 +1035,8 @@ def _test_interventions(
                                 v = 1 if votes[name] else 0
                                 C_true_llm[i_idx, j] = float(v)
                                 _intervention_cache[i_idx][j] = v
-
+                                changed_rows.add(i_idx)
+                    return changed_rows
                 def _run_llm_chunk(batch_idx, chunk):
                     image_paths = [p for (_i, p, _n, _j) in chunk]
                     per_image_names = [names for (_i, _p, names, _idxs) in chunk]
@@ -1047,10 +1060,10 @@ def _test_interventions(
                     for batch_idx, s in enumerate(range(0, len(tasks), bs), start=1):
                         chunk = tasks[s : s + bs]
                         _, chunk_done, votes_list = _run_llm_chunk(batch_idx, chunk)
-                        _apply_llm_votes(chunk_done, votes_list)
-                        _flush_cache(_intervention_cache)
+                        changed_rows = _apply_llm_votes(chunk_done, votes_list)
+                        _append_cache_rows(changed_rows)
                         logger.debug(
-                            "LLM batch %d/%d complete; cache flushed.",
+                            "LLM batch %d/%d complete; cache rows appended.",
                             batch_idx,
                             n_batches,
                         )
@@ -1093,10 +1106,10 @@ def _test_interventions(
                                         other.cancel()
                                     raise
 
-                                _apply_llm_votes(chunk_done, votes_list)
-                                _flush_cache(_intervention_cache)
+                                changed_rows = _apply_llm_votes(chunk_done, votes_list)
+                                _append_cache_rows(changed_rows)
                                 logger.debug(
-                                    "LLM batch %d/%d complete; cache flushed.",
+                                    "LLM batch %d/%d complete; cache rows appended.",
                                     batch_idx,
                                     n_batches,
                                 )
@@ -1105,12 +1118,18 @@ def _test_interventions(
                 if n_batches > 0:
                     logger.info("LLM all %d batches complete.", n_batches)
                 if cache_only:
-                    logger.info(
-                        "LLM cache-only mode complete for threshold=%.3f, budget=%d; "
-                        "skipping intervention scoring.",
-                        settings.intervention_threshold,
-                        budget,
-                    )
+                    if cache_all_concepts:
+                        logger.info(
+                            "LLM exhaustive cache-only mode complete; "
+                            "skipping intervention scoring."
+                        )
+                    else:
+                        logger.info(
+                            "LLM cache-only mode complete for threshold=%.3f, budget=%d; "
+                            "skipping intervention scoring.",
+                            settings.intervention_threshold,
+                            budget,
+                        )
                     return [budget], human_acc, {}
 
                 # rank concepts per instance by single-bit flip effect (reuse for budgets < K)
@@ -1411,7 +1430,8 @@ def prefill_automated_intervention_caches(
         )
     )
     max_budget = max(int(b) for b in budgets)
-    thresholds = list(config.intervention_thresholds)
+    cache_all_concepts = bool(config.llm_cache_all_concepts)
+    thresholds = [0.0] if cache_all_concepts else list(config.intervention_thresholds)
     summary: dict[str, int] = {}
 
     for regime in automated_regimes:
@@ -2200,6 +2220,7 @@ def _parse_args(argv=None):
     parser.add_argument("--llm-model", type=str, default=None)
     parser.add_argument("--llm-reasoning-effort", type=str, default=None)
     parser.add_argument("--llm-cache-only", action="store_true")
+    parser.add_argument("--llm-cache-all-concepts", action="store_true")
     parser.add_argument("--llm-workers", type=int, default=None)
     parser.add_argument("--llm-batch-size", type=int, default=None)
     parser.add_argument("--llm-batch-sleep", type=float, default=None)
@@ -2271,6 +2292,8 @@ def main(argv=None):
         config.llm_reasoning_effort = args.llm_reasoning_effort
     if args.llm_cache_only:
         config.llm_cache_only = True
+    if args.llm_cache_all_concepts:
+        config.llm_cache_all_concepts = True
     if args.llm_workers is not None:
         config.llm_workers = args.llm_workers
     if args.llm_batch_size is not None:

@@ -529,6 +529,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     llm_batch_sleep: float = -1.0
     llm_workers: int = 0
     llm_cache_only: bool = False
+    llm_cache_all_concepts: bool = False
     llm_api_key: str = ""
     llm_api_key_env: str = "GEMINI_API_KEY"
     force_retrain: bool = False  # force retrain LFCBM/subjective models
@@ -844,6 +845,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 "llm_batch_sleep",
                 "llm_workers",
                 "llm_cache_only",
+                "llm_cache_all_concepts",
                 "cbm_family",
                 "cem_emb_size",
                 "cem_training_intervention_prob",
@@ -898,6 +900,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             "llm_batch_sleep",
             "llm_workers",
             "llm_cache_only",
+            "llm_cache_all_concepts",
         ):
             d.pop(k, None)
         # Exclude data_type-irrelevant fields
