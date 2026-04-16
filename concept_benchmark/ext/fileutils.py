@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import logging
 from pathlib import Path
 import dill
@@ -54,8 +55,31 @@ def load(path):
     if not f.is_file():
         raise OSError(f"file: {f} not found")
 
-    with open(f, "rb") as infile:
-        file_contents = dill.load(infile)
+    try:
+        with open(f, "rb") as infile:
+            file_contents = dill.load(infile)
+    except RuntimeError as e:
+        if "Attempting to deserialize object on a CUDA device" not in str(e):
+            raise
+
+        import torch
+
+        logger.warning("Retrying CPU fallback load for CUDA-serialized artifact: %s", f)
+        original = torch.storage._load_from_bytes
+
+        def _cpu_load_from_bytes(blob):
+            return torch.load(
+                io.BytesIO(blob),
+                map_location=torch.device("cpu"),
+                weights_only=False,
+            )
+
+        torch.storage._load_from_bytes = _cpu_load_from_bytes
+        try:
+            with open(f, "rb") as infile:
+                file_contents = dill.load(infile)
+        finally:
+            torch.storage._load_from_bytes = original
 
     if "data" not in file_contents:
         raise ValueError(f"contents of {f} is missing a field called `data`")

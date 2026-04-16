@@ -11,6 +11,7 @@ Usage:
 
 from __future__ import annotations
 
+import concurrent.futures as cf
 import copy
 import logging
 import platform
@@ -88,6 +89,83 @@ class FEOnProbs(FrontEndModel):
 
 def _selected_cbm_key(config: RobotBenchmarkConfig) -> str:
     return str(getattr(config, "cbm_family", "cbm"))
+
+
+AUTOMATED_REGIME_SPECS = {
+    "llm": {
+        "config_attr": "llm_concepts_file",
+        "default_filename": "llm.jsonl",
+    },
+    "clip": {
+        "config_attr": "clip_concepts_file",
+        "default_filename": "clip.jsonl",
+    },
+    "placeholder3": {
+        "config_attr": "placeholder3_concepts_file",
+        "default_filename": None,
+    },
+}
+AUTOMATED_REGIMES = frozenset(AUTOMATED_REGIME_SPECS)
+
+
+def _resolve_automated_regime_concepts_file(
+    config: RobotBenchmarkConfig, regime: str
+) -> Path:
+    """Resolve the concept-description file for an automated regime."""
+    from concept_benchmark.paths import package_dir
+
+    spec = AUTOMATED_REGIME_SPECS.get(regime)
+    if spec is None:
+        raise ValueError(f"Unknown automated regime: {regime!r}")
+
+    concepts_file = str(getattr(config, spec["config_attr"], "") or "").strip()
+    if not concepts_file:
+        default_filename = spec["default_filename"]
+        if default_filename is None:
+            raise ValueError(
+                f"Regime {regime!r} requires config.{spec['config_attr']} to point "
+                "to a concepts JSONL file."
+            )
+        concepts_file = str(package_dir / "concept_descriptions" / default_filename)
+
+    path = Path(concepts_file)
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve()
+    if not path.exists():
+        if spec["default_filename"] is None:
+            raise ValueError(
+                f"Regime {regime!r} concepts file does not exist: {path}"
+            )
+        raise FileNotFoundError(f"concepts file not found: {path}")
+    return path
+
+
+def _automated_intervention_llm_settings(config: RobotBenchmarkConfig) -> dict[str, Any]:
+    """Return the LLM config passed to automated intervention judgments."""
+    provider = str(config.llm_provider).strip().lower()
+    auto_batch_size = 4 if provider in {
+        "codex",
+        "codex_exec",
+        "claude_exec",
+    } else 100
+    batch_size = int(config.llm_batch_size) if int(config.llm_batch_size) > 0 else auto_batch_size
+    batch_sleep = (
+        float(config.llm_batch_sleep)
+        if float(config.llm_batch_sleep) >= 0.0
+        else (0.0 if provider in {"codex", "codex_exec", "claude_exec"} else 5.0)
+    )
+    workers = int(config.llm_workers) if int(config.llm_workers) > 0 else 1
+    return {
+        "provider": config.llm_provider,
+        "model": config.llm_model,
+        "reasoning_effort": config.llm_reasoning_effort,
+        "api_key": config.llm_api_key,
+        "api_key_env": config.llm_api_key_env,
+        "batch_size": batch_size,
+        "batch_sleep": batch_sleep,
+        "workers": workers,
+        "cache_all_concepts": bool(config.llm_cache_all_concepts),
+    }
 
 
 # Lazy import to avoid circular deps — intervention modules
@@ -543,6 +621,8 @@ def _test_interventions(
     test,
     concept_names=None,
     model=None,
+    *,
+    cache_only: bool = False,
 ):
     """Run interventions for each budget and return results dict.
 
@@ -645,40 +725,45 @@ def _test_interventions(
 
         if settings.intervention_expert.lower() == "llm":
             # ── Inline LLM path (matching original robot_concept_regimes.py) ──
-            try:
-                from google.api_core.exceptions import ResourceExhausted
-            except ImportError:
-                ResourceExhausted = None
-
-            from experiments.llm_client import make_llm_client
+            from experiments.llm_client import (
+                is_local_exec_provider,
+                is_retryable_llm_error,
+                make_llm_client,
+            )
 
             llm_cfg = settings.intervention_llm or {}
             provider = str(llm_cfg.get("provider", "gemini"))
-            model_name = str(llm_cfg.get("model", "gemini-2.5-flash-lite"))
+            model_name = str(llm_cfg.get("model", "gemini-3-flash-preview"))
             api_key_env = str(llm_cfg.get("api_key_env", "GEMINI_API_KEY"))
 
             import os
 
             api_key = str(llm_cfg.get("api_key", "")) or os.environ.get(api_key_env, "")
-            if not api_key:
+            if not api_key and not is_local_exec_provider(provider):
                 raise SystemExit(
                     f"missing API key: set llm_api_key in config or {api_key_env} in env"
                 )
 
-            client = make_llm_client(provider, model_name, api_key)
+            reasoning_effort = str(llm_cfg.get("reasoning_effort", "") or "")
+            cache_all_concepts = bool(llm_cfg.get("cache_all_concepts") or False)
+            client = make_llm_client(
+                provider,
+                model_name,
+                api_key,
+                reasoning_effort=reasoning_effort,
+            )
 
             def _llm_call_with_retry(fn, *, max_retries=5, backoff=30.0, label="LLM"):
-                """Call *fn* and retry on ResourceExhausted with exponential back-off."""
+                """Call *fn* and retry on transient provider failures."""
                 for attempt in range(1, max_retries + 1):
                     try:
                         return fn()
                     except Exception as e:
-                        if ResourceExhausted is not None and isinstance(
-                            e, ResourceExhausted
-                        ):
+                        if is_retryable_llm_error(provider, e):
                             logger.warning(
-                                "%s ResourceExhausted attempt %d/%d: %s",
+                                "%s transient %s attempt %d/%d: %s",
                                 label,
+                                e.__class__.__name__,
                                 attempt,
                                 max_retries,
                                 e,
@@ -817,19 +902,21 @@ def _test_interventions(
                     labels=test.y.astype(int),
                     instance_ids=None,
                 )
-                max_budget = max(int(b) for b in budgets)
-                maxK = int(min(max_budget, batch.C_pred.shape[1]))
-                config_max = InterventionConfig(
-                    max_concepts_per_instance=maxK,
-                    random_state=settings.seed,
-                    score_threshold=settings.intervention_threshold,
-                    intervention_noise_rate=1.0 - human_acc,
-                )
-                proposal_max = strategy.propose(cbm, batch, config_max)
-                mask_max = proposal_max.mask
-
                 C_before = batch.C_pred
                 y_prob_before = fe.predict_proba((C_before >= 0.5).astype(int))
+                if cache_all_concepts and cache_only:
+                    mask_max = np.ones_like(C_before, dtype=bool)
+                else:
+                    max_budget = max(int(b) for b in budgets)
+                    maxK = int(min(max_budget, batch.C_pred.shape[1]))
+                    config_max = InterventionConfig(
+                        max_concepts_per_instance=maxK,
+                        random_state=settings.seed,
+                        score_threshold=settings.intervention_threshold,
+                        intervention_noise_rate=1.0 - human_acc,
+                    )
+                    proposal_max = strategy.propose(cbm, batch, config_max)
+                    mask_max = proposal_max.mask
 
                 C_true_llm = np.full_like(C_before, np.nan, dtype=float)
 
@@ -874,9 +961,14 @@ def _test_interventions(
                                     continue
                     return d
 
-                def _flush_cache(d):
-                    with open(cache_path, "w", encoding="utf-8") as f:
-                        for i0, votes_idx in d.items():
+                def _append_cache_rows(row_ids):
+                    if not row_ids:
+                        return
+                    with open(cache_path, "a", encoding="utf-8") as f:
+                        for i0 in sorted(row_ids):
+                            votes_idx = _intervention_cache.get(i0)
+                            if votes_idx is None:
+                                continue
                             f.write(
                                 json.dumps(
                                     {
@@ -895,8 +987,9 @@ def _test_interventions(
                 tasks = []
                 total_pairs = 0
                 missing_pairs = 0
+                all_idxs = np.arange(C_before.shape[1], dtype=int)
                 for i in range(C_before.shape[0]):
-                    idxs = np.where(mask_max[i])[0]
+                    idxs = all_idxs if cache_all_concepts else np.where(mask_max[i])[0]
                     if idxs.size == 0:
                         continue
                     total_pairs += int(idxs.size)
@@ -914,8 +1007,9 @@ def _test_interventions(
 
                 cached_pairs = total_pairs - missing_pairs
                 logger.info(
-                    "LLM intervention selection: total=%d, from_cache=%d, "
+                    "LLM %sselection: total=%d, from_cache=%d, "
                     "to_query=%d, images_needing_llm=%d",
+                    "exhaustive " if cache_all_concepts else "intervention ",
                     total_pairs,
                     cached_pairs,
                     missing_pairs,
@@ -937,26 +1031,12 @@ def _test_interventions(
                 retry_backoff = float(llm_cfg.get("retry_backoff") or 30.0)
                 max_retries = int(llm_cfg.get("max_retries") or 5)
                 sleep_time = float(llm_cfg.get("batch_sleep") or 5.0)
+                workers = int(llm_cfg.get("workers") or 1)
+                if workers < 1:
+                    workers = 1
 
-                for batch_idx, s in enumerate(range(0, len(tasks), bs), start=1):
-                    chunk = tasks[s : s + bs]
-                    image_paths = [p for (_i, p, _n, _j) in chunk]
-                    per_image_names = [names for (_i, _p, names, _idxs) in chunk]
-
-                    votes_list = _llm_call_with_retry(
-                        lambda: _llm_judge_batch(image_paths, per_image_names),
-                        max_retries=max_retries,
-                        backoff=retry_backoff,
-                        label=f"LLM batch {batch_idx}/{n_batches}",
-                    )
-                    logger.debug(
-                        "LLM batch %d/%d ok; sleeping %.1fs to respect rate limits",
-                        batch_idx,
-                        n_batches,
-                        sleep_time,
-                    )
-                    time.sleep(sleep_time)
-
+                def _apply_llm_votes(chunk, votes_list):
+                    changed_rows = set()
                     for (i_idx, _pth, names, idxs), votes in zip(chunk, votes_list):
                         if i_idx not in _intervention_cache:
                             _intervention_cache[i_idx] = {}
@@ -966,14 +1046,102 @@ def _test_interventions(
                                 v = 1 if votes[name] else 0
                                 C_true_llm[i_idx, j] = float(v)
                                 _intervention_cache[i_idx][j] = v
-
-                    _flush_cache(_intervention_cache)
-                    logger.debug(
-                        "LLM batch %d/%d complete; cache flushed.", batch_idx, n_batches
+                                changed_rows.add(i_idx)
+                    return changed_rows
+                def _run_llm_chunk(batch_idx, chunk):
+                    image_paths = [p for (_i, p, _n, _j) in chunk]
+                    per_image_names = [names for (_i, _p, names, _idxs) in chunk]
+                    votes_list = _llm_call_with_retry(
+                        lambda: _llm_judge_batch(image_paths, per_image_names),
+                        max_retries=max_retries,
+                        backoff=retry_backoff,
+                        label=f"LLM batch {batch_idx}/{n_batches}",
                     )
+                    if sleep_time > 0.0:
+                        logger.debug(
+                            "LLM batch %d/%d ok; sleeping %.1fs to respect rate limits",
+                            batch_idx,
+                            n_batches,
+                            sleep_time,
+                        )
+                        time.sleep(sleep_time)
+                    return batch_idx, chunk, votes_list
+
+                if workers == 1:
+                    for batch_idx, s in enumerate(range(0, len(tasks), bs), start=1):
+                        chunk = tasks[s : s + bs]
+                        _, chunk_done, votes_list = _run_llm_chunk(batch_idx, chunk)
+                        changed_rows = _apply_llm_votes(chunk_done, votes_list)
+                        _append_cache_rows(changed_rows)
+                        logger.debug(
+                            "LLM batch %d/%d complete; cache rows appended.",
+                            batch_idx,
+                            n_batches,
+                        )
+                else:
+                    logger.info(
+                        "LLM using %d concurrent worker(s) across %d batches.",
+                        workers,
+                        n_batches,
+                    )
+                    batch_cursor = enumerate(range(0, len(tasks), bs), start=1)
+                    pending: dict[cf.Future, int] = {}
+
+                    def _submit_next(executor: cf.ThreadPoolExecutor) -> bool:
+                        try:
+                            batch_idx, s = next(batch_cursor)
+                        except StopIteration:
+                            return False
+                        chunk = tasks[s : s + bs]
+                        fut = executor.submit(_run_llm_chunk, batch_idx, chunk)
+                        pending[fut] = batch_idx
+                        return True
+
+                    with cf.ThreadPoolExecutor(max_workers=workers) as executor:
+                        for _ in range(min(workers, n_batches)):
+                            _submit_next(executor)
+
+                        while pending:
+                            done, _ = cf.wait(
+                                pending,
+                                return_when=cf.FIRST_COMPLETED,
+                            )
+                            for fut in done:
+                                batch_idx = pending.pop(fut)
+                                chunk_done = None
+                                votes_list = None
+                                try:
+                                    _, chunk_done, votes_list = fut.result()
+                                except Exception:
+                                    for other in pending:
+                                        other.cancel()
+                                    raise
+
+                                changed_rows = _apply_llm_votes(chunk_done, votes_list)
+                                _append_cache_rows(changed_rows)
+                                logger.debug(
+                                    "LLM batch %d/%d complete; cache rows appended.",
+                                    batch_idx,
+                                    n_batches,
+                                )
+                                _submit_next(executor)
 
                 if n_batches > 0:
                     logger.info("LLM all %d batches complete.", n_batches)
+                if cache_only:
+                    if cache_all_concepts:
+                        logger.info(
+                            "LLM exhaustive cache-only mode complete; "
+                            "skipping intervention scoring."
+                        )
+                    else:
+                        logger.info(
+                            "LLM cache-only mode complete for threshold=%.3f, budget=%d; "
+                            "skipping intervention scoring.",
+                            settings.intervention_threshold,
+                            budget,
+                        )
+                    return [budget], human_acc, {}
 
                 # rank concepts per instance by single-bit flip effect (reuse for budgets < K)
                 order = [np.array([], dtype=int)] * C_before.shape[0]
@@ -1127,43 +1295,19 @@ def _test_interventions(
     return budgets, human_acc, intervention_results
 
 
-# ── LLM/CLIP regime helper ────────────────────────────────────────────
+# ── Automated regime helper ───────────────────────────────────────────
 
 
-def _run_llm_regime(config, regime, model, data, budgets, thresholds):
-    """Run LLM or CLIP intervention regime.
-
-    Trains LFCBM on the regime's concept descriptions, then calls
-    ``_test_interventions`` with ``intervention_expert="llm"`` and
-    ``FEOnProbs(lf.classifier)`` as the frontend. Matches the original
-    ``automated_detection`` regime from ``robot_concept_regimes.py``.
-    """
-    from pathlib import Path
+def _prepare_automated_regime_backend(config, regime, data):
+    """Load or train the automated regime backend and return test-time inputs."""
 
     _ensure_intervention_imports()
     from experiments.lfcbm import LabelFreeCBM, LFConceptSet, LFTrainingConfig
 
-    # Load concept descriptions for this regime
-    from concept_benchmark.paths import package_dir
-
-    if regime == "llm":
-        concepts_file = config.llm_concepts_file
-        if not concepts_file:
-            concepts_file = str(package_dir / "concept_descriptions" / "llm.jsonl")
-    else:  # clip
-        concepts_file = config.clip_concepts_file
-        if not concepts_file:
-            concepts_file = str(package_dir / "concept_descriptions" / "clip.jsonl")
-
-    p_cf = Path(concepts_file)
-    if not p_cf.is_absolute():
-        p_cf = (Path.cwd() / p_cf).resolve()
-    if not p_cf.exists():
-        raise FileNotFoundError(f"concepts file not found: {p_cf}")
-
-    concept_set = LFConceptSet.from_file(str(p_cf))
+    concepts_path = _resolve_automated_regime_concepts_file(config, regime)
+    concept_set = LFConceptSet.from_file(str(concepts_path))
     if not getattr(concept_set, "texts", None):
-        raise ValueError(f"concepts file parsed empty: {p_cf}")
+        raise ValueError(f"concepts file parsed empty: {concepts_path}")
 
     # Train LFCBM on this regime's concepts (or load cached)
     device_str = str(determine_device())
@@ -1212,6 +1356,19 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
     # Compute acc_det using continuous probs (matching original)
     y_pred_det = fe.predict_proba(P_te)
     acc_det = float((y_pred_det.argmax(1) == data.test.y.astype(int)).mean())
+    return {
+        "concept_names": list(concept_set.keys),
+        "prob_test": P_te,
+        "fe": fe,
+        "acc_det": acc_det,
+    }
+
+
+def _run_automated_regime(config, regime, model, data, budgets, thresholds):
+    """Run an automated intervention regime backed by LFCBM + LLM judgments."""
+
+    del model
+    backend = _prepare_automated_regime_backend(config, regime, data)
 
     # Matching original: human_annotation_accuracy = 0.8
     ia_val = config.expert_intervention_accuracy
@@ -1235,23 +1392,17 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
             intervention_threshold=t,
             intervention_strategy=config.intervention_strategy,
             intervention_expert="llm",
-            intervention_llm={
-                "provider": config.llm_provider,
-                "model": config.llm_model,
-                "api_key": config.llm_api_key,
-                "api_key_env": config.llm_api_key_env,
-                "batch_size": 100,
-            },
+            intervention_llm=_automated_intervention_llm_settings(config),
             run_dir=str(results_dir),
         )
 
         _, _, r = _test_interventions(
-            prob_test=P_te,
+            prob_test=backend["prob_test"],
             settings=isettings,
-            acc_det=acc_det,
-            fe=fe,
+            acc_det=backend["acc_det"],
+            fe=backend["fe"],
             test=data.test,
-            concept_names=list(concept_set.keys),
+            concept_names=backend["concept_names"],
         )
         df = (
             pd.DataFrame(r)
@@ -1264,6 +1415,61 @@ def _run_llm_regime(config, regime, model, data, budgets, thresholds):
     regime_df = pd.concat(all_dfs, axis=0).reset_index(drop=True)
     regime_df["regime"] = regime
     return regime_df
+
+
+def prefill_automated_intervention_caches(
+    config: RobotBenchmarkConfig,
+    data=None,
+) -> dict[str, int]:
+    """Populate JSONL caches for automated regimes without scoring interventions."""
+    if data is None:
+        data = load(config.get_dataset_path())
+
+    automated_regimes = [
+        regime for regime in config.intervention_regimes if regime in AUTOMATED_REGIMES
+    ]
+    if not automated_regimes:
+        raise ValueError(
+            "llm_cache_only requires at least one automated regime "
+            f"from {sorted(AUTOMATED_REGIMES)}."
+        )
+
+    budgets = sorted(
+        set(
+            [0]
+            + [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
+        )
+    )
+    max_budget = max(int(b) for b in budgets)
+    cache_all_concepts = bool(config.llm_cache_all_concepts)
+    thresholds = [0.0] if cache_all_concepts else list(config.intervention_thresholds)
+    summary: dict[str, int] = {}
+
+    for regime in automated_regimes:
+        backend = _prepare_automated_regime_backend(config, regime, data)
+        for t in thresholds:
+            isettings = InterventionSettings(
+                seed=config.seed,
+                budgets=[max_budget],
+                intervention_accuracy=config.expert_intervention_accuracy,
+                intervention_threshold=t,
+                intervention_strategy=config.intervention_strategy,
+                intervention_expert="llm",
+                intervention_llm=_automated_intervention_llm_settings(config),
+                run_dir=str(results_dir),
+            )
+            _test_interventions(
+                prob_test=backend["prob_test"],
+                settings=isettings,
+                acc_det=backend["acc_det"],
+                fe=backend["fe"],
+                test=data.test,
+                concept_names=backend["concept_names"],
+                cache_only=True,
+            )
+            summary[f"{regime}@{t}"] = max_budget
+
+    return summary
 
 
 # ── Regime dispatch ───────────────────────────────────────────────────
@@ -1310,9 +1516,8 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
             concept_detector=None, label_predictor=fe_machine
         )
         human_acc = config.expert_intervention_accuracy
-    elif regime in ("llm", "clip"):
-        # LLM/CLIP regimes use separate concept files for corrections
-        return _run_llm_regime(config, regime, model, data, budgets, thresholds)
+    elif regime in AUTOMATED_REGIMES:
+        return _run_automated_regime(config, regime, model, data, budgets, thresholds)
     else:
         raise ValueError(f"Unknown regime: {regime!r}")
 
@@ -1394,6 +1599,15 @@ def run_interventions(
 
     if data is None:
         data = load(config.get_dataset_path())
+
+    if config.llm_cache_only:
+        summary = prefill_automated_intervention_caches(config, data=data)
+        logger.info(
+            "Automated intervention cache-only mode complete for %d threshold/regime pair(s).",
+            len(summary),
+        )
+        return pd.DataFrame()
+
     if model is None:
         model = load(config.get_model_path(_selected_cbm_key(config)))
 
@@ -2006,10 +2220,45 @@ def _parse_args(argv=None):
         "--regimes",
         nargs="+",
         default=None,
-        help="Intervention regimes (e.g. baseline expert subjective machine).",
+        help=(
+            "Intervention regimes (e.g. baseline expert subjective machine "
+            "llm clip placeholder3)."
+        ),
     )
     parser.add_argument(
         "--strategy", type=str, default=None, choices=["up_to_k", "exactly_k"]
+    )
+    parser.add_argument("--llm-provider", type=str, default=None)
+    parser.add_argument("--llm-model", type=str, default=None)
+    parser.add_argument("--llm-reasoning-effort", type=str, default=None)
+    parser.add_argument("--llm-cache-only", action="store_true")
+    parser.add_argument("--llm-cache-all-concepts", action="store_true")
+    parser.add_argument("--llm-workers", type=int, default=None)
+    parser.add_argument("--llm-batch-size", type=int, default=None)
+    parser.add_argument("--llm-batch-sleep", type=float, default=None)
+    parser.add_argument(
+        "--llm-api-key-env",
+        type=str,
+        default=None,
+        help="Environment variable name that stores the LLM API key.",
+    )
+    parser.add_argument(
+        "--llm-concepts-file",
+        type=str,
+        default=None,
+        help="Concept descriptions JSONL for the llm automated regime.",
+    )
+    parser.add_argument(
+        "--clip-concepts-file",
+        type=str,
+        default=None,
+        help="Concept descriptions JSONL for the clip automated regime.",
+    )
+    parser.add_argument(
+        "--placeholder3-concepts-file",
+        type=str,
+        default=None,
+        help="Concept descriptions JSONL for the placeholder3 automated regime.",
     )
     parser.add_argument("--llm-api-key", type=str, default=None)
     parser.add_argument("--force-retrain", action="store_true", dest="force_retrain")
@@ -2047,6 +2296,30 @@ def main(argv=None):
         config.intervention_regimes = args.regimes
     if args.strategy:
         config.intervention_strategy = args.strategy
+    if args.llm_provider:
+        config.llm_provider = args.llm_provider
+    if args.llm_model:
+        config.llm_model = args.llm_model
+    if args.llm_reasoning_effort:
+        config.llm_reasoning_effort = args.llm_reasoning_effort
+    if args.llm_cache_only:
+        config.llm_cache_only = True
+    if args.llm_cache_all_concepts:
+        config.llm_cache_all_concepts = True
+    if args.llm_workers is not None:
+        config.llm_workers = args.llm_workers
+    if args.llm_batch_size is not None:
+        config.llm_batch_size = args.llm_batch_size
+    if args.llm_batch_sleep is not None:
+        config.llm_batch_sleep = args.llm_batch_sleep
+    if args.llm_api_key_env:
+        config.llm_api_key_env = args.llm_api_key_env
+    if args.llm_concepts_file:
+        config.llm_concepts_file = args.llm_concepts_file
+    if args.clip_concepts_file:
+        config.clip_concepts_file = args.clip_concepts_file
+    if args.placeholder3_concepts_file:
+        config.placeholder3_concepts_file = args.placeholder3_concepts_file
     if args.llm_api_key:
         config.llm_api_key = args.llm_api_key
     if args.force_retrain:

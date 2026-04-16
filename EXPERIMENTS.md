@@ -33,7 +33,7 @@ python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
     --stages intervene collect
 ```
 
-LLM and CLIP regimes require a Gemini API key:
+LLM and CLIP regimes use the existing API-backed providers. By default this is Gemini:
 
 ```bash
 python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
@@ -41,6 +41,27 @@ python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
     --strategy exactly_k --budgets 1 2 3 4 5 \
     --stages intervene collect \
     --llm-api-key $GEMINI_API_KEY
+```
+
+You can also switch the intervention judgments to local CLI loops instead of API calls:
+
+```bash
+python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
+    --regimes llm clip \
+    --strategy exactly_k --budgets 1 2 3 4 5 \
+    --stages intervene collect \
+    --llm-provider codex_exec
+```
+
+An additional experimental automated regime slot is available for resubmittal work:
+
+```bash
+python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
+    --regimes placeholder3 \
+    --strategy exactly_k --budgets 1 2 3 4 5 \
+    --stages intervene collect \
+    --placeholder3-concepts-file path/to/placeholder3.jsonl \
+    --llm-provider claude_exec
 ```
 
 ## Sudoku Benchmark

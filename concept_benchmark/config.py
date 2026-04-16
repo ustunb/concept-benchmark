@@ -140,7 +140,7 @@ _PROBCBM_FINGERPRINT_FIELDS = frozenset(
     }
 )
 ROBOT_VALID_REGIMES = frozenset(
-    {"baseline", "expert", "subjective", "machine", "llm", "clip"}
+    {"baseline", "expert", "subjective", "machine", "llm", "clip", "placeholder3"}
 )
 ROBOT_TEXT_VALID_REGIMES = frozenset({"baseline", "expert", "subjective", "machine"})
 
@@ -270,8 +270,15 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     label_free_concepts_file: str = field(default="", metadata={"scope": "image"})
     llm_concepts_file: str = field(default="", metadata={"scope": "image"})
     clip_concepts_file: str = field(default="", metadata={"scope": "image"})
+    placeholder3_concepts_file: str = field(default="", metadata={"scope": "image"})
     llm_provider: str = "gemini"
     llm_model: str = "gemini-3-flash-preview"
+    llm_reasoning_effort: str = ""
+    llm_batch_size: int = 0
+    llm_batch_sleep: float = -1.0
+    llm_workers: int = 0
+    llm_cache_only: bool = False
+    llm_cache_all_concepts: bool = False
     llm_api_key: str = ""
     llm_api_key_env: str = "GEMINI_API_KEY"
     force_retrain: bool = False  # force retrain LFCBM/subjective models
@@ -493,8 +500,15 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 "label_free_concepts_file",
                 "llm_concepts_file",
                 "clip_concepts_file",
+                "placeholder3_concepts_file",
                 "llm_provider",
                 "llm_model",
+                "llm_reasoning_effort",
+                "llm_batch_size",
+                "llm_batch_sleep",
+                "llm_workers",
+                "llm_cache_only",
+                "llm_cache_all_concepts",
                 "cbm_family",
                 "cem_emb_size",
                 "cem_training_intervention_prob",
@@ -539,8 +553,15 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             "label_free_concepts_file",
             "llm_concepts_file",
             "clip_concepts_file",
+            "placeholder3_concepts_file",
             "llm_provider",
             "llm_model",
+            "llm_reasoning_effort",
+            "llm_batch_size",
+            "llm_batch_sleep",
+            "llm_workers",
+            "llm_cache_only",
+            "llm_cache_all_concepts",
         ):
             d.pop(k, None)
         # Exclude data_type-irrelevant fields
