@@ -1085,8 +1085,8 @@ def _parse_args(argv=None):
         "--cbm-family",
         type=str,
         default=None,
-        choices=["cbm", "cem", "probcbm"],
-        help="Concept-model family to train/evaluate (tabular support only for cem/probcbm).",
+        choices=["cbm", "cem", "probcbm", "ecbm"],
+        help="Concept-model family to train/evaluate.",
     )
     parser.add_argument("--handwriting", action="store_true", default=None)
     parser.add_argument("--no-handwriting", action="store_true")
