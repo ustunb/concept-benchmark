@@ -30,7 +30,7 @@ from concept_benchmark.utils import (
 )
 from concept_benchmark.config import SudokuBenchmarkConfig
 from concept_benchmark.ext.fileutils import load, save
-from experiments.cem_integration import train_cem_model, train_probcbm_model
+from experiments.cem_integration import train_cem_model, train_ecbm_model, train_probcbm_model
 from experiments.models import (
     ConceptBasedModel,
     ConceptDetector,
@@ -104,7 +104,7 @@ def train_cs(
     model_key = _selected_cs_key(config)
     if model_key != "cs":
         loader_config = get_loader_config()
-        trainer_fn = train_cem_model if model_key == "cem" else train_probcbm_model
+        trainer_fn = {"cem": train_cem_model, "probcbm": train_probcbm_model, "ecbm": train_ecbm_model}[model_key]
         model = trainer_fn(
             train_dataset=data.train,
             valid_dataset=data.validation,

@@ -563,7 +563,17 @@ class LabelFreeCBM:
     def transform(self, X: Sequence[str | Path]) -> np.ndarray:
         if self.Wc is None:
             raise RuntimeError("Wc not learned. Call fit() first.")
-        img = self._get_encoder().encode_images(X, self.cfg.batch_size)  # (N, D)
+        # Cache CLIP embeddings keyed by (length, first_path, last_path) so
+        # repeated calls with the same image list skip the expensive encode.
+        _x_list = list(X)
+        cache_key = (len(_x_list), str(_x_list[0]), str(_x_list[-1])) if _x_list else (0,)
+        if not hasattr(self, "_clip_embed_cache"):
+            self._clip_embed_cache: dict[tuple, np.ndarray] = {}
+        if cache_key in self._clip_embed_cache:
+            img = self._clip_embed_cache[cache_key]
+        else:
+            img = self._get_encoder().encode_images(X, self.cfg.batch_size)  # (N, D)
+            self._clip_embed_cache[cache_key] = img
         Wk = self.Wc.detach().cpu().numpy()  # (Mk, D)
         fc = img @ Wk.T  # (N, Mk)
         return fc.astype(np.float32)

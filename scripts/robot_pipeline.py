@@ -1533,11 +1533,6 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
     else:
         raise ValueError(f"Unknown regime: {regime!r}")
 
-    if _selected_cbm_key(config) != "cbm" and regime not in {"baseline", "expert"}:
-        raise NotImplementedError(
-            f"Regime {regime!r} is currently only supported for cbm_family='cbm'."
-        )
-
     if c_preds is None:
         c_preds = regime_model.concept_detector.predict_proba(data.test)
     # For machine regime (FEOnProbs), pass continuous probs directly;
