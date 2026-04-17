@@ -40,7 +40,9 @@ from concept_benchmark.generators import DatasetGenerator
 from concept_benchmark.ext.fileutils import load, save
 from experiments.cem_integration import (
     CEMDependencyError,
+    compute_ecbm_interpretation_summary,
     train_cem_model,
+    train_ecbm_model,
     train_probcbm_model,
 )
 from experiments.models import (
@@ -302,7 +304,7 @@ def train_cbm(
     return cbm
 
 
-def _train_official_cem_family(
+def _train_wrapped_cbm_family(
     config: RobotBenchmarkConfig,
     *,
     family: str,
@@ -317,7 +319,11 @@ def _train_official_cem_family(
         data = load(config.get_dataset_path())
 
     loader_config = get_loader_config()
-    trainer_fn = train_cem_model if family == "cem" else train_probcbm_model
+    trainer_fn = {
+        "cem": train_cem_model,
+        "probcbm": train_probcbm_model,
+        "ecbm": train_ecbm_model,
+    }[family]
     model = trainer_fn(
         train_dataset=data.train,
         valid_dataset=data.validation,
@@ -1726,6 +1732,17 @@ def collect_results(
             continue
         cbm = load(cbm_path)
         cbm_acc = float((cbm.predict(data.test) == data.test.y).mean())
+        if model_key == "ecbm":
+            interpretation_summary = compute_ecbm_interpretation_summary(cbm, data.test)
+            interpretation_path = cfg.get_interpretation_path(model_key)
+            interpretation_path.parent.mkdir(parents=True, exist_ok=True)
+            interpretation_path.write_text(
+                json.dumps(interpretation_summary, indent=2, sort_keys=True)
+            )
+            pd.DataFrame(interpretation_summary["rows"]).to_csv(
+                interpretation_path.with_suffix(".csv"),
+                index=False,
+            )
         gain_ref = dnn_accuracy if dnn_accuracy is not None else cbm_acc
         rows.append(
             {
@@ -1964,8 +1981,8 @@ def run(
                     missing_fraction=missing_fraction,
                     missing_mechanism=missing_mechanism,
                 )
-            elif selected_key in {"cem", "probcbm"}:
-                _train_official_cem_family(config, family=selected_key, save_key=selected_key)
+            elif selected_key in {"cem", "probcbm", "ecbm"}:
+                _train_wrapped_cbm_family(config, family=selected_key, save_key=selected_key)
             else:
                 raise ValueError(f"Unsupported cbm_family: {selected_key!r}")
             _write_model_fingerprint(selected_key)
@@ -2185,7 +2202,7 @@ def _parse_args(argv=None):
     )
     parser.add_argument(
         "--cbm-family",
-        choices=["cbm", "cem", "probcbm"],
+        choices=["cbm", "cem", "probcbm", "ecbm"],
         default=None,
         help="Concept-model family to train/evaluate (default: config or cbm).",
     )

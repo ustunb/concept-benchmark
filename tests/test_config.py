@@ -63,6 +63,10 @@ class TestRobotConfigValidation:
         cfg = RobotBenchmarkConfig(cbm_family="cem")
         assert cfg.cbm_family == "cem"
 
+    def test_accepts_ecbm_family(self):
+        cfg = RobotBenchmarkConfig(cbm_family="ecbm")
+        assert cfg.cbm_family == "ecbm"
+
     def test_rejects_bad_cbm_family(self):
         with pytest.raises(ValueError, match="cbm_family must be one of"):
             RobotBenchmarkConfig(cbm_family="bogus")
@@ -202,6 +206,10 @@ class TestSudokuConfigValidation:
         cfg = SudokuBenchmarkConfig(cbm_family="probcbm")
         assert cfg.cbm_family == "probcbm"
 
+    def test_rejects_ecbm_family(self):
+        with pytest.raises(ValueError, match="cbm_family must be one of"):
+            SudokuBenchmarkConfig(cbm_family="ecbm")
+
 
 class TestRobotTextConfigValidation:
     def test_text_config_is_valid(self):
@@ -220,6 +228,10 @@ class TestRobotTextConfigValidation:
     def test_rejects_bad_strategy(self):
         with pytest.raises(ValueError, match="intervention_strategy must be one of"):
             RobotBenchmarkConfig(data_type="text", intervention_strategy="random")
+
+    def test_rejects_ecbm_for_text(self):
+        with pytest.raises(ValueError, match="only supported for robot image data"):
+            RobotBenchmarkConfig(data_type="text", cbm_family="ecbm")
 
     def test_text_uses_same_concepts_as_image(self):
         from concept_benchmark.config import ROBOT_CONCEPTS
@@ -338,7 +350,7 @@ class TestModelFingerprintScope:
         assert base.model_fingerprint("cbm") == changed.model_fingerprint("cbm")
         assert base.get_model_path("cbm") == changed.get_model_path("cbm")
 
-    def test_robot_dnn_fingerprint_ignores_cem_probcbm_knobs(self):
+    def test_robot_dnn_fingerprint_ignores_wrapped_family_knobs(self):
         base = RobotBenchmarkConfig()
         changed = RobotBenchmarkConfig(
             cbm_family="probcbm",
@@ -346,6 +358,8 @@ class TestModelFingerprintScope:
             cem_training_intervention_prob=0.1,
             probcbm_hidden_dim=32,
             probcbm_latent_dim=16,
+            ecbm_hid_size=128,
+            ecbm_inference_steps=10,
         )
         assert base.model_fingerprint("dnn") == changed.model_fingerprint("dnn")
         assert base.get_model_path("dnn") == changed.get_model_path("dnn")
@@ -354,15 +368,23 @@ class TestModelFingerprintScope:
         base = RobotBenchmarkConfig()
         cem_changed = RobotBenchmarkConfig(cem_emb_size=64)
         prob_changed = RobotBenchmarkConfig(probcbm_hidden_dim=32)
+        ecbm_changed = RobotBenchmarkConfig(ecbm_hid_size=128)
 
         assert base.model_fingerprint("cem") != cem_changed.model_fingerprint("cem")
         assert base.model_fingerprint("probcbm") == cem_changed.model_fingerprint(
             "probcbm"
         )
+        assert base.model_fingerprint("ecbm") == cem_changed.model_fingerprint("ecbm")
         assert base.model_fingerprint("probcbm") != prob_changed.model_fingerprint(
             "probcbm"
         )
         assert base.model_fingerprint("cem") == prob_changed.model_fingerprint("cem")
+        assert base.model_fingerprint("ecbm") == prob_changed.model_fingerprint("ecbm")
+        assert base.model_fingerprint("ecbm") != ecbm_changed.model_fingerprint("ecbm")
+        assert base.model_fingerprint("cem") == ecbm_changed.model_fingerprint("cem")
+        assert base.model_fingerprint("probcbm") == ecbm_changed.model_fingerprint(
+            "probcbm"
+        )
 
     def test_sudoku_dnn_fingerprint_ignores_cem_probcbm_knobs(self):
         base = SudokuBenchmarkConfig()
