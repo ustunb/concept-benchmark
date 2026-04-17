@@ -119,7 +119,9 @@ IMAGE_SIZE_TO_PIXELS = {
 MISSING_PROPORTION = 0.2
 
 VALID_STRATEGIES = frozenset({"up_to_k", "exactly_k"})
-VALID_CBM_FAMILIES = frozenset({"cbm", "cem", "probcbm"})
+VALID_ROBOT_CBM_FAMILIES = frozenset({"cbm", "cem", "probcbm", "ecbm"})
+VALID_SUDOKU_CBM_FAMILIES = frozenset({"cbm", "cem", "probcbm"})
+VALID_CBM_FAMILIES = VALID_ROBOT_CBM_FAMILIES
 _CEM_FINGERPRINT_FIELDS = frozenset(
     {
         "cem_emb_size",
@@ -137,6 +139,19 @@ _PROBCBM_FINGERPRINT_FIELDS = frozenset(
         "probcbm_n_samples_inference",
         "probcbm_intervention_prob",
         "probcbm_max_epochs",
+    }
+)
+_ECBM_FINGERPRINT_FIELDS = frozenset(
+    {
+        "ecbm_emb_size",
+        "ecbm_hid_size",
+        "ecbm_lambda_xy",
+        "ecbm_lambda_xc",
+        "ecbm_lambda_cy",
+        "ecbm_weight_decay",
+        "ecbm_inference_steps",
+        "ecbm_inference_lr",
+        "ecbm_max_epochs",
     }
 )
 ROBOT_VALID_REGIMES = frozenset(
@@ -252,6 +267,15 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     probcbm_n_samples_inference: int = 1
     probcbm_intervention_prob: float = 0.25
     probcbm_max_epochs: int | None = None
+    ecbm_emb_size: int = 8
+    ecbm_hid_size: int = 64
+    ecbm_lambda_xy: float = 1.0
+    ecbm_lambda_xc: float = 1.0
+    ecbm_lambda_cy: float = 1.0
+    ecbm_weight_decay: float = 1e-4
+    ecbm_inference_steps: int = 25
+    ecbm_inference_lr: float = 0.1
+    ecbm_max_epochs: int | None = None
 
     # Intervention
     intervention_budgets: list[int] = field(default_factory=lambda: [1, 3])
@@ -357,9 +381,9 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 f"got {self.concept_preset!r}"
             )
         self.label_formula.validate_against(self.concepts)
-        if self.cbm_family not in VALID_CBM_FAMILIES:
+        if self.cbm_family not in VALID_ROBOT_CBM_FAMILIES:
             raise ValueError(
-                f"cbm_family must be one of {sorted(VALID_CBM_FAMILIES)}, "
+                f"cbm_family must be one of {sorted(VALID_ROBOT_CBM_FAMILIES)}, "
                 f"got {self.cbm_family!r}"
             )
 
@@ -374,6 +398,10 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 f"intervention_strategy must be one of {sorted(VALID_STRATEGIES)}, "
                 f"got {self.intervention_strategy!r}"
             )
+        if self.ecbm_inference_steps < 1:
+            raise ValueError("ecbm_inference_steps must be positive")
+        if self.ecbm_inference_lr <= 0.0:
+            raise ValueError("ecbm_inference_lr must be positive")
 
     def _validate_image(self):
         """Validate image-specific parameters."""
@@ -391,6 +419,8 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
 
     def _validate_text(self):
         """Validate text-specific parameters."""
+        if self.cbm_family == "ecbm":
+            raise ValueError("cbm_family='ecbm' is only supported for robot image data")
         if self.template_complexity not in ("high", "medium", "low"):
             raise ValueError(
                 f"template_complexity must be 'high', 'medium', or 'low', "
@@ -575,13 +605,20 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         if model_class is not None:
             d.pop("cbm_family", None)
             if model_class in {"cbm", "cbm_subjective", "lfcbm", "dnn"}:
-                for k in _CEM_FINGERPRINT_FIELDS | _PROBCBM_FINGERPRINT_FIELDS:
+                for k in (
+                    _CEM_FINGERPRINT_FIELDS
+                    | _PROBCBM_FINGERPRINT_FIELDS
+                    | _ECBM_FINGERPRINT_FIELDS
+                ):
                     d.pop(k, None)
             elif model_class == "cem":
-                for k in _PROBCBM_FINGERPRINT_FIELDS:
+                for k in _PROBCBM_FINGERPRINT_FIELDS | _ECBM_FINGERPRINT_FIELDS:
                     d.pop(k, None)
             elif model_class == "probcbm":
-                for k in _CEM_FINGERPRINT_FIELDS:
+                for k in _CEM_FINGERPRINT_FIELDS | _ECBM_FINGERPRINT_FIELDS:
+                    d.pop(k, None)
+            elif model_class == "ecbm":
+                for k in _CEM_FINGERPRINT_FIELDS | _PROBCBM_FINGERPRINT_FIELDS:
                     d.pop(k, None)
         return _dict_sha256(d)
 
@@ -610,9 +647,22 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         if self.data_type == "text":
             return results_dir / f"robot_text_{model_class}_seed{self.seed}_results.csv"
         filename = f"robot_{self.data_type}_{self._labeling_tag}"
-        if model_class in {"cbm", "cem", "probcbm"}:
+        if model_class in {"cbm", "cem", "probcbm", "ecbm"}:
             filename += self._preset_suffix
         filename += f"_{model_class}_results.csv"
+        return results_dir / filename
+
+    def get_interpretation_path(self, model_class: str = "ecbm") -> Path:
+        """Return the path where probabilistic interpretation JSON is saved."""
+        if self.data_type == "text":
+            return (
+                results_dir
+                / f"robot_text_{model_class}_seed{self.seed}_interpretation.json"
+            )
+        filename = (
+            f"robot_{self.data_type}_{self._labeling_tag}"
+            f"{self._preset_suffix}_{model_class}_interpretation.json"
+        )
         return results_dir / filename
 
     def get_alignment_constraints(self) -> dict[str, int]:
@@ -721,9 +771,9 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
             raise ValueError(
                 f"font_style must be 'handwritten' or 'printed', got {self.font_style!r}"
             )
-        if self.cbm_family not in VALID_CBM_FAMILIES:
+        if self.cbm_family not in VALID_SUDOKU_CBM_FAMILIES:
             raise ValueError(
-                f"cbm_family must be one of {sorted(VALID_CBM_FAMILIES)}, "
+                f"cbm_family must be one of {sorted(VALID_SUDOKU_CBM_FAMILIES)}, "
                 f"got {self.cbm_family!r}"
             )
         if self.seed < 0:

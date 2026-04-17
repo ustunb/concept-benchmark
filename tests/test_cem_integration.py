@@ -12,11 +12,14 @@ from concept_benchmark.ext.fileutils import load as load_object, save as save_ob
 from experiments.cem_integration import (
     CEMDependencyError,
     CEMSampleAdapterDataset,
+    ECBMBenchmarkModel,
     _OfficialBenchmarkModelBase,
     _PredictionCache,
     _ensure_local_cem_checkout_on_path,
+    compute_ecbm_interpretation_summary,
     require_cem_dependencies,
     train_cem_model,
+    train_ecbm_model,
     train_probcbm_model,
 )
 
@@ -53,6 +56,15 @@ class _TinyCEMConfig:
     probcbm_n_samples_inference: int = 1
     probcbm_intervention_prob: float = 0.25
     probcbm_max_epochs: int | None = 1
+    ecbm_emb_size: int = 4
+    ecbm_hid_size: int = 16
+    ecbm_lambda_xy: float = 1.0
+    ecbm_lambda_xc: float = 1.0
+    ecbm_lambda_cy: float = 1.0
+    ecbm_weight_decay: float = 1e-4
+    ecbm_inference_steps: int = 5
+    ecbm_inference_lr: float = 0.1
+    ecbm_max_epochs: int | None = 2
 
 
 def _toy_dataset_sample(n: int, k: int) -> ConceptDatasetSample:
@@ -330,6 +342,52 @@ def test_probcbm_wrapper_smoke_train_and_predict(tmp_path):
     )
 
     path = tmp_path / "probcbm.model"
+    save_object(model, path, overwrite=True)
+    loaded = load_object(path)
+    loaded_y_prob, loaded_c_prob = loaded.predict_proba(ds.test, return_concepts=True)
+    assert loaded_y_prob.shape == y_prob.shape
+    assert loaded_c_prob.shape == c_prob.shape
+
+
+def test_ecbm_wrapper_smoke_train_predict_replay_and_interpret(tmp_path):
+    ds = _tiny_tabular_dataset(seed=23)
+    model = train_ecbm_model(
+        train_dataset=ds.train,
+        valid_dataset=ds.validation,
+        benchmark="robot",
+        config=_TinyCEMConfig(),
+        device="cpu",
+        num_workers=0,
+        pin_memory=False,
+    )
+
+    assert isinstance(model, ECBMBenchmarkModel)
+
+    preds = model.predict(ds.test)
+    y_prob, c_prob = model.predict_proba(ds.test, return_concepts=True)
+
+    assert preds.shape == (ds.test.n,)
+    assert y_prob.shape == (ds.test.n, ds.test.n_classes)
+    assert c_prob.shape == (ds.test.n, ds.test.n_concepts)
+
+    replayed = model.predict_proba_from_concepts(c_prob)
+    np.testing.assert_allclose(replayed, y_prob, atol=1e-6, rtol=1e-6)
+
+    binary_c = (c_prob > 0.5).astype(np.float32)
+    changed_mask = ~np.isclose(binary_c, c_prob, atol=1e-6, rtol=1e-6)
+    intervened = model.predict_proba_from_concepts(
+        binary_c,
+        baseline_concepts=c_prob,
+        intervention_mask=changed_mask,
+    )
+    assert intervened.shape == (ds.test.n, ds.test.n_classes)
+
+    summary = compute_ecbm_interpretation_summary(model, ds.test, top_k=3)
+    assert summary["family"] == "ecbm"
+    assert len(summary["rows"]) == ds.test.n_concepts * ds.test.n_classes
+    assert set(summary["top_concepts_by_class"]) == set(ds.test.classes)
+
+    path = tmp_path / "ecbm.model"
     save_object(model, path, overwrite=True)
     loaded = load_object(path)
     loaded_y_prob, loaded_c_prob = loaded.predict_proba(ds.test, return_concepts=True)
