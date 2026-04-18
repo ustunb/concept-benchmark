@@ -7,7 +7,7 @@ import csv
 import json
 import logging
 import pickle
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Sequence
 from typing import Any
@@ -23,6 +23,15 @@ logger = logging.getLogger(__name__)
 _EPS = 1e-8
 
 
+def _best_available_device() -> torch.device:
+    """Return the best accelerator device available (cuda > mps > cpu)."""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 # --------- Configs and concept set handling ---------
 
 
@@ -31,7 +40,7 @@ class LFTrainingConfig:
     # CLIP backbone
     clip_model: str = "ViT-B-32"
     clip_pretrained: str = "laion2b_s34b_b79k"
-    device: str = "cpu"
+    device: str = field(default_factory=lambda: str(_best_available_device()))
 
     # Projection learning (Wc)
     lr: float = 1e-2
@@ -173,6 +182,7 @@ class _CLIPEncoder:
 
     def _init_model(self) -> None:
         self.device = torch.device(self._device_str)
+        logger.info("Loading CLIP model %s on device: %s", self.model_name, self.device)
         self.backend = "open_clip"
         try:
             import open_clip  # type: ignore
@@ -215,7 +225,8 @@ class _CLIPEncoder:
     def __setstate__(self, state):
         self.model_name = state["model_name"]
         self.pretrained = state["pretrained"]
-        self._device_str = state["_device_str"]
+        # Override pickled device with best available device
+        self._device_str = str(_best_available_device())
         self._loaded = False
 
     @torch.no_grad()
@@ -385,10 +396,16 @@ class LabelFreeCBM:
 
     def _get_encoder(self) -> _CLIPEncoder:
         if self.encoder is None:
+            device = str(_best_available_device())
+            if device != self.cfg.device:
+                logger.warning(
+                    "LFCBM config has device=%s but %s is available — using %s for CLIP",
+                    self.cfg.device, device, device,
+                )
             self.encoder = _CLIPEncoder(
                 self.cfg.clip_model,
                 self.cfg.clip_pretrained,
-                self.cfg.device,
+                device,
             )
         return self.encoder
 
