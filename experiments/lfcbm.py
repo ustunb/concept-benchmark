@@ -291,11 +291,18 @@ class _CLIPEncoder:
 
         ds = _ImgDS(paths, self.preprocess)
         dl = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=0)
+        n_batches = len(dl)
+        logger.info(
+            "CLIP encode_images: %d images, batch_size=%d, %d batches, device=%s",
+            len(paths), batch_size, n_batches, self.device,
+        )
         all_feats: list[np.ndarray] = []
-        for xb in dl:
+        for batch_idx, xb in enumerate(dl, 1):
             xb = xb.to(self.device)
             feats = self._encode_image(xb)
             all_feats.append(feats)
+            if batch_idx % 5 == 0 or batch_idx == n_batches:
+                print(f"CLIP encode_images: batch {batch_idx}/{n_batches} done", flush=True)
         x = np.concatenate(all_feats, axis=0)
         x /= np.linalg.norm(x, axis=1, keepdims=True) + _EPS
         return x.astype(np.float32)

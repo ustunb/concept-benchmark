@@ -75,18 +75,35 @@ class FEOnProbs(FrontEndModel):
 
     Applies logit transform before predict_proba, matching how the
     LFCBM classifier was trained (on z-scored, then logit-transformed features).
+
+    Exposes effective LR weights that fold the logit transform into the
+    coefficients so KFlip can use the vectorized fast path.
     """
 
-    _kflip_fast_path = False  # class-level: fast path skips our logit transform
+    _kflip_fast_path = True
 
     def __init__(self, clf):
+        from types import SimpleNamespace
+
         super().__init__()
-        self.model = clf
+        self._clf = clf
+
+        # Precompute effective weights: logit(binary) is affine in Z
+        _eps = 1e-6
+        lo = np.log(_eps / (1.0 - _eps))
+        hi = np.log((1.0 - _eps) / _eps)
+        scale = hi - lo
+        coef = np.asarray(clf.coef_)
+        intercept = np.asarray(clf.intercept_)
+        self.model = SimpleNamespace(
+            coef_=coef * scale,
+            intercept_=lo * coef.sum(axis=1) + intercept,
+        )
 
     def predict_proba(self, P: np.ndarray) -> np.ndarray:
         P = np.clip(P, 1e-6, 1 - 1e-6)
         Z = np.log(P / (1.0 - P))
-        return self.model.predict_proba(Z)
+        return self._clf.predict_proba(Z)
 
 
 def _selected_cbm_key(config: RobotBenchmarkConfig) -> str:
@@ -107,6 +124,17 @@ AUTOMATED_REGIME_SPECS = {
         "default_filename": None,
     },
 }
+
+# Machine uses the same LFCBM infrastructure but with human (not LLM)
+# interventions, so it's kept separate from AUTOMATED_REGIME_SPECS to
+# avoid unnecessary LLM cache prefills.
+_LFCBM_REGIME_SPECS = {
+    "machine": {
+        "config_attr": "label_free_concepts_file",
+        "default_filename": None,  # resolved dynamically based on concept_preset
+    },
+    **AUTOMATED_REGIME_SPECS,
+}
 AUTOMATED_REGIMES = frozenset(AUTOMATED_REGIME_SPECS)
 
 
@@ -116,7 +144,7 @@ def _resolve_automated_regime_concepts_file(
     """Resolve the concept-description file for an automated regime."""
     from concept_benchmark.paths import package_dir
 
-    spec = AUTOMATED_REGIME_SPECS.get(regime)
+    spec = _LFCBM_REGIME_SPECS.get(regime)
     if spec is None:
         raise ValueError(f"Unknown automated regime: {regime!r}")
 
@@ -124,10 +152,15 @@ def _resolve_automated_regime_concepts_file(
     if not concepts_file:
         default_filename = spec["default_filename"]
         if default_filename is None:
-            raise ValueError(
-                f"Regime {regime!r} requires config.{spec['config_attr']} to point "
-                "to a concepts JSONL file."
-            )
+            # Machine regime: resolve dynamically like train_lfcbm()
+            if regime == "machine":
+                suffix = "_subconcept" if config.concept_preset == "foot_subtypes" else ""
+                default_filename = f"gt_concepts{suffix}.jsonl"
+            else:
+                raise ValueError(
+                    f"Regime {regime!r} requires config.{spec['config_attr']} to point "
+                    "to a concepts JSONL file."
+                )
         concepts_file = str(package_dir / "concept_descriptions" / default_filename)
 
     path = Path(concepts_file)
@@ -397,14 +430,17 @@ def _apply_concept_noise_grouped(C, concept_names, concept_spec, rate, rng):
     return C_out
 
 
-def _clone_sample_with_C(sample, C_new):
-    """Clone a dataset sample with replaced concept matrix."""
+def _clone_sample_with_C(sample, C_new, concept_names=None):
+    """Clone a dataset sample with replaced concept matrix (and optionally concept names)."""
+    meta = dict(sample.meta)
+    if concept_names is not None:
+        meta["concepts"] = list(concept_names)
     return sample.__class__(
         parent=sample.parent,
         X=sample.X,
         C=C_new.astype(np.float32),
         y=sample.y,
-        meta=sample.meta,
+        meta=meta,
         transform=sample.transform,
         concept_transform=sample.concept_transform,
         target_transform=sample.target_transform,
@@ -461,6 +497,44 @@ def train_cbm_subjective(
     cbm = train_cbm(config, data=noisy_data, save_key=None)
     save(cbm, config.get_model_path("cbm_subjective"), overwrite=True)
     return cbm
+
+
+def _train_family_subjective(
+    config: RobotBenchmarkConfig,
+    family: str,
+    data=None,
+):
+    """Train a non-CBM family (CEM/ProbCBM/ECBM) on noisy concept labels."""
+    if data is None:
+        data = load(config.get_dataset_path())
+    noisy_data = copy.deepcopy(data)
+
+    rng = np.random.default_rng(config.seed + 555)
+    concept_names = list(noisy_data.train.concepts)
+    concept_spec = config.concepts
+
+    noisy_data.train = _clone_sample_with_C(
+        noisy_data.train,
+        _apply_concept_noise_grouped(
+            noisy_data.train.C, concept_names, concept_spec,
+            config.subjective_noise_rate, rng,
+        ),
+    )
+    if hasattr(noisy_data, "validation") and noisy_data.validation is not None:
+        noisy_data.validation = _clone_sample_with_C(
+            noisy_data.validation,
+            _apply_concept_noise_grouped(
+                noisy_data.validation.C, concept_names, concept_spec,
+                config.subjective_noise_rate, rng,
+            ),
+        )
+
+    model = _train_wrapped_cbm_family(
+        config, family=family, data=noisy_data, save_key=None,
+    )
+    save_key = f"{family}_subjective"
+    save(model, config.get_model_path(save_key), overwrite=True)
+    return model
 
 
 def train_lfcbm(
@@ -698,7 +772,9 @@ def _test_interventions(
     llm_cache = None
     _intervention_cache = None
 
-    for budget in budgets:
+    print(f"Starting interventions: budgets={budgets}, strategy={settings.intervention_strategy}, expert={settings.intervention_expert}", flush=True)
+    for b_idx, budget in enumerate(budgets, 1):
+        print(f"Budget {b_idx}/{len(budgets)} (k={budget})...", flush=True)
         if int(budget) <= 0:
             key = f"top_{budget}_human_acc_{int(human_acc * 100)}"
             n_samples = prob_test.shape[0]
@@ -1311,8 +1387,27 @@ def _test_interventions(
 
 def _prepare_automated_regime_backend(config, regime, data):
     """Load or train the automated regime backend and return test-time inputs."""
+    lf = _load_or_train_regime_lfcbm(config, regime, data)
 
-    _ensure_intervention_imports()
+    image_dir = data_dir / "robot_images"
+    test_paths = [str(image_dir / p) for p in data.test.X]
+    print(f"Computing concept_proba for {len(test_paths)} test images (regime={regime})...", flush=True)
+    P_te = lf.concept_proba(test_paths)
+    print(f"concept_proba done, shape={P_te.shape}", flush=True)
+
+    fe = FEOnProbs(lf.classifier)
+    y_pred_det = fe.predict_proba(P_te)
+    acc_det = float((y_pred_det.argmax(1) == data.test.y.astype(int)).mean())
+    return {
+        "concept_names": list(lf.concept_set.keys),
+        "prob_test": P_te,
+        "fe": fe,
+        "acc_det": acc_det,
+    }
+
+
+def _load_or_train_regime_lfcbm(config, regime, data):
+    """Load or train the LFCBM for an automated regime. Returns the LabelFreeCBM object."""
     from experiments.lfcbm import LabelFreeCBM, LFConceptSet, LFTrainingConfig
 
     concepts_path = _resolve_automated_regime_concepts_file(config, regime)
@@ -1320,59 +1415,128 @@ def _prepare_automated_regime_backend(config, regime, data):
     if not getattr(concept_set, "texts", None):
         raise ValueError(f"concepts file parsed empty: {concepts_path}")
 
-    # Train LFCBM on this regime's concepts (or load cached)
-    device_str = str(determine_device())
     lfcbm_key = f"lfcbm_{regime}"
     lfcbm_path = config.get_model_path(lfcbm_key)
 
     if lfcbm_path.exists() and not config.force_retrain:
         logger.info("Loading existing LFCBM for %s: %s", regime, lfcbm_path)
-        lf = load(lfcbm_path)
-    else:
-        cfg = LFTrainingConfig(
-            device=device_str,
-            seed=config.seed,
-            cache_dir=config.get_model_path("lfcbm").parent / f"lfcbm_{regime}_cache",
-        )
-        lf = LabelFreeCBM(cfg)
+        return load(lfcbm_path)
 
-        image_dir = data_dir / "robot_images"
-        train_paths = [str(image_dir / p) for p in data.train.X]
-        valid_paths = [str(image_dir / p) for p in data.validation.X]
-
-        stats = lf.fit(
-            train_X=train_paths,
-            train_y=data.train.y.astype(int),
-            valid_X=valid_paths,
-            valid_y=data.validation.y.astype(int),
-            concept_set=concept_set,
-            cache_dir=cfg.cache_dir,
-        )
-        logger.info(
-            "LFCBM (%s) stats: %s/%s concepts kept",
-            regime,
-            stats.get("kept_concepts"),
-            stats.get("total_concepts"),
-        )
-        save(lf, lfcbm_path, overwrite=True)
-
-    # Get concept probabilities from LFCBM
+    device_str = str(determine_device())
+    cfg = LFTrainingConfig(
+        device=device_str,
+        seed=config.seed,
+        cache_dir=config.get_model_path("lfcbm").parent / f"lfcbm_{regime}_cache",
+    )
+    lf = LabelFreeCBM(cfg)
     image_dir = data_dir / "robot_images"
-    test_paths = [str(image_dir / p) for p in data.test.X]
-    P_te = lf.concept_proba(test_paths)
+    train_paths = [str(image_dir / p) for p in data.train.X]
+    valid_paths = [str(image_dir / p) for p in data.validation.X]
+    stats = lf.fit(
+        train_X=train_paths,
+        train_y=data.train.y.astype(int),
+        valid_X=valid_paths,
+        valid_y=data.validation.y.astype(int),
+        concept_set=concept_set,
+        cache_dir=cfg.cache_dir,
+    )
+    logger.info(
+        "LFCBM (%s) stats: %s/%s concepts kept",
+        regime, stats.get("kept_concepts"), stats.get("total_concepts"),
+    )
+    save(lf, lfcbm_path, overwrite=True)
+    return lf
 
-    # Create FEOnProbs frontend (matching original)
-    fe = FEOnProbs(lf.classifier)
 
-    # Compute acc_det using continuous probs (matching original)
-    y_pred_det = fe.predict_proba(P_te)
-    acc_det = float((y_pred_det.argmax(1) == data.test.y.astype(int)).mean())
-    return {
-        "concept_names": list(concept_set.keys),
-        "prob_test": P_te,
-        "fe": fe,
-        "acc_det": acc_det,
-    }
+def _prepare_lfcbm_labeled_data(lf, data):
+    """Create a copy of data with concept labels replaced by LFCBM predictions."""
+    image_dir = data_dir / "robot_images"
+    concept_names = list(lf.concept_set.keys)
+
+    splits = {}
+    for name in ("train", "validation", "test"):
+        sample = getattr(data, name, None)
+        if sample is None:
+            continue
+        paths = [str(image_dir / p) for p in sample.X]
+        print(f"LFCBM concept_proba for {name} ({len(paths)} images)...", flush=True)
+        C_new = (lf.concept_proba(paths) >= 0.5).astype(np.float32)
+        splits[name] = _clone_sample_with_C(sample, C_new, concept_names=concept_names)
+
+    data_lf = copy.deepcopy(data)
+    for name, sample in splits.items():
+        setattr(data_lf, name, sample)
+    return data_lf
+
+
+def _run_automated_regime_with_family(
+    config, regime, family, data, budgets, thresholds
+):
+    """Train a CBM family on LFCBM-derived concept labels and run interventions."""
+    _ensure_intervention_imports()
+
+    lf = _load_or_train_regime_lfcbm(config, regime, data)
+    data_lf = _prepare_lfcbm_labeled_data(lf, data)
+
+    # Train family model on LFCBM-labeled data (or load cached)
+    model_key = f"{family}_{regime}"
+    model_path = config.get_model_path(model_key)
+    if model_path.exists() and not config.force_retrain:
+        logger.info("Loading cached %s for regime %s: %s", family, regime, model_path)
+        regime_model = load(model_path)
+    else:
+        print(f"Training {family} on LFCBM concepts (regime={regime})...", flush=True)
+        regime_model = _train_wrapped_cbm_family(
+            config, family=family, data=data_lf, save_key=None,
+        )
+        save(regime_model, model_path, overwrite=True)
+        print(f"{family} trained and saved to {model_path}", flush=True)
+
+    # Get concept predictions + accuracy
+    c_preds = regime_model.concept_detector.predict_proba(data_lf.test)
+    acc_det = float(
+        (regime_model.predict(data_lf.test) == data_lf.test.y.astype(int)).mean()
+    )
+    print(f"{family}/{regime} acc_det={acc_det:.4f}", flush=True)
+
+    # Run interventions — use regime model's own mechanism
+    # Ground truth for corrections = LFCBM concept labels (data_lf.test.C)
+    supports_aligned = bool(
+        getattr(regime_model, "supports_aligned_concept_replay", False)
+    )
+
+    METRIC_COLS = [
+        "accuracy", "predictions_intervened_on", "predictions_changed",
+        "total_concept_confirmations", "total_concept_edits_made",
+    ]
+    COLS = ["budget", "threshold"] + METRIC_COLS
+    df_lst = []
+    for t in thresholds:
+        isettings = InterventionSettings(
+            seed=config.seed,
+            budgets=budgets,
+            intervention_accuracy=config.expert_intervention_accuracy,
+            intervention_threshold=t,
+            intervention_strategy=config.intervention_strategy,
+        )
+        _, _, r = _test_interventions(
+            prob_test=c_preds,
+            settings=isettings,
+            acc_det=acc_det,
+            fe=regime_model.label_predictor,
+            test=data_lf.test,
+            model=regime_model if supports_aligned else None,
+        )
+        df_lst.append(
+            pd.DataFrame(r).T
+            .assign(budget=budgets)
+            .assign(threshold=t)
+            .reset_index(drop=True)[COLS]
+        )
+
+    regime_df = pd.concat(df_lst, axis=0).reset_index(drop=True)
+    regime_df["regime"] = regime
+    return regime_df
 
 
 def _run_automated_regime(config, regime, model, data, budgets, thresholds):
@@ -1514,9 +1678,17 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
         regime_model = model
         human_acc = config.expert_intervention_accuracy
     elif regime == "subjective":
-        regime_model = load(config.get_model_path("cbm_subjective"))
+        family = _selected_cbm_key(config)
+        subj_key = f"{family}_subjective" if family != "cbm" else "cbm_subjective"
+        regime_model = load(config.get_model_path(subj_key))
         human_acc = config.subjective_intervention_accuracy
     elif regime == "machine":
+        family = _selected_cbm_key(config)
+        if family != "cbm":
+            return _run_automated_regime_with_family(
+                config, regime, family, data, budgets, thresholds,
+            )
+        # CBM path: use LFCBM end-to-end (original behavior)
         lfcbm_bundle = load(config.get_model_path("lfcbm"))
         lfcbm_obj = lfcbm_bundle["lfcbm"]
         fe_machine = lfcbm_bundle["frontend"]
@@ -1529,7 +1701,12 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
         )
         human_acc = config.expert_intervention_accuracy
     elif regime in AUTOMATED_REGIMES:
-        return _run_automated_regime(config, regime, model, data, budgets, thresholds)
+        family = _selected_cbm_key(config)
+        if family == "cbm":
+            return _run_automated_regime(config, regime, model, data, budgets, thresholds)
+        return _run_automated_regime_with_family(
+            config, regime, family, data, budgets, thresholds,
+        )
     else:
         raise ValueError(f"Unknown regime: {regime!r}")
 
@@ -1623,10 +1800,12 @@ def run_interventions(
     thresholds = config.intervention_thresholds
 
     all_dfs = []
-    for regime in config.intervention_regimes:
+    for r_idx, regime in enumerate(config.intervention_regimes, 1):
+        print(f"=== Regime {r_idx}/{len(config.intervention_regimes)}: {regime} (family={_selected_cbm_key(config)}) ===", flush=True)
         try:
             regime_df = _run_regime(config, regime, model, data, budgets, thresholds)
             all_dfs.append(regime_df)
+            print(f"Regime {regime} DONE. Rows: {len(regime_df)}", flush=True)
         except (FileNotFoundError, NotImplementedError) as e:
             logger.warning("Skipping regime %r: %s", regime, e)
 
@@ -2012,14 +2191,23 @@ def run(
                 selected_key,
                 config.get_model_path(selected_key),
             )
-        if selected_key == "cbm" and "subjective" in config.intervention_regimes:
-            if _should_train("cbm_subjective"):
-                train_cbm_subjective(config)
-                _write_model_fingerprint("cbm_subjective")
+        if "subjective" in config.intervention_regimes:
+            subj_key = (
+                f"{selected_key}_subjective"
+                if selected_key != "cbm"
+                else "cbm_subjective"
+            )
+            if _should_train(subj_key):
+                if selected_key == "cbm":
+                    train_cbm_subjective(config)
+                else:
+                    _train_family_subjective(config, selected_key)
+                _write_model_fingerprint(subj_key)
             else:
                 logger.info(
-                    "Using existing subjective CBM: %s",
-                    config.get_model_path("cbm_subjective"),
+                    "Using existing subjective %s: %s",
+                    selected_key,
+                    config.get_model_path(subj_key),
                 )
         if selected_key == "cbm" and "machine" in config.intervention_regimes:
             if _should_train("lfcbm"):
