@@ -137,6 +137,32 @@ _LFCBM_REGIME_SPECS = {
 }
 AUTOMATED_REGIMES = frozenset(AUTOMATED_REGIME_SPECS)
 
+# ── Concept source × intervention source (decoupled axes) ────────────
+CONCEPT_SOURCES = [
+    "ground_truth",       # 7 ideal concepts, human-annotated
+    "human_concepts",     # 12 subconcepts, human-annotated
+    "machine_annotation", # human descriptions, CLIP-labeled
+    "llm_concepts",       # LLM descriptions, CLIP-labeled
+    "clip_concepts",      # CLIP-Dissect keywords, CLIP-labeled
+]
+INTERVENTION_SOURCES = ["perfect", "expert", "llm"]
+
+# Map concept source names to LFCBM regime keys (for auto-discovered sources)
+_CONCEPT_SOURCE_TO_LFCBM = {
+    "machine_annotation": "machine",
+    "llm_concepts": "llm",
+    "clip_concepts": "clip",
+}
+
+# Map old regime names to (concept_source, intervention_source) pairs
+_REGIME_TO_CELL = {
+    "baseline": ("human_concepts", "perfect"),
+    "expert": ("human_concepts", "expert"),
+    "machine": ("machine_annotation", "expert"),
+    "llm": ("llm_concepts", "llm"),
+    "clip": ("clip_concepts", "llm"),
+}
+
 
 def _resolve_automated_regime_concepts_file(
     config: RobotBenchmarkConfig, regime: str
@@ -1539,6 +1565,149 @@ def _run_automated_regime_with_family(
     return regime_df
 
 
+# ── Decoupled concept source × intervention source ───────────────────
+
+
+def _prepare_model_for_concept_source(config, concept_source, family, data):
+    """Load or train the model for a given concept source and architecture.
+
+    Returns (model, c_preds, concept_names, test_data) where test_data.C
+    contains the ground truth concept values for this concept source.
+    """
+    lfcbm_key = _CONCEPT_SOURCE_TO_LFCBM.get(concept_source)
+
+    if lfcbm_key is not None:
+        # Auto-discovered concepts: load LFCBM, get concept labels, train family
+        lf = _load_or_train_regime_lfcbm(config, lfcbm_key, data)
+        data_lf = _prepare_lfcbm_labeled_data(lf, data)
+
+        if family == "cbm":
+            # Use LFCBM end-to-end (FEOnProbs)
+            image_dir = data_dir / "robot_images"
+            test_paths = [str(image_dir / p) for p in data.test.X]
+            c_preds = lf.concept_proba(test_paths)
+            model = ConceptBasedModel(
+                concept_detector=None,
+                label_predictor=FEOnProbs(lf.classifier),
+            )
+            return model, c_preds, list(lf.concept_set.keys), data_lf.test
+        else:
+            # Train family model on LFCBM-labeled data
+            model_key = f"{family}_{lfcbm_key}"
+            model_path = config.get_model_path(model_key)
+            if model_path.exists() and not config.force_retrain:
+                logger.info("Loading cached %s for %s: %s", family, concept_source, model_path)
+                model = load(model_path)
+            else:
+                print(f"Training {family} on {concept_source} concepts...", flush=True)
+                model = _train_wrapped_cbm_family(
+                    config, family=family, data=data_lf, save_key=None,
+                )
+                save(model, model_path, overwrite=True)
+            c_preds = model.concept_detector.predict_proba(data_lf.test)
+            return model, c_preds, list(lf.concept_set.keys), data_lf.test
+    else:
+        # GT concepts: load the baseline model for this family
+        if concept_source == "ground_truth":
+            # Use ideal preset (7 concepts) — need a separate config
+            gt_config = RobotBenchmarkConfig(seed=config.seed)
+            gt_config.rng_seed = getattr(config, "rng_seed", 12345)
+            gt_config.cbm_family = family
+            gt_data = load(gt_config.get_dataset_path())
+            model = load(gt_config.get_model_path(family))
+            c_preds = model.concept_detector.predict_proba(gt_data.test)
+            return model, c_preds, list(gt_data.test.concepts), gt_data.test
+        else:
+            # human_concepts — uses subconcept preset (already in config)
+            model = load(config.get_model_path(family))
+            c_preds = model.concept_detector.predict_proba(data.test)
+            return model, c_preds, list(data.test.concepts), data.test
+
+
+def _run_cell(config, concept_source, intervention_source, family, data,
+              budgets, thresholds):
+    """Run one cell of the concept_source × intervention_source matrix."""
+    _ensure_intervention_imports()
+
+    print(f"=== Cell: {concept_source} × {intervention_source} × {family} ===", flush=True)
+
+    model, c_preds, concept_names, test_data = _prepare_model_for_concept_source(
+        config, concept_source, family, data,
+    )
+
+    # Determine intervention parameters from intervention_source
+    if intervention_source == "perfect":
+        human_acc = 1.0
+        expert_type = ""
+    elif intervention_source == "expert":
+        human_acc = config.expert_intervention_accuracy
+        expert_type = ""
+    elif intervention_source == "llm":
+        human_acc = config.expert_intervention_accuracy
+        expert_type = "llm"
+    else:
+        raise ValueError(f"Unknown intervention_source: {intervention_source!r}")
+
+    # Compute baseline accuracy
+    supports_aligned = bool(
+        getattr(model, "supports_aligned_concept_replay", False)
+    )
+    if family == "cbm" and concept_source in _CONCEPT_SOURCE_TO_LFCBM:
+        # LFCBM path: use continuous probs for accuracy
+        acc_det = float(
+            (np.argmax(model.label_predictor.predict_proba(c_preds), axis=1)
+             == test_data.y.astype(int)).mean()
+        )
+    else:
+        acc_det = float(
+            (model.predict(test_data) == test_data.y.astype(int)).mean()
+        )
+
+    METRIC_COLS = [
+        "accuracy", "predictions_intervened_on", "predictions_changed",
+        "total_concept_confirmations", "total_concept_edits_made",
+    ]
+    COLS = ["budget", "threshold"] + METRIC_COLS
+    df_lst = []
+    for t in thresholds:
+        isettings = InterventionSettings(
+            seed=config.seed,
+            budgets=budgets,
+            intervention_accuracy=human_acc,
+            intervention_threshold=t,
+            intervention_strategy=config.intervention_strategy,
+        )
+        if expert_type == "llm":
+            isettings.intervention_expert = "llm"
+            isettings.intervention_llm = _automated_intervention_llm_settings(config)
+            isettings.run_dir = str(results_dir)
+
+        _, _, r = _test_interventions(
+            prob_test=c_preds,
+            settings=isettings,
+            acc_det=acc_det,
+            fe=model.label_predictor,
+            test=test_data,
+            concept_names=concept_names,
+            model=model if supports_aligned else None,
+            cache_only=bool(
+                expert_type == "llm" and getattr(config, "llm_cache_only", False)
+            ),
+        )
+        df_lst.append(
+            pd.DataFrame(r).T
+            .assign(budget=budgets)
+            .assign(threshold=t)
+            .reset_index(drop=True)[COLS]
+        )
+
+    cell_df = pd.concat(df_lst, axis=0).reset_index(drop=True)
+    cell_df["concept_source"] = concept_source
+    cell_df["intervention_source"] = intervention_source
+    print(f"Cell {concept_source}×{intervention_source}×{family} DONE. Rows: {len(cell_df)}", flush=True)
+    return cell_df
+
+
 def _run_automated_regime(config, regime, model, data, budgets, thresholds):
     """Run an automated intervention regime backed by LFCBM + LLM judgments."""
 
@@ -1767,15 +1936,11 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
 
 def run_interventions(
     config: RobotBenchmarkConfig,
-    model: ConceptBasedModel | None = None,
     data=None,
     missing_fraction: float = 0.0,
     missing_mechanism: str = "none",
 ) -> pd.DataFrame:
-    """Run interventions on the trained CBM and return a results DataFrame.
-
-    Loops over ``config.intervention_regimes`` (default: ``["baseline"]``).
-    """
+    """Run interventions across concept_sources × intervention_sources."""
     set_deterministic_seed(config.seed)
     _ensure_intervention_imports()
     patch_macos_dataloader()
@@ -1784,12 +1949,9 @@ def run_interventions(
     if data is None:
         data = load(config.get_dataset_path())
 
-    # When llm_cache_only is set, skip the prefill path and run normal
-    # evaluation — _test_interventions will read from cache instead of
-    # calling any LLM.
-
-    if model is None:
-        model = load(config.get_model_path(_selected_cbm_key(config)))
+    family = _selected_cbm_key(config)
+    concept_sources = getattr(config, "concept_sources", None) or ["human_concepts"]
+    intervention_sources = getattr(config, "intervention_sources", None) or ["perfect"]
 
     budgets = sorted(
         set(
@@ -1800,28 +1962,30 @@ def run_interventions(
     thresholds = config.intervention_thresholds
 
     all_dfs = []
-    for r_idx, regime in enumerate(config.intervention_regimes, 1):
-        print(f"=== Regime {r_idx}/{len(config.intervention_regimes)}: {regime} (family={_selected_cbm_key(config)}) ===", flush=True)
-        try:
-            regime_df = _run_regime(config, regime, model, data, budgets, thresholds)
-            all_dfs.append(regime_df)
-            print(f"Regime {regime} DONE. Rows: {len(regime_df)}", flush=True)
-        except (FileNotFoundError, NotImplementedError) as e:
-            logger.warning("Skipping regime %r: %s", regime, e)
+    total = len(concept_sources) * len(intervention_sources)
+    idx = 0
+    for cs in concept_sources:
+        for isrc in intervention_sources:
+            idx += 1
+            print(f"[{idx}/{total}] {cs} × {isrc} × {family}", flush=True)
+            try:
+                cell_df = _run_cell(
+                    config, cs, isrc, family, data, budgets, thresholds,
+                )
+                all_dfs.append(cell_df)
+            except (FileNotFoundError, NotImplementedError) as e:
+                logger.warning("Skipping %s × %s: %s", cs, isrc, e)
 
     if not all_dfs:
-        logger.warning("No regimes produced results.")
+        logger.warning("No cells produced results.")
         return pd.DataFrame()
 
     results_df = pd.concat(all_dfs, axis=0).reset_index(drop=True)
-    results_df["data_name"] = (
-        "subconcept" if config.concept_preset == "foot_subtypes" else "ideal"
-    )
-    results_df["model_family"] = _selected_cbm_key(config)
+    results_df["model_family"] = family
     results_df["n"] = data.test.n
     results_df["missing_fraction"] = missing_fraction
     results_df["missing_mechanism"] = missing_mechanism
-    results_df.to_csv(config.get_results_path(_selected_cbm_key(config)), index=False)
+    results_df.to_csv(config.get_results_path(family), index=False)
     return results_df
 
 
@@ -2191,30 +2355,8 @@ def run(
                 selected_key,
                 config.get_model_path(selected_key),
             )
-        if "subjective" in config.intervention_regimes:
-            subj_key = (
-                f"{selected_key}_subjective"
-                if selected_key != "cbm"
-                else "cbm_subjective"
-            )
-            if _should_train(subj_key):
-                if selected_key == "cbm":
-                    train_cbm_subjective(config)
-                else:
-                    _train_family_subjective(config, selected_key)
-                _write_model_fingerprint(subj_key)
-            else:
-                logger.info(
-                    "Using existing subjective %s: %s",
-                    selected_key,
-                    config.get_model_path(subj_key),
-                )
-        if selected_key == "cbm" and "machine" in config.intervention_regimes:
-            if _should_train("lfcbm"):
-                train_lfcbm(config)
-                _write_model_fingerprint("lfcbm")
-            else:
-                logger.info("Using existing LFCBM: %s", config.get_model_path("lfcbm"))
+        # LFCBM and family-on-LFCBM models are trained lazily during
+        # the intervene stage by _prepare_model_for_concept_source().
 
     if "dnn" in stages:
         logger.info("=== [%d/%d] Train DNN ===", _si["dnn"], n_stages)
@@ -2419,13 +2561,18 @@ def _parse_args(argv=None):
         help="Intervention budgets (e.g. 1 3 5 max).",
     )
     parser.add_argument(
-        "--regimes",
+        "--concept-sources",
         nargs="+",
         default=None,
-        help=(
-            "Intervention regimes (e.g. baseline expert subjective machine "
-            "llm clip placeholder3)."
-        ),
+        choices=CONCEPT_SOURCES,
+        help="Concept sources (e.g. human_concepts machine_annotation llm_concepts clip_concepts).",
+    )
+    parser.add_argument(
+        "--intervention-sources",
+        nargs="+",
+        default=None,
+        choices=INTERVENTION_SOURCES,
+        help="Intervention sources (e.g. perfect expert llm).",
     )
     parser.add_argument(
         "--strategy", type=str, default=None, choices=["up_to_k", "exactly_k"]
@@ -2494,8 +2641,10 @@ def main(argv=None):
         config.intervention_budgets = parse_budgets(args.budgets)
     if args.cbm_family:
         config.cbm_family = args.cbm_family
-    if args.regimes:
-        config.intervention_regimes = args.regimes
+    if args.concept_sources:
+        config.concept_sources = args.concept_sources
+    if args.intervention_sources:
+        config.intervention_sources = args.intervention_sources
     if args.strategy:
         config.intervention_strategy = args.strategy
     if args.llm_provider:
