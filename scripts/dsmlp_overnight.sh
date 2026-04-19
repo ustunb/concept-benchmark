@@ -44,12 +44,14 @@ $cmd
 INNEREOF
 
     # Launch pod in background mode and poll for completion
+    source ~/.bashrc 2>/dev/null || true
     source /opt/launch-sh/lib/kubevars.sh 2>/dev/null
-    $LAUNCH -s -g 1 -c 4 -m 32 -b bash "$HOME/dsmlp_run.sh"
+    $LAUNCH -s -g 1 -c 4 -m 32 -b bash "$HOME/dsmlp_run.sh" 2>&1
 
     # Poll until pod completes
     while true; do
         sleep 30
+        source /opt/launch-sh/lib/kubevars.sh 2>/dev/null
         local status
         status=$(kubectl get pods -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "Unknown")
         case "$status" in
