@@ -820,6 +820,60 @@ def _test_interventions(
             }
             continue
 
+        n_concepts = prob_test.shape[1]
+        if int(budget) >= n_concepts:
+            # k=max: intervene on ALL concepts → just replace with ground truth
+            C_gt = test.C.astype(np.float32)
+            C_pred = prob_test.copy()
+            # Apply intervention noise
+            if err_prob > 0:
+                mistake_draw = rng.random(C_gt.shape) < err_prob
+                C_noisy = C_gt.copy()
+                C_noisy[mistake_draw] = 1.0 - C_gt[mistake_draw]
+                C_intervened = C_noisy
+            else:
+                C_intervened = C_gt.copy()
+
+            mask = np.ones_like(C_pred, dtype=bool)
+
+            if supports_aligned and model is not None:
+                y_prob_after = predict_label_proba_from_concepts(
+                    model,
+                    C_intervened,
+                    row_indices=np.arange(C_intervened.shape[0], dtype=int),
+                    baseline_concepts=(C_pred >= 0.5).astype(np.float32),
+                    intervention_mask=mask,
+                )
+            else:
+                C_binary = (C_intervened >= 0.5).astype(int)
+                y_prob_after = fe.predict_proba(C_binary)
+            y_pred_after = np.argmax(y_prob_after, axis=1)
+
+            acc_after = float((y_pred_after == test.y.astype(int)).mean())
+            C_pred_binary = (C_pred >= 0.5).astype(int)
+            C_final_binary = (C_intervened >= 0.5).astype(int)
+            edits = int(np.sum(C_pred_binary != C_final_binary))
+            n_samples = prob_test.shape[0]
+            y_pred_before = np.argmax(fe.predict_proba((C_pred >= 0.5).astype(int)), axis=1) if not supports_aligned else np.argmax(y_prob_after, axis=1)
+
+            key = f"top_{budget}_human_acc_{int(human_acc * 100)}"
+            intervention_results[key] = {
+                "accuracy": acc_after,
+                "accuracy_gain": acc_after - acc_det,
+                "predictions_intervened_on": n_samples,
+                "predictions_changed": int(np.sum(y_pred_after != y_pred_before)),
+                "interventions_rate": 1.0,
+                "intervention_rate": 1.0,
+                "avg_edits_per_intervention": edits / n_samples,
+                "total_concept_checks": n_samples * n_concepts,
+                "total_concept_confirmations": n_samples * n_concepts,
+                "total_concept_edits_made": edits,
+                "concepts_intervened": {},
+                "concepts_edits": {},
+            }
+            print(f"  k=max short-circuit: acc={acc_after:.4f}", flush=True)
+            continue
+
         config = InterventionConfig(
             max_concepts_per_instance=budget,
             random_state=settings.seed,
