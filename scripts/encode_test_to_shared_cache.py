@@ -27,7 +27,7 @@ dest = shared / f"clip_img_{h.hexdigest()[:16]}.npy"
 if dest.exists():
     print(f"Already exists: {dest}")
 else:
-    lf = load("results/robot_image_stochastic_4_subconcept_lfcbm.model")
+    lf = load("results/robot_image_stochastic_4_subconcept_lfcbm_machine.model")
     print(f"Encoding {len(test_paths)} test images...", flush=True)
     img = lf._get_encoder().encode_images(test_paths, lf.cfg.batch_size)
     np.save(dest, img)
