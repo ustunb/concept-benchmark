@@ -1964,6 +1964,7 @@ def run_interventions(
     all_dfs = []
     total = len(concept_sources) * len(intervention_sources)
     idx = 0
+    out_path = config.get_results_path(family)
     for cs in concept_sources:
         for isrc in intervention_sources:
             idx += 1
@@ -1973,6 +1974,14 @@ def run_interventions(
                     config, cs, isrc, family, data, budgets, thresholds,
                 )
                 all_dfs.append(cell_df)
+                # Save incrementally after each cell
+                partial = pd.concat(all_dfs, axis=0).reset_index(drop=True)
+                partial["model_family"] = family
+                partial["n"] = data.test.n
+                partial["missing_fraction"] = missing_fraction
+                partial["missing_mechanism"] = missing_mechanism
+                partial.to_csv(out_path, index=False)
+                print(f"  Saved {len(partial)} rows to {out_path}", flush=True)
             except (FileNotFoundError, NotImplementedError) as e:
                 logger.warning("Skipping %s × %s: %s", cs, isrc, e)
 
