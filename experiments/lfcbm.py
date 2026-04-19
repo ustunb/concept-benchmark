@@ -587,8 +587,10 @@ class LabelFreeCBM:
     def transform(self, X: Sequence[str | Path]) -> np.ndarray:
         if self.Wc is None:
             raise RuntimeError("Wc not learned. Call fit() first.")
-        # Cache CLIP embeddings keyed by (length, first_path, last_path) so
-        # repeated calls with the same image list skip the expensive encode.
+        # Cache CLIP image embeddings to disk so they're shared across
+        # LFCBM instances (different concept sources, same images).
+        import hashlib
+
         _x_list = list(X)
         cache_key = (len(_x_list), str(_x_list[0]), str(_x_list[-1])) if _x_list else (0,)
         if not hasattr(self, "_clip_embed_cache"):
@@ -596,7 +598,30 @@ class LabelFreeCBM:
         if cache_key in self._clip_embed_cache:
             img = self._clip_embed_cache[cache_key]
         else:
-            img = self._get_encoder().encode_images(X, self.cfg.batch_size)  # (N, D)
+            # Check disk cache (shared across regimes)
+            disk_hit = False
+            disk_path = None
+            cache_dir = getattr(self.cfg, "cache_dir", None)
+            if cache_dir is not None:
+                # Use parent dir so all regimes share one image cache
+                shared_dir = Path(cache_dir).parent / "lfcbm_shared_img_cache"
+                shared_dir.mkdir(parents=True, exist_ok=True)
+                h = hashlib.sha1()
+                for p in _x_list:
+                    h.update(str(p).encode("utf-8"))
+                h.update(str(len(_x_list)).encode("utf-8"))
+                disk_path = shared_dir / f"clip_img_{h.hexdigest()[:16]}.npy"
+                if disk_path.exists():
+                    img = np.load(disk_path)
+                    disk_hit = True
+                    logger.info("CLIP image embeddings loaded from disk cache: %s", disk_path.name)
+
+            if not disk_hit:
+                img = self._get_encoder().encode_images(X, self.cfg.batch_size)  # (N, D)
+                if disk_path is not None:
+                    np.save(disk_path, img)
+                    logger.info("CLIP image embeddings saved to disk cache: %s", disk_path.name)
+
             self._clip_embed_cache[cache_key] = img
         Wk = self.Wc.detach().cpu().numpy()  # (Mk, D)
         fc = img @ Wk.T  # (N, Mk)
