@@ -43,41 +43,37 @@ pip install openai -q 2>/dev/null || true
 $cmd
 INNEREOF
 
-    # Launch pod and wait
+    # Launch pod in background mode and poll for completion
     source /opt/launch-sh/lib/kubevars.sh 2>/dev/null
-    $LAUNCH -s -g 1 -c 4 -m 32 -f bash "$HOME/dsmlp_run.sh"
-    local exit_code=$?
+    $LAUNCH -s -g 1 -c 4 -m 32 -b bash "$HOME/dsmlp_run.sh"
 
-    echo "=== POD $label finished at $(date), exit=$exit_code ==="
-    return $exit_code
-}
-
-# Helper: run a CPU-only pod (no GPU needed)
-run_cpu_pod() {
-    local label="$1"
-    shift
-    local cmd="$*"
-
-    echo ""
-    echo "=== CPU POD: $label ==="
-    echo "=== $(date) ==="
-
-    cat > "$HOME/dsmlp_run.sh" << INNEREOF
-#!/bin/bash
-set -e
-source /opt/conda/etc/profile.d/conda.sh
-conda activate $HOME/myenv
-cd $REPO
-git checkout -- .
-git fetch origin && git checkout codex-cem-probcbm-baselines && git pull --ff-only 2>&1
-export PYTHONUNBUFFERED=1
-pip install openai -q 2>/dev/null || true
-$cmd
-INNEREOF
-
-    source /opt/launch-sh/lib/kubevars.sh 2>/dev/null
-    $LAUNCH -s -g 0 -c 4 -m 16 -f bash "$HOME/dsmlp_run.sh"
-    echo "=== CPU POD $label done at $(date) ==="
+    # Poll until pod completes
+    while true; do
+        sleep 30
+        local status
+        status=$(kubectl get pods -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "Unknown")
+        case "$status" in
+            Succeeded)
+                echo "=== POD $label SUCCEEDED at $(date) ==="
+                kubectl logs "$(kubectl get pods -o jsonpath='{.items[0].metadata.name}')" --tail=20 2>/dev/null
+                kubectl delete pod "$(kubectl get pods -o jsonpath='{.items[0].metadata.name}')" 2>/dev/null
+                return 0
+                ;;
+            Failed|Error)
+                echo "=== POD $label FAILED at $(date) ==="
+                kubectl logs "$(kubectl get pods -o jsonpath='{.items[0].metadata.name}')" --tail=20 2>/dev/null
+                kubectl delete pod "$(kubectl get pods -o jsonpath='{.items[0].metadata.name}')" 2>/dev/null
+                return 1
+                ;;
+            Running|Pending)
+                # Still going, print a dot
+                printf "."
+                ;;
+            *)
+                echo "  status=$status"
+                ;;
+        esac
+    done
 }
 
 echo "============================================"
