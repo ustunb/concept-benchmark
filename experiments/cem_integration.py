@@ -912,7 +912,8 @@ class CEMBenchmarkModel(_OfficialBenchmarkModelBase):
             raise RuntimeError("Missing cached CEM embeddings for intervention replay.")
 
         device = self._inference_device()
-        model.to(device)
+        if next(model.parameters()).device != device:
+            model.to(device)
         concept_tensor = torch.as_tensor(concepts, dtype=torch.float32, device=device)
         baseline_tensor = torch.as_tensor(
             baseline_concepts, dtype=torch.float32, device=device
@@ -928,7 +929,6 @@ class CEMBenchmarkModel(_OfficialBenchmarkModelBase):
                 1.0 - concept_tensor.unsqueeze(-1)
             )
             logits = model.c2y_model(torch.flatten(bottleneck, start_dim=1, end_dim=-1))
-        model.cpu()
         return _to_numpy_task_proba(logits, self.n_classes)
 
     def _rebuild_model(
@@ -1002,7 +1002,8 @@ class ProbCBMBenchmarkModel(_OfficialBenchmarkModelBase):
             )
 
         device = self._inference_device()
-        model.to(device)
+        if next(model.parameters()).device != device:
+            model.to(device)
         concept_tensor = torch.as_tensor(concepts, dtype=torch.float32, device=device)
         baseline_probs = torch.as_tensor(
             baseline_concepts, dtype=torch.float32, device=device
@@ -1051,7 +1052,6 @@ class ProbCBMBenchmarkModel(_OfficialBenchmarkModelBase):
             if getattr(model, "use_scale", False):
                 distance = model.class_negative_scale * distance
             class_probs = F.softmax(-distance, dim=1).mean(dim=-1)
-        model.cpu()
         return class_probs.detach().cpu().numpy().astype(np.float32)
 
     def _rebuild_model(
@@ -1399,7 +1399,8 @@ class ECBMBenchmarkModel(_OfficialBenchmarkModelBase):
         forced_probs = torch.as_tensor(effective, dtype=torch.float32, device=device)
         forced_mask = torch.as_tensor(intervention_mask, dtype=torch.bool, device=device)
 
-        model.to(device)
+        if next(model.parameters()).device != device:
+            model.to(device)
         model.eval()
         y_prob, _ = _run_ecbm_inference(
             model,
@@ -1411,7 +1412,6 @@ class ECBMBenchmarkModel(_OfficialBenchmarkModelBase):
             forced_concept_probs=forced_probs,
             forced_concept_mask=forced_mask,
         )
-        model.cpu()
         return y_prob.cpu().numpy().astype(np.float32)
 
     def _rebuild_model(
