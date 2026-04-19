@@ -1332,7 +1332,7 @@ class ECBMBenchmarkModel(_OfficialBenchmarkModelBase):
         label_chunks: list[np.ndarray] = []
         concept_chunks: list[np.ndarray] = []
         feature_chunks: list[torch.Tensor] = []
-        inference_steps = int(self.eval_config.get("ecbm_inference_steps", 25))
+        inference_steps = int(self.eval_config.get("ecbm_inference_steps", 10))
         inference_lr = float(self.eval_config.get("ecbm_inference_lr", 0.1))
 
         model.to(device)
@@ -1404,7 +1404,7 @@ class ECBMBenchmarkModel(_OfficialBenchmarkModelBase):
         y_prob, _ = _run_ecbm_inference(
             model,
             features,
-            steps=int(self.eval_config.get("ecbm_inference_steps", 25)),
+            steps=int(self.eval_config.get("ecbm_inference_steps", 10)),
             lr=float(self.eval_config.get("ecbm_inference_lr", 0.1)),
             concept_init=baseline_tensor,
             label_init=label_init,
@@ -1798,7 +1798,7 @@ def train_ecbm_model(
     wrapped_kwargs.pop("c_extractor_arch", None)
     eval_config = {
         **loader_cfg,
-        "ecbm_inference_steps": int(getattr(config, "ecbm_inference_steps", 25)),
+        "ecbm_inference_steps": int(getattr(config, "ecbm_inference_steps", 10)),
         "ecbm_inference_lr": float(getattr(config, "ecbm_inference_lr", 0.1)),
     }
     return ECBMBenchmarkModel(

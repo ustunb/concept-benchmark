@@ -273,7 +273,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     ecbm_lambda_xc: float = 1.0
     ecbm_lambda_cy: float = 1.0
     ecbm_weight_decay: float = 1e-4
-    ecbm_inference_steps: int = 25
+    ecbm_inference_steps: int = 10
     ecbm_inference_lr: float = 0.1
     ecbm_max_epochs: int | None = None
 
