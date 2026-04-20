@@ -957,8 +957,7 @@ def _test_interventions(
                     result.y_prob_after = fe.predict_proba(C_final_binary)
                 result.y_pred_after = np.argmax(result.y_prob_after, axis=1)
             else:
-                logger.warning("LLM cache not found at %s, skipping budget %s", cache_path, budget)
-                continue
+                raise FileNotFoundError(f"LLM cache not found at {cache_path}")
 
         elif settings.intervention_expert.lower() == "llm":
             # ── Live LLM path (original robot_concept_regimes.py) ──
