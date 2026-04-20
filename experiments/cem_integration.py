@@ -58,6 +58,8 @@ class _PredictionCache:
     pos_embeddings: torch.Tensor | None = None
     neg_embeddings: torch.Tensor | None = None
     probcbm_pred_embeddings: torch.Tensor | None = None
+    probcbm_pred_mean: torch.Tensor | None = None
+    probcbm_pred_logsigma: torch.Tensor | None = None
     ecbm_features: torch.Tensor | None = None
 
 
@@ -80,6 +82,16 @@ def _slice_prediction_cache(
             None
             if cache.probcbm_pred_embeddings is None
             else cache.probcbm_pred_embeddings.index_select(0, tensor_index)
+        ),
+        probcbm_pred_mean=(
+            None
+            if cache.probcbm_pred_mean is None
+            else cache.probcbm_pred_mean.index_select(0, tensor_index)
+        ),
+        probcbm_pred_logsigma=(
+            None
+            if cache.probcbm_pred_logsigma is None
+            else cache.probcbm_pred_logsigma.index_select(0, tensor_index)
         ),
         ecbm_features=(
             None
@@ -958,6 +970,8 @@ class ProbCBMBenchmarkModel(_OfficialBenchmarkModelBase):
         concept_chunks: list[np.ndarray] = []
         label_chunks: list[np.ndarray] = []
         pred_embedding_chunks: list[torch.Tensor] = []
+        pred_mean_chunks: list[torch.Tensor] = []
+        pred_logsigma_chunks: list[torch.Tensor] = []
 
         model.to(device)
         with torch.no_grad():
@@ -970,10 +984,14 @@ class ProbCBMBenchmarkModel(_OfficialBenchmarkModelBase):
                 concept_probs = outputs[0]
                 pred_embeddings = outputs[1]
                 task_outputs = outputs[2]
+                latent_dict = outputs[3]
 
                 concept_chunks.append(concept_probs.detach().cpu().numpy())
                 label_chunks.append(_to_numpy_task_proba(task_outputs, self.n_classes))
                 pred_embedding_chunks.append(pred_embeddings.detach().cpu())
+                pred_mean_chunks.append(latent_dict["pred_mean"].detach().cpu())
+                if latent_dict.get("pred_logsigma") is not None:
+                    pred_logsigma_chunks.append(latent_dict["pred_logsigma"].detach().cpu())
         model.cpu()
 
         concept_probs = _stack_numpy(concept_chunks, cols=self.n_concepts)
@@ -983,6 +1001,8 @@ class ProbCBMBenchmarkModel(_OfficialBenchmarkModelBase):
             concept_probs=concept_probs,
             label_probs=label_probs,
             probcbm_pred_embeddings=_stack_tensors(pred_embedding_chunks),
+            probcbm_pred_mean=_stack_tensors(pred_mean_chunks),
+            probcbm_pred_logsigma=_stack_tensors(pred_logsigma_chunks) if pred_logsigma_chunks else None,
         )
         return label_probs, concept_probs, cache
 
@@ -995,12 +1015,6 @@ class ProbCBMBenchmarkModel(_OfficialBenchmarkModelBase):
         intervention_mask: np.ndarray | None,
     ) -> np.ndarray:
         model = self._require_official_model()
-        pred_embeddings = cache.probcbm_pred_embeddings
-        if pred_embeddings is None:
-            raise RuntimeError(
-                "Missing cached ProbCBM concept embeddings for intervention replay."
-            )
-
         device = self._inference_device()
         if next(model.parameters()).device != device:
             model.to(device)
@@ -1008,7 +1022,29 @@ class ProbCBMBenchmarkModel(_OfficialBenchmarkModelBase):
         baseline_probs = torch.as_tensor(
             baseline_concepts, dtype=torch.float32, device=device
         )
-        pred_embeddings = pred_embeddings.to(device)
+
+        # Sample from the predicted concept distribution (proper ProbCBM inference).
+        # For intervened concepts we replace with deterministic prototype (zero variance).
+        n_samples = getattr(model, "n_samples_inference", 50)
+        pred_mean = cache.probcbm_pred_mean
+        pred_logsigma = cache.probcbm_pred_logsigma
+
+        if pred_mean is not None and pred_logsigma is not None:
+            mu = pred_mean.to(device)
+            logsigma = pred_logsigma.to(device)
+            eps = torch.randn(
+                mu.size(0), mu.size(1), n_samples, mu.size(2),
+                dtype=mu.dtype, device=device,
+            )
+            pred_embeddings = eps.mul(torch.exp(logsigma.unsqueeze(2) * 0.5)).add_(mu.unsqueeze(2))
+        else:
+            # Fallback: use cached embeddings (mean only, n_samples=1)
+            pred_embeddings = cache.probcbm_pred_embeddings
+            if pred_embeddings is None:
+                raise RuntimeError(
+                    "Missing cached ProbCBM concept embeddings for intervention replay."
+                )
+            pred_embeddings = pred_embeddings.to(device)
 
         concept_mean = F.normalize(model.concept_vectors, p=2, dim=-1)
         if getattr(model, "use_neg_concept", True) and concept_mean.shape[0] < 2:
@@ -1016,6 +1052,8 @@ class ProbCBMBenchmarkModel(_OfficialBenchmarkModelBase):
         neg_proto = concept_mean[0]
         pos_proto = concept_mean[1] if concept_mean.shape[0] > 1 else concept_mean[0]
 
+        # Deterministic prototype replacement for intervened concepts (zero variance)
+        # Shape: [B, n_concepts, 1, embed_dim] — broadcasts across n_samples
         replacement = (
             concept_tensor.unsqueeze(-1).unsqueeze(-1)
             * pos_proto.unsqueeze(0).unsqueeze(2)
