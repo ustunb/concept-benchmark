@@ -1317,31 +1317,39 @@ def _test_interventions(
                     )
                     return [budget], human_acc, {}
 
-                # rank concepts per instance by single-bit flip effect (reuse for budgets < K)
+                # rank concepts per instance by flip effect (reuse for budgets < K)
                 order = [np.array([], dtype=int)] * C_before.shape[0]
-                for i in range(C_before.shape[0]):
-                    sel = np.where(mask_max[i])[0]
-                    if sel.size == 0:
-                        order[i] = np.array([], dtype=int)
-                        continue
-                    base_vec = (C_before[i] >= 0.5).astype(int)
-                    base_prob = fe.predict_proba(base_vec[None, :])[0]
-                    pairs = []
-                    for j in sel:
-                        flipped = base_vec.copy()
-                        flipped[j] = 1 - flipped[j]
-                        p_after = fe.predict_proba(flipped[None, :])[0]
-                        score = float(np.max(np.abs(p_after - base_prob)))
-                        pairs.append((j, score))
-                    order[i] = np.asarray(
-                        [
-                            j
-                            for (j, _) in sorted(
-                                pairs, key=lambda t: t[1], reverse=True
-                            )
-                        ],
-                        dtype=int,
-                    )
+                if supports_aligned and model is not None:
+                    # Aligned models (CEM/ProbCBM/ECBM) can't do per-row predict_proba.
+                    # Rank by concept uncertainty: concepts closest to 0.5 are most
+                    # likely to benefit from intervention.
+                    for i in range(C_before.shape[0]):
+                        sel = np.where(mask_max[i])[0]
+                        if sel.size == 0:
+                            order[i] = np.array([], dtype=int)
+                            continue
+                        uncertainty = 0.5 - np.abs(C_before[i, sel] - 0.5)
+                        ranked = sel[np.argsort(-uncertainty)]
+                        order[i] = ranked.astype(int)
+                else:
+                    for i in range(C_before.shape[0]):
+                        sel = np.where(mask_max[i])[0]
+                        if sel.size == 0:
+                            order[i] = np.array([], dtype=int)
+                            continue
+                        base_vec = (C_before[i] >= 0.5).astype(int)
+                        base_prob = fe.predict_proba(base_vec[None, :])[0]
+                        pairs = []
+                        for j in sel:
+                            flipped = base_vec.copy()
+                            flipped[j] = 1 - flipped[j]
+                            p_after = fe.predict_proba(flipped[None, :])[0]
+                            score = float(np.max(np.abs(p_after - base_prob)))
+                            pairs.append((j, score))
+                        order[i] = np.asarray(
+                            [j for (j, _) in sorted(pairs, key=lambda t: t[1], reverse=True)],
+                            dtype=int,
+                        )
 
                 llm_cache = {
                     "mask_max": mask_max,
