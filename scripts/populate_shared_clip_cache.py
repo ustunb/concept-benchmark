@@ -8,6 +8,7 @@ import numpy as np
 
 sys.path.insert(0, ".")
 from concept_benchmark.config import RobotBenchmarkConfig
+from concept_benchmark.paths import data_dir
 from concept_benchmark.ext.fileutils import load
 
 shared = Path("results/lfcbm_shared_img_cache")
@@ -22,8 +23,7 @@ for label, config_fn in [
     config = config_fn()
     config.seed = 1014
     data = load(config.get_dataset_path())
-    from concept_benchmark.paths import data_dir
-image_dir = data_dir / "robot_images"
+    image_dir = data_dir / "robot_images"
 
     for split_name, file_name, sample in [
         ("train", "train", data.train),
