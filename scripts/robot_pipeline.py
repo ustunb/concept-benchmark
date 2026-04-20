@@ -1317,22 +1317,42 @@ def _test_interventions(
                     )
                     return [budget], human_acc, {}
 
-                # rank concepts per instance by flip effect (reuse for budgets < K)
-                order = [np.array([], dtype=int)] * C_before.shape[0]
+                # rank concepts per instance by single-bit flip effect
+                # For aligned models, compute in batch; for CBM, per-row.
+                n_samples = C_before.shape[0]
+                n_c = C_before.shape[1]
+                order = [np.array([], dtype=int)] * n_samples
+
                 if supports_aligned and model is not None:
-                    # Aligned models (CEM/ProbCBM/ECBM) can't do per-row predict_proba.
-                    # Rank by concept uncertainty: concepts closest to 0.5 are most
-                    # likely to benefit from intervention.
-                    for i in range(C_before.shape[0]):
+                    # Batch flip-effect: for each concept j, flip it for ALL
+                    # samples and measure prediction change in one call.
+                    base_probs = predict_label_proba_from_concepts(
+                        cbm, C_before,
+                        row_indices=np.arange(n_samples, dtype=int),
+                        baseline_concepts=C_before,
+                    )
+                    flip_scores = np.zeros((n_samples, n_c), dtype=np.float64)
+                    for j in range(n_c):
+                        C_flipped = C_before.copy()
+                        C_flipped[:, j] = 1.0 - (C_flipped[:, j] >= 0.5).astype(float)
+                        mask_j = np.zeros_like(C_before, dtype=bool)
+                        mask_j[:, j] = True
+                        p_after = predict_label_proba_from_concepts(
+                            cbm, C_flipped,
+                            row_indices=np.arange(n_samples, dtype=int),
+                            baseline_concepts=C_before,
+                            intervention_mask=mask_j,
+                        )
+                        flip_scores[:, j] = np.max(np.abs(p_after - base_probs), axis=1)
+                    for i in range(n_samples):
                         sel = np.where(mask_max[i])[0]
                         if sel.size == 0:
                             order[i] = np.array([], dtype=int)
                             continue
-                        uncertainty = 0.5 - np.abs(C_before[i, sel] - 0.5)
-                        ranked = sel[np.argsort(-uncertainty)]
+                        ranked = sel[np.argsort(-flip_scores[i, sel])]
                         order[i] = ranked.astype(int)
                 else:
-                    for i in range(C_before.shape[0]):
+                    for i in range(n_samples):
                         sel = np.where(mask_max[i])[0]
                         if sel.size == 0:
                             order[i] = np.array([], dtype=int)
