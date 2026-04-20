@@ -885,8 +885,83 @@ def _test_interventions(
             use_exact_k=(settings.intervention_strategy == "exactly_k"),
         )
 
-        if settings.intervention_expert.lower() == "llm":
-            # ── Inline LLM path (matching original robot_concept_regimes.py) ──
+        if settings.intervention_expert.lower() == "llm" and cache_only:
+            # ── LLM cache-only path: load LLM votes as GT, use standard KFlip ──
+            import hashlib
+            import json
+            from pathlib import Path
+
+            run_root = Path(settings.run_dir)
+            cache_dir = run_root / "cache"
+
+            def _concepts_sig():
+                h = hashlib.sha1()
+                for name in map(str, concept_names):
+                    h.update(name.encode("utf-8"))
+                    h.update(b"\x00")
+                return h.hexdigest()
+
+            def _dataset_sig():
+                h = hashlib.sha1()
+                for pth in map(str, test.X):
+                    h.update(pth.encode("utf-8"))
+                    h.update(b"\x00")
+                return h.hexdigest()
+
+            cache_path = (
+                cache_dir
+                / f"llm_interventions_{_concepts_sig()}_{_dataset_sig()}.jsonl"
+            )
+            if cache_path.exists():
+                # Load LLM votes into a GT-like concept matrix
+                C_llm = np.full_like(prob_test, np.nan, dtype=np.float32)
+                with open(cache_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            rec = json.loads(line)
+                            i = int(rec["i"])
+                            for k, v in rec.get("votes_idx", {}).items():
+                                C_llm[i, int(k)] = float(v)
+                        except Exception:
+                            continue
+
+                # Replace test.C with LLM votes for the standard path
+                import copy
+                test_llm = copy.copy(test)
+                # Fill NaN with original predictions (concepts LLM didn't judge)
+                C_llm_filled = np.where(np.isnan(C_llm), (prob_test >= 0.5).astype(np.float32), C_llm)
+                test_llm.C = C_llm_filled.astype(np.int8)
+
+                # Use standard path with LLM votes as ground truth
+                result = runner.run(
+                    strategy=strategy,
+                    config=config,
+                    dataset=test_llm,
+                    concept_proba=prob_test,
+                    labels=test.y.astype(int),
+                )
+                mask = result.mask
+                C_after = result.C_intervened.copy()
+
+                # No additional noise injection — LLM votes are already noisy
+                if supports_aligned:
+                    result.y_prob_after = predict_label_proba_from_concepts(
+                        cbm,
+                        result.C_intervened,
+                        row_indices=np.arange(result.C_intervened.shape[0], dtype=int),
+                        baseline_concepts=result.C_pred,
+                        intervention_mask=result.mask,
+                    )
+                else:
+                    C_final_binary = (result.C_intervened >= 0.5).astype(int)
+                    result.y_prob_after = fe.predict_proba(C_final_binary)
+                result.y_pred_after = np.argmax(result.y_prob_after, axis=1)
+            else:
+                logger.warning("LLM cache not found at %s, skipping budget %s", cache_path, budget)
+                continue
+
+        elif settings.intervention_expert.lower() == "llm":
+            # ── Live LLM path (original robot_concept_regimes.py) ──
             from experiments.llm_client import (
                 is_local_exec_provider,
                 is_retryable_llm_error,
