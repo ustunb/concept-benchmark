@@ -1211,6 +1211,9 @@ def _run_ecbm_inference(
                 fixed_logits,
                 concept_logits.data,
             )
+            # Re-initialize label logits to zeros for intervention phase
+            # (matching original ECBM paper's Phase 2)
+            label_logits.data.zero_()
 
     original_requires_grad = [param.requires_grad for param in model.parameters()]
     for param in model.parameters():
@@ -1243,11 +1246,17 @@ def _run_ecbm_inference(
                 _soft_cross_entropy_from_probs(label_logits, cy_prob.detach())
                 + _soft_cross_entropy_from_probs(cy_logits, y_prob.detach())
             )
-            loss = (
-                model.lambda_xy * loss_xy
-                + model.lambda_xc * loss_xc
-                + model.lambda_cy * loss_cy
-            )
+            # When intervening, follow the original ECBM paper (Xu et al.):
+            # turn OFF xy and xc losses, amplify cy loss so the label
+            # prediction is forced to follow the corrected concepts.
+            if forced_concept_mask is not None and forced_concept_mask.any():
+                loss = 3.0 * loss_cy
+            else:
+                loss = (
+                    model.lambda_xy * loss_xy
+                    + model.lambda_xc * loss_xc
+                    + model.lambda_cy * loss_cy
+                )
             loss.backward()
             if forced_concept_mask is not None and concept_logits.grad is not None:
                 concept_logits.grad.masked_fill_(forced_concept_mask, 0.0)
