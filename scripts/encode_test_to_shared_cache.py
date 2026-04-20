@@ -12,7 +12,8 @@ from concept_benchmark.ext.fileutils import load
 config = RobotBenchmarkConfig.default_subconcept()
 config.seed = 1014
 data = load(config.get_dataset_path())
-image_dir = Path("data/robot_images")
+from concept_benchmark.paths import data_dir
+image_dir = data_dir / "robot_images"
 
 shared = Path("results/lfcbm_shared_img_cache")
 shared.mkdir(parents=True, exist_ok=True)

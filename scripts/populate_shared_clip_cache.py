@@ -22,7 +22,8 @@ for label, config_fn in [
     config = config_fn()
     config.seed = 1014
     data = load(config.get_dataset_path())
-    image_dir = Path("data/robot_images")
+    from concept_benchmark.paths import data_dir
+image_dir = data_dir / "robot_images"
 
     for split_name, file_name, sample in [
         ("train", "train", data.train),
