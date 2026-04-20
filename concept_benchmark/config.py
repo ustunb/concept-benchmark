@@ -264,7 +264,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     probcbm_hidden_dim: int = 8
     probcbm_class_hidden_dim: int = 64
     probcbm_latent_dim: int = 8
-    probcbm_n_samples_inference: int = 1
+    probcbm_n_samples_inference: int = 50
     probcbm_intervention_prob: float = 0.25
     probcbm_max_epochs: int | None = None
     ecbm_emb_size: int = 8
@@ -743,7 +743,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     probcbm_hidden_dim: int = 8
     probcbm_class_hidden_dim: int = 64
     probcbm_latent_dim: int = 8
-    probcbm_n_samples_inference: int = 1
+    probcbm_n_samples_inference: int = 50
     probcbm_intervention_prob: float = 0.25
     probcbm_max_epochs: int | None = None
 
