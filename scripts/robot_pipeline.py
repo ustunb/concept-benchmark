@@ -1070,7 +1070,14 @@ def _test_interventions(
                     instance_ids=None,
                 )
                 C_before = batch.C_pred
-                y_prob_before = fe.predict_proba((C_before >= 0.5).astype(int))
+                if supports_aligned and model is not None:
+                    y_prob_before = predict_label_proba_from_concepts(
+                        cbm, C_before,
+                        row_indices=np.arange(C_before.shape[0], dtype=int),
+                        baseline_concepts=C_before,
+                    )
+                else:
+                    y_prob_before = fe.predict_proba((C_before >= 0.5).astype(int))
                 if cache_all_concepts and cache_only:
                     mask_max = np.ones_like(C_before, dtype=bool)
                 else:
