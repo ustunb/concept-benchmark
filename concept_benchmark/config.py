@@ -280,7 +280,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     # Intervention
     intervention_budgets: list[int] = field(default_factory=lambda: [1, 3])
     intervention_thresholds: list[float] = field(
-        default_factory=lambda: [0.2, 0.4],
+        default_factory=lambda: [0.2],
         metadata={"scope": "image"},
     )
     intervention_accuracy: float = 1.0
