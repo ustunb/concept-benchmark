@@ -158,9 +158,33 @@ def main():
             print(f"Skipping {family} — {e}")
 
     # Extract concept predictions
+    from concept_benchmark.utils import determine_device
+    device = str(determine_device())
     concept_preds = {}
     for name, model in models.items():
-        concept_preds[name] = model.concept_detector.predict_proba(test)
+        # Override device to match current hardware
+        if hasattr(model, "concept_detector") and hasattr(model.concept_detector, "_eval_config"):
+            model.concept_detector._eval_config["device"] = device
+        if hasattr(model, "eval_config"):
+            model.eval_config["device"] = device
+        try:
+            concept_preds[name] = model.concept_detector.predict_proba(test)
+        except (TypeError, FileNotFoundError, OSError) as e:
+            # Images not available locally — try predict_proba on the full model
+            # which may use cached predictions
+            print(f"  {name}: concept_detector.predict_proba failed ({e.__class__.__name__}), trying model.predict_proba")
+            try:
+                label_probs = model.predict_proba(test)
+                # For official models, the cache now has concept_probs
+                if hasattr(model, "_prediction_cache") and model._prediction_cache is not None:
+                    concept_preds[name] = model._prediction_cache.concept_probs
+                else:
+                    print(f"  {name}: no cached concept probs, skipping")
+                    continue
+            except Exception as e2:
+                print(f"  {name}: all prediction methods failed ({e2}), skipping")
+                continue
+        print(f"  {name}: concept preds shape {concept_preds[name].shape}")
 
     # === CTL ===
     print("=== CTL (Concept-Task Leakage) — per concept ===")
