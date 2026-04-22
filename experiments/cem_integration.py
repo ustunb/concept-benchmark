@@ -512,7 +512,7 @@ def _build_trainer(
         logger=False,
         enable_checkpointing=False,
         enable_model_summary=False,
-        deterministic=False,
+        deterministic=True,
         **_device_to_pl_args(device),
     )
 
@@ -1705,7 +1705,7 @@ def train_probcbm_model(
         "use_neg_concept": True,
         "pred_class": True,
         "use_scale": True,
-        "train_class_mode": "joint",
+        "train_class_mode": "sequential",
         "latent_dim": int(getattr(config, "probcbm_latent_dim", 8)),
         "learning_rate": _resolve_learning_rate(config),
         "optimizer": "adam",
