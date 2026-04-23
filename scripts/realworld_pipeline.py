@@ -272,7 +272,11 @@ def train_dnn(dataset: ConceptDataset, config: SimpleNamespace):
         else:
             no_improve += 1
             if no_improve >= config.cs_patience:
+                logger.info("  DNN epoch %d/%d val_loss=%.4f (early stop)", epoch + 1, config.cs_epochs, val_loss)
                 break
+
+        if (epoch + 1) % 5 == 0 or epoch == 0:
+            logger.info("  DNN epoch %d/%d val_loss=%.4f best=%.4f", epoch + 1, config.cs_epochs, val_loss, best_val_loss)
 
     if best_state is not None:
         model.load_state_dict(best_state)
