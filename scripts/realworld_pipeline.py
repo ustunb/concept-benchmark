@@ -164,6 +164,7 @@ def make_config(seed: int = 42, epochs: int = 50, patience: int = 10,
         probcbm_n_samples_inference=50,
         probcbm_latent_dim=8,
         probcbm_max_epochs=epochs,
+        probcbm_epochs_class=20,
         probcbm_patience=patience,
         # ECBM
         ecbm_emb_size=8,

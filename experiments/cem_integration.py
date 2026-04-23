@@ -1741,14 +1741,58 @@ def train_probcbm_model(
         # Fallback for environments where the upstream helper cannot be imported
         # because optional helper-only deps (for example TensorFlow) are absent.
         model = deps.ProbCBM(**model_init_kwargs)
-        trainer = _build_trainer(
-            pl_module=deps.pl,
-            max_epochs=_resolve_epochs(config, benchmark=benchmark, family="probcbm"),
-            patience=_resolve_patience(config, benchmark=benchmark),
-            device=device,
-        )
-        trainer.fit(model, train_loader, valid_loader)
-        trainer_epochs = trainer.current_epoch + 1
+        patience = _resolve_patience(config, benchmark=benchmark)
+
+        if model.train_class_mode == "sequential":
+            # Phase 1: train concept predictor only
+            model.stage = "concept"
+            classify_params = set(model.params_to_classify())
+            trainable_before = []
+            for name, param in model.named_parameters():
+                trainable_before.append((name, param.requires_grad))
+                if name in classify_params:
+                    param.requires_grad = False
+
+            concept_trainer = _build_trainer(
+                pl_module=deps.pl,
+                max_epochs=_resolve_epochs(config, benchmark=benchmark, family="probcbm"),
+                patience=patience,
+                device=device,
+            )
+            concept_trainer.fit(model, train_loader, valid_loader)
+            trainer_epochs = concept_trainer.current_epoch + 1
+
+            # Phase 2: train class predictor only
+            model.stage = "class"
+            for name, param in model.named_parameters():
+                param.requires_grad = name in classify_params
+
+            class_epochs = int(getattr(config, "probcbm_epochs_class", 20))
+            class_trainer = _build_trainer(
+                pl_module=deps.pl,
+                max_epochs=class_epochs,
+                patience=patience,
+                device=device,
+            )
+            class_trainer.fit(model, train_loader, valid_loader)
+            trainer_epochs += class_trainer.current_epoch + 1
+
+            # Restore requires_grad
+            for name, param in model.named_parameters():
+                for orig_name, orig_req in trainable_before:
+                    if name == orig_name:
+                        param.requires_grad = orig_req
+                        break
+        else:
+            # Joint mode: single training pass
+            trainer = _build_trainer(
+                pl_module=deps.pl,
+                max_epochs=_resolve_epochs(config, benchmark=benchmark, family="probcbm"),
+                patience=patience,
+                device=device,
+            )
+            trainer.fit(model, train_loader, valid_loader)
+            trainer_epochs = trainer.current_epoch + 1
     model.eval()
     model.cpu()
 
