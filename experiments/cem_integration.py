@@ -512,7 +512,7 @@ def _build_trainer(
         logger=False,
         enable_checkpointing=False,
         enable_model_summary=False,
-        deterministic=True,
+        deterministic=False,
         **_device_to_pl_args(device),
     )
 
