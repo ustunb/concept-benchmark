@@ -68,7 +68,8 @@ echo ">>> Log file on DSMLP: ~/$LOGFILE"
 echo "---"
 
 # Launch via nohup so it survives SSH disconnection
-ssh "$DSMLP_HOST" "source ~/.bashrc; nohup $LAUNCH -s -f -g 1 -c 4 -m 32 bash ~/dsmlp_realworld.sh > ~/${LOGFILE%.log}_launch.log 2>&1 &"
+# Note: /home/jskirzynski/ is the path INSIDE the container; ~ on login node is /dsmlp/home-fs03/...
+ssh "$DSMLP_HOST" "source ~/.bashrc; nohup $LAUNCH -s -f -g 1 -c 4 -m 32 bash /home/jskirzynski/dsmlp_realworld.sh > ~/realworld_launch.log 2>&1 &"
 
 echo ">>> Job submitted in background on DSMLP."
 echo ">>> Monitor with: ./scripts/monitor_dsmlp.sh status"
