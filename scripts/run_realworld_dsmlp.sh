@@ -63,25 +63,15 @@ echo ">>> Pushing latest commits..."
 cd "$LOCAL_REPO"
 git push origin HEAD 2>/dev/null || echo "(push skipped or failed — make sure DSMLP has latest code)"
 
-echo ">>> Launching container (1 GPU, 4 CPUs, 32GB RAM)..."
-echo ">>> Output will stream below AND save to ~/$LOGFILE on DSMLP"
+echo ">>> Launching container via nohup (survives SSH disconnect)..."
+echo ">>> Log file on DSMLP: ~/$LOGFILE"
 echo "---"
 
-ssh -t "$DSMLP_HOST" "source ~/.bashrc; $LAUNCH -s -f -g 1 -c 4 -m 32 bash /home/jskirzynski/dsmlp_realworld.sh"
+# Launch via nohup so it survives SSH disconnection
+ssh "$DSMLP_HOST" "source ~/.bashrc; nohup $LAUNCH -s -f -g 1 -c 4 -m 32 bash /home/jskirzynski/dsmlp_realworld.sh > /home/jskirzynski/${LOGFILE%.log}_launch.log 2>&1 &"
 
-EXIT_CODE=$?
-echo "---"
-
-if [[ $EXIT_CODE -eq 0 ]]; then
-    echo ">>> Success! Fetching results..."
-    rsync -avz --progress \
-        "${DSMLP_HOST}:~/concept-benchmark/results/*realworld*" \
-        "${LOCAL_REPO}/results/"
-    echo ">>> Results synced to ${LOCAL_REPO}/results/"
-else
-    echo ">>> FAILED (exit code $EXIT_CODE)"
-    echo ">>> Check log: ssh $DSMLP_HOST cat ~/$LOGFILE"
-    echo ">>> Check pod: ssh $DSMLP_HOST then set KUBECONFIG and kubectl get pods"
-fi
-
-exit $EXIT_CODE
+echo ">>> Job submitted in background on DSMLP."
+echo ">>> Monitor with: ./scripts/monitor_dsmlp.sh status"
+echo ">>> Tail log with: ssh dsmlp 'tail -f ~/$LOGFILE'"
+echo ">>> When done, fetch results with:"
+echo ">>>   rsync -avz dsmlp:~/concept-benchmark/results/*realworld* results/"
