@@ -215,7 +215,7 @@ def train_dnn(dataset: ConceptDataset, config: SimpleNamespace):
     n_classes = dataset.train.n_classes
 
     model = RobotClassifierCNN(num_classes=n_classes, input_size=IMG_SIZE).to(device)
-    criterion = nn.CrossEntropyLoss() if n_classes > 2 else nn.BCELoss()
+    criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
 
     _macos = platform.system() == "Darwin"
@@ -234,13 +234,9 @@ def train_dnn(dataset: ConceptDataset, config: SimpleNamespace):
     for epoch in range(config.cs_epochs):
         model.train()
         for X, _, y in train_loader:
-            X, y = X.to(device), y.to(device)
+            X, y = X.to(device), y.to(device).long()
             optimizer.zero_grad()
-            outputs = model(X)
-            if n_classes <= 2:
-                loss = criterion(outputs.squeeze(), y.float())
-            else:
-                loss = criterion(outputs, y.long())
+            loss = criterion(model(X), y)
             loss.backward()
             optimizer.step()
 
@@ -249,12 +245,8 @@ def train_dnn(dataset: ConceptDataset, config: SimpleNamespace):
         n_batches = 0
         with torch.no_grad():
             for X, _, y in valid_loader:
-                X, y = X.to(device), y.to(device)
-                outputs = model(X)
-                if n_classes <= 2:
-                    batch_loss = criterion(outputs.squeeze(), y.float())
-                else:
-                    batch_loss = criterion(outputs, y.long())
+                X, y = X.to(device), y.to(device).long()
+                batch_loss = criterion(model(X), y)
                 val_loss += batch_loss.item()
                 n_batches += 1
         val_loss /= max(n_batches, 1)
@@ -282,16 +274,10 @@ def dnn_predict_proba(model, dataset_sample) -> np.ndarray:
     model.eval()
     all_probs = []
     loader = dataset_sample.loader(batch_size=64, shuffle=False)
-    n_classes = dataset_sample.n_classes
     with torch.no_grad():
         for X, _, _ in loader:
             X = X.to(device)
-            outputs = model(X)
-            if n_classes <= 2:
-                p = outputs.squeeze().cpu()
-                probs = torch.stack([1 - p, p], dim=-1).numpy()
-            else:
-                probs = torch.softmax(outputs, dim=-1).cpu().numpy()
+            probs = torch.softmax(model(X), dim=-1).cpu().numpy()
             all_probs.append(probs)
     model.cpu()
     return np.concatenate(all_probs, axis=0)
