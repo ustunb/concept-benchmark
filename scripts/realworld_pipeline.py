@@ -99,6 +99,7 @@ def load_pistachio(seed: int = 42) -> ConceptDataset:
             "resolution": 600,
         },
         base_dir=str(data_dir),
+        transform=IMG_TRANSFORM,
     )
     dataset.sample(test_size=0.2, val_size=0.2, stratify=y, seed=seed)
     logger.info("Pistachio: %d train, %d val, %d test, %d concepts, images %dx%d",
@@ -144,6 +145,7 @@ def load_rice(seed: int = 42) -> ConceptDataset:
             "resolution": 250,
         },
         base_dir=str(img_dir),
+        transform=IMG_TRANSFORM,
     )
     dataset.sample(test_size=0.2, val_size=0.2, stratify=y, seed=seed)
     logger.info("Rice: %d train, %d val, %d test, %d concepts, %d classes, images %dx%d",
@@ -212,8 +214,8 @@ def train_dnn(dataset: ConceptDataset, config: SimpleNamespace):
         "num_workers": 0 if _macos else 4,
         "pin_memory": not _macos,
     }
-    train_loader = dataset.train.loader(shuffle=True, transform=IMG_TRANSFORM, **loader_kwargs)
-    valid_loader = dataset.val.loader(shuffle=False, transform=IMG_TRANSFORM, **loader_kwargs)
+    train_loader = dataset.train.loader(shuffle=True, **loader_kwargs)
+    valid_loader = dataset.val.loader(shuffle=False, **loader_kwargs)
 
     best_val_loss = float("inf")
     best_state = None
@@ -269,7 +271,7 @@ def dnn_predict_proba(model, dataset_sample) -> np.ndarray:
     model = model.to(device)
     model.eval()
     all_probs = []
-    loader = dataset_sample.loader(batch_size=64, shuffle=False, transform=IMG_TRANSFORM)
+    loader = dataset_sample.loader(batch_size=64, shuffle=False)
     n_classes = dataset_sample.n_classes
     with torch.no_grad():
         for X, _, _ in loader:
@@ -309,12 +311,11 @@ def train_cbm(dataset: ConceptDataset, config: SimpleNamespace):
         train_dataset=dataset.train,
         valid_dataset=dataset.val,
         freeze_backbone=False,
-        concept_embed_params={"shuffle": False, "transform": IMG_TRANSFORM, **loader_config},
+        concept_embed_params={"shuffle": False, **loader_config},
         concept_fit_params={
             "epochs": config.cs_epochs,
             "lr": config.learning_rate,
             "patience": config.cs_patience,
-            "transform": IMG_TRANSFORM,
             **loader_config,
         },
     )
