@@ -230,6 +230,26 @@ def make_cem_loader(
     )
 
 
+class ViTImageBackbone(nn.Module):
+    """Pretrained ViT backbone for image-based concept benchmarks."""
+
+    def __init__(self, *, output_dim: int, freeze_backbone: bool = True) -> None:
+        super().__init__()
+        from transformers import ViTModel
+
+        self.vit = ViTModel.from_pretrained("google/vit-base-patch16-224")
+        if freeze_backbone:
+            for name, p in self.vit.named_parameters():
+                # Unfreeze last 2 transformer layers + layernorm
+                if "encoder.layer.10" not in name and "encoder.layer.11" not in name and "layernorm" not in name:
+                    p.requires_grad = False
+        self.proj = nn.Linear(768, output_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        features = self.vit(pixel_values=x).last_hidden_state[:, 0, :]
+        return self.proj(features)
+
+
 class RobotImageBackbone(nn.Module):
     """Small CNN aligned with the repo's robot image baselines."""
 
@@ -358,6 +378,12 @@ def _infer_backbone_spec(
         }
 
     if data_type == "image":
+        use_vit = getattr(config, "use_vit_backbone", False) if config else False
+        if use_vit:
+            return {
+                "kind": "vit_image",
+                "default_output_dim": _default_cem_output_dim(config),
+            }
         input_size = int(sample.meta.get("resolution", 32))
         try:
             x0, _, _ = sample[0]
@@ -386,6 +412,8 @@ def _make_backbone_factory(backbone_spec: dict[str, Any]):
 
     def factory(output_dim: int | None = None):
         used_output_dim = int(output_dim or default_output_dim)
+        if kind == "vit_image":
+            return ViTImageBackbone(output_dim=used_output_dim)
         if kind == "robot_image":
             return RobotImageBackbone(
                 input_size=int(backbone_spec["input_size"]),

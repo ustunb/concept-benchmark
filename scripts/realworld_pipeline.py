@@ -168,7 +168,7 @@ def load_rice(seed: int = 42) -> ConceptDataset:
 
 
 def make_config(seed: int = 42, epochs: int = 50, patience: int = 10,
-                batch_size: int = 32, lr: float = 1e-3) -> SimpleNamespace:
+                batch_size: int = 16, lr: float = 5e-5) -> SimpleNamespace:
     return SimpleNamespace(
         seed=seed,
         batch_size=batch_size,
@@ -201,6 +201,8 @@ def make_config(seed: int = 42, epochs: int = 50, patience: int = 10,
         ecbm_weight_decay=1e-4,
         ecbm_max_epochs=epochs,
         ecbm_patience=patience,
+        # Use ViT backbone for CEM/ProbCBM/ECBM
+        use_vit_backbone=True,
     )
 
 
@@ -208,15 +210,27 @@ def make_config(seed: int = 42, epochs: int = 50, patience: int = 10,
 
 
 def train_dnn(dataset: ConceptDataset, config: SimpleNamespace):
-    from experiments.models import RobotClassifierCNN
     from concept_benchmark.utils import determine_device
+    from transformers import ViTModel
 
     device = determine_device()
     n_classes = dataset.train.n_classes
 
-    model = RobotClassifierCNN(num_classes=n_classes, input_size=IMG_SIZE).to(device)
+    # ViT DNN: pretrained backbone (last 2 layers unfrozen) + linear head
+    class ViTDNN(nn.Module):
+        def __init__(self, n_cls):
+            super().__init__()
+            self.vit = ViTModel.from_pretrained("google/vit-base-patch16-224")
+            for name, p in self.vit.named_parameters():
+                if "encoder.layer.10" not in name and "encoder.layer.11" not in name and "layernorm" not in name:
+                    p.requires_grad = False
+            self.head = nn.Linear(768, n_cls)
+        def forward(self, x):
+            return self.head(self.vit(pixel_values=x).last_hidden_state[:, 0, :])
+
+    model = ViTDNN(n_classes).to(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+    optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=5e-5)
 
     _macos = platform.system() == "Darwin"
     loader_kwargs = {
@@ -287,7 +301,7 @@ def dnn_predict_proba(model, dataset_sample) -> np.ndarray:
 
 
 def train_cbm(dataset: ConceptDataset, config: SimpleNamespace):
-    from experiments.models import ConceptBasedModel, ConceptDetector, RobotConceptClassifier
+    from experiments.models import ConceptBasedModel, ConceptDetector, RobotViTConceptClassifier
     from concept_benchmark.utils import determine_device
 
     device = determine_device()
@@ -300,7 +314,7 @@ def train_cbm(dataset: ConceptDataset, config: SimpleNamespace):
     }
 
     n_concepts = dataset.train.n_concepts
-    concept_model = RobotConceptClassifier(num_concepts=n_concepts, input_size=IMG_SIZE)
+    concept_model = RobotViTConceptClassifier(num_concepts=n_concepts)
     cd = ConceptDetector(model=concept_model)
     cbm = ConceptBasedModel(concept_detector=cd, should_propagate=False)
     cbm.fit(
