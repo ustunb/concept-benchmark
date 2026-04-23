@@ -74,17 +74,21 @@ def load_pistachio(seed: int = 42) -> ConceptDataset:
     csv_path = data_dir / "pistachio_cbm.csv"
     df = pd.read_csv(csv_path)
 
-    # Build image paths: kirmizi (label=1) and siirt (label=0)
+    # Build image paths by scanning actual files on disk
+    kirmizi_dir = data_dir / "kirmizi" / "images"
+    siirt_dir = data_dir / "siirt" / "images"
+    kirmizi_files = sorted(kirmizi_dir.glob("*.jpg")) if kirmizi_dir.exists() else []
+    siirt_files = sorted(siirt_dir.glob("*.jpg")) if siirt_dir.exists() else []
+
     image_paths = []
-    kirmizi_idx = 0
-    siirt_idx = 0
+    k_idx, s_idx = 0, 0
     for _, row in df.iterrows():
         if row["label"] == 1:
-            kirmizi_idx += 1
-            image_paths.append(f"kirmizi/images/kirmizi ({kirmizi_idx}).jpg")
+            image_paths.append(str(kirmizi_files[k_idx].relative_to(data_dir)))
+            k_idx += 1
         else:
-            siirt_idx += 1
-            image_paths.append(f"siirt/images/siirt ({siirt_idx}).jpg")
+            image_paths.append(str(siirt_files[s_idx].relative_to(data_dir)))
+            s_idx += 1
 
     X = np.array(image_paths, dtype=object)
     C = df[BINARY_CONCEPTS].values.astype(np.float32)
@@ -121,16 +125,22 @@ def load_rice(seed: int = 42) -> ConceptDataset:
     classes = sorted(df["CLASS"].unique())
     class_to_idx = {name: i for i, name in enumerate(classes)}
 
-    # Build image paths from class folders
-    # Images are named: "Arborio (1).jpg", "Arborio (2).jpg", etc.
-    # CSV rows are ordered by class, 15000 per class
+    # Build image paths by scanning actual files on disk
+    class_files = {}
+    for cls in classes:
+        cls_dir = img_dir / cls
+        if cls_dir.exists():
+            class_files[cls] = sorted(cls_dir.glob("*.jpg"))
+        else:
+            class_files[cls] = []
+
     image_paths = []
     class_counters = {c: 0 for c in classes}
     for _, row in df.iterrows():
         cls = row["CLASS"]
-        class_counters[cls] += 1
         idx = class_counters[cls]
-        image_paths.append(f"{cls}/{cls} ({idx}).jpg")
+        image_paths.append(str(class_files[cls][idx].relative_to(img_dir)))
+        class_counters[cls] += 1
 
     X = np.array(image_paths, dtype=object)
     C = df[concept_cols].values.astype(np.float32)
