@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Real-world automation experiments: Pistachio + Rice MSC.
+"""Real-world automation experiments: Pistachio + Rice.
 
-Train DNN, CBM, CEM, ProbCBM, ECBM on real-world tabular datasets and
+Train DNN, CBM, CEM, ProbCBM, ECBM on real-world image datasets and
 evaluate as automation tasks (selective classification + interventions).
 
 Usage:
@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from sklearn.preprocessing import StandardScaler
+import torchvision.transforms as T
 
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.evaluation.metrics import (
@@ -42,6 +42,16 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 RESULTS_DIR = REPO_ROOT / "results"
 RESULTS_DIR.mkdir(exist_ok=True)
 
+# Image size for all models (resize to this)
+IMG_SIZE = 224
+
+# ImageNet normalization
+IMG_TRANSFORM = T.Compose([
+    T.Resize((IMG_SIZE, IMG_SIZE)),
+    T.ToTensor(),
+    T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
+
 
 # ── Column definitions ────────────────────────────────────────────────
 
@@ -55,94 +65,98 @@ MORPH_CONCEPTS_UPPER = [c.upper() for c in MORPH_CONCEPTS]
 BINARY_CONCEPTS = [f"{c}_binary" for c in MORPH_CONCEPTS]
 BINARY_CONCEPTS_UPPER = [f"{c}_binary" for c in MORPH_CONCEPTS_UPPER]
 
-PISTACHIO_COLOR_COLS = [
-    "Mean_RR", "Mean_RG", "Mean_RB", "StdDev_RR", "StdDev_RG", "StdDev_RB",
-    "Skew_RR", "Skew_RG", "Skew_RB", "Kurtosis_RR", "Kurtosis_RG", "Kurtosis_RB",
-]
-
 
 # ── Dataset loaders ──────────────────────────────────────────────────
 
 
 def load_pistachio(seed: int = 42) -> ConceptDataset:
-    csv_path = REPO_ROOT / "data" / "pistachio" / "pistachio_cbm.csv"
+    data_dir = REPO_ROOT / "data" / "pistachio"
+    csv_path = data_dir / "pistachio_cbm.csv"
     df = pd.read_csv(csv_path)
 
-    # X = all continuous features (morph + color) — concept detector predicts shape from these
-    x_cols = MORPH_CONCEPTS + PISTACHIO_COLOR_COLS
-    X = df[x_cols].values.astype(np.float32)
+    # Build image paths: kirmizi (label=1) and siirt (label=0)
+    image_paths = []
+    kirmizi_idx = 0
+    siirt_idx = 0
+    for _, row in df.iterrows():
+        if row["label"] == 1:
+            kirmizi_idx += 1
+            image_paths.append(f"kirmizi/images/kirmizi ({kirmizi_idx}).jpg")
+        else:
+            siirt_idx += 1
+            image_paths.append(f"siirt/images/siirt ({siirt_idx}).jpg")
+
+    X = np.array(image_paths, dtype=object)
     C = df[BINARY_CONCEPTS].values.astype(np.float32)
     y = df["label"].values.astype(np.int64)
-
-    # Standardize features (fit on full data before split, same as original paper's PCA pipeline)
-    scaler = StandardScaler()
-    X = scaler.fit_transform(X).astype(np.float32)
 
     dataset = ConceptDataset(
         X=X, C=C, y=y,
         meta={
             "classes": ["Siirt", "Kirmizi"],
             "concepts": BINARY_CONCEPTS,
-            "data_type": "tabular",
+            "data_type": "image",
+            "resolution": 600,
         },
+        base_dir=str(data_dir),
     )
     dataset.sample(test_size=0.2, val_size=0.2, stratify=y, seed=seed)
-    logger.info("Pistachio: %d train, %d val, %d test, %d concepts, %d input features",
+    logger.info("Pistachio: %d train, %d val, %d test, %d concepts, images %dx%d",
                 dataset.train.n, dataset.val.n, dataset.test.n,
-                dataset.train.n_concepts, X.shape[1])
+                dataset.train.n_concepts, 600, 600)
     return dataset
 
 
 def load_rice(seed: int = 42) -> ConceptDataset:
-    csv_path = REPO_ROOT / "data" / "rice" / "rice_msc_cbm.csv"
+    data_dir = REPO_ROOT / "data" / "rice"
+    csv_path = data_dir / "rice_msc_cbm.csv"
+    img_dir = data_dir / "rice_images" / "Rice_Image_Dataset"
     df = pd.read_csv(csv_path)
 
-    # Concepts = binarized morphological features (uppercase in this CSV)
+    # Drop rows with NaN
     concept_cols = BINARY_CONCEPTS_UPPER
-    # Input X = everything that's not a concept, not a label, not CLASS, not raw morph
-    exclude = set(MORPH_CONCEPTS_UPPER) | set(concept_cols) | {"label", "CLASS"}
-    color_cols = [c for c in df.columns if c not in exclude]
-
-    # Drop entropy features (values in billions, different encoding)
-    entropy_cols = [c for c in color_cols if "entropy" in c.lower()]
-    color_cols = [c for c in color_cols if c not in entropy_cols]
-    logger.info("Dropped %d entropy features with extreme values", len(entropy_cols))
-
-    # Drop rows with NaN (only ~8 out of 75k)
-    all_cols = color_cols + concept_cols + ["label"]
-    df = df.dropna(subset=all_cols).reset_index(drop=True)
-    logger.info("Dropped rows with NaN, %d remaining", len(df))
-
-    X = df[color_cols].values.astype(np.float32)
-    C = df[concept_cols].values.astype(np.float32)
-    y = df["label"].values.astype(np.int64)
-
-    # Standardize features
-    scaler = StandardScaler()
-    X = scaler.fit_transform(X).astype(np.float32)
+    df = df.dropna(subset=concept_cols + ["label"]).reset_index(drop=True)
 
     classes = sorted(df["CLASS"].unique())
+    class_to_idx = {name: i for i, name in enumerate(classes)}
+
+    # Build image paths from class folders
+    # Images are named: "Arborio (1).jpg", "Arborio (2).jpg", etc.
+    # CSV rows are ordered by class, 15000 per class
+    image_paths = []
+    class_counters = {c: 0 for c in classes}
+    for _, row in df.iterrows():
+        cls = row["CLASS"]
+        class_counters[cls] += 1
+        idx = class_counters[cls]
+        image_paths.append(f"{cls}/{cls} ({idx}).jpg")
+
+    X = np.array(image_paths, dtype=object)
+    C = df[concept_cols].values.astype(np.float32)
+    y = df["label"].values.astype(np.int64)
 
     dataset = ConceptDataset(
         X=X, C=C, y=y,
         meta={
             "classes": classes,
             "concepts": concept_cols,
-            "data_type": "tabular",
+            "data_type": "image",
+            "resolution": 250,
         },
+        base_dir=str(img_dir),
     )
     dataset.sample(test_size=0.2, val_size=0.2, stratify=y, seed=seed)
-    logger.info("Rice: %d train, %d val, %d test, %d concepts, %d input features, %d classes",
+    logger.info("Rice: %d train, %d val, %d test, %d concepts, %d classes, images %dx%d",
                 dataset.train.n, dataset.val.n, dataset.test.n,
-                dataset.train.n_concepts, X.shape[1], len(classes))
+                dataset.train.n_concepts, len(classes), 250, 250)
     return dataset
 
 
-# ── Config namespace (mimics what train_*_model expects) ─────────────
+# ── Config namespace ─────────────────────────────────────────────────
 
 
 def make_config(seed: int = 42, epochs: int = 50, patience: int = 10,
-                batch_size: int = 64, lr: float = 1e-3) -> SimpleNamespace:
+                batch_size: int = 32, lr: float = 1e-3) -> SimpleNamespace:
     return SimpleNamespace(
         seed=seed,
         batch_size=batch_size,
@@ -178,35 +192,28 @@ def make_config(seed: int = 42, epochs: int = 50, patience: int = 10,
     )
 
 
-# ── DNN baseline ──��──────────────────────────────────────────────────
+# ── DNN baseline (CNN on images) ─────────────────────────────────────
 
 
-class TabularDNN(nn.Module):
-    def __init__(self, input_dim: int, n_classes: int, hidden: int = 128):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden),
-            nn.ReLU(),
-            nn.Linear(hidden, hidden),
-            nn.ReLU(),
-            nn.Linear(hidden, n_classes),
-        )
+def train_dnn(dataset: ConceptDataset, config: SimpleNamespace):
+    from experiments.models import RobotClassifierCNN
+    from concept_benchmark.utils import determine_device
 
-    def forward(self, x):
-        return self.net(x.float())
-
-
-def train_dnn(dataset: ConceptDataset, config: SimpleNamespace) -> TabularDNN:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = determine_device()
     n_classes = dataset.train.n_classes
-    input_dim = dataset.train.X.shape[1]
 
-    model = TabularDNN(input_dim, n_classes).to(device)
-    criterion = nn.CrossEntropyLoss()
+    model = RobotClassifierCNN(num_classes=n_classes, input_size=IMG_SIZE).to(device)
+    criterion = nn.CrossEntropyLoss() if n_classes > 2 else nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
 
-    train_loader = dataset.train.loader(batch_size=config.batch_size, shuffle=True)
-    valid_loader = dataset.val.loader(batch_size=config.batch_size, shuffle=False)
+    _macos = platform.system() == "Darwin"
+    loader_kwargs = {
+        "batch_size": config.batch_size,
+        "num_workers": 0 if _macos else 4,
+        "pin_memory": not _macos,
+    }
+    train_loader = dataset.train.loader(shuffle=True, transform=IMG_TRANSFORM, **loader_kwargs)
+    valid_loader = dataset.val.loader(shuffle=False, transform=IMG_TRANSFORM, **loader_kwargs)
 
     best_val_loss = float("inf")
     best_state = None
@@ -215,9 +222,13 @@ def train_dnn(dataset: ConceptDataset, config: SimpleNamespace) -> TabularDNN:
     for epoch in range(config.cs_epochs):
         model.train()
         for X, _, y in train_loader:
-            X, y = X.to(device).float(), y.to(device).long()
+            X, y = X.to(device), y.to(device)
             optimizer.zero_grad()
-            loss = criterion(model(X), y)
+            outputs = model(X)
+            if n_classes <= 2:
+                loss = criterion(outputs.squeeze(), y.float())
+            else:
+                loss = criterion(outputs, y.long())
             loss.backward()
             optimizer.step()
 
@@ -226,8 +237,13 @@ def train_dnn(dataset: ConceptDataset, config: SimpleNamespace) -> TabularDNN:
         n_batches = 0
         with torch.no_grad():
             for X, _, y in valid_loader:
-                X, y = X.to(device).float(), y.to(device).long()
-                val_loss += criterion(model(X), y).item()
+                X, y = X.to(device), y.to(device)
+                outputs = model(X)
+                if n_classes <= 2:
+                    batch_loss = criterion(outputs.squeeze(), y.float())
+                else:
+                    batch_loss = criterion(outputs, y.long())
+                val_loss += batch_loss.item()
                 n_batches += 1
         val_loss /= max(n_batches, 1)
 
@@ -247,26 +263,36 @@ def train_dnn(dataset: ConceptDataset, config: SimpleNamespace) -> TabularDNN:
     return model
 
 
-def dnn_predict_proba(model: TabularDNN, dataset_sample) -> np.ndarray:
-    device = next(model.parameters()).device
+def dnn_predict_proba(model, dataset_sample) -> np.ndarray:
+    from concept_benchmark.utils import determine_device
+    device = determine_device()
+    model = model.to(device)
     model.eval()
     all_probs = []
-    loader = dataset_sample.loader(batch_size=256, shuffle=False)
+    loader = dataset_sample.loader(batch_size=64, shuffle=False, transform=IMG_TRANSFORM)
+    n_classes = dataset_sample.n_classes
     with torch.no_grad():
         for X, _, _ in loader:
-            logits = model(X.to(device).float())
-            probs = torch.softmax(logits, dim=-1).cpu().numpy()
+            X = X.to(device)
+            outputs = model(X)
+            if n_classes <= 2:
+                p = outputs.squeeze().cpu()
+                probs = torch.stack([1 - p, p], dim=-1).numpy()
+            else:
+                probs = torch.softmax(outputs, dim=-1).cpu().numpy()
             all_probs.append(probs)
+    model.cpu()
     return np.concatenate(all_probs, axis=0)
 
 
-# ── CBM training ──��─────────────────────────────��────────────────────
+# ── CBM training (CNN concept detector) ──────────────────────────────
 
 
 def train_cbm(dataset: ConceptDataset, config: SimpleNamespace):
-    from experiments.models import ConceptBasedModel, ConceptDetector, FrontEndModel
+    from experiments.models import ConceptBasedModel, ConceptDetector, RobotConceptClassifier
+    from concept_benchmark.utils import determine_device
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = determine_device()
     _macos = platform.system() == "Darwin"
     loader_config = {
         "device": device,
@@ -275,21 +301,20 @@ def train_cbm(dataset: ConceptDataset, config: SimpleNamespace):
         "pin_memory": not _macos,
     }
 
-    # Build a simple tabular concept detector
-    from experiments.train import train_concept_heads
-    input_dim = dataset.train.X.shape[1]
-
-    cd = ConceptDetector()
+    n_concepts = dataset.train.n_concepts
+    concept_model = RobotConceptClassifier(num_concepts=n_concepts, input_size=IMG_SIZE)
+    cd = ConceptDetector(model=concept_model)
     cbm = ConceptBasedModel(concept_detector=cd, should_propagate=False)
     cbm.fit(
         train_dataset=dataset.train,
         valid_dataset=dataset.val,
         freeze_backbone=False,
-        concept_embed_params={"shuffle": False, **loader_config},
+        concept_embed_params={"shuffle": False, "transform": IMG_TRANSFORM, **loader_config},
         concept_fit_params={
             "epochs": config.cs_epochs,
             "lr": config.learning_rate,
             "patience": config.cs_patience,
+            "transform": IMG_TRANSFORM,
             **loader_config,
         },
     )
@@ -297,7 +322,7 @@ def train_cbm(dataset: ConceptDataset, config: SimpleNamespace):
     return cbm
 
 
-# ── CEM/ProbCBM/ECBM training ───────��───────────────────────────────
+# ── CEM/ProbCBM/ECBM training ────────────────────────────────────────
 
 
 def train_cem(dataset: ConceptDataset, config: SimpleNamespace, benchmark: str):
@@ -347,7 +372,10 @@ def evaluate_selective_all_thresholds(
 ) -> list[dict]:
     """Find threshold achieving each target selective accuracy, report coverage."""
     results = []
-    thresholds = np.linspace(0.5, 1.0, 200)
+    # Use actual unique confidence values for precise threshold search
+    unique_conf = np.unique(confidence)
+    thresholds = np.concatenate([unique_conf, np.linspace(0.5, 1.0, 500)])
+    thresholds = np.unique(thresholds)
 
     for target in target_accs:
         best = None
@@ -367,79 +395,6 @@ def evaluate_selective_all_thresholds(
     return results
 
 
-# ── Intervention evaluation ──────���───────────────────────────────────
-
-
-def run_model_interventions(model, test_sample, budgets: list[int], model_name: str):
-    """Run KFlip interventions at given budgets. Returns list of result dicts."""
-    from experiments.kflip import KFlipInterventionStrategy
-    from experiments.intervention import (
-        ConceptInterventionRunner,
-        InterventionBatch,
-        InterventionConfig,
-    )
-
-    C_pred = model.predict_concepts(test_sample) if hasattr(model, "predict_concepts") else None
-    if C_pred is None:
-        # For CBM: get concept probabilities
-        try:
-            C_pred = model.concept_detector.predict_proba(test_sample)
-        except Exception:
-            logger.warning("Cannot get concept predictions for %s, skipping interventions", model_name)
-            return []
-
-    C_true = np.array(test_sample.C)
-    y_true = np.array(test_sample.y)
-
-    results = []
-    for k in budgets:
-        if k == 0:
-            # No intervention baseline
-            y_pred = model.predict(test_sample)
-            acc = accuracy(y_pred, y_true)
-            results.append({
-                "model": model_name, "budget": 0, "accuracy": acc,
-                "predictions_intervened_on": 0, "predictions_changed": 0,
-            })
-            continue
-
-        try:
-            strategy = KFlipInterventionStrategy(k=k)
-            batch = InterventionBatch(
-                C_pred=C_pred,
-                C_true=C_true,
-                y_true=y_true,
-            )
-            config = InterventionConfig(
-                budgets=[k],
-                threshold=0.2,
-            )
-            runner = ConceptInterventionRunner(
-                model=model,
-                strategy=strategy,
-                config=config,
-            )
-            result = runner.run(batch)
-            results.append({
-                "model": model_name,
-                "budget": k,
-                "accuracy": result.accuracy,
-                "predictions_intervened_on": result.predictions_intervened_on,
-                "predictions_changed": result.predictions_changed,
-            })
-        except Exception as e:
-            logger.warning("Intervention failed for %s at k=%d: %s", model_name, k, e)
-            # Fallback: manual intervention
-            y_pred = model.predict(test_sample)
-            results.append({
-                "model": model_name, "budget": k,
-                "accuracy": accuracy(y_pred, y_true),
-                "predictions_intervened_on": 0, "predictions_changed": 0,
-            })
-
-    return results
-
-
 # ── Main pipeline ────────────────────────────────────────────────────
 
 
@@ -448,7 +403,7 @@ def run_pipeline(dataset_name: str, dataset: ConceptDataset, config: SimpleNames
     logger.info("Running pipeline for: %s", dataset_name)
     logger.info("=" * 60)
 
-    # Use "robot" as benchmark name so _infer_backbone_spec picks TabularBackbone
+    # Use "robot" as benchmark name so _infer_backbone_spec picks RobotImageBackbone
     benchmark = "robot"
     target_accs = [0.90, 0.95, 0.99]
     intervention_budgets = [0, 1, 3]
@@ -497,8 +452,9 @@ def run_pipeline(dataset_name: str, dataset: ConceptDataset, config: SimpleNames
             y_pred = model.predict(test)
             try:
                 probs = model.predict_proba(test)
+                if isinstance(probs, tuple):
+                    probs = probs[0]
                 if probs.ndim == 1:
-                    # Binary: convert to 2-class
                     probs = np.column_stack([1 - probs, probs])
                 conf = probs.max(axis=1)
             except Exception as e:
@@ -525,10 +481,8 @@ def run_pipeline(dataset_name: str, dataset: ConceptDataset, config: SimpleNames
 
         # Interventions (skip DNN)
         if name != "DNN":
-            # Get concept predictions (also caches embeddings for CEM/ProbCBM/ECBM)
             try:
                 if hasattr(model, "predict_proba_from_concepts"):
-                    # CEM/ProbCBM/ECBM: predict_proba caches internal state
                     probs_result = model.predict_proba(test, return_concepts=True)
                     if isinstance(probs_result, tuple):
                         _, C_pred_proba = probs_result
@@ -545,31 +499,22 @@ def run_pipeline(dataset_name: str, dataset: ConceptDataset, config: SimpleNames
             for k in intervention_budgets:
                 if k == 0:
                     all_results.append({
-                        "dataset": dataset_name,
-                        "model": name,
-                        "metric_type": "intervention",
-                        "budget": 0,
-                        "accuracy": acc,
-                        "target_acc": np.nan,
-                        "threshold": np.nan,
-                        "selective_acc": np.nan,
+                        "dataset": dataset_name, "model": name,
+                        "metric_type": "intervention", "budget": 0,
+                        "accuracy": acc, "target_acc": np.nan,
+                        "threshold": np.nan, "selective_acc": np.nan,
                         "coverage": np.nan,
                     })
                 elif C_pred_proba is None:
                     all_results.append({
-                        "dataset": dataset_name,
-                        "model": name,
-                        "metric_type": "intervention",
-                        "budget": k,
-                        "accuracy": acc,
-                        "target_acc": np.nan,
-                        "threshold": np.nan,
-                        "selective_acc": np.nan,
+                        "dataset": dataset_name, "model": name,
+                        "metric_type": "intervention", "budget": k,
+                        "accuracy": acc, "target_acc": np.nan,
+                        "threshold": np.nan, "selective_acc": np.nan,
                         "coverage": np.nan,
                     })
                 else:
                     try:
-                        # Select top-k most uncertain concepts per sample
                         C_int = C_pred_proba.copy()
                         uncertainty = np.abs(C_pred_proba - 0.5)
                         intervention_mask = np.zeros_like(C_int, dtype=bool)
@@ -578,10 +523,8 @@ def run_pipeline(dataset_name: str, dataset: ConceptDataset, config: SimpleNames
                             C_int[i, most_uncertain] = C_true[i, most_uncertain]
                             intervention_mask[i, most_uncertain] = True
 
-                        # Get label predictions with intervened concepts
                         y_prob_int = predict_label_proba_from_concepts(
-                            model,
-                            C_int,
+                            model, C_int,
                             row_indices=np.arange(len(C_int), dtype=int),
                             baseline_concepts=C_pred_proba,
                             intervention_mask=intervention_mask,
@@ -590,21 +533,16 @@ def run_pipeline(dataset_name: str, dataset: ConceptDataset, config: SimpleNames
                             y_pred_int = (y_prob_int >= 0.5).astype(int)
                         else:
                             y_pred_int = y_prob_int.argmax(axis=1)
-
                         acc_int = accuracy(y_pred_int, y_true)
                     except Exception as e:
                         logger.warning("  Intervention failed for %s k=%d: %s", name, k, e)
                         acc_int = acc
 
                     all_results.append({
-                        "dataset": dataset_name,
-                        "model": name,
-                        "metric_type": "intervention",
-                        "budget": k,
-                        "accuracy": acc_int,
-                        "target_acc": np.nan,
-                        "threshold": np.nan,
-                        "selective_acc": np.nan,
+                        "dataset": dataset_name, "model": name,
+                        "metric_type": "intervention", "budget": k,
+                        "accuracy": acc_int, "target_acc": np.nan,
+                        "threshold": np.nan, "selective_acc": np.nan,
                         "coverage": np.nan,
                     })
                     logger.info("  %s k=%d accuracy: %.4f", name, k, acc_int)
@@ -615,7 +553,7 @@ def run_pipeline(dataset_name: str, dataset: ConceptDataset, config: SimpleNames
     results_df.to_csv(out_path, index=False)
     logger.info("Results saved to %s", out_path)
 
-    # Print summary table
+    # Print summary
     logger.info("\n%s Summary:", dataset_name.upper())
     intervention_rows = results_df[results_df["metric_type"] == "intervention"]
     if not intervention_rows.empty:
@@ -643,7 +581,7 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--patience", type=int, default=10)
-    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
     args = parser.parse_args()
 
