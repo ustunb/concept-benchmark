@@ -450,8 +450,12 @@ def run_pipeline(dataset: ConceptDataset, config: SimpleNamespace, skip_training
 
             for k in intervention_budgets:
                 if k == 0:
+                    y_pred_int = y_pred
+                    conf_int = conf
                     acc_int = acc
                 elif C_pred_proba is None:
+                    y_pred_int = y_pred
+                    conf_int = conf
                     acc_int = acc
                 else:
                     try:
@@ -471,23 +475,30 @@ def run_pipeline(dataset: ConceptDataset, config: SimpleNamespace, skip_training
                         )
                         if y_prob_int.ndim == 1:
                             y_pred_int = (y_prob_int >= 0.5).astype(int)
+                            conf_int = np.maximum(y_prob_int, 1 - y_prob_int)
                         else:
                             y_pred_int = y_prob_int.argmax(axis=1)
+                            conf_int = y_prob_int.max(axis=1)
                         acc_int = accuracy(y_pred_int, y_true)
                     except Exception as e:
                         logger.warning("  Intervention failed for %s k=%d: %s", name, k, e)
+                        y_pred_int = y_pred
+                        conf_int = conf
                         acc_int = acc
 
-                all_results.append({
-                    "model": name,
-                    "metric_type": "intervention",
-                    "target_acc": np.nan,
-                    "threshold": np.nan,
-                    "selective_acc": np.nan,
-                    "coverage": np.nan,
-                    "budget": k,
-                    "accuracy": acc_int,
-                })
+                # Selective classification on intervened predictions
+                for res in evaluate_selective_all_thresholds(y_pred_int, y_true, conf_int, target_accs):
+                    all_results.append({
+                        "model": name,
+                        "metric_type": "intervention_selective",
+                        "target_acc": res["target_acc"],
+                        "threshold": res["threshold"],
+                        "selective_acc": res["selective_acc"],
+                        "coverage": res["coverage"],
+                        "budget": k,
+                        "accuracy": acc_int,
+                    })
+
                 logger.info("  %s k=%d accuracy: %.4f", name, k, acc_int)
 
     results_df = pd.DataFrame(all_results)
