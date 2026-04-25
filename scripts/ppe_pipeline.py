@@ -392,12 +392,74 @@ def run_pipeline(dataset: ConceptDataset, config: SimpleNamespace):
         for res in evaluate_selective_all_thresholds(y_pred, y_true, conf, target_accs):
             all_results.append({
                 "model": name,
+                "metric_type": "selective",
                 "target_acc": res["target_acc"],
                 "threshold": res["threshold"],
                 "selective_acc": res["selective_acc"],
                 "coverage": res["coverage"],
-                "raw_accuracy": acc,
+                "budget": 0,
+                "accuracy": acc,
             })
+
+        # Interventions (skip DNN)
+        intervention_budgets = [0, 1, 3, dataset.train.n_concepts]
+        if name != "DNN":
+            try:
+                if hasattr(model, "predict_proba_from_concepts"):
+                    probs_result = model.predict_proba(test, return_concepts=True)
+                    if isinstance(probs_result, tuple):
+                        _, C_pred_proba = probs_result
+                    else:
+                        C_pred_proba = model.concept_detector.predict_proba(test)
+                else:
+                    C_pred_proba = model.concept_detector.predict_proba(test)
+            except Exception as e:
+                logger.warning("  Cannot get concept predictions for %s: %s", name, e)
+                C_pred_proba = None
+
+            C_true = np.array(test.C)
+
+            for k in intervention_budgets:
+                if k == 0:
+                    acc_int = acc
+                elif C_pred_proba is None:
+                    acc_int = acc
+                else:
+                    try:
+                        C_int = C_pred_proba.copy()
+                        uncertainty = np.abs(C_pred_proba - 0.5)
+                        intervention_mask = np.zeros_like(C_int, dtype=bool)
+                        for i in range(len(C_int)):
+                            most_uncertain = np.argsort(uncertainty[i])[:k]
+                            C_int[i, most_uncertain] = C_true[i, most_uncertain]
+                            intervention_mask[i, most_uncertain] = True
+
+                        y_prob_int = predict_label_proba_from_concepts(
+                            model, C_int,
+                            row_indices=np.arange(len(C_int), dtype=int),
+                            baseline_concepts=C_pred_proba,
+                            intervention_mask=intervention_mask,
+                        )
+                        if y_prob_int.ndim == 1:
+                            y_pred_int = (y_prob_int >= 0.5).astype(int)
+                        else:
+                            y_pred_int = y_prob_int.argmax(axis=1)
+                        acc_int = accuracy(y_pred_int, y_true)
+                    except Exception as e:
+                        logger.warning("  Intervention failed for %s k=%d: %s", name, k, e)
+                        acc_int = acc
+
+                all_results.append({
+                    "model": name,
+                    "metric_type": "intervention",
+                    "target_acc": np.nan,
+                    "threshold": np.nan,
+                    "selective_acc": np.nan,
+                    "coverage": np.nan,
+                    "budget": k,
+                    "accuracy": acc_int,
+                })
+                logger.info("  %s k=%d accuracy: %.4f", name, k, acc_int)
 
     results_df = pd.DataFrame(all_results)
     out_path = RESULTS_DIR / "ppe_automation_results.csv"
@@ -407,11 +469,16 @@ def run_pipeline(dataset: ConceptDataset, config: SimpleNamespace):
     # Print summary
     logger.info("\nPPE Automation Summary:")
     for target in target_accs:
-        subset = results_df[results_df["target_acc"] == target]
+        subset = results_df[(results_df["target_acc"] == target) & (results_df["metric_type"] == "selective")]
         logger.info("\nSelective classification (target=%.2f):", target)
         for _, row in subset.iterrows():
             logger.info("  %s: sel_acc=%.4f, coverage=%.4f",
                         row["model"], row["selective_acc"], row["coverage"])
+
+    int_rows = results_df[results_df["metric_type"] == "intervention"]
+    if not int_rows.empty:
+        pivot = int_rows.pivot_table(index="model", columns="budget", values="accuracy", aggfunc="first")
+        logger.info("\nIntervention accuracy:\n%s", pivot.to_string(float_format="%.4f"))
 
     return results_df
 
