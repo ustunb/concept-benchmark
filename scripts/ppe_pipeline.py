@@ -491,6 +491,15 @@ def run_pipeline(dataset: ConceptDataset, config: SimpleNamespace, skip_training
                 runner = ConceptInterventionRunner(model)
                 strategy = ConceptualSafeguardsStrategy()
 
+                # Compute baseline predictions ONCE for consistent coverage
+                interv_cfg_k0 = InterventionConfig(
+                    abstention_threshold=cs_t,
+                    max_concepts_per_instance=0,
+                    random_state=config.seed,
+                )
+                result_k0 = runner.run(strategy, interv_cfg_k0, test)
+                y_prob_baseline = result_k0.y_prob_after
+
                 rows_int = []
                 for k in intervention_budgets:
                     interv_cfg = InterventionConfig(
@@ -498,7 +507,7 @@ def run_pipeline(dataset: ConceptDataset, config: SimpleNamespace, skip_training
                         max_concepts_per_instance=k,
                         random_state=config.seed,
                     )
-                    result = runner.run(strategy, interv_cfg, test)
+                    result = runner.run(strategy, interv_cfg, test, y_prob_baseline=y_prob_baseline)
                     acc_int = float((result.y_pred_after == y_true).mean())
                     predictions_intervened_on = int(np.sum(np.any(result.mask, axis=1)))
                     total_concept_checks = int(np.sum(result.mask))

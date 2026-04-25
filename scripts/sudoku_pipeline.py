@@ -300,14 +300,23 @@ def run_interventions(
     cs_runner = ConceptInterventionRunner(cs_model)
     cs_strategy = ConceptualSafeguardsStrategy()
 
+    # Compute baseline predictions ONCE for consistent coverage across k values
+    interv_cfg_k0 = InterventionConfig(
+        abstention_threshold=cs_t,
+        max_concepts_per_instance=0,
+        random_state=config.seed,
+    )
+    result_k0 = cs_runner.run(cs_strategy, interv_cfg_k0, data.test)
+    y_prob_baseline = result_k0.y_prob_after  # = y_prob_before since k=0
+
     no_interv = {
         "budget": 0,
-        "accuracy": cs_sel_acc,
+        "accuracy": float((result_k0.y_pred_after == data.test.y).mean()),
         "predictions_intervened_on": 0,
         "total_concept_checks": 0,
         "total_concept_edits_made": 0,
-        "selective_accuracy_after": cs_sel_acc,
-        "coverage_after": cs_sel_cov,
+        "selective_accuracy_after": result_k0.strategy_metrics.get("selective_acc_after", cs_sel_acc),
+        "coverage_after": result_k0.strategy_metrics.get("coverage_after", cs_sel_cov),
     }
 
     rows = [no_interv]
@@ -318,7 +327,7 @@ def run_interventions(
             max_concepts_per_instance=budget,
             random_state=config.seed,
         )
-        result = cs_runner.run(cs_strategy, interv_cfg, data.test)
+        result = cs_runner.run(cs_strategy, interv_cfg, data.test, y_prob_baseline=y_prob_baseline)
         acc_intervened = float((result.y_pred_after == data.test.y).mean())
         predictions_intervened_on = int(np.sum(np.any(result.mask, axis=1)))
         total_concept_checks = int(np.sum(result.mask))

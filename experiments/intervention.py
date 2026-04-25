@@ -899,6 +899,7 @@ class ConceptInterventionRunner:
         concept_true: np.ndarray | None = None,
         labels: np.ndarray | None = None,
         instance_ids: np.ndarray | None = None,
+        y_prob_baseline: np.ndarray | None = None,
     ) -> InterventionResult:
 
         # NOTE: config.intervention_noise_rate is not consumed here — intervention
@@ -930,13 +931,16 @@ class ConceptInterventionRunner:
         row_indices = _aligned_replay_row_indices(batch)
 
         if supports_aligned:
-            y_prob_before = predict_label_proba_from_concepts(
-                self.model,
-                batch.C_pred,
-                dataset=dataset,
-                row_indices=row_indices,
-                baseline_concepts=batch.C_pred,
-            )
+            if y_prob_baseline is not None:
+                y_prob_before = y_prob_baseline
+            else:
+                y_prob_before = predict_label_proba_from_concepts(
+                    self.model,
+                    batch.C_pred,
+                    dataset=dataset,
+                    row_indices=row_indices,
+                    baseline_concepts=batch.C_pred,
+                )
             y_prob_after = predict_label_proba_from_concepts(
                 self.model,
                 C_intervened,
@@ -949,18 +953,21 @@ class ConceptInterventionRunner:
                 predict_proba_fn = self.model.predict_proba_from_concepts
             else:
                 predict_proba_fn = self.model._propagate_predict_proba_mc
-            y_prob_before = predict_proba_fn(batch.C_pred)
+            if y_prob_baseline is not None:
+                y_prob_before = y_prob_baseline
+            else:
+                y_prob_before = predict_proba_fn(batch.C_pred)
             y_prob_after = predict_proba_fn(C_intervened)
         else:
             concepts_before = batch.C_pred >= 0.5
             concepts_after = C_intervened >= 0.5
-            y_prob_before = predict_label_proba_from_concepts(self.model, concepts_before)
+            if y_prob_baseline is not None:
+                y_prob_before = y_prob_baseline
+            else:
+                y_prob_before = predict_label_proba_from_concepts(self.model, concepts_before)
             y_prob_after = predict_label_proba_from_concepts(self.model, concepts_after)
 
         # Keep predictions for non-intervened samples unchanged.
-        # Re-prediction through stochastic paths (e.g. MC sampling) can alter
-        # outputs even when concepts haven't changed, so we preserve y_prob_before
-        # for rows that received no intervention.
         intervened_rows = np.any(overwrite_mask, axis=1)
         y_prob_after[~intervened_rows] = y_prob_before[~intervened_rows]
 
