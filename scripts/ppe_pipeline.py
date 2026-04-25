@@ -544,7 +544,7 @@ def run_pipeline(dataset: ConceptDataset, config: SimpleNamespace, skip_training
                 # Record for target 0.99
                 all_results.append({
                     "model": name, "metric_type": "intervention_selective",
-                    "target_acc": 0.99, "threshold": t0,
+                    "target_acc": 0.99, "threshold": t0_unc,
                     "selective_acc": sa_after, "coverage": cov_after,
                     "budget": k, "accuracy": acc_int,
                 })
