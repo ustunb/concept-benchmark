@@ -676,7 +676,7 @@ def run(
             test_size=0.2, val_size=0.2, stratify=_shared_data.y, seed=config.seed
         )
 
-        cs_path = config.get_model_path("cs", data_type="tabular")
+        cs_path = config.get_model_path(_selected_cs_key(config), data_type="tabular")
         if cs_path.exists():
             _shared_cs = load(cs_path)
             _shared_cs._random_state = config.seed
