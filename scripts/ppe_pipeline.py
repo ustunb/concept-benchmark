@@ -330,36 +330,54 @@ def evaluate_selective_all_thresholds(y_pred, y_true, confidence, target_accs):
 # ── Main pipeline ────────────────────────────────────────────────────
 
 
-def run_pipeline(dataset: ConceptDataset, config: SimpleNamespace):
+def run_pipeline(dataset: ConceptDataset, config: SimpleNamespace, skip_training: bool = False):
     logger.info("=" * 60)
     logger.info("Running PPE automation pipeline")
     logger.info("=" * 60)
 
     benchmark = "robot"  # Use robot backbone spec (image-based)
     target_accs = [0.90, 0.95, 0.99]
+    model_dir = RESULTS_DIR / "ppe_models"
+    model_dir.mkdir(exist_ok=True)
+
+    import pickle
+
+    def save_model(name, model):
+        path = model_dir / f"{name}.pkl"
+        with open(path, "wb") as f:
+            pickle.dump(model, f)
+        logger.info("  Saved %s to %s", name, path)
+
+    def load_model(name):
+        path = model_dir / f"{name}.pkl"
+        if path.exists():
+            with open(path, "rb") as f:
+                model = pickle.load(f)
+            logger.info("  Loaded %s from %s", name, path)
+            return model
+        return None
 
     models = {}
+    train_fns = {
+        "DNN": lambda: train_dnn(dataset, config),
+        "CBM": lambda: train_cbm(dataset, config),
+        "CEM": lambda: train_cem(dataset, config, benchmark),
+        "ProbCBM": lambda: train_probcbm(dataset, config, benchmark),
+        "ECBM": lambda: train_ecbm(dataset, config, benchmark),
+    }
 
-    set_deterministic_seed(config.seed)
-    logger.info("Training DNN...")
-    dnn = train_dnn(dataset, config)
-    models["DNN"] = dnn
+    for name in ["DNN", "CBM", "CEM", "ProbCBM", "ECBM"]:
+        if skip_training:
+            model = load_model(name)
+            if model is not None:
+                models[name] = model
+                continue
+            logger.warning("  No saved model for %s, training from scratch", name)
 
-    set_deterministic_seed(config.seed)
-    logger.info("Training CBM...")
-    models["CBM"] = train_cbm(dataset, config)
-
-    set_deterministic_seed(config.seed)
-    logger.info("Training CEM...")
-    models["CEM"] = train_cem(dataset, config, benchmark)
-
-    set_deterministic_seed(config.seed)
-    logger.info("Training ProbCBM...")
-    models["ProbCBM"] = train_probcbm(dataset, config, benchmark)
-
-    set_deterministic_seed(config.seed)
-    logger.info("Training ECBM...")
-    models["ECBM"] = train_ecbm(dataset, config, benchmark)
+        set_deterministic_seed(config.seed)
+        logger.info("Training %s...", name)
+        models[name] = train_fns[name]()
+        save_model(name, models[name])
 
     # Evaluate
     test = dataset.test
@@ -490,6 +508,8 @@ def main():
     parser.add_argument("--patience", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=5e-5)
+    parser.add_argument("--skip-training", action="store_true",
+                        help="Load saved models instead of retraining")
     args = parser.parse_args()
 
     config = make_config(
@@ -501,7 +521,7 @@ def main():
     )
 
     ds = load_ppe(seed=args.seed)
-    run_pipeline(ds, config)
+    run_pipeline(ds, config, skip_training=args.skip_training)
 
 
 if __name__ == "__main__":
