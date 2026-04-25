@@ -352,27 +352,48 @@ def run_interventions(
             final_binary = (result.C_intervened >= 0.5).astype(int)
             total_concept_edits_made = int(np.sum(pred_binary != final_binary))
 
-            # Compute selective classification at target 0.99 on post-intervention predictions
-            y_prob = result.y_prob_after
-            if y_prob.ndim == 1:
-                conf_after = np.maximum(y_prob, 1 - y_prob)
+            # Compute selective classification after intervention
+            # Key: automated predictions (conf >= t0) are FIXED.
+            # Only abstained predictions are re-predicted after intervention.
+            # Coverage can only grow.
+            y_prob_after = result.y_prob_after
+            if y_prob_after.ndim == 1:
+                conf_after = np.maximum(y_prob_after, 1 - y_prob_after)
             else:
-                conf_after = y_prob.max(axis=1)
-            y_true = np.array(data.test.y)
-            y_pred_after = result.y_pred_after
+                conf_after = y_prob_after.max(axis=1)
+            y_true_arr = np.array(data.test.y)
 
-            # Sweep thresholds to find best coverage at sel_acc >= 0.99
-            thresholds = np.unique(np.concatenate([np.unique(conf_after), np.linspace(0.5, 1.0, 500)]))
-            thresholds.sort()
-            best_sel = {"selective_acc_099": float("nan"), "coverage_099": 0.0}
-            for t in thresholds:
-                mask = conf_after >= t
-                if mask.sum() == 0:
-                    continue
-                sa = (y_pred_after[mask] == y_true[mask]).mean()
-                cov = mask.mean()
-                if sa >= 0.99 and cov > best_sel["coverage_099"]:
-                    best_sel = {"selective_acc_099": sa, "coverage_099": cov}
+            if budget == 0:
+                # k=0: use original selective metrics
+                sel_acc_after = cs_sel_acc
+                cov_after = cs_sel_cov
+            else:
+                # Use k=0 threshold. Automated set is fixed.
+                # Only check if abstained samples are now confident.
+                automated_k0 = np.array([
+                    (cs_test_probs[i] >= cs_t) if cs_test_probs[i] >= 0.5
+                    else ((1 - cs_test_probs[i]) >= cs_t)
+                    for i in range(len(cs_test_probs))
+                ]) if cs_test_probs.ndim == 1 else (cs_test_probs.max(axis=1) >= cs_t)
+
+                # For abstained samples, check new confidence
+                abstained_k0 = ~automated_k0
+                newly_automated = np.zeros(len(y_true_arr), dtype=bool)
+                if abstained_k0.any():
+                    newly_automated[abstained_k0] = conf_after[abstained_k0] >= cs_t
+
+                final_automated = automated_k0 | newly_automated
+                final_pred = np.where(
+                    automated_k0,
+                    cs_test_y,  # original predictions for automated
+                    result.y_pred_after,  # new predictions for intervened
+                )
+
+                cov_after = final_automated.mean()
+                sel_acc_after = (
+                    (final_pred[final_automated] == y_true_arr[final_automated]).mean()
+                    if final_automated.any() else float("nan")
+                )
 
             rows.append(
                 {
@@ -381,8 +402,8 @@ def run_interventions(
                     "predictions_intervened_on": predictions_intervened_on,
                     "total_concept_checks": total_concept_checks,
                     "total_concept_edits_made": total_concept_edits_made,
-                    "selective_accuracy_after": best_sel["selective_acc_099"],
-                    "coverage_after": best_sel["coverage_099"],
+                    "selective_accuracy_after": sel_acc_after,
+                    "coverage_after": cov_after,
                 }
             )
 
