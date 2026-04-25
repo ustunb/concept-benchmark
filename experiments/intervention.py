@@ -418,12 +418,8 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
             )
         elif hasattr(model, "predict_proba_from_concepts"):
             y_prob = model.predict_proba_from_concepts(batch.C_pred)
-        elif getattr(model, "should_propagate", True):
-            y_prob = model._propagate_predict_proba_mc(batch.C_pred)
         else:
-            y_prob = model.label_predictor.predict_proba(
-                (batch.C_pred > 0.5).astype(np.float32)
-            )
+            y_prob = model._propagate_predict_proba_mc(batch.C_pred)
         predicted = np.argmax(y_prob, axis=1)
         confidences = y_prob[np.arange(batch.n_samples), predicted]
         abstain_mask = (confidences >= config.abstention_threshold) & (
@@ -951,12 +947,11 @@ class ConceptInterventionRunner:
         elif isinstance(strategy, ConceptualSafeguardsStrategy):
             if hasattr(self.model, "predict_proba_from_concepts"):
                 predict_proba_fn = self.model.predict_proba_from_concepts
-            elif getattr(self.model, "should_propagate", True):
-                predict_proba_fn = self.model._propagate_predict_proba_mc
             else:
-                predict_proba_fn = lambda C: self.model.label_predictor.predict_proba(
-                    (np.asarray(C) > 0.5).astype(np.float32)
-                )
+                # Use the deterministic label predictor (not MC sampling).
+                # This matches the pre-refactor behavior where run() used
+                # front_end_model.predict_proba directly.
+                predict_proba_fn = self.model.label_predictor.predict_proba
             y_prob_before = predict_proba_fn(batch.C_pred)
             y_prob_after = predict_proba_fn(C_intervened)
         else:
