@@ -956,6 +956,14 @@ class ConceptInterventionRunner:
             concepts_after = C_intervened >= 0.5
             y_prob_before = predict_label_proba_from_concepts(self.model, concepts_before)
             y_prob_after = predict_label_proba_from_concepts(self.model, concepts_after)
+
+        # Keep predictions for non-intervened samples unchanged.
+        # Re-prediction through stochastic paths (e.g. MC sampling) can alter
+        # outputs even when concepts haven't changed, so we preserve y_prob_before
+        # for rows that received no intervention.
+        intervened_rows = np.any(overwrite_mask, axis=1)
+        y_prob_after[~intervened_rows] = y_prob_before[~intervened_rows]
+
         y_pred_after = np.argmax(y_prob_after, axis=1)
 
         # Conceptual Safeguards results
