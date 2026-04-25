@@ -418,8 +418,12 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
             )
         elif hasattr(model, "predict_proba_from_concepts"):
             y_prob = model.predict_proba_from_concepts(batch.C_pred)
-        else:
+        elif getattr(model, "should_propagate", True):
             y_prob = model._propagate_predict_proba_mc(batch.C_pred)
+        else:
+            y_prob = model.label_predictor.predict_proba(
+                (batch.C_pred > 0.5).astype(np.float32)
+            )
         predicted = np.argmax(y_prob, axis=1)
         confidences = y_prob[np.arange(batch.n_samples), predicted]
         abstain_mask = (confidences >= config.abstention_threshold) & (
