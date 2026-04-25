@@ -491,16 +491,8 @@ def run_pipeline(dataset: ConceptDataset, config: SimpleNamespace, skip_training
                 runner = ConceptInterventionRunner(model)
                 strategy = ConceptualSafeguardsStrategy()
 
-                rows_int = [{
-                    "budget": 0, "accuracy": cs_sel_acc,
-                    "predictions_intervened_on": 0, "total_concept_checks": 0,
-                    "total_concept_edits_made": 0,
-                    "selective_accuracy_after": cs_sel_acc, "coverage_after": cs_sel_cov,
-                }]
-
+                rows_int = []
                 for k in intervention_budgets:
-                    if k == 0:
-                        continue
                     interv_cfg = InterventionConfig(
                         abstention_threshold=cs_t,
                         max_concepts_per_instance=k,

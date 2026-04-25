@@ -948,10 +948,7 @@ class ConceptInterventionRunner:
             if hasattr(self.model, "predict_proba_from_concepts"):
                 predict_proba_fn = self.model.predict_proba_from_concepts
             else:
-                # Use the deterministic label predictor (not MC sampling).
-                # This matches the pre-refactor behavior where run() used
-                # front_end_model.predict_proba directly.
-                predict_proba_fn = self.model.label_predictor.predict_proba
+                predict_proba_fn = self.model._propagate_predict_proba_mc
             y_prob_before = predict_proba_fn(batch.C_pred)
             y_prob_after = predict_proba_fn(C_intervened)
         else:
