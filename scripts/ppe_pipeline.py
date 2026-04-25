@@ -430,127 +430,97 @@ def run_pipeline(dataset: ConceptDataset, config: SimpleNamespace, skip_training
                 "accuracy": acc,
             })
 
-        # Interventions (skip DNN)
-        # Logic: at k=0, find threshold t0 for each target. Automated set = conf >= t0.
-        # At k>0, only intervene on ABSTAINED samples, re-predict those only.
-        # Automated predictions are FIXED. Coverage can only grow.
+        # Interventions using ConceptInterventionRunner (skip DNN)
+        # Uses the same intervention mechanism as the sudoku pipeline.
+        # Automated predictions (conf >= t0) are FIXED. Coverage can only grow.
         intervention_budgets = [0, 1, 3, dataset.train.n_concepts]
         if name != "DNN":
-            try:
-                if hasattr(model, "predict_proba_from_concepts"):
-                    probs_result = model.predict_proba(test, return_concepts=True)
-                    if isinstance(probs_result, tuple):
-                        _, C_pred_proba = probs_result
-                    else:
-                        C_pred_proba = model.concept_detector.predict_proba(test)
-                else:
-                    C_pred_proba = model.concept_detector.predict_proba(test)
-            except Exception as e:
-                logger.warning("  Cannot get concept predictions for %s: %s", name, e)
-                C_pred_proba = None
+            from experiments.intervention import (
+                ConceptInterventionRunner,
+                ConceptualSafeguardsStrategy,
+                InterventionConfig,
+            )
 
-            C_true = np.array(test.C)
-
-            # Find k=0 thresholds for each target
+            # Find k=0 threshold at target 0.99
             k0_results = evaluate_selective_all_thresholds(y_pred, y_true, conf, target_accs)
+            # Use target 0.99 threshold
+            res_099 = [r for r in k0_results if r["target_acc"] == 0.99][0]
+            t0 = res_099["threshold"]
+
+            runner = ConceptInterventionRunner(model)
+            strategy = ConceptualSafeguardsStrategy()
+
+            # Identify automated set at k=0 (FIXED)
+            automated_k0 = conf >= t0 if not np.isnan(t0) else np.zeros(len(y_true), dtype=bool)
 
             for k in intervention_budgets:
-                if k == 0 or C_pred_proba is None:
-                    # k=0: just record the selective results
+                if k == 0:
                     for res in k0_results:
                         all_results.append({
-                            "model": name,
-                            "metric_type": "intervention_selective",
-                            "target_acc": res["target_acc"],
-                            "threshold": res["threshold"],
-                            "selective_acc": res["selective_acc"],
-                            "coverage": res["coverage"],
-                            "budget": k,
-                            "accuracy": acc,
+                            "model": name, "metric_type": "intervention_selective",
+                            "target_acc": res["target_acc"], "threshold": res["threshold"],
+                            "selective_acc": res["selective_acc"], "coverage": res["coverage"],
+                            "budget": 0, "accuracy": acc,
                         })
-                    if k == 0:
-                        logger.info("  %s k=%d accuracy: %.4f", name, k, acc)
+                    logger.info("  %s k=%d accuracy: %.4f", name, k, acc)
                     continue
 
-                # For each target, use the k=0 threshold and only re-predict abstained
-                for res0 in k0_results:
-                    t0 = res0["threshold"]
-                    if np.isnan(t0):
+                if np.isnan(t0):
+                    for res in k0_results:
                         all_results.append({
                             "model": name, "metric_type": "intervention_selective",
-                            "target_acc": res0["target_acc"], "threshold": t0,
+                            "target_acc": res["target_acc"], "threshold": np.nan,
                             "selective_acc": np.nan, "coverage": 0.0,
                             "budget": k, "accuracy": acc,
                         })
-                        continue
+                    continue
 
-                    # Automated set (FIXED, never re-predicted)
-                    automated = conf >= t0
-                    abstained = ~automated
+                try:
+                    interv_cfg = InterventionConfig(
+                        abstention_threshold=t0,
+                        max_concepts_per_instance=k,
+                        random_state=config.seed,
+                    )
+                    result = runner.run(strategy, interv_cfg, test)
 
-                    # Intervene on abstained samples only
-                    abstained_idx = np.where(abstained)[0]
-                    if len(abstained_idx) == 0:
-                        # Everything already automated
-                        all_results.append({
-                            "model": name, "metric_type": "intervention_selective",
-                            "target_acc": res0["target_acc"], "threshold": t0,
-                            "selective_acc": res0["selective_acc"],
-                            "coverage": res0["coverage"],
-                            "budget": k, "accuracy": acc,
-                        })
-                        continue
+                    # Get confidence from post-intervention predictions
+                    y_prob_after = result.y_prob_after
+                    if y_prob_after.ndim == 1:
+                        conf_after = np.maximum(y_prob_after, 1 - y_prob_after)
+                    else:
+                        conf_after = y_prob_after.max(axis=1)
 
-                    try:
-                        C_int = C_pred_proba[abstained_idx].copy()
-                        uncertainty = np.abs(C_int - 0.5)
-                        int_mask = np.zeros_like(C_int, dtype=bool)
-                        for i in range(len(C_int)):
-                            most_uncertain = np.argsort(uncertainty[i])[:k]
-                            C_int[i, most_uncertain] = C_true[abstained_idx[i], most_uncertain]
-                            int_mask[i, most_uncertain] = True
+                    # Keep automated predictions FIXED, only check abstained
+                    abstained_k0 = ~automated_k0
+                    newly_automated = np.zeros(len(y_true), dtype=bool)
+                    if abstained_k0.any():
+                        newly_automated[abstained_k0] = conf_after[abstained_k0] >= t0
 
-                        y_prob_abs = predict_label_proba_from_concepts(
-                            model, C_int,
-                            row_indices=abstained_idx.astype(int),
-                            baseline_concepts=C_pred_proba[abstained_idx],
-                            intervention_mask=int_mask,
-                        )
-                        if y_prob_abs.ndim == 1:
-                            conf_abs = np.maximum(y_prob_abs, 1 - y_prob_abs)
-                            y_pred_abs = (y_prob_abs >= 0.5).astype(int)
-                        else:
-                            conf_abs = y_prob_abs.max(axis=1)
-                            y_pred_abs = y_prob_abs.argmax(axis=1)
+                    final_automated = automated_k0 | newly_automated
+                    final_pred = y_pred.copy()
+                    final_pred[abstained_k0] = result.y_pred_after[abstained_k0]
 
-                        # Newly automated: abstained samples now confident enough
-                        newly_automated = conf_abs >= t0
+                    cov_after = final_automated.mean()
+                    sa_after = (
+                        (final_pred[final_automated] == y_true[final_automated]).mean()
+                        if final_automated.any() else np.nan
+                    )
+                    acc_int = (final_pred == y_true).mean()
 
-                        # Combined automated set
-                        final_pred = y_pred.copy()
-                        final_pred[abstained_idx[newly_automated]] = y_pred_abs[newly_automated]
-                        final_automated = automated.copy()
-                        final_automated[abstained_idx[newly_automated]] = True
+                except Exception as e:
+                    logger.warning("  Intervention failed for %s k=%d: %s", name, k, e)
+                    sa_after = res_099["selective_acc"]
+                    cov_after = res_099["coverage"]
+                    acc_int = acc
 
-                        n_total = len(y_true)
-                        cov_after = final_automated.sum() / n_total
-                        sa_after = (final_pred[final_automated] == y_true[final_automated]).mean() if final_automated.any() else np.nan
-                        acc_int = (final_pred == y_true).mean()
-
-                    except Exception as e:
-                        logger.warning("  Intervention failed for %s k=%d: %s", name, k, e)
-                        sa_after = res0["selective_acc"]
-                        cov_after = res0["coverage"]
-                        acc_int = acc
-
-                    all_results.append({
-                        "model": name, "metric_type": "intervention_selective",
-                        "target_acc": res0["target_acc"], "threshold": t0,
-                        "selective_acc": sa_after, "coverage": cov_after,
-                        "budget": k, "accuracy": acc_int,
-                    })
-
-                logger.info("  %s k=%d accuracy: %.4f", name, k, acc_int)
+                # Record for target 0.99
+                all_results.append({
+                    "model": name, "metric_type": "intervention_selective",
+                    "target_acc": 0.99, "threshold": t0,
+                    "selective_acc": sa_after, "coverage": cov_after,
+                    "budget": k, "accuracy": acc_int,
+                })
+                logger.info("  %s k=%d accuracy: %.4f cov: %.4f", name, k, acc_int, cov_after)
 
     results_df = pd.DataFrame(all_results)
     out_path = RESULTS_DIR / "ppe_automation_results.csv"
