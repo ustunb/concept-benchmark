@@ -130,25 +130,27 @@ def make_config(seed=42, epochs=50, patience=10, batch_size=16, lr=5e-5):
 
 # ── DNN (ViT backbone) ──────────────────────────────────────────────
 
+from transformers import ViTModel
+
+
+class ViTDNN(nn.Module):
+    def __init__(self, n_cls):
+        super().__init__()
+        self.vit = ViTModel.from_pretrained("google/vit-base-patch16-224")
+        for name, p in self.vit.named_parameters():
+            if "encoder.layer.10" not in name and "encoder.layer.11" not in name and "layernorm" not in name:
+                p.requires_grad = False
+        self.head = nn.Linear(768, n_cls)
+
+    def forward(self, x):
+        return self.head(self.vit(pixel_values=x).last_hidden_state[:, 0, :])
+
 
 def train_dnn(dataset: ConceptDataset, config: SimpleNamespace):
     from concept_benchmark.utils import determine_device
-    from transformers import ViTModel
 
     device = determine_device()
     n_classes = dataset.train.n_classes
-
-    class ViTDNN(nn.Module):
-        def __init__(self, n_cls):
-            super().__init__()
-            self.vit = ViTModel.from_pretrained("google/vit-base-patch16-224")
-            for name, p in self.vit.named_parameters():
-                if "encoder.layer.10" not in name and "encoder.layer.11" not in name and "layernorm" not in name:
-                    p.requires_grad = False
-            self.head = nn.Linear(768, n_cls)
-
-        def forward(self, x):
-            return self.head(self.vit(pixel_values=x).last_hidden_state[:, 0, :])
 
     model = ViTDNN(n_classes).to(device)
     criterion = nn.CrossEntropyLoss()
@@ -344,18 +346,27 @@ def run_pipeline(dataset: ConceptDataset, config: SimpleNamespace, skip_training
 
     def save_model(name, model):
         path = model_dir / f"{name}.pkl"
-        with open(path, "wb") as f:
-            pickle.dump(model, f)
+        if name == "DNN":
+            torch.save({"state_dict": model.state_dict(), "n_cls": len(dataset.meta["classes"])}, path)
+        else:
+            with open(path, "wb") as f:
+                pickle.dump(model, f)
         logger.info("  Saved %s to %s", name, path)
 
     def load_model(name):
         path = model_dir / f"{name}.pkl"
-        if path.exists():
+        if not path.exists():
+            return None
+        if name == "DNN":
+            ckpt = torch.load(path, map_location="cpu", weights_only=False)
+            model = ViTDNN(ckpt["n_cls"])
+            model.load_state_dict(ckpt["state_dict"])
+            model.eval()
+        else:
             with open(path, "rb") as f:
                 model = pickle.load(f)
-            logger.info("  Loaded %s from %s", name, path)
-            return model
-        return None
+        logger.info("  Loaded %s from %s", name, path)
+        return model
 
     models = {}
     train_fns = {
