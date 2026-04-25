@@ -351,8 +351,29 @@ def run_interventions(
             pred_binary = (result.C_pred >= 0.5).astype(int)
             final_binary = (result.C_intervened >= 0.5).astype(int)
             total_concept_edits_made = int(np.sum(pred_binary != final_binary))
-            selective_acc_after = result.strategy_metrics.get("selective_acc_after", None)
-            coverage_after = result.strategy_metrics.get("coverage_after", None)
+
+            # Compute selective classification at target 0.99 on post-intervention predictions
+            y_prob = result.y_prob_after
+            if y_prob.ndim == 1:
+                conf_after = np.maximum(y_prob, 1 - y_prob)
+            else:
+                conf_after = y_prob.max(axis=1)
+            y_true = np.array(data.test.y)
+            y_pred_after = result.y_pred_after
+
+            # Sweep thresholds to find best coverage at sel_acc >= 0.99
+            thresholds = np.unique(np.concatenate([np.unique(conf_after), np.linspace(0.5, 1.0, 500)]))
+            thresholds.sort()
+            best_sel = {"selective_acc_099": float("nan"), "coverage_099": 0.0}
+            for t in thresholds:
+                mask = conf_after >= t
+                if mask.sum() == 0:
+                    continue
+                sa = (y_pred_after[mask] == y_true[mask]).mean()
+                cov = mask.mean()
+                if sa >= 0.99 and cov > best_sel["coverage_099"]:
+                    best_sel = {"selective_acc_099": sa, "coverage_099": cov}
+
             rows.append(
                 {
                     "budget": budget,
@@ -360,8 +381,8 @@ def run_interventions(
                     "predictions_intervened_on": predictions_intervened_on,
                     "total_concept_checks": total_concept_checks,
                     "total_concept_edits_made": total_concept_edits_made,
-                    "selective_accuracy_after": selective_acc_after,
-                    "coverage_after": coverage_after,
+                    "selective_accuracy_after": best_sel["selective_acc_099"],
+                    "coverage_after": best_sel["coverage_099"],
                 }
             )
 
