@@ -947,8 +947,12 @@ class ConceptInterventionRunner:
         elif isinstance(strategy, ConceptualSafeguardsStrategy):
             if hasattr(self.model, "predict_proba_from_concepts"):
                 predict_proba_fn = self.model.predict_proba_from_concepts
-            else:
+            elif getattr(self.model, "should_propagate", True):
                 predict_proba_fn = self.model._propagate_predict_proba_mc
+            else:
+                predict_proba_fn = lambda C: self.model.label_predictor.predict_proba(
+                    (np.asarray(C) > 0.5).astype(np.float32)
+                )
             y_prob_before = predict_proba_fn(batch.C_pred)
             y_prob_after = predict_proba_fn(C_intervened)
         else:
