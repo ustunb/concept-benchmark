@@ -1270,16 +1270,19 @@ def _run_ecbm_inference(
     fixed_logits = None
     if forced_concept_probs is not None:
         fixed_logits = _safe_binary_logit(forced_concept_probs)
+    # Identify which ROWS have any intervention (not just which concepts)
+    intervened_rows = None
     if forced_concept_mask is not None and fixed_logits is not None:
+        intervened_rows = forced_concept_mask.any(dim=-1)  # (N,) bool
         with torch.no_grad():
             concept_logits.data = torch.where(
                 forced_concept_mask,
                 fixed_logits,
                 concept_logits.data,
             )
-            # Re-initialize label logits to zeros for intervention phase
-            # (matching original ECBM paper's Phase 2)
-            label_logits.data.zero_()
+            # Only reset label logits for intervened rows
+            if intervened_rows.any():
+                label_logits.data[intervened_rows] = 0.0
 
     original_requires_grad = [param.requires_grad for param in model.parameters()]
     for param in model.parameters():
@@ -1312,20 +1315,23 @@ def _run_ecbm_inference(
                 _soft_cross_entropy_from_probs(label_logits, cy_prob.detach())
                 + _soft_cross_entropy_from_probs(cy_logits, y_prob.detach())
             )
-            # When intervening, follow the original ECBM paper (Xu et al.):
-            # turn OFF xy and xc losses, amplify cy loss so the label
-            # prediction is forced to follow the corrected concepts.
-            if forced_concept_mask is not None and forced_concept_mask.any():
-                loss = 3.0 * loss_cy
-            else:
-                loss = (
-                    model.lambda_xy * loss_xy
-                    + model.lambda_xc * loss_xc
-                    + model.lambda_cy * loss_cy
-                )
+            # Use the full loss for all samples during optimization.
+            # For intervened rows, the cy path dominates because xy_target
+            # and xc_target still reflect the original (pre-intervention) state,
+            # while cy_prob reflects the corrected concepts.
+            loss = (
+                model.lambda_xy * loss_xy
+                + model.lambda_xc * loss_xc
+                + model.lambda_cy * loss_cy
+            )
             loss.backward()
             if forced_concept_mask is not None and concept_logits.grad is not None:
                 concept_logits.grad.masked_fill_(forced_concept_mask, 0.0)
+            # Freeze label logits for non-intervened rows so their predictions don't change
+            if intervened_rows is not None and label_logits.grad is not None:
+                non_intervened = ~intervened_rows
+                if non_intervened.any():
+                    label_logits.grad.data[non_intervened] = 0.0
             optimizer.step()
             if forced_concept_mask is not None and fixed_logits is not None:
                 with torch.no_grad():
