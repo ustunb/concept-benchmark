@@ -430,9 +430,7 @@ def run_pipeline(dataset: ConceptDataset, config: SimpleNamespace, skip_training
                 "accuracy": acc,
             })
 
-        # Interventions using ConceptInterventionRunner (skip DNN)
-        # Uses the same intervention mechanism as the sudoku pipeline.
-        # Automated predictions (conf >= t0) are FIXED. Coverage can only grow.
+        # Interventions — identical logic to sudoku pipeline (main branch)
         intervention_budgets = [0, 1, 3, dataset.train.n_concepts]
         if name != "DNN":
             from experiments.intervention import (
@@ -441,114 +439,95 @@ def run_pipeline(dataset: ConceptDataset, config: SimpleNamespace, skip_training
                 InterventionConfig,
             )
 
-            # Find k=0 threshold for target 0.99 using uncertainty measure
-            # uncertainty = min(p, 1-p), same as sudoku pipeline
-            # Abstain when uncertainty > threshold (too uncertain)
-            # Automate when uncertainty <= threshold (confident enough)
-            k0_results = evaluate_selective_all_thresholds(y_pred, y_true, conf, target_accs)
-            res_099 = [r for r in k0_results if r["target_acc"] == 0.99][0]
+            # Find selective accuracy threshold on validation set (same as sudoku)
+            val_probs = model.predict_proba(dataset.val)
+            if isinstance(val_probs, tuple):
+                val_probs = val_probs[0]
+            if val_probs.ndim == 2:
+                val_probs = val_probs[:, 1] if val_probs.shape[1] == 2 else val_probs.max(axis=1)
+            val_y = np.array(dataset.val.y)
 
-            # Convert confidence threshold to uncertainty threshold for InterventionConfig
-            # conf >= t_conf means min(p, 1-p) <= 1 - t_conf (when t_conf > 0.5)
-            # But _selective_accuracy_threshold uses min_prob directly
-            # Let's compute it the same way as sudoku
-            if probs.ndim == 1:
-                min_prob = np.minimum(probs, 1.0 - probs)
-            else:
-                min_prob = 1.0 - conf  # min(p, 1-p) = 1 - max(p)
-
-            # Find uncertainty threshold for target 0.99
-            candidates = np.unique(min_prob)
+            # Find threshold (uncertainty-based, same as sudoku _selective_accuracy_threshold)
+            min_prob_val = np.minimum(val_probs, 1.0 - val_probs)
+            candidates = np.unique(np.concatenate(([0.0], min_prob_val)))
             candidates = candidates[(candidates >= 0.0) & (candidates <= 0.5)]
             candidates.sort()
-            t0_unc = None
-            cov_k0 = 0.0
+            cs_t = None
             for t in candidates[::-1]:
-                mask = min_prob <= t
+                mask = min_prob_val <= t
                 if not mask.any():
                     continue
-                sa = (y_pred[mask] == y_true[mask]).mean()
+                preds = (val_probs[mask] >= 0.5).astype(int)
+                sa = (preds == val_y[mask]).mean()
                 if sa >= 0.99:
-                    t0_unc = t
-                    cov_k0 = mask.mean()
+                    cs_t = float(t)
                     break
 
-            runner = ConceptInterventionRunner(model)
-            strategy = ConceptualSafeguardsStrategy()
-
-            # Identify automated set at k=0 (FIXED)
-            if t0_unc is not None:
-                automated_k0 = min_prob <= t0_unc
-            else:
-                automated_k0 = np.zeros(len(y_true), dtype=bool)
-
-            for k in intervention_budgets:
-                if k == 0:
-                    for res in k0_results:
-                        all_results.append({
-                            "model": name, "metric_type": "intervention_selective",
-                            "target_acc": res["target_acc"], "threshold": res["threshold"],
-                            "selective_acc": res["selective_acc"], "coverage": res["coverage"],
-                            "budget": 0, "accuracy": acc,
-                        })
-                    logger.info("  %s k=%d accuracy: %.4f", name, k, acc)
-                    continue
-
-                if t0_unc is None:
+            if cs_t is None:
+                logger.warning("  %s: cannot reach 0.99 selective accuracy, skipping interventions", name)
+                for k in intervention_budgets:
                     all_results.append({
-                        "model": name, "metric_type": "intervention_selective",
-                        "target_acc": 0.99, "threshold": np.nan,
-                        "selective_acc": np.nan, "coverage": 0.0,
+                        "model": name, "metric_type": "intervention",
                         "budget": k, "accuracy": acc,
+                        "selective_accuracy_after": float("nan"), "coverage_after": 0.0,
+                        "predictions_intervened_on": 0, "total_concept_checks": 0,
+                        "total_concept_edits_made": 0,
                     })
-                    continue
+            else:
+                # Test set selective metrics
+                test_probs = probs[:, 1] if probs.ndim == 2 and probs.shape[1] == 2 else conf
+                if probs.ndim == 2 and probs.shape[1] == 2:
+                    test_probs_1d = probs[:, 1]
+                elif probs.ndim == 1:
+                    test_probs_1d = probs
+                else:
+                    test_probs_1d = conf
 
-                try:
+                min_prob_test = np.minimum(test_probs_1d, 1.0 - test_probs_1d)
+                test_mask = min_prob_test <= cs_t
+                cs_sel_acc = (y_pred[test_mask] == y_true[test_mask]).mean() if test_mask.any() else float("nan")
+                cs_sel_cov = test_mask.mean()
+
+                runner = ConceptInterventionRunner(model)
+                strategy = ConceptualSafeguardsStrategy()
+
+                rows_int = [{
+                    "budget": 0, "accuracy": cs_sel_acc,
+                    "predictions_intervened_on": 0, "total_concept_checks": 0,
+                    "total_concept_edits_made": 0,
+                    "selective_accuracy_after": cs_sel_acc, "coverage_after": cs_sel_cov,
+                }]
+
+                for k in intervention_budgets:
+                    if k == 0:
+                        continue
                     interv_cfg = InterventionConfig(
-                        abstention_threshold=t0_unc,
+                        abstention_threshold=cs_t,
                         max_concepts_per_instance=k,
                         random_state=config.seed,
                     )
                     result = runner.run(strategy, interv_cfg, test)
+                    acc_int = float((result.y_pred_after == y_true).mean())
+                    predictions_intervened_on = int(np.sum(np.any(result.mask, axis=1)))
+                    total_concept_checks = int(np.sum(result.mask))
+                    pred_binary = (result.C_pred >= 0.5).astype(int)
+                    final_binary = (result.C_intervened >= 0.5).astype(int)
+                    total_concept_edits_made = int(np.sum(pred_binary != final_binary))
+                    selective_acc_after = result.strategy_metrics.get("selective_acc_after", None)
+                    coverage_after = result.strategy_metrics.get("coverage_after", None)
+                    rows_int.append({
+                        "budget": k, "accuracy": acc_int,
+                        "predictions_intervened_on": predictions_intervened_on,
+                        "total_concept_checks": total_concept_checks,
+                        "total_concept_edits_made": total_concept_edits_made,
+                        "selective_accuracy_after": selective_acc_after,
+                        "coverage_after": coverage_after,
+                    })
+                    logger.info("  %s k=%d accuracy: %.4f sel_acc: %s cov: %s",
+                                name, k, acc_int, selective_acc_after, coverage_after)
 
-                    # Get uncertainty from post-intervention predictions
-                    y_prob_after = result.y_prob_after
-                    if y_prob_after.ndim == 1:
-                        min_prob_after = np.minimum(y_prob_after, 1.0 - y_prob_after)
-                    else:
-                        min_prob_after = 1.0 - y_prob_after.max(axis=1)
-
-                    # Keep automated predictions FIXED, only check abstained
-                    abstained_k0 = ~automated_k0
-                    newly_automated = np.zeros(len(y_true), dtype=bool)
-                    if abstained_k0.any():
-                        newly_automated[abstained_k0] = min_prob_after[abstained_k0] <= t0_unc
-
-                    final_automated = automated_k0 | newly_automated
-                    final_pred = y_pred.copy()
-                    final_pred[abstained_k0] = result.y_pred_after[abstained_k0]
-
-                    cov_after = final_automated.mean()
-                    sa_after = (
-                        (final_pred[final_automated] == y_true[final_automated]).mean()
-                        if final_automated.any() else np.nan
-                    )
-                    acc_int = (final_pred == y_true).mean()
-
-                except Exception as e:
-                    logger.warning("  Intervention failed for %s k=%d: %s", name, k, e)
-                    sa_after = res_099["selective_acc"]
-                    cov_after = res_099["coverage"]
-                    acc_int = acc
-
-                # Record for target 0.99
-                all_results.append({
-                    "model": name, "metric_type": "intervention_selective",
-                    "target_acc": 0.99, "threshold": t0_unc,
-                    "selective_acc": sa_after, "coverage": cov_after,
-                    "budget": k, "accuracy": acc_int,
-                })
-                logger.info("  %s k=%d accuracy: %.4f cov: %.4f", name, k, acc_int, cov_after)
+                for r in rows_int:
+                    all_results.append({"model": name, "metric_type": "intervention", **r})
 
     results_df = pd.DataFrame(all_results)
     out_path = RESULTS_DIR / "ppe_automation_results.csv"

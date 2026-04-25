@@ -44,11 +44,6 @@ from experiments.intervention import (
 logger = logging.getLogger(__name__)
 
 
-def _selected_cs_key(config: SudokuBenchmarkConfig) -> str:
-    family = str(getattr(config, "cbm_family", "cbm"))
-    return "cs" if family == "cbm" else family
-
-
 # ── Stage: setup_dataset ──────────────────────────────────────────────
 
 
@@ -79,6 +74,11 @@ def train_ocr(config: SudokuBenchmarkConfig) -> None:
         str(config.max_cell_swaps),
     ]
     subprocess.run(cmd, check=True)
+
+
+def _selected_cs_key(config: SudokuBenchmarkConfig) -> str:
+    family = str(getattr(config, "cbm_family", "cbm"))
+    return "cs" if family == "cbm" else family
 
 
 # ── Stage: train_cs ───────────────────────────────────────────────────
@@ -118,6 +118,11 @@ def train_cs(
         logger.info("Test Accuracy: %s", np.mean(test_pred == data.test.y))
         save(model, config.get_model_path(model_key, data_type="tabular"), overwrite=True)
         return model
+
+    if data is None:
+        tab_dir = config.get_dataset_path(data_type="tabular")
+        data = load(tab_dir / "sudoku_dataset.pkl")
+        data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
     # Missingness can be applied here if needed:
     # data.sample_concept_missingness(p=0.2, mechanism="mcar", rng=config.seed)
@@ -280,134 +285,61 @@ def run_interventions(
         cs_y, cs_probs, config.target_accuracy, decision_threshold
     )
 
-    cs_test_probs, cs_test_y = _cs_val_probs(cs_model, data.test)
-    budgets = [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
-
     if cs_t is None:
-        logger.warning(
-            "Model %s cannot reach target selective accuracy %.2f on validation; "
-            "skipping interventions and reporting raw accuracy with no improvement.",
-            _selected_cs_key(config),
-            config.target_accuracy,
+        raise ValueError(
+            "Could not find a tau for conceptual safeguards at the target accuracy."
         )
-        raw_acc = float(
-            ((cs_test_probs >= decision_threshold).astype(int) == cs_test_y.astype(int)).mean()
+
+    # Test set selective metrics
+    cs_test_probs, cs_test_y = _cs_val_probs(cs_model, data.test)
+    cs_sel_acc, cs_sel_cov = _selective_metrics(
+        cs_test_y, cs_test_probs, cs_t, decision_threshold
+    )
+
+    # Run interventions at different budgets
+    cs_runner = ConceptInterventionRunner(cs_model)
+    cs_strategy = ConceptualSafeguardsStrategy()
+
+    no_interv = {
+        "budget": 0,
+        "accuracy": cs_sel_acc,
+        "predictions_intervened_on": 0,
+        "total_concept_checks": 0,
+        "total_concept_edits_made": 0,
+        "selective_accuracy_after": cs_sel_acc,
+        "coverage_after": cs_sel_cov,
+    }
+
+    rows = [no_interv]
+    budgets = [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
+    for budget in budgets:
+        interv_cfg = InterventionConfig(
+            abstention_threshold=cs_t,
+            max_concepts_per_instance=budget,
+            random_state=config.seed,
         )
-        rows: list[dict] = [
+        result = cs_runner.run(cs_strategy, interv_cfg, data.test)
+        acc_intervened = float((result.y_pred_after == data.test.y).mean())
+        predictions_intervened_on = int(np.sum(np.any(result.mask, axis=1)))
+        total_concept_checks = int(np.sum(result.mask))
+        pred_binary = (result.C_pred >= 0.5).astype(int)
+        final_binary = (result.C_intervened >= 0.5).astype(int)
+        total_concept_edits_made = int(np.sum(pred_binary != final_binary))
+        selective_acc_after = result.strategy_metrics.get("selective_acc_after", None)
+        coverage_after = result.strategy_metrics.get("coverage_after", None)
+        rows.append(
             {
-                "budget": 0,
-                "accuracy": raw_acc,
-                "predictions_intervened_on": 0,
-                "total_concept_checks": 0,
-                "total_concept_edits_made": 0,
-                "selective_accuracy_after": float("nan"),
-                "coverage_after": 0.0,
+                "budget": budget,
+                "accuracy": acc_intervened,
+                "predictions_intervened_on": predictions_intervened_on,
+                "total_concept_checks": total_concept_checks,
+                "total_concept_edits_made": total_concept_edits_made,
+                "selective_accuracy_after": selective_acc_after,
+                "coverage_after": coverage_after,
             }
-        ]
-        for budget in budgets:
-            rows.append(
-                {
-                    "budget": budget,
-                    "accuracy": raw_acc,
-                    "predictions_intervened_on": 0,
-                    "total_concept_checks": 0,
-                    "total_concept_edits_made": 0,
-                    "selective_accuracy_after": float("nan"),
-                    "coverage_after": 0.0,
-                }
-            )
-        cs_intervention_df = pd.DataFrame(rows)
-    else:
-        # Test set selective metrics
-        cs_sel_acc, cs_sel_cov = _selective_metrics(
-            cs_test_y, cs_test_probs, cs_t, decision_threshold
         )
 
-        # Run interventions at different budgets
-        cs_runner = ConceptInterventionRunner(cs_model)
-        cs_strategy = ConceptualSafeguardsStrategy()
-
-        rows = [
-            {
-                "budget": 0,
-                "accuracy": cs_sel_acc,
-                "predictions_intervened_on": 0,
-                "total_concept_checks": 0,
-                "total_concept_edits_made": 0,
-                "selective_accuracy_after": cs_sel_acc,
-                "coverage_after": cs_sel_cov,
-            }
-        ]
-        for budget in budgets:
-            interv_cfg = InterventionConfig(
-                abstention_threshold=cs_t,
-                max_concepts_per_instance=budget,
-                random_state=config.seed,
-            )
-            result = cs_runner.run(cs_strategy, interv_cfg, data.test)
-            acc_intervened = float((result.y_pred_after == data.test.y).mean())
-            predictions_intervened_on = int(np.sum(np.any(result.mask, axis=1)))
-            total_concept_checks = int(np.sum(result.mask))
-            pred_binary = (result.C_pred >= 0.5).astype(int)
-            final_binary = (result.C_intervened >= 0.5).astype(int)
-            total_concept_edits_made = int(np.sum(pred_binary != final_binary))
-
-            # Compute selective classification after intervention
-            # Key: automated predictions (conf >= t0) are FIXED.
-            # Only abstained predictions are re-predicted after intervention.
-            # Coverage can only grow.
-            y_prob_after = result.y_prob_after
-            if y_prob_after.ndim == 1:
-                conf_after = np.maximum(y_prob_after, 1 - y_prob_after)
-            else:
-                conf_after = y_prob_after.max(axis=1)
-            y_true_arr = np.array(data.test.y)
-
-            if budget == 0:
-                # k=0: use original selective metrics
-                sel_acc_after = cs_sel_acc
-                cov_after = cs_sel_cov
-            else:
-                # Use k=0 threshold. Automated set is fixed.
-                # Only check if abstained samples are now confident.
-                automated_k0 = np.array([
-                    (cs_test_probs[i] >= cs_t) if cs_test_probs[i] >= 0.5
-                    else ((1 - cs_test_probs[i]) >= cs_t)
-                    for i in range(len(cs_test_probs))
-                ]) if cs_test_probs.ndim == 1 else (cs_test_probs.max(axis=1) >= cs_t)
-
-                # For abstained samples, check new confidence
-                abstained_k0 = ~automated_k0
-                newly_automated = np.zeros(len(y_true_arr), dtype=bool)
-                if abstained_k0.any():
-                    newly_automated[abstained_k0] = conf_after[abstained_k0] >= cs_t
-
-                final_automated = automated_k0 | newly_automated
-                final_pred = np.where(
-                    automated_k0,
-                    cs_test_y,  # original predictions for automated
-                    result.y_pred_after,  # new predictions for intervened
-                )
-
-                cov_after = final_automated.mean()
-                sel_acc_after = (
-                    (final_pred[final_automated] == y_true_arr[final_automated]).mean()
-                    if final_automated.any() else float("nan")
-                )
-
-            rows.append(
-                {
-                    "budget": budget,
-                    "accuracy": acc_intervened,
-                    "predictions_intervened_on": predictions_intervened_on,
-                    "total_concept_checks": total_concept_checks,
-                    "total_concept_edits_made": total_concept_edits_made,
-                    "selective_accuracy_after": sel_acc_after,
-                    "coverage_after": cov_after,
-                }
-            )
-
-        cs_intervention_df = pd.DataFrame(rows)
+    cs_intervention_df = pd.DataFrame(rows)
 
     results_key = (
         f"{_selected_cs_key(config)}_interventions"
@@ -449,7 +381,7 @@ def align(
         data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
     if cs_model is None:
-        cs_model = load(config.get_model_path("cs", data_type="tabular"))
+        cs_model = load(config.get_model_path(_selected_cs_key(config), data_type="tabular"))
 
     from experiments.alignment import test_alignment
 
@@ -506,11 +438,9 @@ def collect_results(
     for cfg in configs:
         label = _dataset_label(cfg)
         target = cfg.target_accuracy
-        cs_key = _selected_cs_key(cfg)
-        selective_key = "selective" if cs_key == "cs" else f"{cs_key}_selective"
 
-        # ── Selective CSV: DNN + CS/CEM/ProbCBM at the default target_accuracy ────
-        sel_csv = cfg.get_results_path(selective_key, data_type="tabular").with_suffix(
+        # ── Selective CSV: DNN + CS at the default target_accuracy ────
+        sel_csv = cfg.get_results_path("selective", data_type="tabular").with_suffix(
             ".csv"
         )
         if sel_csv.exists():
@@ -519,7 +449,7 @@ def collect_results(
             if "tau" in sel_df.columns:
                 sel_df = sel_df.rename(columns={"tau": "target_accuracy"})
 
-            for model in ["dnn", cs_key]:
+            for model in ["dnn", "cs"]:
                 model_df = sel_df[
                     (sel_df["model"] == model) & (sel_df["target_accuracy"] == target)
                 ]
@@ -531,7 +461,7 @@ def collect_results(
                     {
                         "dataset": label,
                         "model": model,
-                        "budget": 0 if model == cs_key else "",
+                        "budget": 0 if model == "cs" else "",
                         "target_accuracy": target,
                         "raw_test_acc": round(float(r["raw_test_acc"]), 4),
                         "selective_acc": round(float(sel_acc), 4)
@@ -544,12 +474,9 @@ def collect_results(
                     }
                 )
 
-        # ── Intervention CSV: CS / CEM / ProbCBM at k > 0 ────────────
-        interv_key = (
-            "interventions" if cs_key == "cs" else f"{cs_key}_interventions"
-        )
+        # ── Intervention CSV: CS at k > 0 ────────────────────────────
         interv_csv = cfg.get_results_path(
-            interv_key, data_type="tabular"
+            "interventions", data_type="tabular"
         ).with_suffix(".csv")
         if interv_csv.exists():
             interv_df = pd.read_csv(interv_csv)
@@ -565,7 +492,7 @@ def collect_results(
                 rows.append(
                     {
                         "dataset": label,
-                        "model": cs_key,
+                        "model": "cs",
                         "budget": budget,
                         "target_accuracy": target,
                         "raw_test_acc": "",
@@ -642,14 +569,6 @@ def run(
             "collect",
         ]
 
-    if _selected_cs_key(config) != "cs" and "align" in stages:
-        logger.info(
-            "Alignment does not apply to cbm_family=%s (no per-concept frontend weights); "
-            "dropping 'align' from the stage list.",
-            _selected_cs_key(config),
-        )
-        stages = [s for s in stages if s != "align"]
-
     # Early validation: check that dataset directory exists if we need it
     _needs_data = {"cs", "dnn", "intervene", "selective", "align", "collect"}
     if _needs_data & set(stages) and "setup" not in stages:
@@ -665,9 +584,8 @@ def run(
     n_stages = len(stages)
     _si = {s: i for i, s in enumerate(stages, 1)}
     logger.info(
-        "=== Sudoku Benchmark === seed=%d, cbm_family=%s, stages=%s, device=%s",
+        "=== Sudoku Benchmark === seed=%d, stages=%s, device=%s",
         config.seed,
-        _selected_cs_key(config),
         stages,
         device,
     )
@@ -699,24 +617,13 @@ def run(
         else:
             logger.info("Setup data is up to date (fingerprint matches), skipping")
 
-    def _model_fp_path(model_key: str) -> Path:
-        return config.get_model_path(model_key).with_suffix(".fingerprint")
-
-    def _current_model_fp(model_key: str) -> str:
-        return config.model_fingerprint(model_key)
-
-    def _model_stale(model_key: str) -> bool:
-        model_fp_path = _model_fp_path(model_key)
-        current_model_fp = _current_model_fp(model_key)
-        cached_model_fp = (
-            model_fp_path.read_text().strip() if model_fp_path.exists() else None
-        )
-        return cached_model_fp != current_model_fp
-
-    def _write_model_fingerprint(model_key: str) -> None:
-        model_fp_path = _model_fp_path(model_key)
-        model_fp_path.parent.mkdir(parents=True, exist_ok=True)
-        model_fp_path.write_text(_current_model_fp(model_key))
+    # Model fingerprint: retrain if config changed since last training
+    model_fp_path = config.get_model_path("cs").with_suffix(".fingerprint")
+    current_model_fp = config.model_fingerprint()
+    cached_model_fp = (
+        model_fp_path.read_text().strip() if model_fp_path.exists() else None
+    )
+    model_stale = cached_model_fp != current_model_fp
 
     if "ocr" in stages:
         if config.data_type == "tabular":
@@ -727,9 +634,8 @@ def run(
             )
         else:
             logger.info("=== [%d/%d] Train OCR ===", _si["ocr"], n_stages)
-            if _model_stale("ocr") or not config.get_model_path("ocr").exists():
+            if model_stale or not config.get_model_path("ocr").exists():
                 train_ocr(config)
-                _write_model_fingerprint("ocr")
             else:
                 logger.info(
                     "Using existing OCR model: %s", config.get_model_path("ocr")
@@ -737,24 +643,22 @@ def run(
 
     if "cs" in stages:
         logger.info("=== [%d/%d] Train CS ===", _si["cs"], n_stages)
-        selected_cs_key = _selected_cs_key(config)
-        if _model_stale(selected_cs_key) or not config.get_model_path(selected_cs_key).exists():
+        if model_stale or not config.get_model_path("cs").exists():
             train_cs(config)
-            _write_model_fingerprint(selected_cs_key)
         else:
-            logger.info(
-                "Using existing %s model: %s",
-                selected_cs_key,
-                config.get_model_path(selected_cs_key),
-            )
+            logger.info("Using existing CS model: %s", config.get_model_path("cs"))
 
     if "dnn" in stages:
         logger.info("=== [%d/%d] Train DNN ===", _si["dnn"], n_stages)
-        if _model_stale("dnn") or not config.get_model_path("dnn").exists():
+        if model_stale or not config.get_model_path("dnn").exists():
             train_dnn(config)
-            _write_model_fingerprint("dnn")
         else:
             logger.info("Using existing DNN: %s", config.get_model_path("dnn"))
+
+    # Save model fingerprint after training stages
+    if any(s in stages for s in ("ocr", "cs", "dnn")) and model_stale:
+        model_fp_path.parent.mkdir(parents=True, exist_ok=True)
+        model_fp_path.write_text(current_model_fp)
 
     # Pre-load shared data and models for intervene/selective/align stages
     _eval_stages = {"intervene", "selective", "align"}
@@ -772,7 +676,7 @@ def run(
             test_size=0.2, val_size=0.2, stratify=_shared_data.y, seed=config.seed
         )
 
-        cs_path = config.get_model_path(_selected_cs_key(config), data_type="tabular")
+        cs_path = config.get_model_path("cs", data_type="tabular")
         if cs_path.exists():
             _shared_cs = load(cs_path)
             _shared_cs._random_state = config.seed
@@ -795,13 +699,7 @@ def run(
 
     if "align" in stages:
         logger.info("=== [%d/%d] Align ===", _si["align"], n_stages)
-        if _selected_cs_key(config) != "cs":
-            logger.info(
-                "Alignment is only implemented for cbm_family='cbm'; skipping %s.",
-                _selected_cs_key(config),
-            )
-        else:
-            align(config, cs_model=_shared_cs, data=_shared_data)
+        align(config, cs_model=_shared_cs, data=_shared_data)
 
     if "collect" in stages:
         logger.info("=== [%d/%d] Collect ===", _si["collect"], n_stages)
@@ -809,13 +707,7 @@ def run(
 
     if "plot" in stages:
         logger.info("=== [%d/%d] Plot ===", _si.get("plot", n_stages), n_stages)
-        if _selected_cs_key(config) != "cs":
-            logger.info(
-                "Plotting is only implemented for cbm_family='cbm'; skipping %s.",
-                _selected_cs_key(config),
-            )
-        else:
-            _plot_results(config)
+        _plot_results(config)
 
     logger.info("Pipeline complete!")
 
@@ -1002,10 +894,9 @@ def compute_selective_results(
             }
         )
 
-    # ---- CS / CEM / ProbCBM selective metrics ----
-    model_key = _selected_cs_key(config)
+    # ---- CS selective metrics ----
     if cs_model is None:
-        cs_model = load(config.get_model_path(model_key, data_type="tabular"))
+        cs_model = load(config.get_model_path(_selected_cs_key(config), data_type="tabular"))
         cs_model._random_state = config.seed
 
     cs_val_probs, cs_val_y = _cs_val_probs(cs_model, data.validation)
@@ -1024,7 +915,7 @@ def compute_selective_results(
         )
         rows.append(
             {
-                "model": model_key,
+                "model": "cs",
                 "target_accuracy": tau,
                 "raw_test_acc": cs_raw_acc,
                 "selective_acc": sel_acc,
@@ -1034,9 +925,8 @@ def compute_selective_results(
 
     df = pd.DataFrame(rows)
 
-    # Save CSV with a family-aware key so CBM / CEM / ProbCBM do not collide.
-    selective_key = "selective" if model_key == "cs" else f"{model_key}_selective"
-    csv_path = config.get_results_path(selective_key, data_type="tabular").with_suffix(
+    # Save CSV
+    csv_path = config.get_results_path("selective", data_type="tabular").with_suffix(
         ".csv"
     )
     csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1124,11 +1014,8 @@ def _parse_args(argv=None):
         "--data-type", type=str, default=None, choices=["tabular", "image"]
     )
     parser.add_argument(
-        "--cbm-family",
-        type=str,
-        default=None,
+        "--cbm-family", type=str, default="cbm",
         choices=["cbm", "cem", "probcbm", "ecbm"],
-        help="Concept-model family to train/evaluate.",
     )
     parser.add_argument("--handwriting", action="store_true", default=None)
     parser.add_argument("--no-handwriting", action="store_true")
@@ -1158,8 +1045,7 @@ def main(argv=None):
         config.font_style = "handwritten"
     if args.data_type is not None:
         config.data_type = args.data_type
-    if args.cbm_family is not None:
-        config.cbm_family = args.cbm_family
+    config.cbm_family = args.cbm_family
 
     run(config, stages=args.stages, force_setup=args.force_setup)
 
