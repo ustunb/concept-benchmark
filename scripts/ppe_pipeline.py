@@ -441,17 +441,46 @@ def run_pipeline(dataset: ConceptDataset, config: SimpleNamespace, skip_training
                 InterventionConfig,
             )
 
-            # Find k=0 threshold at target 0.99
+            # Find k=0 threshold for target 0.99 using uncertainty measure
+            # uncertainty = min(p, 1-p), same as sudoku pipeline
+            # Abstain when uncertainty > threshold (too uncertain)
+            # Automate when uncertainty <= threshold (confident enough)
             k0_results = evaluate_selective_all_thresholds(y_pred, y_true, conf, target_accs)
-            # Use target 0.99 threshold
             res_099 = [r for r in k0_results if r["target_acc"] == 0.99][0]
-            t0 = res_099["threshold"]
+
+            # Convert confidence threshold to uncertainty threshold for InterventionConfig
+            # conf >= t_conf means min(p, 1-p) <= 1 - t_conf (when t_conf > 0.5)
+            # But _selective_accuracy_threshold uses min_prob directly
+            # Let's compute it the same way as sudoku
+            if probs.ndim == 1:
+                min_prob = np.minimum(probs, 1.0 - probs)
+            else:
+                min_prob = 1.0 - conf  # min(p, 1-p) = 1 - max(p)
+
+            # Find uncertainty threshold for target 0.99
+            candidates = np.unique(min_prob)
+            candidates = candidates[(candidates >= 0.0) & (candidates <= 0.5)]
+            candidates.sort()
+            t0_unc = None
+            cov_k0 = 0.0
+            for t in candidates[::-1]:
+                mask = min_prob <= t
+                if not mask.any():
+                    continue
+                sa = (y_pred[mask] == y_true[mask]).mean()
+                if sa >= 0.99:
+                    t0_unc = t
+                    cov_k0 = mask.mean()
+                    break
 
             runner = ConceptInterventionRunner(model)
             strategy = ConceptualSafeguardsStrategy()
 
             # Identify automated set at k=0 (FIXED)
-            automated_k0 = conf >= t0 if not np.isnan(t0) else np.zeros(len(y_true), dtype=bool)
+            if t0_unc is not None:
+                automated_k0 = min_prob <= t0_unc
+            else:
+                automated_k0 = np.zeros(len(y_true), dtype=bool)
 
             for k in intervention_budgets:
                 if k == 0:
@@ -465,36 +494,35 @@ def run_pipeline(dataset: ConceptDataset, config: SimpleNamespace, skip_training
                     logger.info("  %s k=%d accuracy: %.4f", name, k, acc)
                     continue
 
-                if np.isnan(t0):
-                    for res in k0_results:
-                        all_results.append({
-                            "model": name, "metric_type": "intervention_selective",
-                            "target_acc": res["target_acc"], "threshold": np.nan,
-                            "selective_acc": np.nan, "coverage": 0.0,
-                            "budget": k, "accuracy": acc,
-                        })
+                if t0_unc is None:
+                    all_results.append({
+                        "model": name, "metric_type": "intervention_selective",
+                        "target_acc": 0.99, "threshold": np.nan,
+                        "selective_acc": np.nan, "coverage": 0.0,
+                        "budget": k, "accuracy": acc,
+                    })
                     continue
 
                 try:
                     interv_cfg = InterventionConfig(
-                        abstention_threshold=t0,
+                        abstention_threshold=t0_unc,
                         max_concepts_per_instance=k,
                         random_state=config.seed,
                     )
                     result = runner.run(strategy, interv_cfg, test)
 
-                    # Get confidence from post-intervention predictions
+                    # Get uncertainty from post-intervention predictions
                     y_prob_after = result.y_prob_after
                     if y_prob_after.ndim == 1:
-                        conf_after = np.maximum(y_prob_after, 1 - y_prob_after)
+                        min_prob_after = np.minimum(y_prob_after, 1.0 - y_prob_after)
                     else:
-                        conf_after = y_prob_after.max(axis=1)
+                        min_prob_after = 1.0 - y_prob_after.max(axis=1)
 
                     # Keep automated predictions FIXED, only check abstained
                     abstained_k0 = ~automated_k0
                     newly_automated = np.zeros(len(y_true), dtype=bool)
                     if abstained_k0.any():
-                        newly_automated[abstained_k0] = conf_after[abstained_k0] >= t0
+                        newly_automated[abstained_k0] = min_prob_after[abstained_k0] <= t0_unc
 
                     final_automated = automated_k0 | newly_automated
                     final_pred = y_pred.copy()
