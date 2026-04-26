@@ -45,25 +45,17 @@ logger = logging.getLogger(__name__)
 
 
 def _sudoku_image_transform():
-    """Transform that loads a PIL image from a path and applies ViT preprocessing."""
-    import torchvision.transforms as T
-    from PIL import Image
-    from pathlib import Path
+    """ViT preprocessing for sudoku board images.
 
-    vit_transforms = T.Compose([
+    ConceptImageDatasetSample already loads PIL from path in __getitem__,
+    so this transform receives a PIL image, not a path.
+    """
+    import torchvision.transforms as T
+    return T.Compose([
         T.Resize((224, 224)),
         T.ToTensor(),
         T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
-
-    def transform(x):
-        if isinstance(x, (str, Path)):
-            img = Image.open(str(x)).convert("RGB")
-        else:
-            img = x
-        return vit_transforms(img)
-
-    return transform
 
 
 # ── Stage: setup_dataset ──────────────────────────────────────────────
