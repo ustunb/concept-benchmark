@@ -346,9 +346,9 @@ def run_interventions(
             "reporting raw accuracy with no interventions.",
             _selected_cs_key(config), config.target_accuracy,
         )
-        raw_acc = float((cs_test_y.astype(int) == (cs_test_probs >= decision_threshold).astype(int)).mean()) if cs_test_probs is not None else 0.0
         cs_test_probs, cs_test_y = _cs_val_probs(cs_model, data.test)
         raw_acc = float((cs_test_y.astype(int) == (cs_test_probs >= decision_threshold).astype(int)).mean())
+        logger.info("  Raw test accuracy: %.4f", raw_acc)
         budgets = [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
         rows = [{"budget": b, "accuracy": raw_acc, "predictions_intervened_on": 0,
                  "total_concept_checks": 0, "total_concept_edits_made": 0,
