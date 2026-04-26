@@ -44,6 +44,28 @@ from experiments.intervention import (
 logger = logging.getLogger(__name__)
 
 
+def _sudoku_image_transform():
+    """Transform that loads a PIL image from a path and applies ViT preprocessing."""
+    import torchvision.transforms as T
+    from PIL import Image
+    from pathlib import Path
+
+    vit_transforms = T.Compose([
+        T.Resize((224, 224)),
+        T.ToTensor(),
+        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+
+    def transform(x):
+        if isinstance(x, (str, Path)):
+            img = Image.open(str(x)).convert("RGB")
+        else:
+            img = x
+        return vit_transforms(img)
+
+    return transform
+
+
 # ── Stage: setup_dataset ──────────────────────────────────────────────
 
 
@@ -99,14 +121,9 @@ def train_cs(
     if data is None:
         use_vit = getattr(config, "use_vit_backbone", False)
         if use_vit:
-            import torchvision.transforms as T
             img_dir = config.get_dataset_path(data_type="image")
             data = load(img_dir / "sudoku_dataset.pkl")
-            data.transform = T.Compose([
-                T.Resize((224, 224)),
-                T.ToTensor(),
-                T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ])
+            data.transform = _sudoku_image_transform()
             data.meta["data_type"] = "image"
         else:
             tab_dir = config.get_dataset_path(data_type="tabular")
@@ -210,14 +227,9 @@ def train_dnn(
     if data is None:
         use_vit = getattr(config, "use_vit_backbone", False)
         if use_vit:
-            import torchvision.transforms as T
             img_dir = config.get_dataset_path(data_type="image")
             data = load(img_dir / "sudoku_dataset.pkl")
-            data.transform = T.Compose([
-                T.Resize((224, 224)),
-                T.ToTensor(),
-                T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ])
+            data.transform = _sudoku_image_transform()
             data.meta["data_type"] = "image"
         else:
             tab_dir = config.get_dataset_path(data_type="tabular")
@@ -738,12 +750,7 @@ def run(
             # Direct-image mode: load raw image dataset with ViT transforms
             img_dir = config.get_dataset_path(data_type="image")
             _shared_data = load(img_dir / "sudoku_dataset.pkl")
-            import torchvision.transforms as T
-            _shared_data.transform = T.Compose([
-                T.Resize((224, 224)),
-                T.ToTensor(),
-                T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ])
+            _shared_data.transform = _sudoku_image_transform()
             _shared_data.meta["data_type"] = "image"
         elif config.data_type == "image":
             img_dir = config.get_dataset_path(data_type="image")
