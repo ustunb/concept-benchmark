@@ -341,9 +341,28 @@ def run_interventions(
     )
 
     if cs_t is None:
-        raise ValueError(
-            "Could not find a tau for conceptual safeguards at the target accuracy."
+        logger.warning(
+            "Model %s cannot reach target selective accuracy %.2f; "
+            "reporting raw accuracy with no interventions.",
+            _selected_cs_key(config), config.target_accuracy,
         )
+        raw_acc = float((cs_test_y.astype(int) == (cs_test_probs >= decision_threshold).astype(int)).mean()) if cs_test_probs is not None else 0.0
+        cs_test_probs, cs_test_y = _cs_val_probs(cs_model, data.test)
+        raw_acc = float((cs_test_y.astype(int) == (cs_test_probs >= decision_threshold).astype(int)).mean())
+        budgets = [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
+        rows = [{"budget": b, "accuracy": raw_acc, "predictions_intervened_on": 0,
+                 "total_concept_checks": 0, "total_concept_edits_made": 0,
+                 "selective_accuracy_after": float("nan"), "coverage_after": 0.0}
+                for b in [0] + budgets]
+        cs_intervention_df = pd.DataFrame(rows)
+        results_key = (
+            f"{_selected_cs_key(config)}_interventions"
+            if _selected_cs_key(config) != "cs" else "interventions"
+        )
+        csv_path = config.get_results_path(results_key, data_type="tabular").with_suffix(".csv")
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        cs_intervention_df.to_csv(csv_path, index=False)
+        return cs_intervention_df
 
     # Test set selective metrics
     cs_test_probs, cs_test_y = _cs_val_probs(cs_model, data.test)
