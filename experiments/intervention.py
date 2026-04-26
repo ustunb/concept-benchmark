@@ -401,25 +401,30 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
         model: ConceptBasedModel,
         batch: InterventionBatch,
         config: InterventionConfig,
+        *,
+        y_prob_baseline: np.ndarray | None = None,
     ) -> StrategyProposal:
         if config.abstention_threshold is None:
             raise InterventionError(
                 "Conceptual safeguards require abstention_threshold to be specified in the config."
             )
 
-        supports_aligned = _supports_aligned_concept_replay(model)
-        if supports_aligned:
-            row_indices = _aligned_replay_row_indices(batch)
-            y_prob = predict_label_proba_from_concepts(
-                model,
-                batch.C_pred,
-                row_indices=row_indices,
-                baseline_concepts=batch.C_pred,
-            )
-        elif hasattr(model, "predict_proba_from_concepts"):
-            y_prob = model.predict_proba_from_concepts(batch.C_pred)
+        if y_prob_baseline is not None:
+            y_prob = y_prob_baseline
         else:
-            y_prob = model._propagate_predict_proba_mc(batch.C_pred)
+            supports_aligned = _supports_aligned_concept_replay(model)
+            if supports_aligned:
+                row_indices = _aligned_replay_row_indices(batch)
+                y_prob = predict_label_proba_from_concepts(
+                    model,
+                    batch.C_pred,
+                    row_indices=row_indices,
+                    baseline_concepts=batch.C_pred,
+                )
+            elif hasattr(model, "predict_proba_from_concepts"):
+                y_prob = model.predict_proba_from_concepts(batch.C_pred)
+            else:
+                y_prob = model._propagate_predict_proba_mc(batch.C_pred)
         predicted = np.argmax(y_prob, axis=1)
         confidences = y_prob[np.arange(batch.n_samples), predicted]
         abstain_mask = (confidences >= config.abstention_threshold) & (
@@ -918,7 +923,10 @@ class ConceptInterventionRunner:
         _prime_aligned_replay_context(self.model, dataset, batch)
 
         # Propose interventions based on the strategy.
-        proposal = strategy.propose(self.model, batch, config)
+        propose_kwargs = {}
+        if y_prob_baseline is not None and isinstance(strategy, ConceptualSafeguardsStrategy):
+            propose_kwargs["y_prob_baseline"] = y_prob_baseline
+        proposal = strategy.propose(self.model, batch, config, **propose_kwargs)
         if proposal.mask.shape != batch.C_pred.shape:
             raise InterventionError(
                 "Strategy returned a mask with shape"
