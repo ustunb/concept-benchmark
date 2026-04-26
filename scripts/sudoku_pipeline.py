@@ -97,8 +97,20 @@ def train_cs(
     device = determine_device()
 
     if data is None:
-        tab_dir = config.get_dataset_path(data_type="tabular")
-        data = load(tab_dir / "sudoku_dataset.pkl")
+        use_vit = getattr(config, "use_vit_backbone", False)
+        if use_vit:
+            import torchvision.transforms as T
+            img_dir = config.get_dataset_path(data_type="image")
+            data = load(img_dir / "sudoku_dataset.pkl")
+            data.transform = T.Compose([
+                T.Resize((224, 224)),
+                T.ToTensor(),
+                T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+            data.meta["data_type"] = "image"
+        else:
+            tab_dir = config.get_dataset_path(data_type="tabular")
+            data = load(tab_dir / "sudoku_dataset.pkl")
         data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
     model_key = _selected_cs_key(config)
@@ -124,9 +136,6 @@ def train_cs(
         data = load(tab_dir / "sudoku_dataset.pkl")
         data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
-    # Missingness can be applied here if needed:
-    # data.sample_concept_missingness(p=0.2, mechanism="mcar", rng=config.seed)
-
     _macos = platform.system() == "Darwin"
     loader_config = {
         "device": device,
@@ -135,25 +144,46 @@ def train_cs(
         "pin_memory": not _macos,
     }
 
-    from experiments.models import (
-        GroupPoolingConceptSudokuCNN as SudokuConceptModel,
-    )
-
-    model = SudokuConceptModel()
-    cd = ConceptDetector(model=model)
-    cbm = ConceptBasedModel(concept_detector=cd, should_propagate=True)
-    cbm.fit(
-        train_dataset=data.train,
-        valid_dataset=data.validation,
-        freeze_backbone=False,
-        concept_embed_params={"shuffle": False, **loader_config},
-        concept_fit_params={
-            "epochs": config.cs_epochs,
-            "lr": 1e-3,
-            "patience": config.cs_patience,
-            **loader_config,
-        },
-    )
+    # Direct-image mode: use ViT concept detector (no OCR)
+    use_vit = getattr(config, "use_vit_backbone", False)
+    if use_vit:
+        from experiments.models import RobotViTConceptClassifier
+        n_concepts = data.train.n_concepts
+        concept_model = RobotViTConceptClassifier(num_concepts=n_concepts)
+        cd = ConceptDetector(model=concept_model)
+        cbm = ConceptBasedModel(concept_detector=cd, should_propagate=False)
+        loader_config["batch_size"] = 16
+        cbm.fit(
+            train_dataset=data.train,
+            valid_dataset=data.validation,
+            freeze_backbone=False,
+            concept_embed_params={"shuffle": False, **loader_config},
+            concept_fit_params={
+                "epochs": config.cs_epochs,
+                "lr": 5e-5,
+                "patience": config.cs_patience,
+                **loader_config,
+            },
+        )
+    else:
+        from experiments.models import (
+            GroupPoolingConceptSudokuCNN as SudokuConceptModel,
+        )
+        model = SudokuConceptModel()
+        cd = ConceptDetector(model=model)
+        cbm = ConceptBasedModel(concept_detector=cd, should_propagate=True)
+        cbm.fit(
+            train_dataset=data.train,
+            valid_dataset=data.validation,
+            freeze_backbone=False,
+            concept_embed_params={"shuffle": False, **loader_config},
+            concept_fit_params={
+                "epochs": config.cs_epochs,
+                "lr": 1e-3,
+                "patience": config.cs_patience,
+                **loader_config,
+            },
+        )
 
     test_pred = cbm.predict(data.test)
     logger.info("Test Accuracy: %s", np.mean(test_pred == data.test.y))
@@ -178,15 +208,43 @@ def train_dnn(
     device = determine_device()
 
     if data is None:
-        tab_dir = config.get_dataset_path(data_type="tabular")
-        data = load(tab_dir / "sudoku_dataset.pkl")
+        use_vit = getattr(config, "use_vit_backbone", False)
+        if use_vit:
+            import torchvision.transforms as T
+            img_dir = config.get_dataset_path(data_type="image")
+            data = load(img_dir / "sudoku_dataset.pkl")
+            data.transform = T.Compose([
+                T.Resize((224, 224)),
+                T.ToTensor(),
+                T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+            data.meta["data_type"] = "image"
+        else:
+            tab_dir = config.get_dataset_path(data_type="tabular")
+            data = load(tab_dir / "sudoku_dataset.pkl")
         data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
-    from experiments.models import SudokuValidatorCNN as DNNSudokuModel
-
-    model = DNNSudokuModel()
-    criterion = nn.BCELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    use_vit = getattr(config, "use_vit_backbone", False)
+    if use_vit:
+        from transformers import ViTModel
+        class ViTDNN(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.vit = ViTModel.from_pretrained("google/vit-base-patch16-224")
+                for name, p in self.vit.named_parameters():
+                    if "encoder.layer.10" not in name and "encoder.layer.11" not in name and "layernorm" not in name:
+                        p.requires_grad = False
+                self.head = nn.Sequential(nn.Linear(768, 1))
+            def forward(self, x):
+                return torch.sigmoid(self.head(self.vit(pixel_values=x).last_hidden_state[:, 0, :]))
+        model = ViTDNN()
+        criterion = nn.BCELoss()
+        optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=5e-5)
+    else:
+        from experiments.models import SudokuValidatorCNN as DNNSudokuModel
+        model = DNNSudokuModel()
+        criterion = nn.BCELoss()
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
     loader_config = get_loader_config()
     train_loader = data.train.loader(shuffle=True, **loader_config)
@@ -675,7 +733,19 @@ def run(
     _shared_cs = None
     _shared_dnn = None
     if _eval_stages & set(stages):
-        if config.data_type == "image":
+        use_vit = getattr(config, "use_vit_backbone", False)
+        if use_vit:
+            # Direct-image mode: load raw image dataset with ViT transforms
+            img_dir = config.get_dataset_path(data_type="image")
+            _shared_data = load(img_dir / "sudoku_dataset.pkl")
+            import torchvision.transforms as T
+            _shared_data.transform = T.Compose([
+                T.Resize((224, 224)),
+                T.ToTensor(),
+                T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+            _shared_data.meta["data_type"] = "image"
+        elif config.data_type == "image":
             img_dir = config.get_dataset_path(data_type="image")
             _shared_data = load(img_dir / "ocr_inferred_full_dataset.pkl")
         else:
@@ -1026,6 +1096,8 @@ def _parse_args(argv=None):
         "--cbm-family", type=str, default="cbm",
         choices=["cbm", "cem", "probcbm", "ecbm"],
     )
+    parser.add_argument("--direct-image", action="store_true",
+                        help="Use ViT backbone directly on board images (no OCR)")
     parser.add_argument("--handwriting", action="store_true", default=None)
     parser.add_argument("--no-handwriting", action="store_true")
     parser.add_argument("--force-setup", action="store_true")
@@ -1055,6 +1127,9 @@ def main(argv=None):
     if args.data_type is not None:
         config.data_type = args.data_type
     config.cbm_family = args.cbm_family
+    if args.direct_image:
+        config.use_vit_backbone = True
+        config.data_type = "image"
 
     run(config, stages=args.stages, force_setup=args.force_setup)
 

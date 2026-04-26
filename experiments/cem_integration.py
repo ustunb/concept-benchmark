@@ -369,9 +369,14 @@ def _infer_backbone_spec(
 ) -> dict[str, Any]:
     data_type = sample.meta.get("data_type", "tabular")
 
-    # Sudoku CBM/CEM/ProbCBM always operate on the tabular (one-hot board)
-    # representation, even when the dataset was generated from images via OCR.
+    # Sudoku: use tabular backbone by default, but allow ViT for direct-image mode
     if benchmark == "sudoku":
+        use_vit = getattr(config, "use_vit_backbone", False) if config else False
+        if use_vit or data_type == "image":
+            return {
+                "kind": "vit_image",
+                "default_output_dim": _default_cem_output_dim(config),
+            }
         return {
             "kind": "sudoku_tabular",
             "default_output_dim": _default_cem_output_dim(config),
