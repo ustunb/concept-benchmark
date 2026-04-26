@@ -85,6 +85,8 @@ def train_ocr(config: SudokuBenchmarkConfig) -> None:
         str(config.seed),
         "--max-corrupt",
         str(config.max_cell_swaps),
+        "--cell-px",
+        str(config.cell_px),
     ]
     subprocess.run(cmd, check=True)
 
