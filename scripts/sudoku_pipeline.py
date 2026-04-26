@@ -44,18 +44,17 @@ from experiments.intervention import (
 logger = logging.getLogger(__name__)
 
 
-def _sudoku_image_transform():
-    """ViT preprocessing for sudoku board images.
+def _load_sudoku_image_dataset(config):
+    """Load sudoku image dataset for direct-image (ViT) mode.
 
-    ConceptImageDatasetSample already loads PIL from path in __getitem__,
-    so this transform receives a PIL image, not a path.
+    The dataset's preprocess (sudoku_image_preprocess) already handles
+    resize to 224, normalize, and convert to tensor. No additional
+    transform is needed.
     """
-    import torchvision.transforms as T
-    return T.Compose([
-        T.Resize((224, 224)),
-        T.ToTensor(),
-        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
+    img_dir = config.get_dataset_path(data_type="image")
+    data = load(img_dir / "sudoku_dataset.pkl")
+    data.meta["data_type"] = "image"
+    return data
 
 
 # ── Stage: setup_dataset ──────────────────────────────────────────────
@@ -113,10 +112,7 @@ def train_cs(
     if data is None:
         use_vit = getattr(config, "use_vit_backbone", False)
         if use_vit:
-            img_dir = config.get_dataset_path(data_type="image")
-            data = load(img_dir / "sudoku_dataset.pkl")
-            data.transform = _sudoku_image_transform()
-            data.meta["data_type"] = "image"
+            data = _load_sudoku_image_dataset(config)
         else:
             tab_dir = config.get_dataset_path(data_type="tabular")
             data = load(tab_dir / "sudoku_dataset.pkl")
@@ -219,10 +215,7 @@ def train_dnn(
     if data is None:
         use_vit = getattr(config, "use_vit_backbone", False)
         if use_vit:
-            img_dir = config.get_dataset_path(data_type="image")
-            data = load(img_dir / "sudoku_dataset.pkl")
-            data.transform = _sudoku_image_transform()
-            data.meta["data_type"] = "image"
+            data = _load_sudoku_image_dataset(config)
         else:
             tab_dir = config.get_dataset_path(data_type="tabular")
             data = load(tab_dir / "sudoku_dataset.pkl")
@@ -739,11 +732,8 @@ def run(
     if _eval_stages & set(stages):
         use_vit = getattr(config, "use_vit_backbone", False)
         if use_vit:
-            # Direct-image mode: load raw image dataset with ViT transforms
-            img_dir = config.get_dataset_path(data_type="image")
-            _shared_data = load(img_dir / "sudoku_dataset.pkl")
-            _shared_data.transform = _sudoku_image_transform()
-            _shared_data.meta["data_type"] = "image"
+            # Direct-image mode: load raw image dataset (preprocess handles ViT transforms)
+            _shared_data = _load_sudoku_image_dataset(config)
         elif config.data_type == "image":
             img_dir = config.get_dataset_path(data_type="image")
             _shared_data = load(img_dir / "ocr_inferred_full_dataset.pkl")
