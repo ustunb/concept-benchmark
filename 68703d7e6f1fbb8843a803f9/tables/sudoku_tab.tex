@@ -1,0 +1,28 @@
+\renewcommand{\arraystretch}{1}
+\begin{tabular}{@{}Hlrrrrr@{}}
+\multicolumn{2}{c}{} &
+\multicolumn{5}{c}{\textbf{Method}} \\
+\cmidrule(lr){3-7}
+\textbf{Dataset} & \textbf{Metrics} & \DNN{} & \CBM{} & \CEM{} & \ProbCBM{} & \ECBM{} \\
+\midrule
+
+\sudokuMultiModal{1,000}{27}
+& \scmetrics{}
+& \cell{r}{95.0\% \\ 10.0\% \\ 10.0\%}
+& \cell{r}{99.2\% \\ \textbf{59.0\%} \\ \textbf{59.0\%}}
+& \cell{r}{100.0\% \\ 41.5\% \\ 41.5\%}
+& \cell{r}{100.0\% \\ 1.0\% \\ 1.0\%}
+& \cell{r}{97.9\% \\ 47.0\% \\ 47.0\%} \\
+
+\midrule
+
+\adddatainfo{ppe}{141}{5}
+& \scmetrics{}
+& \cell{r}{100.0\% \\ 54.6\% \\ 54.6\%}
+& \cell{r}{100.0\% \\ 27.7\% \\ 27.7\%}
+& \cell{r}{99.0\% \\ \textbf{73.0\%} \\ \textbf{73.0\%}}
+& \cell{r}{100.0\% \\ 17.0\% \\ 17.0\%}
+& \cell{r}{100.0\% \\ 35.5\% \\ 35.5\%} \\
+
+\bottomrule
+\end{tabular}

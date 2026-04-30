@@ -1,0 +1,707 @@
+\documentclass[11pt]{article}
+
+% Venue Configuration
+\usepackage{etoolbox}
+\usepackage[venue=neurips, year=2026]{ext/mlconf}
+
+% Legacy venue toggles (used in paper body)
+\providetoggle{arxiv}
+\providetoggle{neurips}
+\providetoggle{icml}
+\providetoggle{iclr}
+\settoggle{neurips}{true}
+\settoggle{arxiv}{false}
+\settoggle{icml}{false}
+\settoggle{iclr}{false}
+
+% Project Toggles
+\providetoggle{blind}
+\settoggle{blind}{false}
+\providetoggle{workingversion}
+\settoggle{workingversion}{false}
+\settoggle{showtodos}{false}
+\settoggle{splitsections}{false}
+
+\newcommand{\ourtitle}{Measuring What Matters:\\Synthetic Benchmarks for Concept Bottleneck Models}
+\newcommand{\ourtitleshort}{Measuring What Matters: Synthetic Benchmarks for Concept Bottleneck Models}
+\newcommand{\ourshorttitle}{\ourtitleshort}
+
+\iftoggle{blind}{
+\newcommand{\repourl}[0]{\href{https://anonymous.4open.science/r/concept-benchmark-84D2}{our anonymized repository}}
+}{
+\newcommand{\repourl}[0]{\href{https://github.com/ustunb/concept-benchmark}{on GitHub}}
+}
+
+% Split sections
+\iftoggle{splitsections}{
+\newcommand{\newsection}[1]{\clearpage\section{#1}}
+}{
+\newcommand{\newsection}[1]{\section{#1}}
+}
+
+% Authors (mlconf declarations for test infrastructure)
+\mlauthor{Julian Skirzy\'nski}{}{University of California, San Diego}{jskirzynski@ucsd.edu}
+\mlauthor{Harry Cheon}{}{University of California, San Diego}{scheon@ucsd.edu}
+\mlauthor{Shreyas Kadekodi}{}{University of California, San Diego}{skadekodi@ucsd.edu}
+\mlauthor{Meredith Stewart}{}{University of California, San Diego}{mstewart@ucsd.edu}
+\mlauthor{Berk Ustun}{}{University of California, San Diego}{berk@ucsd.edu}
+
+% NeurIPS native title/author setup
+\title{\ourtitle{}}
+\newcommand{\authorinfo}[4]{{#1}\\{#3}}
+\author{
+\authorinfo{Harry Cheon$^*$}{CSE}{UCSD}{XXX}%
+\And
+\authorinfo{Shreyas Kadekodi$^*$}{CSE}{UCSD}{XXX}%
+\And
+\authorinfo{Julian Skirzy\'nski$^*$}{CSE}{UCSD}{XXX}%
+\And
+\authorinfo{Meredith Stewart$^*$}{CSE}{UCSD}{XXX}%
+\And
+\authorinfo{Berk Ustun$^*$}{HDSI}{UCSD}{berk@ucsd.edu}
+}
+
+\input{preamble.tex}
+\input{notation.tex}
+
+\begin{document}
+
+\doparttoc
+\iftoggle{iclr}{\maketitle}{}
+\iftoggle{neurips}{\maketitle}{}
+\iftoggle{arxiv}{
+\title{\ourtitle{}}
+\author{\parbox{\textwidth}{\centering%
+\textbf{Julian Skirzy\'nski, Harry Cheon, Shreyas Kadekodi, Meredith Stewart, Berk Ustun} \\[0.3em]
+{\small\it University of California, San Diego} \\
+{\small\sc \{jskirzynski, hcheon, skadekodi, mstewart, berk\}@ucsd.edu}}%
+}
+
+\maketitle
+}
+
+\iftoggle{icml}{
+\twocolumn[
+\icmltitle{\ourtitle{}}
+\icmltitlerunning{\ourtitleshort{}}
+\begin{icmlauthorlist}
+\icmlauthor{Harry Cheon}{ucsd}
+\icmlauthor{Shreyas Kadekodi}{ucsd}
+\icmlauthor{Julian Skirzy\'nski}{ucsd}
+\icmlauthor{Meredith Stewart}{ucsd}
+\icmlauthor{Berk Ustun}{ucsd}
+\end{icmlauthorlist}
+\icmlaffiliation{ucsd}{UCSD}
+\icmlcorrespondingauthor{Berk Ustun}{berk@ucsd.edu}
+\icmlkeywords{interpretability, explainability}
+\vskip 0.42in
+]
+\printAffiliationsAndNotice{}
+}{}
+
+\begin{abstract}
+Concept bottleneck models predict outcomes from high-level concepts detected in inputs. Although concepts provide a simple way to reap benefits from interpretability, very few datasets include concept labels. This limits researchers' ability to determine which problems are suitable for these models, isolate the factors that drive their performance or lead to failures, or uncover which algorithms perform well. In this paper, we develop synthetic benchmarks for concept-bottleneck models, focusing on their two main use cases: decision support, in which models assist humans in making better decisions, and automation, in which models handle routine tasks without supervision. Our benchmarks can generate labeled datasets while controlling for properties that affect performance, including data modality, concept choice, annotation quality, and completeness. We demonstrate how the benchmarks can be used to evaluate major classes of concept bottleneck models. Our demonstrations show how the benchmarks can surface failure modes and inform best practices.
+\end{abstract}
+
+\iftoggle{arxiv}{
+\vspace{0.25em}
+\begin{keywords}{Concept Bottleneck Models, Safety, Interpretability, Alignment, Benchmarks}
+\end{keywords}
+}
+
+\faketableofcontents
+
+\section{Introduction}
+\label{Sec::Intro}
+Many machine learning models are developed for settings in which humans require interpretability to verify, contest, and correct automated decisions. A promising approach to introduce interpretability in these settings is to build models whose predictions are based on \emph{concepts}, i.e., meaningful, high-level attributes of the input. For example, consider an automated melanoma classification task from dermoscopic images. The task is well-established with a plethora of high-performing black-box models~\citep{esteva2017derm, kaur2022melanoma, sm2023classification, adepu2023melanoma, teja2024lightweight}, but their adoption is hindered by the lack of interpretability~\citep{metta2024advancing, chanda2024dermatologist, tonekaboni2019clinicians}. In this application, a concept‑based model could first infer whether there are \textcp{dots} or \textcp{streaks} on the skin (diagnostic cues used by clinicians during screening~\citep{thomas1998semiological, ebell2008clinical}), and then use these concepts to predict the presence of melanoma. Clinicians could verify whether the detected concepts are correct, e.g., whether the image really shows streaks, and whether they influence the prediction in clinically sensible ways, e.g., whether streaks appropriately increase the probability of melanoma.
+
+Concept bottleneck models (CBMs)~\citep{koh2020concept} are machine learning systems that implement this approach. They first predict concepts from raw data, and then use simple models to map concepts to the final label. CBMs have attracted significant interest, with studies covering new architectures, training methods, and intervention strategies~\citep[e.g., see surveys][]{di2025ante, sinha2025comprehensive}. 
+
+\begin{table*}[t!]
+    \centering
+    \resizebox{1.0\textwidth}{!}{
+    \begin{tabular}{llrlrrllll}
+    \bfcell{l}{Dataset} &  
+    \bfcell{l}{Task} & 
+    \bfcell{l}{\# Papers} &
+    \bfcell{l}{Use Case} & 
+    \bfcell{c}{$n$} & 
+    \bfcell{c}{$m$} & 
+    \bfcell{l}{Concepts} &
+    \bfcell{r}{Noise} & 
+    \bfcell{l}{Subjective Concepts} \\
+    \midrule
+
+    CUB-200~\citep{wah2011cub} & Classify bird species & 72 & Unclear & 11,788 & 312 & physical attributes (e.g., \textcp{has\_breast\_pattern}) & Yes & Yes \\
+    \midrule
+    
+    AwA2~\citep{xian2019zero} & Classify animal species & 22 & Unclear & 37,322 & 85 & physical attributes (e.g., \textcp{black}) & Yes & No \\
+    \midrule
+    
+    CelebA~\citep{liu2015faceattributes} & Predict facial attributes & 21 & Unclear & 202,599 & 40 & appearance traits (e.g., \textcp{smiling}) & Yes & Yes \\
+    \midrule
+    
+    SkinCon~\citep{daneshjou2022skincon} & Classify skin lesion type & 15 & Decision Support & 3,230 & 48 & pathology characteristics (e.g., \textcp{plaque}) & No & No \\
+    \midrule
+    
+    Derm7pt~\citep{esteva2017derm} & Classify lesion as melanoma & 10 & Decision Support & 2,045 & 7 & dermoscopic patterns (e.g., \textcp{pigment\_network}) & No & No \\
+    \midrule
+    
+    CheXpert~\citep{irvin2019chexpert} & Detect chest abnormalities & 7 & Decision Support & 224,316 & 14 & medical findings (e.g., \textcp{atelectasis}) & Yes & Yes \\
+    \midrule
+    
+    OAI~\citep{nevitt2006osteoarthritis} & Assess osteoarthritis severity & 6 & Decision Support & 36,369 & 10 & joint pathology (e.g., \textcp{narrowing}) & N/A & No \\
+    \midrule
+    
+    PH2~\citep{esteva2017derm} & Classify lesion as melanoma & 4 & Decision Support & 200 & 7 & dermoscopic patterns (e.g., \textcp{pigment\_network}) & No & No \\
+    \midrule
+    
+    CEBaB~\citep{abraham2022cebab} & Predict restaurant rating & 4 & Unclear & 15,089 & 4 & sentiment of review aspects (e.g., \textcp{food\_aspect}) & Yes & Yes \\
+    \midrule
+    
+    DTD~\citep{cimpoi14describing} & Classify material texture & 4 & Unclear & 5640 & 47 & texture properties (e.g., \textcp{blotchy}) & No & Yes \\
+    
+    \bottomrule
+    \end{tabular}
+    }
+    \caption{Overview of datasets used to develop concept bottleneck models. We present the 10 most prevalent ones, based on 123 papers published since 2020. Concept Noise averages annotation errors or uncertainties across all concepts.}
+    \label{Table::DatasetsInLiterature}
+\end{table*}
+
+The most significant barrier to adopting CBMs in practice is that their development requires datasets with concept annotations. 
+%
+There are few such datasets because developing them is costly: if a task has $m$ concepts, the final dataset will require $m$ times the annotation cost. This scarcity of datasets is a barrier to research progress on two fronts: 
+
+\begin{enumerate}[]
+\item \emph{Coverage}: Current evaluations are too narrow and may fail to reveal important failure modes. In standard machine learning, broader benchmarks often surface limitations early enough that we can address them during algorithm design and report them. Here, limited ``dataset coverage'' (see~\cref{Table::DatasetsInLiterature}) sharply limits such reporting.
+
+\item \emph{Use Cases}: Current evaluations do not always reveal where CBMs fail on tasks with clear practical stakes. This is because many commonly used tasks do not make it easy to evaluate whether correcting concepts would improve decisions or reduce human work (e.g., predicting attractiveness from face attributes~\citep{liu2015faceattributes}). In this regime, experiments provide limited guidance on how to improve the model.
+\end{enumerate}
+
+
+In this paper, we present new synthetic benchmarks for CBMs that help address these barriers. Our benchmarks target decision support and automation, and use synthetic data generation to broaden coverage without requiring costly manual concept annotation. Our main contributions are as follows:
+
+ \begin{enumerate}
+    
+     \item We design benchmark tasks and metrics to reflect use cases where CBMs provide unique value: automating routine tasks measured by a reduction in work (which we study through Sudoku board validation) and supporting human decision-making measured by gain in performance relative to a black-box model (which we study through robot type prediction from visual features).
+     %for automation and decision support. These benchmarks allow practitioners 
+
+     \item We introduce dataset generators that quickly produce data for developing CBMs, allowing us to vary modality, concept granularity, annotation quality, and concept-label mapping.
+
+     \item We demonstrate how to use our benchmarks to (1) identify limitations and determine the scope under which CBMs work; (2) test foundational assumptions about CBMs (e.g., what if we do not know the concepts); (3) evaluate how their performance changes under different conditions (e.g., concept noise, alignment constraints).
+
+     % \item We identify new failure modes of CBMs: performance degradation caused by overly specific concept sets and ineffective interventions arising from annotation noise or expert constraints on the model.
+
+     \item We publish our software package \repourl{}.
+ \end{enumerate}
+
+
+\paragraph{Related Work}
+
+
+Our work is related to a stream of research on concept bottleneck models \citep{koh2020concept}. %
+This body of work is broadly motivated by the potential to build interpretable models for tasks for which we would otherwise develop black-box models. %
+The idea of adding bottlenecks to black-box models has inspired a diverse range of follow-up work on architectures~\citep[e.g., ][]{ismail2024concept, zintgraf025selective, jeon2025localitycbm, kim2024eqcbm, chowdhury2024adacbm, zhang2024decoupling, hu2024semisupervised, zarlenga2023tabcbm, steinmann2025object, wang2025mvp, hou2024concept}, training strategies~\citep[e.g.,][]{hegde2024improving, penaloza2025preference, selvaraj2024improving, yu2025language, qi2024vip, kim2023concept, sheth2023auxiliary, pang2024integrating} and extensions, e.g., to causal reasoning \citep{dominici2024causal, de2025causally}. Researchers have also studied properties CBMs exhibit with respect to concept specification, such as concept leakage \citep[e.g.,][]{havasi2022addressing, sun2024eliminating}, robustness \citep{hu2025stable, yan2023robust, park2025analysis, lai2024cat, raman2024concept}, or uncertainty quantification \citep{kim2023probabilistic, collins2023human, feng2024bayesian, gao2024evidential}. An important line of work investigated the benefits of using CBMs, including intervention strategies \citep[e.g.,][]{shin2023closer, mahinpei2021promises, shen2025adaptive, balloli2024they, espinosa2024learning, sheth2022learning}, and learning with weak supervision \citep[e.g.,][]{oikarinen2023label, hu2024semisupervised, zintgraf025selective, rao2024discover, xu2025concept, makonnen2025measuring, parisini2025leakage}. %
+
+% \begin{table}[ht]
+%     \centering
+%     \resizebox{1.0\textwidth}{!}{
+%     \begin{tabular}{lllllllll}
+%     \textbf{Dataset} & 
+%     \textbf{Modality} & 
+%     \textbf{\#} & 
+%     \textbf{Annotators} & 
+%     \textbf{Papers} & \textbf{Task} & \textbf{Data Points} & \textbf{Example Concepts} & \textbf{Data Points } \\
+%     & & \textbf{Concepts} & & \textbf{Where Used} & & & & \textbf{w\ Concept Noise} \\
+%     \midrule
+% CUB-200~\citep{koh2020concept} & image & 312 & Amazon Mechanical & 59\% & Bird classification & 11,788 & 
+% \cell{c}{physical attributes (e.g., \textcp{forked\_tail},\\ \textcp{spotted\_breast\_pattern})} \\
+%  & & & Turk workers & & & & has\_breast\_pattern::spotted & 79.4\% \\%17.9\%\\  %54.3\% \\
+% \midrule
+% CIFAR-10/100~\citep{krizhevsky2009learning} & image & 0 & LLM & 25\% & Object classification & 60,000 & N/A (no concepts) & -- \\
+% \midrule
+% ImageNet~\citep{deng2009imagenet} & image & 0 & LLM & 21\% & Object classification & 1.2M+ & N/A (no concepts) & -- \\
+% \midrule
+% AwA2~\citep{xian2019zero} & image & 85 & Academic & 18\% & Animal classification & 37,322 & black, white, stripes, furry, & 0\% \\
+%  & & & researchers & & & & swims, flies, smart, big & \\
+% \midrule
+% CelebA~\citep{liu2015faceattributes} & image & 40 & Professional labeling & 17\% & Face attribute recognition & 202,599 & male, young, smiling, eyeglasses, & 9.84\%~\citep{lingenfelter2022quantitative} \\
+%  & & & company & & & & bald, mustache, attractive &  \\
+% \midrule
+% SkinCon~\citep{daneshjou2022skincon} & image & 48 & Medical experts & 12\% & Skin lesion diagnosis & 3,230 & plaque, scale, erosion, vesicle, & 12.5\%  \\
+%  & & & & & & & papule, macule, nodule & \\
+% \midrule
+% HAM10000~\citep{tschandl2018ham10000} & image & 0 & LLM & 11\% & Skin lesion classification & 10,015 & N/A (no concepts) & -- \\
+%  & & & & & & & & \\
+% \midrule
+% MNIST~\citep{lecun2002gradient} & image & 0 & LLM & 11\% & Digit classification & 70,000 & N/A (no concepts) & -- \\
+% \midrule
+% Places365~\citep{zhou2017places} & image & 0 & LLM & 9\% & Scene classification & 1.8M+ & N/A (no concepts) & -- \\
+% \midrule
+% Derm7pt~\citep{esteva2017derm} & image & 7 & Medical experts & 8\% & Melanoma classification & 2,045 & pigment\_network, blue\_whitish\_veil, & 0\%\\
+%  & & & & & & & streaks, regression\_structures & \\
+% \midrule
+% OAI~\citep{nevitt2006osteoarthritis} & image & 10 & Medical experts & 6\% & Osteoarthritis classification & 36,369 & joint space narrowing, osteophytes, & N/A\\
+% & & & & & & & sclerosis & \\
+% \midrule
+% CheXpert~\citep{irvin2019chexpert} & image & 14 & Extracted from & 5\% & Radiograph interpretation & 224,316 & atelectasis, cardiomegaly, & 100\% \\
+% & & & medical notes & & & & consolidation, edema &  \\
+%     \bottomrule
+%     \end{tabular}
+%     }
+%     \caption{One of the most widely used datasets appearing in the literature according to our review of 123 CBM-related papers. Concept Noise occurs when a data point has annotations that are uncertain or conflict with other annotations.}
+%     \label{Table::DatasetsInLiterature}
+% \end{table}
+
+The literature evaluates CBMs on a range of concept-annotated datasets (see~\cref{Table::DatasetsInLiterature}), including \textds{CUB-200}~\citep{wah2011cub}, \textds{CelebA}~\citep{liu2015faceattributes}, and \textds{CheXpert}~\citep{irvin2019chexpert}. These datasets were not originally designed for concept supervision. For instance, it is unclear which concepts included in these datasets are truly relevant for the task. It is also unclear how noisy concept labels are, and whether the concept set is complete. The high cost of building concept datasets motivated work in concept discovery~\citep[e.g.,][]{rao2024discover, schrodi2024concept, panousis2024coarse, xie2025discovering}, and led many CBM papers to use datasets where concepts and labels are defined via large language models~\citep[as in, e.g.,][]{kim2023probabilistic, oikarinen2023label, yu2025language, yang2023language, zhang2025attribute, he2025v2c, jiang2025enhancing}. This procedure can introduce noise into concept annotations that is difficult to quantify. As a result, the existing datasets do not provide the level of control to study CBMs under all relevant conditions e.g., comparing how the models fare when not all relevant concepts are annotated. The evaluations may also confound shortcomings in the model architecture with imperfections in the data.
+
+Our work seeks to complement research on CBMs with controlled synthetic benchmarks. Current synthetic datasets for concept-based models remain limited~\citep[e.g., ][]{pugnana2025deferring, shin2023closer, alukaev2023cross, barbiero2024relational, makonnen2025measuring, parisini2025leakage}, are rarely available for public use, and are often built ad hoc for specific questions. Established benchmarks in machine learning~\citep[see e.g.,][]{johnson2017clevr, ding2021retiring, schwettmann2023find, grinsztajn2022tree, koh2021wilds} provide: (i) clear evaluation targets, (ii) controlled variation to make comparisons across models and training settings; (iii) access to ground truth, (iv) reproducibility.
+Synthetic datasets support these properties because they are generated under fully specified conditions. These advantages are especially important for concept-based models, because evaluation hinges on isolating the effect of concept learning on downstream performance.
+
+
+\newsection{Use Cases}
+\label{Sec::Preliminaries}
+We provide an overview of concept bottleneck models and formally define automation and decision support as their canonical use cases.
+
+\paragraph{Preliminaries}
+We consider a supervised learning task where we predict a label from a complex feature space. We start with a dataset of $n$ examples $\{(\features_i, \concepts_i, \outcome_i)\}_{i=1}^n$, where $\features_{i} \in \X \subseteq \R^d$ are features (e.g., pixels), $\concepts_{i} \in \C = \{0, 1\}^m$ are \emph{concepts} (e.g., $\concepts_{i,k} = 1$ if image $i$ shows a lesion with \textcp{streaks}), and $\outcome_{i} \in \Y = \{0, 1\}$ is a \emph{label} (e.g., patient $i$ has melanoma)\footnote{We focus on binary classification; the formalism extends to multi-class settings}. 
+
+We use the dataset to train:
+%
+\begin{itemize}[leftmargin =*]
+    \item A set of $m$ \emph{concept detectors} $\detector_k: \X \to [0, 1]$ that predict the probability the concept is present $\Pr{\concept_{i, k} = 1 \mid \features_i}.$ 
+    
+    \item A \emph{front-end model} $\frontend: \C \to [0,1]$, which maps concepts $\concepts_i$ to the \emph{soft} label $\frontend(\concepts_i)$.
+\end{itemize}
+%
+The full CBM pipeline $\pipeline: \X \to \Y$ outputs the \emph{hard} label $\outcomepred_i$ by thresholding the soft label.
+
+%Concept bottleneck models can be trained using various approaches~\citep[e.g.,][]{selvaraj2024improving, qi2024vip, kim2023concept, sheth2023auxiliary}. %In what follows, we focus on an independent training setup where we train concept detectors and the front-end model separately. In an image classification task, the concept detector $\detector_k$ would be a DNN fit on dataset $\{(\features_i, \concepts_{i,k})\}_{i=1}^n$, and the front-end model $\frontend$ would be a logistic regression model fit on $\{(\concepts_i, \outcome_i)\}_{i=1}^n$. This is a broadly applicable approach that overcomes barriers to adoption because we can train concept detectors on partial data (only examples with relevant concept annotations) and train them by fine-tuning an existing DNN~\citep{mertk2022posthoc,joren2024classification}.
+
+
+\paragraph{Interventions}
+
+One practical benefit of training a concept bottleneck is that semantically meaningful concepts provide a path to improve models through human \emph{intervention}:
+%
+\begin{enumerate}
+    
+    \item \emph{Confirmation}: A user corrects the predicted concept. For example, if a detector predicts that concept $k = \textcp{dots}$ is present in image $i$ with unmarked skin, $\conceptspred_{i,k} = 1$, the user can correct this by setting $\conceptspred_{i,k} = 0$ and using the new value in the front-end model.
+    
+    \item \emph{Manipulation}: A user edits the raw input to toggle a concept. If the detector fails to detect \textcp{dots} in image $i$, the user can digitally enhance them so the detector picks them up.
+    
+\end{enumerate}
+
+The value of interventions depends on the concepts and instances to which humans are asked to attend. 
+In what follows, we consider a general strategy based on the responsiveness of the label to changes in concept values. We chose this approach over alternatives~\citep{shin2023closer,shen2025adaptive} because it maximizes effectiveness while accounting for concept uncertainty. 
+
+An intervention induces a mapping $t: \C \times \X \to\C$ that, given input $\features$, modifies a subset of selected concepts $S(\features) \subseteq \{1,\ldots,m\}$ before they are passed to the front-end model. We denote the number of intervened concepts by $k = |S(\features)|$.
+
+We quantify the benefit of interventions as the improvement in expected performance with respect to a performance metric. For accuracy, this improvement is given by:
+\begin{align}
+\incacc(\pipeline) = \E[\frontend(t(\detector(\features), \features)) = \outcome] - \E[\frontend(\detector(\features)) = \outcome] 
+\end{align}
+
+\subsection{Decision Support}
+Decision support encompasses specialized tasks where models assist experts in making decisions under uncertainty, often in settings with probabilistic or unknown ground-truth labels~\citep[see, e.g., diagnostic applications][]{kawahara2018derm,irvin2019chexpert}. 
+%
+The overarching motivation for using machine learning in this use case is to improve the accuracy of decisions. 
+
+The simplest approach is to build models that outperform experts~\citep{grove2000clinical, aegisdottir2006meta}. These models cannot be easily analyzed to understand their predictions and are therefore difficult to collaborate with. Concept bottleneck models, on the other hand, are well-suited for collaboration. We may accompany predictions with explanations~\citep[see][]{arrieta2020explainable, belle2021principles, adadi2018peeking} derived from the front-end model to help experts decide when to rely on the model's predictions. We may also have experts validate concept predictions and delegate the downstream task to the model, since it is more accurate. Experts can also pass domain knowledge onto the front-end model $\frontend$ to align its predictions with domain standards.
+
+CBMs become viable to the extent that they outperform black-box alternatives with interventions. Unlike $\incacc$, which measures the benefit of interventions alone, we benchmark concept-based models by their change in performance after interventions relative to a baseline predictor $\baseline$:
+\begin{align}
+\gain(\pipeline, \baseline) =  \E[\frontend(t(\detector(\features), \features)) = \outcome] - \E[\baseline(\features) = \outcome] .
+\label{Def::Gain}
+\end{align}
+
+  
+\subsection{Automation}
+ \begin{wrapfigure}[18]{R}{0.35\linewidth}
+%\begin{figure}[t]
+        \centering
+    \includegraphics[%
+    page=5,%
+    %<left> <lower> <right> <upper>}
+    trim=0in 0in 6.3in 3in,%,%
+    clip,%
+    width=0.99\linewidth]%
+    {figures/figures.pdf}
+    \caption{Effect of interventions on automated work. We compare models that achieve a fixed selective accuracy rate, here a CBM with and without interventions. The figure shows the resulting change in automated work, illustrating how interventions can increase the safety of automation.}
+    \label{Fig::AccuracyCoverage}
+%  \end{figure}
+\end{wrapfigure}
+  
+One of the most powerful uses of concept-based models is for automation~\citep{joren2024classification}. These tasks represent a major use case for machine learning models in domains that require large volumes of repeated work. For example, government agencies process billions of non-digital documents annually~\citep{google2022documentai} (e.g., taxes, immigration, benefits) and use models to check if these documents contain responses/signatures for all mandatory sections~\citep[][]{pandey2023ai, di2024streamlining, gruzauskas2020robotic, shende2024enhancing}. 
+
+Standard models for these tasks, called selective classifiers, automate the ``easy" cases and defer uncertain instances to human experts~\citep[see][]{el2010foundations, geifman2017selective, gangrade2021selective}. These models abstain on uncertain predictions according to threshold $\threshold \in [0, 0.5]$, i.e., when $\pipeline(\features) \in [\threshold, 1-\threshold]$, the model outputs $\abstain$ (abstain) rather than a label. Their performance is evaluated on the subset of instances they choose to predict using \emph{selective accuracy}:
+%
+\begin{align}
+    \textsf{SelectiveAccuracy}(\pipeline) = \E[\pipeline(\features) = \outcome \mid \pipeline(\features) \neq \abstain]
+\end{align}
+%
+The proportion of instances where they predict is called \emph{coverage}:
+%
+\begin{align}
+    \textsf{Coverage}(\pipeline) = \E[\pipeline(\features) \neq \abstain]
+\end{align}
+%
+
+Resolving model abstentions is costly because it requires manual inspection of all instances on which the model abstains. Concept-based models can improve automation and reduce that cost by allowing interventions: rather than having humans review entire instances, they can identify when human input is needed and specify concepts that require verification~\citep{joren2024classification}. To compute ``safe" automation, we restrict attention to models that satisfy a fixed selective accuracy requirement (see \cref{Fig::AccuracyCoverage} and \citep{geifman2017selective}). 
+%
+%
+We quantify automation using a net utility metric, which captures the fraction of work handled automatically after accounting for the human effort required by interventions:
+%
+\begin{align}
+    \wrk(\pipeline) = \E[\pipeline(\features) \neq \abstain] - \E\!\left[\frac{|S(\features)|}{m}\right]
+\end{align}
+%
+A high value of this metric ($\wrk(\pipeline)\approx 1$) indicates very few interventions that produce a relatively low human cost can yield a substantial increase in automated work whereas a low value ($\wrk(\pipeline)\approx 0$) indicates that interventions fail to resolve abstentions and instead introduce additional human effort without commensurate gains in automation.
+
+
+
+
+\newsection{Decision Support}
+\label{Sec::Robot}
+
+\begin{wrapfigure}[12]{R}{0.5\linewidth}
+%\begin{figure}[t]
+    \centering
+    %<left> <lower> <right> <upper>}
+{\includegraphics[width=0.99\linewidth, page=16,trim={0in 3.0in 4.7in 0in},%
+    clip,]%
+    {figures/figures.pdf}
+        \caption{Overview of concepts in the \textds{robots} dataset. Each concept corresponds to one of 9 binary features that indicate a robot's body part.}
+        \label{Fig::RobotFeatures}}
+%\end{figure}
+\end{wrapfigure}
+
+We present a benchmark for decision-support tasks, i.e., tasks in which experts use models to improve the accuracy of their own uncertain decisions.
+
+\paragraph{Task}
+
+We consider the task of classifying fictional robots known as Glorps and Drents. Our task is inspired by \citet{williams2010role}, who used these robots to study how explanations can help humans discover new concepts~\citep[see also][for other adaptations]{skirzynski2024overreliance, skirzynski2025discrimination}. This task models decision support well because we control the ground-truth labeling function and the relevant concepts, yet we can evaluate CBMs under realistic conditions in which this knowledge is hidden from the model.
+
+For this task, $\features$ are pixels in an image of a robot, and concepts $\concepts$ describe the shape or presence of salient body parts (see~\cref{Fig::RobotFeatures}):
+%
+\begin{align*}
+\concept_k := \indic{\textcp{BodyPart}_k = \textcp{Value}}.
+\end{align*} 
+%
+As shown in \cref{Fig::ConceptDiscovery}, \textcp{FootShape} and \textcp{HandShape} exhibit numerous (visual) subtypes. We assume that decision-makers could identify these variations as distinct concepts, and use multiple (sub)concepts of the form $\textcp{Foot/HandShape\_is\_Subtype}\in\{0,1\}$.
+The label $\outcome \in \{0, 1\}$ denotes robot type (Glorp or Drent).
+
+\begin{wrapfigure}[20]{R}{0.6\linewidth}
+%\begin{figure*}[t]
+    \centering
+    %<left> <lower> <right> <upper>}
+\includegraphics[width=0.95\linewidth, page=19,trim={0.3in 0in 1.7in 0in},%
+    clip,]{figures/figures.pdf}
+        \caption{Our benchmarks allow explicit control over the relationship between true task concepts and human-provided annotations. Here, the true model depends on a binary \textcp{FootShape} concept (\textcp{Flat} vs.\ \textcp{Pointy}), while human annotators would likely assign finer-grained foot-shape labels (e.g., \textcp{Triangle}, \textcp{Hexagon}, \textcp{Diamond}) that do not reflect the task’s underlying structure.}
+        \label{Fig::ConceptDiscovery}
+%\end{figure*}
+\end{wrapfigure}
+
+We control the ground truth distribution of robot types $\outcome\sim \prob{\outcome=\textcp{G}\mid \concepts}$, e.g., as a logistic function (see~\cref{Eq::RobotGT}).
+
+
+\paragraph{Dataset Generation} 
+
+Robots are defined by 9 binary body parts, plus one of 10 \textcp{FootShape} variations (5 \textcp{Pointy} and 5 \textcp{Flat}) and one of 6 \textcp{HandShape} variations. This yields 7,680 distinct robot instances. We can use these to create up to 921{,}600 robot instances by rendering each robot with one of 120 different color schemes.
+
+This procedure can be used to generate a benchmark dataset that varies in terms of the following characteristics:
+    
+\noindent \emph{Concept Relevance}: We can set the ground truth labelling function in terms of concepts. In this way, we can control the concepts that genuinely determine robot type, concepts that can be used to predict robot type, and concepts that are irrelevant. In the simplest case, we can control this by including or excluding concepts for body parts in the labelling function. Alternatively, we can also control how concepts are encoded in the training set (e.g., \textcp{FootShape} as in \cref{Fig::ConceptDiscovery}). %Finally, we can control how to distribute the concepts in the dataset, i.e., what proportion of robots should have a given concept value.
+
+\noindent \emph{Data Modality}: Our task can be used to generate benchmark datasets across data modalities. We can generate the \textds{robots} dataset in both image and text formats. For images, we control how easily humans or models spot concepts by specifying image resolution. Some features are invisible to humans, but become machine-detectable due to small differences in pixel intensity (i.e., \textcp{MouthType}). In contrast, some become imperceptible to both humans and machines (i.e., \textcp{HasKnees} and \textcp{HasElbows}). For text, we can create descriptions with 3 levels of complexity: (1) simple templates, (2) semi-structured templates, and (3) unstructured descriptions generated via an LLM. Beyond these examples, we can also include a tabular representation which we can use to evaluate how models can perform if we were given ground-truth annotations. 
+
+    %
+In each of these cases, we can control the distribution of points in a dataset through filtering and rebalancing. In this way, we can study how performance changes with sample size, class imbalance, or concept-quality issues, such as missingness or noise.
+
+
+\paragraph{Sample Benchmarks}
+\begin{itemize}[leftmargin=0pt,label={}]
+
+    \item \emph{Concept Discovery}: One of the key benefits of benchmarking with a synthetic task is that we can test assumptions we would be unable to explore in practice. In this case, we can evaluate how the performance and functionality of CBMs depend on our ability to identify and label concepts. In real-world decision-support tasks, the ground-truth concepts are unknown. It is not clear which concepts best predict, e.g., knee osteoarthritis from X-rays~\citep{koh2020concept}, and such determinations are subject to new scientific findings and our better understanding of the world~\citep[e.g., see the paradigm changes in][]{ahmed200523}. To model this scenario, we can set up two datasets: one that uses the \textcp{FootShape\_is\_Subtype} concepts, and another that uses the ground-truth \textcp{FootShape} concept. We can compare the performance of the CBMs trained on both datasets to see how the models handle concept misspecification. We perform this evaluation in~\cref{Sec::ConceptSpecification}.
+    
+    \item \emph{Human Assistance}: By using low-resolution images, we can make automatic concept detection for \textcp{HasKnees} and \textcp{HasElbows} unreliable and simulate two deployment scenarios. In practice, this setting would reflect computational constraints that require training the model on low-resolution images, while experts still have access to high-resolution versions for interventions. We can also assume that both experts and models have access only to low-resolution images, and that experts must rely on the model for certain concepts. In this way, we can measure the human-AI team's $\gain$ as a function of the accuracy with which experts provide concept labels to determine when interventions provide benefit. We leave this as a template for users of our benchmark.
+
+    %\item \emph{Distributional Robustness}: We sample the training dataset to include robots where the rule (\textcp{Pointy} \textcp{FootShape} or \textcp{Square} \textcp{BodyShape}) separates Glorps from Drents. We can then set the labeling function to just \textcp{Pointy} \textcp{FootShape} -- and measure performance $\perf$ under the distribution shift where some Glorps do not have a \textcpp{Square} \textcp{BodyShape}. We can also assume that humans would impose constraints on the sign of \textcp{BodyShape}, e.g., requiring it to be positive, and test how this affects performance. We conduct a similar study in~\cref{Sec::Alignment}.
+
+\end{itemize}
+
+
+% \subsection{Why Concepts?}
+
+% In decision-support tasks, concept-based models are valuable primarily because they let human check and correct intermediate steps. Unlike automation, where the goal is to minimize human effort entirely, the objective is to \emph{optimize} the human--model collaboration by reducing the need for oversight while improving predictive reliability.  
+
+% We build a system where humans can improve the prediction by testing the presence uncertain concepts (e.g., [with confidence near 50\%]). Given any instance, we can score features in terms of their [return-to-intervention]:
+% %
+% \begin{align}
+%     [EQUATION]
+% \end{align}
+% %
+% [What do we we do with the score after? Intervene on top feature? All features?]
+
+
+% We can evaluate the benefits of this collaboration using the following metrics ~\cref{Sec::Preliminaries}. 
+
+
+% Key benefits include:
+% \begin{itemize}
+%     \item Using Humans: Human can improve performance by performing tasks that are difficult to detect by models -- e.g., a feature like \textfn{foot\_shape} that may be difficult for a computer to detect in a small, low-resolution image, or if the color of the robot is too similar to the color of the outline. %This will also help to resolve potential out-of-distribution issues.
+    
+%     %\item Effective Oversight: Since the model will have learned the intermediate concept weights and how they correspond to the opaque mapping function, the human oversight will be more effective than the human simply performing the task by themselves.
+
+% \end{itemize}
+
+%\paragraph{Real World Analogs}
+
+% SPRINKLE SOME OF THE REFERENCES HERE INTO THE TEXT TO POINT OUT PARALLELS WITH REAL-WORLD TASKS.
+
+%\textbf{Medical imaging with Unknown Concepts}. 
+% adiologists inspect medical images such as chest x-rays \citep{irvin2019chexpert}, to search for dozens of potential anatomical features that would help them make a final diagnosis (heart size, lung opacity patterns, rib spacing, diaphragm position, etc.). When models are used in this workflow, they can latch onto shortcuts like image artifacts or terminology \citep{degrave2021ai}. This can lead to failure modes such as feature conflation. Models can also have strong in-distribution accuracy but generalize poorly \citep{zech2018plosmed, oakdenrayner2020hidden}. CBMs are not immune to these issues and if concepts are misspecified, conflated, or leaky, interventions can reduce accuracy \citep{havasi2022addressing, shin2023closer, margeloiu2021learn}. We can test if our CBM falls prone to these issues with the synthetic dataset where the ground-truth is known.
+
+
+%\textbf{Medical imaging with Subjective Concepts} Dermatologists examine skin lesions using clinical concepts like ``asymmetry,'' ``border irregularity,'' ``color variation,'' and ``diameter'' to diagnose melanoma versus benign lesions \citep{thanh2020melanoma,choi2024enhancing}. However, these concepts are inherently subjective - studies show substantial variability among expert dermatologists on concept ratings \citep{polesie2021interobserver}, with complete diagnostic agreement achieved in only 53.5\% of cases \citep{haggenmuller2025discordance}. Differences like these can drive concept annotations and only some of these annotations may be correct. We can model this setting by randomly flipping ground truth concept annotations with some probability in our dataset and testing how different CBM models perform in this regime. Differences like these also drive the quality of interventions. We can test how  varying intervention accuracy affects CBM performance by using ambiguous text descriptions for concept values (such as grouping multiple descriptions, providing negations to certain values, etc.; see \cref{subsec::decisionsupportlessons}).
+
+  
+% We can use the robot dataset to parallel this  pipeline: (1) we set a labeling function on 2-3 concepts, simulating true diagnostic concepts, (2) we add strong spurious correlations in contextual information (just as medical equipment placement can correlate with the outcome variable), (3) we add over-specification of concepts, simulating the inclusion of irrelevant anatomical features, and (4) we generate text descriptions varying from structured text mirroring radiology reports to unstructured text mirroring clinical notes. These controls let us test faithfulness, probe failures, and shortcut reliance in environments where diagnostic logic is not fully known.
+
+\newsection{Automation}
+\label{Sec::Sudoku}
+We present benchmarks for automation tasks, i.e., routine tasks that human experts can perform but could instead be automated by a model. 
+% HIGH LEVEL MOTIVATION FOR AUTOMATION
+% 
+\paragraph{Task}
+
+% What makes Sudoku the best benchmark for automation
+We consider the task of determining if a Sudoku board is \emph{valid} -- i.e., contains the digits 1-9 exactly once in each row, column, and block. Sudoku validation provides a strong baseline for automation because we can measure $\wrk$ precisely by counting the number of concepts that require human confirmation. 
+
+In a standard Sudoku board, a $9 \times 9$ grid is divided into $\nBoard{} \times \nBoard{} = 3 \times 3$ non-overlapping sub-grids. We have to check the validity of $3\nBoard{}^2 = 27$ rules: $9$ rules for each row, column, and block. We build a concept-based model with concepts \begin{align*}
+\crow{j} &:= \indic{\text{$j$-th row contains all numbers exactly once}}, \\
+\ccol{j} &:= \indic{\text{$j$-th column contains all numbers exactly once}}, \\
+\cblk{j} &:= \indic{\text{$j$-th block contains all numbers exactly once}}.
+\end{align*}
+
+We predict the final label as the logical AND of the concepts:
+\begin{align}
+    y & = \mathrm{AND}(\ccol{1}, \ldots, \ccol{\nBoard{}^2},\ldots, \crow{\nBoard{}^2},\ldots, \cblk{\nBoard{}^2}) \notag \\
+      &= \prod_{\substack{j=1,\ldots,\nBoard{}^2}} \crow{j}\ccol{j} \cblk{j}
+\label{Eq::SudokuDomain}
+\end{align}
+
+
+
+\paragraph{Dataset Generation}
+\begin{wrapfigure}[16]{R}{0.5\linewidth}
+%\begin{figure}[t]
+  \centering
+    \includegraphics[%
+    page=3,
+%   trim={<left> <lower> <right> <upper>}
+    trim={0in 0in 4.2in 2.9in},%
+    clip,%
+    width=\linewidth]%
+    {figures/figures.pdf}
+    \caption{Partial work in the Sudoku automation benchmark. We present a board with handwritten digits and candidate marks, on which a concept-based model abstains and requests confirmation for a subset of constraint concepts. Here, the human only needs to verify the validity of the first $3\times3$ block ($\cblk{1}$) and the fifth row ($\crow{5}$).}
+    \label{Fig::Safeguard}
+%\end{figure}
+\end{wrapfigure}
+
+We can generate a valid board by solving a mixed-integer program in which variables encode the entry in each cell of the board (see~\cref{Appendix::Automation}). Given a valid board, we can generate additional boards for a dataset through simple transformations. We can create additional valid boards through transformations that exploit symmetry, such as permuting digit labels (e.g., swapping all 1s and 2s) or reordering rows/columns while keeping $\nBoard{} \times \nBoard{}$ blocks valid. %---of which there are $\nBoard{}^2! \times (\nBoard{}!)^{2\nBoard{} + 2}$ variations. 
+We can also generate additional invalid boards by swapping two numbers within the same row, column, or block of a valid board.
+
+%The formulation also includes a random variable, ensuring that the solver finds a unique solution in each run. 
+
+% ADJUSTMENTS
+We represent each board as a vector that we then use to generate an image. This generation step provides a means to control the incidence of salient issues affecting image classifiers. In this case, we can control the font, the \emph{starter} values, and the \emph{candidates}. Given the number of clues to start \citep[$\geq 17$][]{mcguire2013cluesudoku}, we can programmatically select starter values---typeset in black---and solutions---handwritten in blue. We can also include written \emph{candidates}: neighboring values located in a circle in the top corner of the cell that resemble options someone could have considered while solving the puzzle.
+
+
+These parameters can be used to generate a large class of datasets that vary in terms of the following characteristics %(full details in \cref{Appendix::Automation}): 
+%
+\begin{itemize}[leftmargin=0pt,label={}]
+
+%\item \emph{Data Modality}: 
+
+
+\item \emph{Task Complexity}: 
+We can control the difficulty of the task by adjusting the size of the board. 
+%
+In general, an $\nBoard{}^2 \times \nBoard{}^2$ board has $\nBoard{}^4$ digits and involves $3\nBoard{}^2$ concept checks.
+%
+Assuming we maintain the accuracy of concept detectors, we are likely to obtain a less reliable system, since a single concept error flips the board label. 
+%
+Formally, assuming independent concept detection errors with rate $\cErrPr$, increasing the number of concepts from $m$ to $m+1$ increases the probability of an incorrect label prediction from $1 - (1-\cErrPr)^m$ to $1 - (1-\cErrPr)^{m+1}$.
+
+
+\item \emph{Out-of-Sample Examples}: 
+%A typical Sudoku board only contains numbers $1$ to $\nBoard{}^2$ in each cell. 
+%
+We can generate atypical boards with missing entries or incorrect symbols (e.g., ``0'' or ``a''). This allows us to measure performance on datasets outside of the training distribution.
+
+\end{itemize}
+
+% Reliable Explanations: Concept-based models enable more reliable oversight of model predictions than post-hoc explanation methods like LIME~\citep{ribeiro2016should} or SHAP~\citep{lundberg2017unified}. This is because the front-end model provides ground truth on which features influence predictions. In Sudoku, assuming $f$ implements an AND logic on concepts, we can interpret concepts that were \emph{not} detected, e.g., $\cblk{j} = 0$, as explanations on why the board was predicted to be invalid, e.g., block $j$ contains repeated numbers.
+        
+
+
+\paragraph{Sample Benchmarks}
+\begin{itemize}[leftmargin=0pt,label={}]
+
+\item \emph{Domain Knowledge}: We can evaluate if domain knowledge improves automated prediction with concept noise ~\citep{dash2022review, guo2023di}. We generate a set of tabular boards with known concept-label mappings and inject noise during training. For each board, we compare two models: (1) a CBM with a learned front-end, and (2) a domain-informed CBM where we encode~\cref{Eq::SudokuDomain}. If domain knowledge is beneficial, the domain-informed model should achieve higher performance under noise than the standard CBM and alternative models. We provide full experimental details and results for this benchmark in \cref{Appendix::Demonstrations}. 
+
+
+\item \emph{Intervention Sensitivity}: We can study how concept detection can affect automation. We can generate boards with: (1) different fonts or different \textfn{pixels\_per\_cell} in the images, $px_c$, which creates blurrier digits and makes detection harder, (2) additional candidate values or visual noise that create ambiguity, (3) varying line thickness between blocks that affects block boundary detection. These modifications make concept predictions less certain, thereby increasing the number of required interventions. We can test the reduction in work between CBMs and other selective classifiers to determine the most viable method. We leave this as a template for users of our benchmark.
+
+% \item \emph{Concept Detection}: We can directly compare concept detection accuracy across image and tabular renderings of a \textds{sudoku} dataset that share 1) underlying board values, 2) concepts, and 3) ground-truth validity by changing \textfn{pixels\_per\_cell}, $px_c$, in the image dataset. Decreasing $px_c$ will lead to blurrier digits, which will cause a decrease in accuracy of digit recognition and concept detection, while detection accuracy in the tabular dataset will remain unchanged.
+
+
+\end{itemize}
+
+\newsection{Demonstrations}
+\label{Sec::Experiments}
+
+In this section, we demonstrate how synthetic benchmarks can support model development by revealing failure modes and exploring untested assumptions. We provide additional details in \cref{Appendix::Demonstrations} and code to reproduce our experiments in \repourl{}.
+
+
+\paragraph{Setup}
+\label{subsec::setup}
+
+We generate two benchmarks:
+\begin{enumerate}
+    
+    \item \emph{Automation}: We consider an instance of the \textds{sudoku} benchmark that reflects the inherent traits of automation tasks -- i.e., humans can identify and annotate ground truth concepts, models may not be able to detect them perfectly, and concept-based models provide a way to improve coverage by asking humans to confirm uncertain concepts. We generate a dataset of 1,000 $9\times 9$ Sudoku boards, with balanced validity (50\% valid, 50\% invalid). We render each board as a 454 x 454 px image, with typeset starting values, handwritten entries, and candidate values scattered across a random subset of cells. %In this setting, %concepts through interventions always concerned $k=1, 3, \text{max}$ most uncertain concepts. 
+
+    \item \emph{Decision Support}: We consider an instance of the \textds{robots} benchmark where we can study how the performance and effectiveness of interventions in concept-based models depend on the ability of human experts to identify and annotate concepts. In this case, we compare models on two datasets: \textds{true\_concepts}, where we have ground-truth concepts, and \textds{human\_concepts}, where we train models using concepts that are recognized and annotated by human experts. We consider a task in which the labeling function is $y = f(c_1,\dots,c_7)$, where $c_k$ denotes a body-part concept. We assume that experts correctly define a concept for each body part, as these are salient characteristics that vary across images. We control the deviation between ground-truth and what humans infer by varying \textcp{FootShape} as shown in \cref{Fig::ConceptDiscovery}. In \textds{true\_concepts}, each \textcp{FootShape} is a binary feature that captures high-level values \textcp{Pointy} and \textcp{Flat}. In \textds{human\_concepts}, \textcp{FootShape} is a categorical feature encoded in terms of the distinct subtypes, with an uneven distribution of subtypes. To study how each architecture responds to automated concept annotation, we additionally test three concept sources where labeling is performed by an LLM (GPT-4o-mini):  \textds{machine\_annotation} (the same concepts as \textds{human\_concepts}), \textds{llm\_concepts} (concepts generated by an LLM, such as ``Gradient color'' and ``Square hands''), and \textds{clip\_concepts} (concepts from the CLIP-Dissect vocabulary~\citep{oikarinen2022clip}, such as ``transistor'', ``robotic'', and ``physics''). Finally, we vary who performs interventions at test time: an oracle (\textds{perfect}), a human expert with 80\% accuracy (\textds{expert}), or an LLM that judges concepts from robot images (\textds{llm}).
+
+\end{enumerate}
+
+We divided each dataset into training and test samples. We used the training sample to train models and tune their parameters, and the test sample to evaluate performance on the metrics listed in \cref{Sec::Preliminaries}. 
+
+We test four established concept-based architectures that each address different failure modes of CBMs, and show the ability of our benchmarks to surface when these architectures are not suitable and why. Our baseline concept-based model is the standard \CBM{}~\citep{koh2020concept}, which predicts binary concepts and maps them to labels through a logistic regression frontend~\citep{mertk2022posthoc,joren2024classification}. We also test \CEM{}~\citep{zarlenga2022concept}, which replaces binary concept outputs with learned per-concept embeddings to preserve richer representations. 
+%During training, \CEM{} randomly replaces some predicted concepts with ground-truth values so the label predictor is exposed to both predicted and corrected inputs, reducing the distribution shift that occurs when a human intervenes at test time. 
+Then, we test \ProbCBM{}~\citep{kim2023probabilistic}, which models concepts as Gaussian latent variables so the model can express per-concept uncertainty. 
+%This allows the label predictor to weigh uncertain concepts less, rather than treating a noisy $0.51$ prediction the same as a confident $0.99$. 
+Finally, we test \ECBM{}~\citep{xu2024energy}, which uses energy-based scoring to train concept detection and label prediction jointly. 
+%This avoids the mismatch that arises in independently trained CBMs, where the label predictor is trained on ground-truth concept values but receives noisy predicted values at test time. 
+For automation, we adapt all four architectures as selective classifiers~\citep{joren2024classification}. As a black-box baseline, we trained a deep neural network (\DNN{}) end-to-end on each task.
+
+\input{tables/robot_big_table}
+
+\paragraph{Validation of the Benchmark on Decision Support}
+\label{Sec::DecisionSupportValidation}
+
+In this section, we show that our benchmarks can differentiate concept-based architectures and diagnose why some of them fail. We compare all four architectures on \textds{human\_concepts} with perfect interventions (see \cref{tab:robot-big-table}).
+
+The \DNN{} baseline achieves $87.5\%$ by predicting the majority class; it cannot find signal beyond the class prior. Because we know the labeling rule, we can examine accuracy on the three concepts that drive the label --- \textcp{MouthType}, \textcp{HasKnees}, and \textcp{FootShape} --- to diagnose why some architectures benefit from interventions and others do not.
+
+On \textds{human\_concepts} with perfect interventions, \CBM{}, \CEM{}, and \ProbCBM{} all improve with interventions, while \ECBM{} is flat at $87.5\%$ for partial budgets and only recovers at $k{=}\text{max}$ (see \cref{tab:robot-big-table}). \CBM{} improves from $79.9\%$ to $91.2\%$ at $k{=}3$ and reaches $94.9\%$ at $k{=}\text{max}$; \CEM{} reaches $94.2\%$ at $k{=}1$ and $94.0\%$ at $k{=}\text{max}$; \ProbCBM{} reaches $89.0\%$ at $k{=}3$ and $94.9\%$ at $k{=}\text{max}$. \ECBM{}'s concept detector learns a majority-class template on the three key concepts --- predicting all of them as $0$ for drents (the minority class). Because these predictions appear confident, the intervention policy does not select them for correction, so interventions at partial budgets leave the relevant concepts unchanged. Only at $k{=}\text{max}$, when all concepts are corrected, does accuracy recover to $92.8\%$.
+
+We examine \ProbCBM{} more closely because it achieves the highest accuracy at $k{=}\text{max}$. We hypothesize that this stems from its sequential training and explicit representation of per-concept uncertainty --- a design choice advocated by~\citet{kim2023probabilistic} so that concept embeddings remain focused on representing uncertainty rather than encoding shortcuts around the bottleneck. We can test this claim directly: when we train \ProbCBM{} jointly and perform the same analysis, we find that accuracy is flat at $87.5\%$ across all budgets. Examining the concept predictions, the key concepts are predicted at chance (${\approx}50\%$), which is why interventions fail. Leakage metrics~\citep{parisini2025leakage} confirm the bottleneck is bypassed (\cref{Table::Leakage}). We note that \CEM{} is also trained jointly but avoids this failure through its RandInt mechanism, which presents the label predictor with a mix of predicted and ground-truth concept values during training. Our benchmark enables these comparisons because we know which concepts drive the label and can directly verify whether each architecture learns them.
+
+\paragraph[Robustness to concept specification]{\mbox{Robustness to concept specification.}}
+\label{Sec::ConceptSpecification}
+
+Practitioners cannot know the true generative concept set for their task. They annotate the concepts they can see, which are often finer-grained than the latent structure that drives the label. Our benchmark can stress-test whether a method survives this mismatch because we can swap the concept set while holding the images, labels, and labeling rule fixed.
+
+We compare all four architectures on \textds{true\_concepts} (7 binary concepts matching the generative rule) and \textds{human\_concepts} (12 finer-grained subconcepts) under perfect interventions (see \cref{tab:robot-big-table}).
+
+\CEM{} is robust: its baseline is comparable on both concept sets ($84.9\%$ and $87.3\%$), and interventions yield gains in both cases ($95.3\%$ at $k{=}3$ on \textds{true\_concepts}; $94.2\%$ at $k{=}1$ on \textds{human\_concepts}).
+
+\CBM{} and \ProbCBM{} are both sensitive to concept specification: their baselines and intervention ceilings drop with finer-grained concepts, but interventions help in both cases. For example, \CBM{} drops from $97.1\%$ ($k{=}3$) on \textds{true\_concepts} to $91.2\%$ on \textds{human\_concepts}; \ProbCBM{} drops from $94.3\%$ to $89.0\%$.
+
+\ECBM{} reveals the most severe sensitivity. On \textds{true\_concepts}, it benefits substantially from interventions ($86.4\%$ to $95.2\%$ at $k{=}3$) --- comparable to \CBM{} and \CEM{}. On \textds{human\_concepts}, it is flat at $87.5\%$ for all partial budgets. Where \CBM{} and \ProbCBM{} degrade gracefully with finer concepts, \ECBM{} fails catastrophically.
+
+Our benchmark surfaces distinct patterns under concept specification mismatch, ranging from graceful degradation (\CBM{}, \ProbCBM{}) to robustness (\CEM{}) to catastrophic sensitivity (\ECBM{}). These patterns are invisible on real datasets because no real dataset supports swapping the concept set while holding the task fixed.
+
+
+
+\paragraph{Robustness to Concept Source}
+\label{Sec::Noise}
+
+\begin{wrapfigure}[18]{R}{0.7\linewidth}
+    \vspace{-1em}
+    \centering
+    \includegraphics[width=\linewidth, page=24]{figures/figures.pdf}
+    \caption{Mean $\Delta$ Accuracy (averaged over $k \in \{1, 3, \text{max}\}$) across concept source and intervention pipelines. \CBM{} benefits from hand-annotated concepts but backfires on automated ones; other architectures are flat or recover toward the majority-class baseline.}
+    \label{fig:relative-change}
+\end{wrapfigure}
+
+Concept annotation is expensive, and practitioners increasingly turn to automated concept discovery~\citep{oikarinen2023label, oikarinen2022clip}. Our benchmark can stress-test whether intervention benefit survives with automated concepts, because we can vary the concept source and intervention source independently while holding the task fixed (see \cref{tab:robot-big-table} and \cref{fig:relative-change}).
+
+\CBM{} benefits from interventions on hand-annotated concepts ($+1\%$ to $+12\%$) but backfires on automated ones ($-13\%$ to $-49\%$). At $k{=}0$, \CBM{} predicts the majority class on automated concepts --- the concept predictions carry little task-relevant signal. Intervening activates the front-end's concept coefficients at full strength, but since the automated concepts do not relate to the task, these coefficients produce noise rather than signal~\citep[see also][]{shin2023closer, park2025analysis}.
+
+\CEM{} and \ProbCBM{} are both degraded by automated concepts at $k{=}0$: their baseline accuracy drops below the majority-class rate (e.g., \CEM{} drops to $81.7\%$ on \textds{llm\_concepts}; \ProbCBM{} drops to $71.0\%$ on \textds{clip\_concepts}). The automated concept values actively push predictions in the wrong direction. The two architectures differ in how they respond to interventions: \ProbCBM{} recovers to the majority-class rate ($87.5\%$) --- correcting the concept values neutralizes the damage but does not improve beyond the prior, because the corrected values are accurate but irrelevant to the task. \CEM{} does not recover ($81.7\% \to 81.6\%$ at $k{=}\text{max}$); the damage from automated concepts persists even after correction.
+
+\ECBM{} is flat at $87.5\%$ across all concept sources (\cref{Sec::DecisionSupportValidation}).
+
+Our benchmark surfaces a failure mode that is invisible on real datasets: automated concepts that do not align with the task can degrade baseline accuracy, cause interventions to backfire, or both. These effects cannot be detected without varying concept source quality independently of the task.
+
+\paragraph{Robustness to Alignment Constraints}
+\label{Sec::Alignment}
+
+\begin{wrapfigure}[14]{R}{0.5\linewidth}
+    \vspace{-0.5em}
+    \centering
+    \includegraphics[width=\linewidth, page=22]{figures/figures.pdf}
+    \caption{Our benchmarks allow us to evaluate how aligning CBMs with domain knowledge affects $\gain$ in performance with respect to the baseline. Alignment constraints that appear harmless during training can destroy the benefit of interventions.}
+    \label{Fig::robot_alignment}
+\end{wrapfigure}
+
+Concept-based models allow practitioners to encode domain knowledge by constraining concept weights in the frontend, for example by fixing the sign of a feature weight to match clinical expectations~\citep{joseph2025cognitive, adler2022meeting}. Our benchmark can stress-test whether such constraints survive training, because we know the true concept weights and can measure intervention gain on a constrained concept before and after the constraint is applied.
+
+We set the weight on \textcp{HasKnees} to zero. This choice appears reasonable: knees have poor detector accuracy ($\approx 50\%$) and experts could easily miss their predictive importance, as knees appear commonly in both classes. The constraint preserves training accuracy ($88\%$ to $88.1\%$), so a practitioner inspecting only accuracy would accept it. However, as shown in \cref{Fig::robot_alignment}, the constraint destroys the benefit of interventions. On \textds{human\_concepts}, the unconstrained \CBM{} outperforms the \DNN{} by $6.9\%$ with interventions, whereas the constrained \CBM{} \emph{underperforms} by $8\%$. The same pattern appears on \textds{true\_concepts} ($+10.2\%$ vs.\ $-0.3\%$). Training accuracy is preserved because gradient descent routes task-relevant signal through the unconstrained concepts to compensate for the fixed weight. This failure mode is visible on our benchmark because we can measure intervention gain on a concept with a known true weight. On a real dataset, training accuracy alone would suggest the constraint is harmless.
+
+
+\paragraph{Validation of the Benchmark on Automation}
+\label{Sec::AutomationValidation}
+
+\begin{wraptable}[18]{R}{0.55\linewidth}
+    \centering
+    \resizebox{0.49\textwidth}{!}{
+    \small
+    \input{tables/sudoku_tab}
+    }
+    \caption{$\textsf{SelectiveAccuracy}$, $\textsf{NetWorkAutomated}$, and $\textsf{Coverage}$ on a real-world \textds{ppe} checklist task and on our synthetic \textds{sudoku} benchmark. The architecture ranking changes across datasets. \CEM{} leads on \textds{ppe} ($73.0\%$), while \CBM{} leads on \textds{sudoku} ($59.0\%$) and \ProbCBM{} falls to $1.0\%$. Because \textds{sudoku} has a known labeling rule, it lets us probe architecture-level explanations that are hard to isolate on \textds{ppe}.}
+    \label{Table::sudoku}
+\end{wraptable}
+
+The automation benchmark checks whether rankings from a real checklist task hold when the label rule is known. On \textds{ppe}, \CEM{} covers the most cases ($73.0\%$), followed by \ECBM{} ($35.5\%$), \CBM{} ($27.7\%$), and \ProbCBM{} ($17.0\%$). The \DNN{} reaches $54.6\%$. These results rank methods, but they do not explain the ranking. A coverage gap can come from concept detector quality, calibration, bottleneck leakage, concept-label mismatch, label noise, or the architecture itself. \textds{ppe} does not separate these causes.
+
+On \textds{sudoku}, the ranking changes. \CBM{} leads with $59.0\%$ \wrk{}, followed by \ECBM{} ($47.0\%$), \CEM{} ($41.5\%$), and \ProbCBM{} ($1.0\%$). The \DNN{} reaches $10.0\%$. Every label is known because a board is valid only when all $27$ row, column, and block constraints hold. This rule makes \CBM{} a natural fit. Its binary bottleneck and logistic frontend can represent the thresholded sum that implements the AND rule. \ProbCBM{} accepts almost no cases in this setting, which flags a bottleneck question like the one in \cref{Sec::DecisionSupportValidation}. That is the value of the controlled task. \textds{ppe} tells us which method handled more cases. \textds{sudoku} narrows the cause of failure because the rule and every label are known instead of mixed with real-world noise.
+
+\newsection{Concluding Remarks}
+\label{Sec::ConcludingRemarks}
+
+%Our goal is to support researchers who wish to understand how models operate, how they may fail before committing to costly data collection or deployment.
+
+In this work, we introduce synthetic benchmarks to support research on concept-based models. Our benchmarks pertain to simple, fictional tasks, in which researchers can readily generate a broad range of datasets, quickly train models, and communicate their findings to a broader audience. Our experiments highlight how we can benefit from such synthetic tasks on several fronts: by expanding the testbed of datasets used to evaluate algorithms, by exploring the impact of untestable assumptions, and by drawing attention to the appropriate performance metrics. Our aim is to provide diagnostic tools rather than a leaderboard. Failures on controlled synthetic tasks are informative: they signal vulnerabilities that are likely to persist or worsen in real-world settings. In this way, our benchmarks help practitioners decide what to investigate further before committing to costly data collection or deployment.
+
+% \paragraph{Limitations and Future Work}
+% Our benchmarks focus on tabular and image-based settings and rely on simplified generative assumptions that do not capture the full heterogeneity of real-world data. Extending these tools to additional modalities and richer forms of noise remains an important direction for future work. Future work could also test newer architectures developed to address specific limitations of CBMs, such as concept noise, uncertainty, and selective abstention~\citep{vandenhirtz2024scbm,singhi2024realignment,penaloza2025cpo, pugnana2025deferring}.
+
+\paragraph{Broader Impacts}
+Our work introduces benchmarks that support the development of reliable concept bottleneck models by providing researchers with tools that can improve algorithm design, reveal failure modes, and communicate the benefits of concept-based systems. Our benchmarks are designed to delineate conditions under which concept-based models are viable alternatives to standard neural networks for canonical use cases.
+
+
+%Our benchmarks can generate datasets that can be used to study isolated characteristics related to model architecture, training, or the data itself in use cases that matter for deployment. 
+
+
+
+\nottoggle{blind}{%
+\iftoggle{workingversion}{%
+\subsection*{Contribution Statement}
+Harry Cheon developed the Sudoku benchmark and ran the experiments on automation, concept set specification, and missingness. Julian Skirzy\'nski developed the robots benchmark, ran the experiments on alignment, and led the writing of the manuscript. Shreyas Kadekodi developed the text-robot benchmark and conducted experiments on concept noise. Meredith Stewart contributed to the development of the Sudoku benchmark. Berk Ustun conceived the idea and supervised the project. All authors provided feedback and revisions throughout the writing process.
+
+
+\subsection*{Acknowledgements}
+This work was supported by funding from the National Science Foundation IIS 2313105 and the NIH Bridge2AI Center Grant U54HG012510.%
+}}{}
+
+\bibliographystyle{plainnat}
+{\small\bibliography{concept_benchmark}}
+
+%%% Appendices
+\clearpage
+\input{concept_benchmark_appendix}
+\end{document}
