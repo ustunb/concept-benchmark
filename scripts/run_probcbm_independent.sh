@@ -28,6 +28,7 @@ python -u scripts/robot_pipeline.py \
     --concept-preset ground_truth \
     --cbm-family probcbm \
     --intervention-sources perfect expert llm \
+    --llm-cache-only \
     --force-retrain \
     --stages cbm intervene collect
 
@@ -39,6 +40,7 @@ python -u scripts/robot_pipeline.py \
     --cbm-family probcbm \
     --concept-sources human_concepts machine_annotation llm_concepts clip_concepts \
     --intervention-sources perfect expert llm \
+    --llm-cache-only \
     --force-retrain \
     --stages cbm intervene collect
 
