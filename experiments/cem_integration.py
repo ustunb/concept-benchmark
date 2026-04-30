@@ -1744,7 +1744,7 @@ def train_probcbm_model(
         "use_neg_concept": True,
         "pred_class": True,
         "use_scale": True,
-        "train_class_mode": "sequential",
+        "train_class_mode": getattr(config, "probcbm_train_class_mode", "independent"),
         "latent_dim": int(getattr(config, "probcbm_latent_dim", 8)),
         "learning_rate": _resolve_learning_rate(config),
         "optimizer": "adam",
