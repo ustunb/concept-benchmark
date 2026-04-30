@@ -2113,7 +2113,8 @@ def run_interventions(
         data = load(config.get_dataset_path())
 
     family = _selected_cbm_key(config)
-    concept_sources = getattr(config, "concept_sources", None) or ["human_concepts"]
+    default_cs = "ground_truth" if config.concept_preset == "ground_truth" else "human_concepts"
+    concept_sources = getattr(config, "concept_sources", None) or [default_cs]
     intervention_sources = getattr(config, "intervention_sources", None) or ["perfect"]
 
     budgets = sorted(

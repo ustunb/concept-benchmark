@@ -34,7 +34,7 @@ echo "============================================"
 echo "ProbCBM Independent: all concept sources"
 echo "============================================"
 
-# 1. true_concepts (m=7) — needs ground_truth preset
+# 1. true_concepts (m=7) — needs ground_truth preset + concept source
 echo ">>> [1/2] true_concepts (ground_truth preset)"
 python -u scripts/robot_pipeline.py \
     --seed $SEED \
