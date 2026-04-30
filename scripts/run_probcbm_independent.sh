@@ -3,6 +3,7 @@
 # for the big table (5 concept sources × 3 intervention sources)
 #
 # Requires: code on codex-cem-probcbm-baselines branch with independent default
+# Results are saved with _independent suffix to avoid overwriting sequential results.
 
 set -euo pipefail
 
@@ -16,6 +17,18 @@ cd "$(dirname "$0")/.."
 export PYTHONPATH=.
 
 SEED=1014
+RESDIR=results
+
+# Helper: rename probcbm results/models to *_independent* after each run
+rename_outputs() {
+    for f in "$RESDIR"/*probcbm*; do
+        [ -f "$f" ] || continue
+        # Skip files already renamed
+        [[ "$f" == *_independent* ]] && continue
+        newname="${f/probcbm/probcbm_independent}"
+        mv -v "$f" "$newname"
+    done
+}
 
 echo "============================================"
 echo "ProbCBM Independent: all concept sources"
@@ -32,6 +45,9 @@ python -u scripts/robot_pipeline.py \
     --force-retrain \
     --stages cbm intervene collect
 
+echo ">>> Renaming true_concepts outputs..."
+rename_outputs
+
 # 2. human_concepts + machine_annotation + llm_concepts + clip_concepts (m=12)
 echo ">>> [2/2] subconcepts (foot_subtypes preset, all concept sources)"
 python -u scripts/robot_pipeline.py \
@@ -44,8 +60,11 @@ python -u scripts/robot_pipeline.py \
     --force-retrain \
     --stages cbm intervene collect
 
+echo ">>> Renaming subconcept outputs..."
+rename_outputs
+
 echo ""
 echo "============================================"
 echo "DONE. Results:"
 echo "============================================"
-ls -lt results/*probcbm* 2>/dev/null | head -20
+ls -lt results/*probcbm_independent* 2>/dev/null | head -20
