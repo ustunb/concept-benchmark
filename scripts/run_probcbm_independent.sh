@@ -6,6 +6,12 @@
 
 set -euo pipefail
 
+# Activate conda env (needed on DSMLP)
+if [ -f /opt/conda/etc/profile.d/conda.sh ]; then
+    source /opt/conda/etc/profile.d/conda.sh
+    conda activate /home/jskirzynski/myenv
+fi
+
 cd "$(dirname "$0")/.."
 export PYTHONPATH=.
 
