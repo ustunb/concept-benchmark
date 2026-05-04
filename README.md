@@ -166,50 +166,6 @@ dataset.train.explore()  # opens in the browser
   <img src="docs/assets/robot_samples.png" width="600" alt="Sample Glorps and Drents with concept annotations">
 </p>
 
-#### Controlled Semantic Space, Continuous Render Space
-
-The robot benchmark now has two levels of variation:
-
-- `semantic_id`: the finite, interpretable concept combination that determines the concept vector and label.
-- `render_id`: nuisance-only variation such as translation, scale, mild rotation, arm angle, stance, head tilt, foot orientation, stroke jitter, and small palette perturbations.
-
-Legacy behavior is still the default:
-
-```python
-legacy = DatasetGenerator("robot", seed=1014).generate()
-```
-
-Opt into broader image variety without changing the semantics:
-
-```python
-continuous = DatasetGenerator(
-    "robot",
-    seed=1014,
-    render_space_mode="continuous_light",   # or "continuous_heavy"
-    renders_per_robot=6,
-    validate_renders=True,
-    validation_checks={
-        "hands_body_clearance": "off",      # disable one collision rule only
-    },
-    group_split_by_semantic_id=True,        # prevent same semantic robot across splits
-).generate()
-```
-
-Notes:
-
-- `render_space_mode="legacy"` preserves the existing paper-style behavior.
-- `continuous_light` is conservative enough for the default 32x32 images.
-- `continuous_heavy` is a stronger stress test and is better suited to larger renders.
-- `validation_checks` lets you disable individual rules without disabling the whole validator.
-- `group_split_by_semantic_id=True` is opt-in, so paper-default splits stay unchanged.
-- For text data, `include_pose_text=True` adds only minimal neutral descriptors such as `arms angled slightly upward` or `standing with a wider stance`. It is off by default.
-
-Preview the render space without training:
-
-```bash
-python scripts/preview_robot_render_space.py --mode continuous_light --output-dir results/robot_preview
-```
-
 Train CBMs on both concept sets and compare (requires cloning the repo):
 
 ```python
@@ -272,6 +228,7 @@ dataset = DatasetGenerator(
     n_boards=1000,        # number of boards
     max_cell_swaps=9,     # cells swapped in invalid boards (higher = subtler errors)
     valid_board_ratio=0.5,  # fraction of valid boards
+    render_images=False,  # set True to generate board images (slower)
 ).generate()
 
 # Stratified split — preserves valid/invalid ratio in each split
@@ -927,12 +884,12 @@ python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
     --regimes baseline expert subjective machine
 ```
 
-The pipeline also exposes an experimental `placeholder3` regime slot for an additional automated baseline. It is not part of the locked paper table above and requires an explicit concepts file. You can keep using the API-backed providers, or switch the intervention judgments to local CLI loops with `--llm-provider codex_exec` or `--llm-provider claude_exec`:
+The pipeline also exposes a `custom` regime slot for an additional automated baseline with your own concept descriptions. It requires an explicit concepts file. You can use API-backed providers or switch to local CLI loops with `--llm-provider codex_exec` or `--llm-provider claude_exec`:
 
 ```bash
 python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
-    --regimes placeholder3 \
-    --placeholder3-concepts-file path/to/placeholder3.jsonl \
+    --regimes custom \
+    --custom-concepts-file path/to/my_concepts.jsonl \
     --llm-provider codex_exec
 ```
 

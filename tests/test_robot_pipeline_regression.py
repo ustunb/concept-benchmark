@@ -29,10 +29,14 @@ for _old, _new in [
 
 # Model-loading tests need cached artifacts; reference CSV tests don't.
 _ideal_cfg = RobotBenchmarkConfig.default_ideal()
-_has_artifacts = _ideal_cfg.get_dataset_path().exists()
+_has_artifacts = (
+    _ideal_cfg.get_dataset_path().exists()
+    and _ideal_cfg.get_model_path("cbm").exists()
+    and _ideal_cfg.get_model_path("dnn").exists()
+)
 _needs_artifacts = pytest.mark.skipif(
     not _has_artifacts,
-    reason="Robot demo artifacts not found; run the pipeline first.",
+    reason="Robot demo artifacts not found; run the full pipeline first.",
 )
 
 
