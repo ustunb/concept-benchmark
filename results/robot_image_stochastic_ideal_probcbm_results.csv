@@ -1,7 +1,0 @@
-budget,threshold,accuracy,predictions_intervened_on,predictions_changed,total_concept_confirmations,total_concept_edits_made,regime,data_name,model_family,n,missing_fraction,missing_mechanism
-0,0.2,0.8746,0,0,0,0,baseline,ideal,probcbm,10000,0.0,mcar
-1,0.2,0.8746,0,0,0,0,baseline,ideal,probcbm,10000,0.0,mcar
-3,0.2,0.8738,3321,1604,9963,4563,baseline,ideal,probcbm,10000,0.0,mcar
-0,0.4,0.8746,0,0,0,0,baseline,ideal,probcbm,10000,0.0,mcar
-1,0.4,0.8746,0,0,0,0,baseline,ideal,probcbm,10000,0.0,mcar
-3,0.4,0.8737,2828,1397,8484,3914,baseline,ideal,probcbm,10000,0.0,mcar

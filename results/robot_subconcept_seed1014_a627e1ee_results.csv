@@ -1,5 +1,0 @@
-dataset,model,budget,threshold,accuracy,gain,predictions_intervened_on,avg_concepts_per_sample,predictions_changed
-subconcept,dnn,,,0.8746,0.0,,,
-subconcept,probcbm,0,,0.8746,0.0,,,
-subconcept,probcbm,1,0.2,0.8573,-0.0173,645,1.0,347
-subconcept,probcbm,3,0.2,0.8199,-0.0547,2898,2.38,1047

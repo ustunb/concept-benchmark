@@ -29,7 +29,8 @@ data/cub/
 data/sudoku/
 data/robot_images/
 data/ppe/
-data/rice/rice_images/
+data/pistachio/
+data/rice/
 
 # folders to ignore
 dev/

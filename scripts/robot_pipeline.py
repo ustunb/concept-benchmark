@@ -39,7 +39,6 @@ from concept_benchmark.config import RobotBenchmarkConfig
 from concept_benchmark.generators import DatasetGenerator
 from concept_benchmark.ext.fileutils import load, save
 from experiments.cem_integration import (
-    CEMDependencyError,
     compute_ecbm_interpretation_summary,
     train_cem_model,
     train_ecbm_model,
