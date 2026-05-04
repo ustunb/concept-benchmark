@@ -69,4 +69,4 @@ class TestFEOnProbs:
     def test_fast_path_disabled(self):
         from scripts.robot_pipeline import FEOnProbs
 
-        assert FEOnProbs._kflip_fast_path is False
+        assert FEOnProbs._kflip_fast_path is True

@@ -58,15 +58,15 @@ Verify the installation:
 python3 -c "import concept_benchmark; print('OK')"
 ```
 
-### Optional Official CEM / ProbCBM Baselines
+### Optional: CEM, ProbCBM, and ECBM Baselines
 
-The repo can also run the official `mateoespinosa/cem` implementations for:
+The repo supports three additional CBM families beyond the standard CBM/DNN:
 
-- `cem` (`cem.models.cem.ConceptEmbeddingModel`)
-- `probcbm` (`cem.models.probcbm.ProbCBM`)
+- **CEM** — Concept Embedding Model (`--cbm-family cem`)
+- **ProbCBM** — Probabilistic Concept Bottleneck Model (`--cbm-family probcbm`)
+- **ECBM** — Energy-based Concept Bottleneck Model (`--cbm-family ecbm`)
 
-These dependencies are optional and are only needed when you explicitly select
-`--cbm-family cem` or `--cbm-family probcbm`.
+**ECBM** is included in the repo and works out of the box. **CEM and ProbCBM** require the official [`mateoespinosa/cem`](https://github.com/mateoespinosa/cem) package — install it with:
 
 ```bash
 ./scripts/install_cem_repo.sh
@@ -80,6 +80,29 @@ python -m pip install "pytorch-lightning>=1.6,<2.0" "torchmetrics<1.0"
 python -m pip install -r third_party/cem/requirements.txt
 python -m pip install -e third_party/cem
 ```
+
+Once installed, use `--cbm-family` to select the model in any pipeline script:
+
+```bash
+# Train and evaluate a CEM on the robot benchmark
+python scripts/robot_pipeline.py --seed 1014 --cbm-family cem
+
+# Train and evaluate a ProbCBM on the robot benchmark
+python scripts/robot_pipeline.py --seed 1014 --cbm-family probcbm
+
+# CEM / ProbCBM on tabular sudoku
+python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family cem --stages setup cs intervene
+python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family probcbm --stages setup cs intervene
+```
+
+Key configuration options (set via `--`flags or in the config dataclass):
+
+| Parameter | Default | Description |
+|---|---|---|
+| `cem_emb_size` | 16 | Concept embedding dimension for CEM |
+| `cem_training_intervention_prob` | 0.25 | Intervention probability during CEM training |
+| `probcbm_train_class_mode` | `independent` | ProbCBM class training: `independent` or `sequential` |
+| `probcbm_n_samples_inference` | 50 | Monte Carlo samples during ProbCBM inference |
 
 Notes:
 

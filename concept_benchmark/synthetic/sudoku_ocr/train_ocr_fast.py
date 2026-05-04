@@ -233,6 +233,7 @@ def main():
         n_boards=args.n_samples,
         max_cell_swaps=args.max_corrupt,
         seed=args.seed,
+        cell_px=args.cell_px,
     )
 
     dataset_dir = cfg.get_dataset_path(data_type="image")

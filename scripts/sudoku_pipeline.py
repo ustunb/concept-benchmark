@@ -1110,6 +1110,8 @@ def _parse_args(argv=None):
                         help="Use ViT backbone directly on board images (no OCR)")
     parser.add_argument("--handwriting", action="store_true", default=None)
     parser.add_argument("--no-handwriting", action="store_true")
+    parser.add_argument("--cell-px", type=int, default=None,
+                        help="Pixels per cell for OCR rendering (default: 50)")
     parser.add_argument("--force-setup", action="store_true")
     return parser.parse_args(argv)
 
@@ -1137,6 +1139,8 @@ def main(argv=None):
     if args.data_type is not None:
         config.data_type = args.data_type
     config.cbm_family = args.cbm_family
+    if args.cell_px is not None:
+        config.cell_px = args.cell_px
     if args.direct_image:
         config.use_vit_backbone = True
         config.data_type = "image"

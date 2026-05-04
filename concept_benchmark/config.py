@@ -138,6 +138,7 @@ _PROBCBM_FINGERPRINT_FIELDS = frozenset(
         "probcbm_latent_dim",
         "probcbm_n_samples_inference",
         "probcbm_intervention_prob",
+        "probcbm_train_class_mode",
         "probcbm_max_epochs",
     }
 )
@@ -266,6 +267,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     probcbm_latent_dim: int = 8
     probcbm_n_samples_inference: int = 50
     probcbm_intervention_prob: float = 0.25
+    probcbm_train_class_mode: str = "independent"
     probcbm_max_epochs: int | None = None
     ecbm_emb_size: int = 8
     ecbm_hid_size: int = 64
@@ -550,6 +552,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 "probcbm_latent_dim",
                 "probcbm_n_samples_inference",
                 "probcbm_intervention_prob",
+                "probcbm_train_class_mode",
                 "probcbm_max_epochs",
             }
             for k in _exclude:
@@ -745,6 +748,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     probcbm_latent_dim: int = 8
     probcbm_n_samples_inference: int = 50
     probcbm_intervention_prob: float = 0.25
+    probcbm_train_class_mode: str = "independent"
     probcbm_max_epochs: int | None = None
 
     # Intervention
@@ -840,14 +844,14 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     def get_dataset_path(self, data_type: str | None = None) -> Path:
         """Return the directory path for the dataset."""
         dt = data_type or self.data_type
-        filename = f"sudoku_{dt}_n{self.block_size}_ns{self.n_boards}_mc{self.max_cell_swaps}_seed{self.seed}"
+        filename = f"sudoku_{dt}_n{self.block_size}_ns{self.n_boards}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}"
         return data_dir / "sudoku" / filename
 
     def get_model_path(self, model_class: str, data_type: str | None = None) -> Path:
         """Return the path where a trained model is saved."""
         dt = data_type or self.data_type
         filename = (
-            f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}"
+            f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}"
         )
         return results_dir / f"{filename}.model"
 
@@ -857,7 +861,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
         """Return the path where results are saved."""
         dt = data_type or self.data_type
         filename = (
-            f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}"
+            f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}"
         )
         return results_dir / f"{filename}.results"
 

@@ -2782,6 +2782,12 @@ def _parse_args(argv=None):
         default=None,
         help="Concept descriptions JSONL for the placeholder3 automated regime.",
     )
+    parser.add_argument(
+        "--regimes",
+        nargs="+",
+        default=None,
+        help="Intervention regimes (e.g. baseline expert llm placeholder3).",
+    )
     parser.add_argument("--llm-api-key", type=str, default=None)
     parser.add_argument("--force-retrain", action="store_true", dest="force_retrain")
     parser.add_argument("--force-setup", action="store_true")
@@ -2844,6 +2850,8 @@ def main(argv=None):
         config.clip_concepts_file = args.clip_concepts_file
     if args.placeholder3_concepts_file:
         config.placeholder3_concepts_file = args.placeholder3_concepts_file
+    if args.regimes:
+        config.intervention_regimes = args.regimes
     if args.llm_api_key:
         config.llm_api_key = args.llm_api_key
     if args.force_retrain:
