@@ -28,6 +28,9 @@ data/*/raw
 data/cub/
 data/sudoku/
 data/robot_images/
+data/ppe/
+data/pistachio/
+data/rice/
 
 # folders to ignore
 dev/

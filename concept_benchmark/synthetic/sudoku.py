@@ -411,10 +411,10 @@ def image_transform(
                 continue  # cell is too small (shouldn't happen)
 
             # Start with a generous mini size, then *shrink* until it fits
-            mini = max(12, int(cell_px * 0.46))
+            mini = max(4, int(cell_px * 0.30))
             fitted = None
             tries = 0
-            while mini >= 8 and tries < 6:
+            while mini >= 4 and tries < 6:
                 seq_img = _render_inline_candidates(
                     generator, opts, fill_color, size=mini, seed_base=(r * N + c) * 997
                 )

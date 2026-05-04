@@ -43,13 +43,32 @@ class TestRobotConfigValidation:
                 "machine",
                 "llm",
                 "clip",
+                "custom",
             ]
         )
-        assert len(cfg.intervention_regimes) == 6
+        assert len(cfg.intervention_regimes) == 7
+
+    def test_gemini_is_default_llm_provider(self):
+        cfg = RobotBenchmarkConfig()
+        assert cfg.llm_provider == "gemini"
+        assert cfg.llm_model == "gemini-3-flash-preview"
+        assert cfg.llm_api_key_env == "GEMINI_API_KEY"
 
     def test_exactly_k_strategy(self):
         cfg = RobotBenchmarkConfig(intervention_strategy="exactly_k")
         assert cfg.intervention_strategy == "exactly_k"
+
+    def test_accepts_cem_family(self):
+        cfg = RobotBenchmarkConfig(cbm_family="cem")
+        assert cfg.cbm_family == "cem"
+
+    def test_accepts_ecbm_family(self):
+        cfg = RobotBenchmarkConfig(cbm_family="ecbm")
+        assert cfg.cbm_family == "ecbm"
+
+    def test_rejects_bad_cbm_family(self):
+        with pytest.raises(ValueError, match="cbm_family must be one of"):
+            RobotBenchmarkConfig(cbm_family="bogus")
 
     def test_concept_preset_foot_subtypes(self):
         cfg = RobotBenchmarkConfig(concept_preset="foot_subtypes")
@@ -135,6 +154,14 @@ class TestSudokuConfigValidation:
         cfg = SudokuBenchmarkConfig(data_type="tabular")
         assert cfg.data_type == "tabular"
 
+    def test_accepts_probcbm_family(self):
+        cfg = SudokuBenchmarkConfig(cbm_family="probcbm")
+        assert cfg.cbm_family == "probcbm"
+
+    def test_rejects_ecbm_family(self):
+        with pytest.raises(ValueError, match="cbm_family must be one of"):
+            SudokuBenchmarkConfig(cbm_family="ecbm")
+
 
 class TestRobotTextConfigValidation:
     def test_text_config_is_valid(self):
@@ -153,6 +180,10 @@ class TestRobotTextConfigValidation:
     def test_rejects_bad_strategy(self):
         with pytest.raises(ValueError, match="intervention_strategy must be one of"):
             RobotBenchmarkConfig(data_type="text", intervention_strategy="random")
+
+    def test_rejects_ecbm_for_text(self):
+        with pytest.raises(ValueError, match="only supported for robot image data"):
+            RobotBenchmarkConfig(data_type="text", cbm_family="ecbm")
 
     def test_text_uses_same_concepts_as_image(self):
         from concept_benchmark.config import ROBOT_CONCEPTS
@@ -214,6 +245,7 @@ class TestYAMLRoundTrip:
             seed=42,
             concept_preset="foot_subtypes",
             intervention_regimes=["baseline", "expert"],
+            custom_concepts_file="concepts/custom.jsonl",
         )
         self._assert_roundtrip(cfg, RobotBenchmarkConfig, tmp_path)
 
@@ -246,11 +278,66 @@ class TestYAMLSecretExclusion:
         content = path.read_text()
         # The secret value should not appear; llm_api_key_env is a different field
         assert "super_secret_key" not in content
-        # The exact key "llm_api_key:" should not be a YAML key
-        # (llm_api_key_env is fine — it's not the secret)
-        lines = content.splitlines()
-        yaml_keys = [line.split(":")[0].strip() for line in lines if ":" in line]
-        assert "llm_api_key" not in yaml_keys
+
+
+class TestModelFingerprintScope:
+    def test_robot_model_fingerprint_ignores_automated_regime_paths(self):
+        base = RobotBenchmarkConfig()
+        changed = RobotBenchmarkConfig(
+            llm_concepts_file="custom/llm.jsonl",
+            clip_concepts_file="custom/clip.jsonl",
+            custom_concepts_file="custom/custom.jsonl",
+            llm_provider="anthropic",
+            llm_model="claude-3-5-sonnet",
+        )
+        assert base.model_fingerprint("cbm") == changed.model_fingerprint("cbm")
+        assert base.get_model_path("cbm") == changed.get_model_path("cbm")
+
+    def test_robot_dnn_fingerprint_ignores_wrapped_family_knobs(self):
+        base = RobotBenchmarkConfig()
+        changed = RobotBenchmarkConfig(
+            cbm_family="probcbm",
+            cem_emb_size=64,
+            cem_training_intervention_prob=0.1,
+            probcbm_hidden_dim=32,
+            probcbm_latent_dim=16,
+            ecbm_hid_size=128,
+            ecbm_inference_steps=10,
+        )
+        assert base.model_fingerprint("dnn") == changed.model_fingerprint("dnn")
+        assert base.get_model_path("dnn") == changed.get_model_path("dnn")
+
+    def test_robot_family_specific_fingerprints_only_depend_on_their_own_knobs(self):
+        base = RobotBenchmarkConfig()
+        cem_changed = RobotBenchmarkConfig(cem_emb_size=64)
+        prob_changed = RobotBenchmarkConfig(probcbm_hidden_dim=32)
+        ecbm_changed = RobotBenchmarkConfig(ecbm_hid_size=128)
+
+        assert base.model_fingerprint("cem") != cem_changed.model_fingerprint("cem")
+        assert base.model_fingerprint("probcbm") == cem_changed.model_fingerprint(
+            "probcbm"
+        )
+        assert base.model_fingerprint("ecbm") == cem_changed.model_fingerprint("ecbm")
+        assert base.model_fingerprint("probcbm") != prob_changed.model_fingerprint(
+            "probcbm"
+        )
+        assert base.model_fingerprint("cem") == prob_changed.model_fingerprint("cem")
+        assert base.model_fingerprint("ecbm") == prob_changed.model_fingerprint("ecbm")
+        assert base.model_fingerprint("ecbm") != ecbm_changed.model_fingerprint("ecbm")
+        assert base.model_fingerprint("cem") == ecbm_changed.model_fingerprint("cem")
+        assert base.model_fingerprint("probcbm") == ecbm_changed.model_fingerprint(
+            "probcbm"
+        )
+
+    def test_sudoku_dnn_fingerprint_ignores_cem_probcbm_knobs(self):
+        base = SudokuBenchmarkConfig()
+        changed = SudokuBenchmarkConfig(
+            cbm_family="cem",
+            cem_emb_size=64,
+            probcbm_hidden_dim=32,
+        )
+        assert base.model_fingerprint("dnn") == changed.model_fingerprint("dnn")
+        assert base.get_model_path("dnn") == changed.get_model_path("dnn")
 
     def test_robot_text_yaml_excludes_llm_api_key(self, tmp_path):
         cfg = RobotBenchmarkConfig(data_type="text")

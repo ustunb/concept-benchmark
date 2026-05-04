@@ -41,8 +41,11 @@ def crop_cell(
 
 
 def cell_preprocess_28x28(cell_bgr: np.ndarray) -> np.ndarray:
+    if cell_bgr.size == 0 or cell_bgr.shape[0] < 2 or cell_bgr.shape[1] < 2:
+        return np.zeros((28, 28), dtype=np.float32)
     g = cv2.cvtColor(cell_bgr, cv2.COLOR_BGR2GRAY)
-    g = cv2.resize(g, (28, 28), interpolation=cv2.INTER_AREA)
+    interp = cv2.INTER_AREA if min(g.shape) > 28 else cv2.INTER_LINEAR
+    g = cv2.resize(g, (28, 28), interpolation=interp)
     g = 255.0 - g  # invert to white-on-black
     g = g.astype(np.float32) / 255.0
     return g

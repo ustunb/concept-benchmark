@@ -30,6 +30,7 @@ from concept_benchmark.utils import (
 )
 from concept_benchmark.config import SudokuBenchmarkConfig
 from concept_benchmark.ext.fileutils import load, save
+from experiments.cem_integration import train_cem_model, train_ecbm_model, train_probcbm_model
 from experiments.models import (
     ConceptBasedModel,
     ConceptDetector,
@@ -41,6 +42,19 @@ from experiments.intervention import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _load_sudoku_image_dataset(config):
+    """Load sudoku image dataset for direct-image (ViT) mode.
+
+    The dataset's preprocess (sudoku_image_preprocess) already handles
+    resize to 224, normalize, and convert to tensor. No additional
+    transform is needed.
+    """
+    img_dir = config.get_dataset_path(data_type="image")
+    data = load(img_dir / "sudoku_dataset.pkl")
+    data.meta["data_type"] = "image"
+    return data
 
 
 # ── Stage: setup_dataset ──────────────────────────────────────────────
@@ -71,8 +85,15 @@ def train_ocr(config: SudokuBenchmarkConfig) -> None:
         str(config.seed),
         "--max-corrupt",
         str(config.max_cell_swaps),
+        "--cell-px",
+        str(config.cell_px),
     ]
     subprocess.run(cmd, check=True)
+
+
+def _selected_cs_key(config: SudokuBenchmarkConfig) -> str:
+    family = str(getattr(config, "cbm_family", "cbm"))
+    return "cs" if family == "cbm" else family
 
 
 # ── Stage: train_cs ───────────────────────────────────────────────────
@@ -91,12 +112,36 @@ def train_cs(
     device = determine_device()
 
     if data is None:
+        use_vit = getattr(config, "use_vit_backbone", False)
+        if use_vit:
+            data = _load_sudoku_image_dataset(config)
+        else:
+            tab_dir = config.get_dataset_path(data_type="tabular")
+            data = load(tab_dir / "sudoku_dataset.pkl")
+        data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
+
+    model_key = _selected_cs_key(config)
+    if model_key != "cs":
+        loader_config = get_loader_config()
+        trainer_fn = {"cem": train_cem_model, "probcbm": train_probcbm_model, "ecbm": train_ecbm_model}[model_key]
+        model = trainer_fn(
+            train_dataset=data.train,
+            valid_dataset=data.validation,
+            benchmark="sudoku",
+            config=config,
+            device=device,
+            num_workers=loader_config["num_workers"],
+            pin_memory=loader_config["pin_memory"],
+        )
+        test_pred = model.predict(data.test)
+        logger.info("Test Accuracy: %s", np.mean(test_pred == data.test.y))
+        save(model, config.get_model_path(model_key, data_type="tabular"), overwrite=True)
+        return model
+
+    if data is None:
         tab_dir = config.get_dataset_path(data_type="tabular")
         data = load(tab_dir / "sudoku_dataset.pkl")
         data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
-
-    # Missingness can be applied here if needed:
-    # data.sample_concept_missingness(p=0.2, mechanism="mcar", rng=config.seed)
 
     _macos = platform.system() == "Darwin"
     loader_config = {
@@ -106,25 +151,46 @@ def train_cs(
         "pin_memory": not _macos,
     }
 
-    from experiments.models import (
-        GroupPoolingConceptSudokuCNN as SudokuConceptModel,
-    )
-
-    model = SudokuConceptModel()
-    cd = ConceptDetector(model=model)
-    cbm = ConceptBasedModel(concept_detector=cd, should_propagate=True)
-    cbm.fit(
-        train_dataset=data.train,
-        valid_dataset=data.validation,
-        freeze_backbone=False,
-        concept_embed_params={"shuffle": False, **loader_config},
-        concept_fit_params={
-            "epochs": config.cs_epochs,
-            "lr": 1e-3,
-            "patience": config.cs_patience,
-            **loader_config,
-        },
-    )
+    # Direct-image mode: use ViT concept detector (no OCR)
+    use_vit = getattr(config, "use_vit_backbone", False)
+    if use_vit:
+        from experiments.models import RobotViTConceptClassifier
+        n_concepts = data.train.n_concepts
+        concept_model = RobotViTConceptClassifier(num_concepts=n_concepts)
+        cd = ConceptDetector(model=concept_model)
+        cbm = ConceptBasedModel(concept_detector=cd, should_propagate=False)
+        loader_config["batch_size"] = 16
+        cbm.fit(
+            train_dataset=data.train,
+            valid_dataset=data.validation,
+            freeze_backbone=False,
+            concept_embed_params={"shuffle": False, **loader_config},
+            concept_fit_params={
+                "epochs": config.cs_epochs,
+                "lr": 5e-5,
+                "patience": config.cs_patience,
+                **loader_config,
+            },
+        )
+    else:
+        from experiments.models import (
+            GroupPoolingConceptSudokuCNN as SudokuConceptModel,
+        )
+        model = SudokuConceptModel()
+        cd = ConceptDetector(model=model)
+        cbm = ConceptBasedModel(concept_detector=cd, should_propagate=True)
+        cbm.fit(
+            train_dataset=data.train,
+            valid_dataset=data.validation,
+            freeze_backbone=False,
+            concept_embed_params={"shuffle": False, **loader_config},
+            concept_fit_params={
+                "epochs": config.cs_epochs,
+                "lr": 1e-3,
+                "patience": config.cs_patience,
+                **loader_config,
+            },
+        )
 
     test_pred = cbm.predict(data.test)
     logger.info("Test Accuracy: %s", np.mean(test_pred == data.test.y))
@@ -149,15 +215,35 @@ def train_dnn(
     device = determine_device()
 
     if data is None:
-        tab_dir = config.get_dataset_path(data_type="tabular")
-        data = load(tab_dir / "sudoku_dataset.pkl")
+        use_vit = getattr(config, "use_vit_backbone", False)
+        if use_vit:
+            data = _load_sudoku_image_dataset(config)
+        else:
+            tab_dir = config.get_dataset_path(data_type="tabular")
+            data = load(tab_dir / "sudoku_dataset.pkl")
         data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
-    from experiments.models import SudokuValidatorCNN as DNNSudokuModel
-
-    model = DNNSudokuModel()
-    criterion = nn.BCELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    use_vit = getattr(config, "use_vit_backbone", False)
+    if use_vit:
+        from transformers import ViTModel
+        class ViTDNN(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.vit = ViTModel.from_pretrained("google/vit-base-patch16-224")
+                for name, p in self.vit.named_parameters():
+                    if "encoder.layer.10" not in name and "encoder.layer.11" not in name and "layernorm" not in name:
+                        p.requires_grad = False
+                self.head = nn.Sequential(nn.Linear(768, 1))
+            def forward(self, x):
+                return torch.sigmoid(self.head(self.vit(pixel_values=x).last_hidden_state[:, 0, :]))
+        model = ViTDNN()
+        criterion = nn.BCELoss()
+        optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=5e-5)
+    else:
+        from experiments.models import SudokuValidatorCNN as DNNSudokuModel
+        model = DNNSudokuModel()
+        criterion = nn.BCELoss()
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
     loader_config = get_loader_config()
     train_loader = data.train.loader(shuffle=True, **loader_config)
@@ -246,7 +332,7 @@ def run_interventions(
         data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
     if cs_model is None:
-        cs_model = load(config.get_model_path("cs", data_type="tabular"))
+        cs_model = load(config.get_model_path(_selected_cs_key(config), data_type="tabular"))
         cs_model._random_state = config.seed
 
     # Find selective accuracy threshold on validation set
@@ -257,9 +343,28 @@ def run_interventions(
     )
 
     if cs_t is None:
-        raise ValueError(
-            "Could not find a tau for conceptual safeguards at the target accuracy."
+        logger.warning(
+            "Model %s cannot reach target selective accuracy %.2f; "
+            "reporting raw accuracy with no interventions.",
+            _selected_cs_key(config), config.target_accuracy,
         )
+        cs_test_probs, cs_test_y = _cs_val_probs(cs_model, data.test)
+        raw_acc = float((cs_test_y.astype(int) == (cs_test_probs >= decision_threshold).astype(int)).mean())
+        logger.info("  Raw test accuracy: %.4f", raw_acc)
+        budgets = [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
+        rows = [{"budget": b, "accuracy": raw_acc, "predictions_intervened_on": 0,
+                 "total_concept_checks": 0, "total_concept_edits_made": 0,
+                 "selective_accuracy_after": float("nan"), "coverage_after": 0.0}
+                for b in [0] + budgets]
+        cs_intervention_df = pd.DataFrame(rows)
+        results_key = (
+            f"{_selected_cs_key(config)}_interventions"
+            if _selected_cs_key(config) != "cs" else "interventions"
+        )
+        csv_path = config.get_results_path(results_key, data_type="tabular").with_suffix(".csv")
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        cs_intervention_df.to_csv(csv_path, index=False)
+        return cs_intervention_df
 
     # Test set selective metrics
     cs_test_probs, cs_test_y = _cs_val_probs(cs_model, data.test)
@@ -271,14 +376,23 @@ def run_interventions(
     cs_runner = ConceptInterventionRunner(cs_model)
     cs_strategy = ConceptualSafeguardsStrategy()
 
+    # Compute baseline predictions ONCE for consistent coverage across k values
+    interv_cfg_k0 = InterventionConfig(
+        abstention_threshold=cs_t,
+        max_concepts_per_instance=0,
+        random_state=config.seed,
+    )
+    result_k0 = cs_runner.run(cs_strategy, interv_cfg_k0, data.test)
+    y_prob_baseline = result_k0.y_prob_after  # = y_prob_before since k=0
+
     no_interv = {
         "budget": 0,
-        "accuracy": cs_sel_acc,
+        "accuracy": float((result_k0.y_pred_after == data.test.y).mean()),
         "predictions_intervened_on": 0,
         "total_concept_checks": 0,
         "total_concept_edits_made": 0,
-        "selective_accuracy_after": cs_sel_acc,
-        "coverage_after": cs_sel_cov,
+        "selective_accuracy_after": result_k0.strategy_metrics.get("selective_acc_after", cs_sel_acc),
+        "coverage_after": result_k0.strategy_metrics.get("coverage_after", cs_sel_cov),
     }
 
     rows = [no_interv]
@@ -289,7 +403,7 @@ def run_interventions(
             max_concepts_per_instance=budget,
             random_state=config.seed,
         )
-        result = cs_runner.run(cs_strategy, interv_cfg, data.test)
+        result = cs_runner.run(cs_strategy, interv_cfg, data.test, y_prob_baseline=y_prob_baseline)
         acc_intervened = float((result.y_pred_after == data.test.y).mean())
         predictions_intervened_on = int(np.sum(np.any(result.mask, axis=1)))
         total_concept_checks = int(np.sum(result.mask))
@@ -312,9 +426,14 @@ def run_interventions(
 
     cs_intervention_df = pd.DataFrame(rows)
 
-    csv_path = config.get_results_path(
-        "interventions", data_type="tabular"
-    ).with_suffix(".csv")
+    results_key = (
+        f"{_selected_cs_key(config)}_interventions"
+        if _selected_cs_key(config) != "cs"
+        else "interventions"
+    )
+    csv_path = config.get_results_path(results_key, data_type="tabular").with_suffix(
+        ".csv"
+    )
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     cs_intervention_df.to_csv(csv_path, index=False)
     logger.info("Saved intervention results to %s", csv_path)
@@ -347,7 +466,7 @@ def align(
         data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
     if cs_model is None:
-        cs_model = load(config.get_model_path("cs", data_type="tabular"))
+        cs_model = load(config.get_model_path(_selected_cs_key(config), data_type="tabular"))
 
     from experiments.alignment import test_alignment
 
@@ -632,7 +751,11 @@ def run(
     _shared_cs = None
     _shared_dnn = None
     if _eval_stages & set(stages):
-        if config.data_type == "image":
+        use_vit = getattr(config, "use_vit_backbone", False)
+        if use_vit:
+            # Direct-image mode: load raw image dataset (preprocess handles ViT transforms)
+            _shared_data = _load_sudoku_image_dataset(config)
+        elif config.data_type == "image":
             img_dir = config.get_dataset_path(data_type="image")
             _shared_data = load(img_dir / "ocr_inferred_full_dataset.pkl")
         else:
@@ -642,7 +765,7 @@ def run(
             test_size=0.2, val_size=0.2, stratify=_shared_data.y, seed=config.seed
         )
 
-        cs_path = config.get_model_path("cs", data_type="tabular")
+        cs_path = config.get_model_path(_selected_cs_key(config), data_type="tabular")
         if cs_path.exists():
             _shared_cs = load(cs_path)
             _shared_cs._random_state = config.seed
@@ -862,7 +985,7 @@ def compute_selective_results(
 
     # ---- CS selective metrics ----
     if cs_model is None:
-        cs_model = load(config.get_model_path("cs", data_type="tabular"))
+        cs_model = load(config.get_model_path(_selected_cs_key(config), data_type="tabular"))
         cs_model._random_state = config.seed
 
     cs_val_probs, cs_val_y = _cs_val_probs(cs_model, data.validation)
@@ -979,8 +1102,16 @@ def _parse_args(argv=None):
     parser.add_argument(
         "--data-type", type=str, default=None, choices=["tabular", "image"]
     )
+    parser.add_argument(
+        "--cbm-family", type=str, default="cbm",
+        choices=["cbm", "cem", "probcbm", "ecbm"],
+    )
+    parser.add_argument("--direct-image", action="store_true",
+                        help="Use ViT backbone directly on board images (no OCR)")
     parser.add_argument("--handwriting", action="store_true", default=None)
     parser.add_argument("--no-handwriting", action="store_true")
+    parser.add_argument("--cell-px", type=int, default=None,
+                        help="Pixels per cell for OCR rendering (default: 50)")
     parser.add_argument("--force-setup", action="store_true")
     return parser.parse_args(argv)
 
@@ -1007,6 +1138,12 @@ def main(argv=None):
         config.font_style = "handwritten"
     if args.data_type is not None:
         config.data_type = args.data_type
+    config.cbm_family = args.cbm_family
+    if args.cell_px is not None:
+        config.cell_px = args.cell_px
+    if args.direct_image:
+        config.use_vit_backbone = True
+        config.data_type = "image"
 
     run(config, stages=args.stages, force_setup=args.force_setup)
 

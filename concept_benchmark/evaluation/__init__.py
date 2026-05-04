@@ -26,6 +26,7 @@ from .plots import (
     plot_alignment_comparison,
     plot_concept_discovery,
     plot_intervention_curve,
+    plot_model_comparison,
     plot_regime_comparison,
     plot_selective_classification,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "plot_alignment_comparison",
     "plot_concept_discovery",
     "plot_intervention_curve",
+    "plot_model_comparison",
     "plot_regime_comparison",
     "plot_selective_classification",
 ]

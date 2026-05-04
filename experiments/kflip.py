@@ -14,6 +14,7 @@ from experiments.intervention import (
     InterventionConfig,
     StrategyProposal,
     InterventionError,
+    predict_label_proba_from_concepts,
 )
 
 
@@ -84,10 +85,29 @@ class KFlipInterventionStrategy(InterventionStrategy):
 
         # concept probabilities and baseline concept vectors
         P = np.clip(batch.C_pred.astype(np.float64), 1e-9, 1.0 - 1e-9)  # (N,C)
+        supports_aligned = bool(
+            getattr(model, "supports_aligned_concept_replay", False)
+            or getattr(
+                getattr(model, "label_predictor", None),
+                "supports_aligned_concept_replay",
+                False,
+            )
+        )
+        source_rows = (
+            np.asarray(batch.instance_ids, dtype=int)
+            if batch.instance_ids is not None
+            else np.arange(n_samples, dtype=int)
+        )
+        base_cont = batch.C_pred.astype(np.float32)
         base_Z = (P >= 0.5).astype(np.float32)  # 'hard' mode
 
         # baseline labels
-        base_probs = model.label_predictor.predict_proba(base_Z)  # (N,K)
+        base_probs = predict_label_proba_from_concepts(
+            model,
+            base_cont if supports_aligned else base_Z,
+            row_indices=source_rows if supports_aligned else None,
+            baseline_concepts=base_cont if supports_aligned else None,
+        )  # (N,K)
         base_lbl = base_probs.argmax(axis=1)
         n_classes = int(base_probs.shape[1])
 
@@ -242,11 +262,33 @@ class KFlipInterventionStrategy(InterventionStrategy):
                         axis=2,
                     )  # (m, A)
 
-                    Z_chunk = np.repeat(base_Z[s : s + m], A, axis=0)  # (m*A, C)
+                    base_chunk = base_cont[s : s + m] if supports_aligned else base_Z[s : s + m]
+                    Z_chunk = np.repeat(base_chunk, A, axis=0)  # (m*A, C)
                     AS = np.tile(assign, (m, 1))  # (m*A, subset_size)
                     Z_chunk[:, subset] = AS
 
-                    Y = model.label_predictor.predict_proba(Z_chunk)  # (m*A, j)
+                    repeated_rows = (
+                        np.repeat(source_rows[s : s + m], A)
+                        if supports_aligned
+                        else None
+                    )
+                    repeated_baseline = (
+                        np.repeat(base_cont[s : s + m], A, axis=0)
+                        if supports_aligned
+                        else None
+                    )
+                    intervention_mask = None
+                    if supports_aligned:
+                        intervention_mask = np.zeros_like(Z_chunk, dtype=bool)
+                        intervention_mask[:, subset] = True
+
+                    Y = predict_label_proba_from_concepts(
+                        model,
+                        Z_chunk,
+                        row_indices=repeated_rows,
+                        baseline_concepts=repeated_baseline,
+                        intervention_mask=intervention_mask,
+                    )  # (m*A, j)
                     Y_lbl = Y.argmax(axis=1).reshape(m, A)  # (m, A)
 
                     flip_mask = Y_lbl != base_lbl[s : s + m][:, None]  # (m, A)

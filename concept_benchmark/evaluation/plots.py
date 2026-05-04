@@ -548,3 +548,139 @@ def plot_concept_discovery(
             txt.set_position((x_off, y_off + extra_pts))
 
     return fig, ax
+
+
+# ── Model comparison ─────────────────────────────────────────────────
+
+# Per-model colors (colorblind-safe)
+_MODEL_COLORS = {
+    "CBM": "#0072B2",
+    "CEM": "#E69F00",
+    "ProbCBM": "#009E73",
+}
+
+
+def plot_model_comparison(
+    results: dict[tuple[str, str], pd.DataFrame],
+    dnn_accuracy: float,
+    budgets: list[int] | None = None,
+    ax: plt.Axes | None = None,
+) -> tuple[plt.Figure, plt.Axes]:
+    """Grouped bar chart comparing models × concept sets across budgets.
+
+    Each budget group has one bar per (model, concept_set) pair.
+    Same model = same color; true concepts = full color,
+    human concepts = lighter shade.
+
+    Parameters
+    ----------
+    results : dict
+        Keys are ``(model_name, concept_set)`` tuples, e.g.
+        ``("CBM", "true_concepts")``. Values are DataFrames with
+        columns ``budget`` and ``accuracy``.
+    dnn_accuracy : float
+        DNN baseline accuracy (drawn as horizontal line).
+    budgets : list of int, optional
+        Which budgets to show (default: ``[0, 1, 3]``).
+    """
+    fig, ax = _ensure_ax(ax, figsize=(14, 5))
+    budgets = budgets or [0, 1, 3]
+    concept_keys = ["true_concepts", "human_concepts"]
+
+    # Discover models present in results
+    models = []
+    for model_name, cset in results:
+        if model_name not in models:
+            models.append(model_name)
+
+    n_models = len(models)
+    n_budgets = len(budgets)
+    # Layout: within each budget group, model pairs with a small gap between models
+    bar_w = 0.09
+    pair_gap = 0.01  # gap between true/human within a model
+    model_gap = 0.06  # extra gap between different models
+    x = np.arange(n_budgets)
+
+    baseline_y = dnn_accuracy * 100
+
+    # Compute total group width to center the bars
+    group_width = (
+        n_models * 2 * bar_w + n_models * pair_gap + (n_models - 1) * model_gap
+    )
+
+    for m_idx, model_name in enumerate(models):
+        base_color = _MODEL_COLORS.get(model_name, f"C{m_idx}")
+        light_color = _lighten_color(base_color, alpha=0.45)
+
+        for c_idx, ckey in enumerate(concept_keys):
+            key = (model_name, ckey)
+            if key not in results:
+                continue
+            df = results[key]
+            accs = []
+            for k in budgets:
+                row = df[df["budget"] == k]
+                accs.append(float(row["accuracy"].values[0]) * 100 if len(row) else 0)
+
+            # Position: model block offset + bar within pair
+            block_offset = m_idx * (2 * bar_w + pair_gap + model_gap)
+            bar_offset = block_offset + c_idx * (bar_w + pair_gap)
+            offset = bar_offset - group_width / 2 + bar_w / 2
+
+            is_true = ckey == "true_concepts"
+            color = base_color if is_true else light_color
+
+            label = None
+            if c_idx == 0:
+                label = f"{model_name} (true)"
+            elif c_idx == 1:
+                label = f"{model_name} (human)"
+
+            bars = ax.bar(
+                x + offset,
+                accs,
+                bar_w,
+                color=color,
+                edgecolor="white",
+                linewidth=0.5,
+                label=label,
+            )
+            ax.bar_label(
+                bars,
+                labels=_pct_labels(accs),
+                padding=3,
+                fontsize=style.FONT_SIZE_ANNOT - 2,
+            )
+
+    ax.axhline(baseline_y, color=style.GREY, linestyle="--", linewidth=1.5)
+    ax.text(
+        1.0,
+        baseline_y,
+        f"  DNN ({baseline_y:.1f}%)",
+        transform=ax.get_yaxis_transform(),
+        va="center",
+        ha="left",
+        fontsize=style.FONT_SIZE_ANNOT,
+        color=style.GREY,
+        clip_on=False,
+    )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"k={k}" for k in budgets], fontsize=style.FONT_SIZE)
+    ax.set_xlabel("Intervention budget", fontsize=style.FONT_SIZE)
+    ax.set_ylabel("Accuracy", fontsize=style.FONT_SIZE)
+    ax.set_ylim(0, 105)
+    ax.yaxis.set_major_formatter(style.pct_formatter())
+    style.apply_style(ax)
+
+    ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.12),
+        ncol=len(models),
+        fontsize=style.FONT_SIZE_LEGEND - 1,
+        framealpha=0.9,
+        columnspacing=0.8,
+    )
+    fig.tight_layout()
+
+    return fig, ax

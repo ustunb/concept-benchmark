@@ -119,8 +119,44 @@ IMAGE_SIZE_TO_PIXELS = {
 MISSING_PROPORTION = 0.2
 
 VALID_STRATEGIES = frozenset({"up_to_k", "exactly_k"})
+VALID_ROBOT_CBM_FAMILIES = frozenset({"cbm", "cem", "probcbm", "ecbm"})
+VALID_SUDOKU_CBM_FAMILIES = frozenset({"cbm", "cem", "probcbm"})
+VALID_CBM_FAMILIES = VALID_ROBOT_CBM_FAMILIES
+_CEM_FINGERPRINT_FIELDS = frozenset(
+    {
+        "cem_emb_size",
+        "cem_training_intervention_prob",
+        "cem_concept_loss_weight",
+        "cem_task_loss_weight",
+        "cem_max_epochs",
+    }
+)
+_PROBCBM_FINGERPRINT_FIELDS = frozenset(
+    {
+        "probcbm_hidden_dim",
+        "probcbm_class_hidden_dim",
+        "probcbm_latent_dim",
+        "probcbm_n_samples_inference",
+        "probcbm_intervention_prob",
+        "probcbm_train_class_mode",
+        "probcbm_max_epochs",
+    }
+)
+_ECBM_FINGERPRINT_FIELDS = frozenset(
+    {
+        "ecbm_emb_size",
+        "ecbm_hid_size",
+        "ecbm_lambda_xy",
+        "ecbm_lambda_xc",
+        "ecbm_lambda_cy",
+        "ecbm_weight_decay",
+        "ecbm_inference_steps",
+        "ecbm_inference_lr",
+        "ecbm_max_epochs",
+    }
+)
 ROBOT_VALID_REGIMES = frozenset(
-    {"baseline", "expert", "subjective", "machine", "llm", "clip"}
+    {"baseline", "expert", "subjective", "machine", "llm", "clip", "custom"}
 )
 ROBOT_TEXT_VALID_REGIMES = frozenset({"baseline", "expert", "subjective", "machine"})
 
@@ -220,11 +256,33 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     learning_rate: float = field(default=1e-3, metadata={"scope": "image"})
     patience: int = field(default=10, metadata={"scope": "image"})
     batch_size: int = field(default=32, metadata={"scope": "image"})
+    cbm_family: str = "cbm"
+    cem_emb_size: int = 16
+    cem_training_intervention_prob: float = 0.25
+    cem_concept_loss_weight: float = 1.0
+    cem_task_loss_weight: float = 1.0
+    cem_max_epochs: int | None = None
+    probcbm_hidden_dim: int = 8
+    probcbm_class_hidden_dim: int = 64
+    probcbm_latent_dim: int = 8
+    probcbm_n_samples_inference: int = 50
+    probcbm_intervention_prob: float = 0.25
+    probcbm_train_class_mode: str = "independent"
+    probcbm_max_epochs: int | None = None
+    ecbm_emb_size: int = 8
+    ecbm_hid_size: int = 64
+    ecbm_lambda_xy: float = 1.0
+    ecbm_lambda_xc: float = 1.0
+    ecbm_lambda_cy: float = 1.0
+    ecbm_weight_decay: float = 1e-4
+    ecbm_inference_steps: int = 10
+    ecbm_inference_lr: float = 0.1
+    ecbm_max_epochs: int | None = None
 
     # Intervention
     intervention_budgets: list[int] = field(default_factory=lambda: [1, 3])
     intervention_thresholds: list[float] = field(
-        default_factory=lambda: [0.2, 0.4],
+        default_factory=lambda: [0.2],
         metadata={"scope": "image"},
     )
     intervention_accuracy: float = 1.0
@@ -238,8 +296,15 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     label_free_concepts_file: str = field(default="", metadata={"scope": "image"})
     llm_concepts_file: str = field(default="", metadata={"scope": "image"})
     clip_concepts_file: str = field(default="", metadata={"scope": "image"})
+    custom_concepts_file: str = field(default="", metadata={"scope": "image"})
     llm_provider: str = "gemini"
     llm_model: str = "gemini-3-flash-preview"
+    llm_reasoning_effort: str = ""
+    llm_batch_size: int = 0
+    llm_batch_sleep: float = -1.0
+    llm_workers: int = 0
+    llm_cache_only: bool = False
+    llm_cache_all_concepts: bool = False
     llm_api_key: str = ""
     llm_api_key_env: str = "GEMINI_API_KEY"
     force_retrain: bool = False  # force retrain LFCBM/subjective models
@@ -318,6 +383,11 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 f"got {self.concept_preset!r}"
             )
         self.label_formula.validate_against(self.concepts)
+        if self.cbm_family not in VALID_ROBOT_CBM_FAMILIES:
+            raise ValueError(
+                f"cbm_family must be one of {sorted(VALID_ROBOT_CBM_FAMILIES)}, "
+                f"got {self.cbm_family!r}"
+            )
 
         if self.seed < 0:
             raise ValueError(f"seed must be non-negative, got {self.seed}")
@@ -330,6 +400,10 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 f"intervention_strategy must be one of {sorted(VALID_STRATEGIES)}, "
                 f"got {self.intervention_strategy!r}"
             )
+        if self.ecbm_inference_steps < 1:
+            raise ValueError("ecbm_inference_steps must be positive")
+        if self.ecbm_inference_lr <= 0.0:
+            raise ValueError("ecbm_inference_lr must be positive")
 
     def _validate_image(self):
         """Validate image-specific parameters."""
@@ -347,6 +421,8 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
 
     def _validate_text(self):
         """Validate text-specific parameters."""
+        if self.cbm_family == "ecbm":
+            raise ValueError("cbm_family='ecbm' is only supported for robot image data")
         if self.template_complexity not in ("high", "medium", "low"):
             raise ValueError(
                 f"template_complexity must be 'high', 'medium', or 'low', "
@@ -456,8 +532,28 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 "label_free_concepts_file",
                 "llm_concepts_file",
                 "clip_concepts_file",
+                "custom_concepts_file",
                 "llm_provider",
                 "llm_model",
+                "llm_reasoning_effort",
+                "llm_batch_size",
+                "llm_batch_sleep",
+                "llm_workers",
+                "llm_cache_only",
+                "llm_cache_all_concepts",
+                "cbm_family",
+                "cem_emb_size",
+                "cem_training_intervention_prob",
+                "cem_concept_loss_weight",
+                "cem_task_loss_weight",
+                "cem_max_epochs",
+                "probcbm_hidden_dim",
+                "probcbm_class_hidden_dim",
+                "probcbm_latent_dim",
+                "probcbm_n_samples_inference",
+                "probcbm_intervention_prob",
+                "probcbm_train_class_mode",
+                "probcbm_max_epochs",
             }
             for k in _exclude:
                 d.pop(k, None)
@@ -469,7 +565,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         d.pop("train_dnn", None)  # not a data param
         return _dict_sha256(d)
 
-    def model_fingerprint(self) -> str:
+    def model_fingerprint(self, model_class: str | None = None) -> str:
         """Hash of all parameters that affect model training."""
         d = self._prepare_asdict()
         # Remove params that don't affect training
@@ -490,8 +586,15 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             "label_free_concepts_file",
             "llm_concepts_file",
             "clip_concepts_file",
+            "custom_concepts_file",
             "llm_provider",
             "llm_model",
+            "llm_reasoning_effort",
+            "llm_batch_size",
+            "llm_batch_sleep",
+            "llm_workers",
+            "llm_cache_only",
+            "llm_cache_all_concepts",
         ):
             d.pop(k, None)
         # Exclude data_type-irrelevant fields
@@ -502,6 +605,24 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         )
         for k in exclude:
             d.pop(k, None)
+        if model_class is not None:
+            d.pop("cbm_family", None)
+            if model_class in {"cbm", "cbm_subjective", "lfcbm", "dnn"}:
+                for k in (
+                    _CEM_FINGERPRINT_FIELDS
+                    | _PROBCBM_FINGERPRINT_FIELDS
+                    | _ECBM_FINGERPRINT_FIELDS
+                ):
+                    d.pop(k, None)
+            elif model_class == "cem":
+                for k in _PROBCBM_FINGERPRINT_FIELDS | _ECBM_FINGERPRINT_FIELDS:
+                    d.pop(k, None)
+            elif model_class == "probcbm":
+                for k in _CEM_FINGERPRINT_FIELDS | _ECBM_FINGERPRINT_FIELDS:
+                    d.pop(k, None)
+            elif model_class == "ecbm":
+                for k in _CEM_FINGERPRINT_FIELDS | _PROBCBM_FINGERPRINT_FIELDS:
+                    d.pop(k, None)
         return _dict_sha256(d)
 
     def get_dataset_path(self) -> Path:
@@ -529,9 +650,22 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         if self.data_type == "text":
             return results_dir / f"robot_text_{model_class}_seed{self.seed}_results.csv"
         filename = f"robot_{self.data_type}_{self._labeling_tag}"
-        if model_class == "cbm":
+        if model_class in {"cbm", "cem", "probcbm", "ecbm"}:
             filename += self._preset_suffix
         filename += f"_{model_class}_results.csv"
+        return results_dir / filename
+
+    def get_interpretation_path(self, model_class: str = "ecbm") -> Path:
+        """Return the path where probabilistic interpretation JSON is saved."""
+        if self.data_type == "text":
+            return (
+                results_dir
+                / f"robot_text_{model_class}_seed{self.seed}_interpretation.json"
+            )
+        filename = (
+            f"robot_{self.data_type}_{self._labeling_tag}"
+            f"{self._preset_suffix}_{model_class}_interpretation.json"
+        )
         return results_dir / filename
 
     def get_alignment_constraints(self) -> dict[str, int]:
@@ -603,6 +737,19 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     batch_size: int = 32
     cs_epochs: int = 100
     cs_patience: int = 20
+    cbm_family: str = "cbm"
+    cem_emb_size: int = 16
+    cem_training_intervention_prob: float = 0.25
+    cem_concept_loss_weight: float = 1.0
+    cem_task_loss_weight: float = 1.0
+    cem_max_epochs: int | None = None
+    probcbm_hidden_dim: int = 8
+    probcbm_class_hidden_dim: int = 64
+    probcbm_latent_dim: int = 8
+    probcbm_n_samples_inference: int = 50
+    probcbm_intervention_prob: float = 0.25
+    probcbm_train_class_mode: str = "independent"
+    probcbm_max_epochs: int | None = None
 
     # Intervention
     intervention_budgets: list[int] = field(default_factory=lambda: [1, 3, 27])
@@ -627,6 +774,11 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
         if self.font_style not in ("handwritten", "printed"):
             raise ValueError(
                 f"font_style must be 'handwritten' or 'printed', got {self.font_style!r}"
+            )
+        if self.cbm_family not in VALID_SUDOKU_CBM_FAMILIES:
+            raise ValueError(
+                f"cbm_family must be one of {sorted(VALID_SUDOKU_CBM_FAMILIES)}, "
+                f"got {self.cbm_family!r}"
             )
         if self.seed < 0:
             raise ValueError(f"seed must be non-negative, got {self.seed}")
@@ -664,7 +816,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
         d.pop("temp_train_data_path", None)
         return _dict_sha256(d)
 
-    def model_fingerprint(self) -> str:
+    def model_fingerprint(self, model_class: str | None = None) -> str:
         """Hash of all parameters that affect model training."""
         d = self._prepare_asdict()
         # Remove params that don't affect training
@@ -676,20 +828,29 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
             "alignment_weights",
         ):
             d.pop(k, None)
+        if model_class is not None:
+            d.pop("cbm_family", None)
+            if model_class in {"cs", "dnn", "ocr"}:
+                for k in _CEM_FINGERPRINT_FIELDS | _PROBCBM_FINGERPRINT_FIELDS:
+                    d.pop(k, None)
+            elif model_class == "cem":
+                for k in _PROBCBM_FINGERPRINT_FIELDS:
+                    d.pop(k, None)
+            elif model_class == "probcbm":
+                for k in _CEM_FINGERPRINT_FIELDS:
+                    d.pop(k, None)
         return _dict_sha256(d)
 
     def get_dataset_path(self, data_type: str | None = None) -> Path:
         """Return the directory path for the dataset."""
         dt = data_type or self.data_type
-        filename = f"sudoku_{dt}_n{self.block_size}_ns{self.n_boards}_mc{self.max_cell_swaps}_seed{self.seed}"
+        filename = f"sudoku_{dt}_n{self.block_size}_ns{self.n_boards}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}"
         return data_dir / "sudoku" / filename
 
     def get_model_path(self, model_class: str, data_type: str | None = None) -> Path:
         """Return the path where a trained model is saved."""
         dt = data_type or self.data_type
-        filename = (
-            f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}"
-        )
+        filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}"
         return results_dir / f"{filename}.model"
 
     def get_results_path(
@@ -697,9 +858,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     ) -> Path:
         """Return the path where results are saved."""
         dt = data_type or self.data_type
-        filename = (
-            f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}"
-        )
+        filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}"
         return results_dir / f"{filename}.results"
 
     def get_alignment_weights(self) -> dict[str, float]:

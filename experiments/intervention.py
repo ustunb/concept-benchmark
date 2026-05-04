@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import itertools
+import inspect
 import math
 from collections.abc import Sequence
 from typing import Any
@@ -41,6 +42,87 @@ from experiments.models import ConceptBasedModel
 
 class InterventionError(RuntimeError):
     """Raised when a strategy or configuration cannot be executed."""
+
+
+def predict_label_proba_from_concepts(
+    model: ConceptBasedModel,
+    concepts: np.ndarray,
+    *,
+    dataset: ConceptDatasetSample | None = None,
+    row_indices: np.ndarray | None = None,
+    source_indices: np.ndarray | None = None,
+    baseline_concepts: np.ndarray | None = None,
+    intervention_mask: np.ndarray | None = None,
+) -> np.ndarray:
+    """Predict label probabilities from concept values with optional model override."""
+
+    replay_target = None
+    if hasattr(model, "predict_proba_from_concepts"):
+        replay_target = model.predict_proba_from_concepts
+    elif hasattr(getattr(model, "label_predictor", None), "predict_proba_from_concepts"):
+        replay_target = model.label_predictor.predict_proba_from_concepts
+
+    if replay_target is not None:
+        replay_kwargs = {
+            "dataset": dataset,
+            "row_indices": row_indices,
+            "source_indices": source_indices,
+            "baseline_concepts": baseline_concepts,
+            "intervention_mask": intervention_mask,
+        }
+        replay_kwargs = {k: v for k, v in replay_kwargs.items() if v is not None}
+        sig = inspect.signature(replay_target)
+        if any(
+            param.kind == inspect.Parameter.VAR_KEYWORD
+            for param in sig.parameters.values()
+        ):
+            return replay_target(concepts, **replay_kwargs)
+        supported = {
+            key: value for key, value in replay_kwargs.items() if key in sig.parameters
+        }
+        return replay_target(concepts, **supported)
+    return model.label_predictor.predict_proba(concepts)
+
+
+def _supports_aligned_concept_replay(model: ConceptBasedModel) -> bool:
+    if getattr(model, "supports_aligned_concept_replay", False):
+        return True
+    return bool(
+        getattr(getattr(model, "label_predictor", None), "supports_aligned_concept_replay", False)
+    )
+
+
+def _aligned_replay_row_indices(batch: "InterventionBatch") -> np.ndarray:
+    row_indices = (
+        np.asarray(batch.instance_ids, dtype=int)
+        if batch.instance_ids is not None
+        else np.arange(batch.n_samples, dtype=int)
+    )
+    if row_indices.ndim != 1:
+        raise ValueError("Aligned replay row indices must be a 1D integer array.")
+    if row_indices.shape[0] != batch.n_samples:
+        raise ValueError(
+            "Aligned replay row indices must match the batch size, got "
+            f"{row_indices.shape[0]} and {batch.n_samples}."
+        )
+    return row_indices
+
+
+def _prime_aligned_replay_context(
+    model: ConceptBasedModel,
+    dataset: ConceptDatasetSample,
+    batch: "InterventionBatch",
+) -> None:
+    if not _supports_aligned_concept_replay(model):
+        return
+    row_indices = _aligned_replay_row_indices(batch)
+    predict_label_proba_from_concepts(
+        model,
+        batch.C_pred,
+        dataset=dataset,
+        row_indices=row_indices,
+        baseline_concepts=batch.C_pred,
+    )
 
 
 @dataclass
@@ -319,13 +401,30 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
         model: ConceptBasedModel,
         batch: InterventionBatch,
         config: InterventionConfig,
+        *,
+        y_prob_baseline: np.ndarray | None = None,
     ) -> StrategyProposal:
         if config.abstention_threshold is None:
             raise InterventionError(
                 "Conceptual safeguards require abstention_threshold to be specified in the config."
             )
 
-        y_prob = model._propagate_predict_proba_mc(batch.C_pred)
+        if y_prob_baseline is not None:
+            y_prob = y_prob_baseline
+        else:
+            supports_aligned = _supports_aligned_concept_replay(model)
+            if supports_aligned:
+                row_indices = _aligned_replay_row_indices(batch)
+                y_prob = predict_label_proba_from_concepts(
+                    model,
+                    batch.C_pred,
+                    row_indices=row_indices,
+                    baseline_concepts=batch.C_pred,
+                )
+            elif hasattr(model, "predict_proba_from_concepts"):
+                y_prob = model.predict_proba_from_concepts(batch.C_pred)
+            else:
+                y_prob = model._propagate_predict_proba_mc(batch.C_pred)
         predicted = np.argmax(y_prob, axis=1)
         confidences = y_prob[np.arange(batch.n_samples), predicted]
         abstain_mask = (confidences >= config.abstention_threshold) & (
@@ -390,7 +489,14 @@ class OrderedCBMStrategy(InterventionStrategy):
             )
 
         n_samples, n_concepts = batch.C_pred.shape
-        y_prob_orig = model.label_predictor.predict_proba(batch.C_pred)
+        supports_aligned = _supports_aligned_concept_replay(model)
+        row_indices = _aligned_replay_row_indices(batch)
+        y_prob_orig = predict_label_proba_from_concepts(
+            model,
+            batch.C_pred,
+            row_indices=row_indices if supports_aligned else None,
+            baseline_concepts=batch.C_pred if supports_aligned else None,
+        )
         y_pred_orig = np.argmax(y_prob_orig, axis=1)
         y_error_orig = (y_pred_orig != batch.y_true).astype(int)
 
@@ -398,7 +504,17 @@ class OrderedCBMStrategy(InterventionStrategy):
         for concept_idx in range(n_concepts):
             C_intervened = batch.C_pred.copy()
             C_intervened[:, concept_idx] = batch.C_true[:, concept_idx]
-            y_prob_tti = model.label_predictor.predict_proba(C_intervened)
+            intervention_mask = None
+            if supports_aligned:
+                intervention_mask = np.zeros_like(batch.C_pred, dtype=bool)
+                intervention_mask[:, concept_idx] = True
+            y_prob_tti = predict_label_proba_from_concepts(
+                model,
+                C_intervened,
+                row_indices=row_indices if supports_aligned else None,
+                baseline_concepts=batch.C_pred if supports_aligned else None,
+                intervention_mask=intervention_mask,
+            )
             y_pred_tti = np.argmax(y_prob_tti, axis=1)
             y_error_tti = (y_pred_tti != batch.y_true).astype(int)
             error_deltas[:, concept_idx] = y_error_tti - y_error_orig
@@ -425,8 +541,15 @@ class OrderedCBMStrategy(InterventionStrategy):
                 )
             order = np.asarray(self.state["ordering"])
 
+        supports_aligned = _supports_aligned_concept_replay(model)
         if config.select_only_abstained and config.abstention_threshold is not None:
-            y_prob = model.label_predictor.predict_proba(batch.C_pred)
+            row_indices = _aligned_replay_row_indices(batch)
+            y_prob = predict_label_proba_from_concepts(
+                model,
+                batch.C_pred,
+                row_indices=row_indices if supports_aligned else None,
+                baseline_concepts=batch.C_pred if supports_aligned else None,
+            )
             predicted = np.argmax(y_prob, axis=1)
             confidences = y_prob[np.arange(batch.n_samples), predicted]
             abstain_mask = (confidences >= config.abstention_threshold) & (
@@ -463,8 +586,15 @@ class RandomInterventionStrategy(InterventionStrategy):
         batch: InterventionBatch,
         config: InterventionConfig,
     ) -> StrategyProposal:
+        supports_aligned = _supports_aligned_concept_replay(model)
         if config.select_only_abstained and config.abstention_threshold is not None:
-            y_prob = model.label_predictor.predict_proba(batch.C_pred)
+            row_indices = _aligned_replay_row_indices(batch)
+            y_prob = predict_label_proba_from_concepts(
+                model,
+                batch.C_pred,
+                row_indices=row_indices if supports_aligned else None,
+                baseline_concepts=batch.C_pred if supports_aligned else None,
+            )
             predicted = np.argmax(y_prob, axis=1)
             confidences = y_prob[np.arange(batch.n_samples), predicted]
             abstain_mask = (confidences >= config.abstention_threshold) & (
@@ -529,9 +659,18 @@ class ScoreIntervention(InterventionStrategy):
     ) -> StrategyProposal:
         n_samples, n_concepts = batch.C_pred.shape
         mask = np.zeros_like(batch.C_pred, dtype=bool)
+        supports_aligned = _supports_aligned_concept_replay(model)
 
-        concepts_before = (batch.C_pred >= 0.5).astype(int)
-        p_before = model.label_predictor.predict_proba(concepts_before)
+        concepts_before = (
+            batch.C_pred if supports_aligned else (batch.C_pred >= 0.5).astype(int)
+        )
+        row_indices = _aligned_replay_row_indices(batch)
+        p_before = predict_label_proba_from_concepts(
+            model,
+            concepts_before,
+            row_indices=row_indices if supports_aligned else None,
+            baseline_concepts=batch.C_pred if supports_aligned else None,
+        )
         y_pred_before = np.argmax(p_before, axis=1)
 
         scores = np.zeros(n_samples, dtype=float)
@@ -564,7 +703,17 @@ class ScoreIntervention(InterventionStrategy):
         ):
             all_flipped = concepts_before.copy()
             all_flipped[:, combo_indices] = 1 - all_flipped[:, combo_indices]
-            p_after = model.label_predictor.predict_proba(all_flipped)
+            intervention_mask = None
+            if supports_aligned:
+                intervention_mask = np.zeros_like(all_flipped, dtype=bool)
+                intervention_mask[:, combo_indices] = True
+            p_after = predict_label_proba_from_concepts(
+                model,
+                all_flipped,
+                row_indices=row_indices if supports_aligned else None,
+                baseline_concepts=batch.C_pred if supports_aligned else None,
+                intervention_mask=intervention_mask,
+            )
             scores_combo = np.max(np.abs(p_after - p_before), axis=1)
             improve = scores_combo > scores
             scores[improve] = scores_combo[improve]
@@ -620,6 +769,8 @@ class ScoreIntervention(InterventionStrategy):
         threshold: float,
         m: int,
     ) -> dict[str, Any]:
+        supports_aligned = _supports_aligned_concept_replay(model)
+        row_indices = _aligned_replay_row_indices(batch)
         overall_acc_before: float | None = None
         acc_non_intervened_before: float | None = None
         confusion_selected_before: np.ndarray | None = None
@@ -666,8 +817,16 @@ class ScoreIntervention(InterventionStrategy):
 
         overwrite_mask = mask & ~np.isnan(batch.C_true)
         C_intervened = np.where(overwrite_mask, batch.C_true, batch.C_pred)
-        concepts_after = (C_intervened >= 0.5).astype(int)
-        p_after = model.label_predictor.predict_proba(concepts_after)
+        concepts_after = (
+            C_intervened if supports_aligned else (C_intervened >= 0.5).astype(int)
+        )
+        p_after = predict_label_proba_from_concepts(
+            model,
+            concepts_after,
+            row_indices=row_indices if supports_aligned else None,
+            baseline_concepts=batch.C_pred if supports_aligned else None,
+            intervention_mask=overwrite_mask if supports_aligned else None,
+        )
         y_pred_after = np.argmax(p_after, axis=1)
 
         overall_acc_after: float | None = None
@@ -732,6 +891,7 @@ class ConceptInterventionRunner:
             labels=labels,
             instance_ids=instance_ids,
         )
+        _prime_aligned_replay_context(self.model, validation_dataset, batch)
         strategy.prepare(self.model, batch, config)
 
     def run(
@@ -744,6 +904,7 @@ class ConceptInterventionRunner:
         concept_true: np.ndarray | None = None,
         labels: np.ndarray | None = None,
         instance_ids: np.ndarray | None = None,
+        y_prob_baseline: np.ndarray | None = None,
     ) -> InterventionResult:
 
         # NOTE: config.intervention_noise_rate is not consumed here — intervention
@@ -759,35 +920,65 @@ class ConceptInterventionRunner:
             labels=labels,
             instance_ids=instance_ids,
         )
+        _prime_aligned_replay_context(self.model, dataset, batch)
 
         # Propose interventions based on the strategy.
-        proposal = strategy.propose(self.model, batch, config)
+        propose_kwargs = {}
+        if y_prob_baseline is not None and isinstance(strategy, ConceptualSafeguardsStrategy):
+            propose_kwargs["y_prob_baseline"] = y_prob_baseline
+        proposal = strategy.propose(self.model, batch, config, **propose_kwargs)
         if proposal.mask.shape != batch.C_pred.shape:
             raise InterventionError(
                 "Strategy returned a mask with shape"
                 f" {proposal.mask.shape}, expected {batch.C_pred.shape}."
             )
 
-        # Future: consider removing explicit >= 0.5 threshold
-        # Determine how to get predictions from the downstream model.
-        # Conceptual safeguards operate on concept probabilities, others on binarized concepts.
-        if isinstance(strategy, ConceptualSafeguardsStrategy):
-            predict_proba_fn = self.model._propagate_predict_proba_mc
-            concepts_before = batch.C_pred
-        else:
-            predict_proba_fn = self.model.label_predictor.predict_proba
-            concepts_before = batch.C_pred >= 0.5
-
-        # Evaluate the model before and after the intervention.
-        y_prob_before = predict_proba_fn(concepts_before)
         overwrite_mask = proposal.mask & ~np.isnan(batch.C_true)
         C_intervened = np.where(overwrite_mask, batch.C_true, batch.C_pred)
-        concepts_after = (
-            C_intervened
-            if isinstance(strategy, ConceptualSafeguardsStrategy)
-            else (C_intervened >= 0.5)
-        )
-        y_prob_after = predict_proba_fn(concepts_after)
+        supports_aligned = _supports_aligned_concept_replay(self.model)
+        row_indices = _aligned_replay_row_indices(batch)
+
+        if supports_aligned:
+            if y_prob_baseline is not None:
+                y_prob_before = y_prob_baseline
+            else:
+                y_prob_before = predict_label_proba_from_concepts(
+                    self.model,
+                    batch.C_pred,
+                    dataset=dataset,
+                    row_indices=row_indices,
+                    baseline_concepts=batch.C_pred,
+                )
+            y_prob_after = predict_label_proba_from_concepts(
+                self.model,
+                C_intervened,
+                row_indices=row_indices,
+                baseline_concepts=batch.C_pred,
+                intervention_mask=overwrite_mask,
+            )
+        elif isinstance(strategy, ConceptualSafeguardsStrategy):
+            if hasattr(self.model, "predict_proba_from_concepts"):
+                predict_proba_fn = self.model.predict_proba_from_concepts
+            else:
+                predict_proba_fn = self.model._propagate_predict_proba_mc
+            if y_prob_baseline is not None:
+                y_prob_before = y_prob_baseline
+            else:
+                y_prob_before = predict_proba_fn(batch.C_pred)
+            y_prob_after = predict_proba_fn(C_intervened)
+        else:
+            concepts_before = batch.C_pred >= 0.5
+            concepts_after = C_intervened >= 0.5
+            if y_prob_baseline is not None:
+                y_prob_before = y_prob_baseline
+            else:
+                y_prob_before = predict_label_proba_from_concepts(self.model, concepts_before)
+            y_prob_after = predict_label_proba_from_concepts(self.model, concepts_after)
+
+        # Keep predictions for non-intervened samples unchanged.
+        intervened_rows = np.any(overwrite_mask, axis=1)
+        y_prob_after[~intervened_rows] = y_prob_before[~intervened_rows]
+
         y_pred_after = np.argmax(y_prob_after, axis=1)
 
         # Conceptual Safeguards results

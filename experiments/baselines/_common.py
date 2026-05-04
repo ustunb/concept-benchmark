@@ -1,0 +1,916 @@
+"""Shared utilities, backbones, base classes, and data adapters for CEM-family baselines."""
+from __future__ import annotations
+
+import copy
+import importlib
+import inspect
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, Dataset
+
+from concept_benchmark.data import ConceptDatasetSample
+from concept_benchmark.utils import determine_device, get_loader_config
+from experiments.models import ConceptBasedModel, ConceptDetector, FrontEndModel
+
+_EARLY_STOP_EPS = 1e-6
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_LOCAL_CEM_CHECKOUT = _REPO_ROOT / "third_party" / "cem"
+
+
+# ---------------------------------------------------------------------------
+# Dependency management
+# ---------------------------------------------------------------------------
+
+class CEMDependencyError(ImportError):
+    """Raised when the optional official CEM dependencies are unavailable."""
+
+
+@dataclass(frozen=True)
+class _CEMDependencies:
+    pl: Any
+    ConceptEmbeddingModel: type
+    ProbCBM: type
+    train_prob_cbm: Any | None = None
+
+
+def _ensure_local_cem_checkout_on_path() -> None:
+    if (_LOCAL_CEM_CHECKOUT / "cem").is_dir():
+        checkout = str(_LOCAL_CEM_CHECKOUT)
+        if checkout not in sys.path:
+            sys.path.insert(0, checkout)
+
+
+def _patch_reduce_on_plateau_for_torch_compat() -> None:
+    scheduler_cls = torch.optim.lr_scheduler.ReduceLROnPlateau
+    if getattr(scheduler_cls, "_concept_benchmark_compat", False):
+        return
+    sig = inspect.signature(scheduler_cls.__init__)
+    if "verbose" in sig.parameters:
+        return
+
+    class _CompatReduceLROnPlateau(scheduler_cls):
+        _concept_benchmark_compat = True
+
+        def __init__(self, optimizer, *args, verbose: bool = False, **kwargs):
+            super().__init__(optimizer, *args, **kwargs)
+
+    torch.optim.lr_scheduler.ReduceLROnPlateau = _CompatReduceLROnPlateau
+
+
+def _format_install_message(exc: Exception | None = None) -> str:
+    hint = (
+        "Optional CEM/ProbCBM support requires the official `cem` package and "
+        "`pytorch_lightning`. Install with:\n"
+        "  python -m pip install pytorch-lightning 'torchmetrics<1.0'\n"
+        "  git clone https://github.com/mateoespinosa/cem.git third_party/cem\n"
+        "  python -m pip install -r third_party/cem/requirements.txt\n"
+        "or use the repo helper once available.\n"
+        "This error is only raised when `cem` or `probcbm` is explicitly requested."
+    )
+    if exc is None:
+        return hint
+    return f"{hint}\nOriginal import error: {type(exc).__name__}: {exc}"
+
+
+def require_cem_dependencies(
+    *,
+    include_probcbm_training_helper: bool = False,
+) -> _CEMDependencies:
+    """Import official CEM dependencies lazily and raise a clean error on failure."""
+
+    _ensure_local_cem_checkout_on_path()
+    _patch_reduce_on_plateau_for_torch_compat()
+
+    try:
+        pl = importlib.import_module("pytorch_lightning")
+        ConceptEmbeddingModel = importlib.import_module(
+            "cem.models.cem"
+        ).ConceptEmbeddingModel
+        ProbCBM = importlib.import_module("cem.models.probcbm").ProbCBM
+    except Exception as exc:  # pragma: no cover - exercised by targeted unit test
+        raise CEMDependencyError(_format_install_message(exc)) from exc
+
+    train_prob_cbm = None
+    if include_probcbm_training_helper:
+        try:
+            train_prob_cbm = importlib.import_module(
+                "cem.train.train_prob_cbm"
+            ).train_prob_cbm
+        except Exception:
+            train_prob_cbm = None
+
+    return _CEMDependencies(
+        pl=pl,
+        ConceptEmbeddingModel=ConceptEmbeddingModel,
+        ProbCBM=ProbCBM,
+        train_prob_cbm=train_prob_cbm,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Prediction cache
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _PredictionCache:
+    dataset_id: int | None
+    concept_probs: np.ndarray
+    label_probs: np.ndarray
+    pos_embeddings: torch.Tensor | None = None
+    neg_embeddings: torch.Tensor | None = None
+    probcbm_pred_embeddings: torch.Tensor | None = None
+    probcbm_pred_mean: torch.Tensor | None = None
+    probcbm_pred_logsigma: torch.Tensor | None = None
+    ecbm_features: torch.Tensor | None = None
+
+
+def _slice_prediction_cache(
+    cache: _PredictionCache,
+    row_indices: np.ndarray,
+) -> _PredictionCache:
+    tensor_index = torch.as_tensor(row_indices, dtype=torch.long)
+    return _PredictionCache(
+        dataset_id=cache.dataset_id,
+        concept_probs=cache.concept_probs[row_indices],
+        label_probs=cache.label_probs[row_indices],
+        pos_embeddings=(
+            None if cache.pos_embeddings is None else cache.pos_embeddings.index_select(0, tensor_index)
+        ),
+        neg_embeddings=(
+            None if cache.neg_embeddings is None else cache.neg_embeddings.index_select(0, tensor_index)
+        ),
+        probcbm_pred_embeddings=(
+            None
+            if cache.probcbm_pred_embeddings is None
+            else cache.probcbm_pred_embeddings.index_select(0, tensor_index)
+        ),
+        probcbm_pred_mean=(
+            None
+            if cache.probcbm_pred_mean is None
+            else cache.probcbm_pred_mean.index_select(0, tensor_index)
+        ),
+        probcbm_pred_logsigma=(
+            None
+            if cache.probcbm_pred_logsigma is None
+            else cache.probcbm_pred_logsigma.index_select(0, tensor_index)
+        ),
+        ecbm_features=(
+            None
+            if cache.ecbm_features is None
+            else cache.ecbm_features.index_select(0, tensor_index)
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tensor helpers
+# ---------------------------------------------------------------------------
+
+def _to_float_tensor(value: Any) -> torch.Tensor:
+    if isinstance(value, torch.Tensor):
+        return value.to(dtype=torch.float32)
+    return torch.as_tensor(value, dtype=torch.float32)
+
+
+def _to_label_tensor(value: Any) -> torch.Tensor:
+    if isinstance(value, torch.Tensor):
+        return value.to(dtype=torch.long).reshape(())
+    arr = np.asarray(value)
+    if arr.ndim == 0:
+        return torch.tensor(int(arr), dtype=torch.long)
+    return torch.as_tensor(arr, dtype=torch.long)
+
+
+def _to_numpy_task_proba(outputs: torch.Tensor, n_tasks: int) -> np.ndarray:
+    if outputs.ndim == 1:
+        outputs = outputs.unsqueeze(-1)
+    if n_tasks <= 2 and outputs.shape[-1] == 1:
+        probs = torch.sigmoid(outputs).detach().cpu().numpy()
+        return np.concatenate([1.0 - probs, probs], axis=1).astype(np.float32)
+
+    detached = outputs.detach()
+    if detached.numel() and bool(
+        torch.all((detached >= -1e-6) & (detached <= 1.0 + 1e-6))
+    ):
+        row_sums = detached.sum(dim=1)
+        if bool(torch.all(torch.isfinite(row_sums))) and bool(
+            torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-3, rtol=1e-3)
+        ):
+            return detached.cpu().numpy().astype(np.float32)
+
+    return torch.softmax(detached, dim=1).cpu().numpy().astype(np.float32)
+
+
+def _stack_numpy(chunks: list[np.ndarray], *, cols: int) -> np.ndarray:
+    if not chunks:
+        return np.zeros((0, cols), dtype=np.float32)
+    return np.concatenate(chunks, axis=0).astype(np.float32, copy=False)
+
+
+def _stack_tensors(chunks: list[torch.Tensor] | None) -> torch.Tensor | None:
+    if not chunks:
+        return None
+    return torch.cat(chunks, dim=0).cpu()
+
+
+def _soft_cross_entropy_from_probs(
+    logits: torch.Tensor,
+    target_probs: torch.Tensor,
+) -> torch.Tensor:
+    target_probs = torch.clamp(target_probs, min=1e-6)
+    target_probs = target_probs / target_probs.sum(dim=-1, keepdim=True)
+    return -(target_probs * F.log_softmax(logits, dim=-1)).sum(dim=-1).mean()
+
+
+def _safe_binary_logit(probs: torch.Tensor) -> torch.Tensor:
+    probs = torch.clamp(probs, min=1e-6, max=1.0 - 1e-6)
+    return torch.log(probs) - torch.log1p(-probs)
+
+
+def _safe_class_logit(probs: torch.Tensor) -> torch.Tensor:
+    probs = torch.clamp(probs, min=1e-6)
+    probs = probs / probs.sum(dim=-1, keepdim=True)
+    return torch.log(probs)
+
+
+def _prepare_batch_features(batch_x: Any, *, device: torch.device) -> torch.Tensor:
+    if isinstance(batch_x, torch.Tensor):
+        return batch_x.to(device=device, dtype=torch.float32)
+    return torch.as_tensor(batch_x, dtype=torch.float32, device=device)
+
+
+def _prepare_batch_concepts(batch_c: Any, *, device: torch.device) -> torch.Tensor:
+    if isinstance(batch_c, torch.Tensor):
+        return batch_c.to(device=device, dtype=torch.float32)
+    return torch.as_tensor(batch_c, dtype=torch.float32, device=device)
+
+
+def _prepare_batch_labels(batch_y: Any, *, device: torch.device) -> torch.Tensor:
+    if isinstance(batch_y, torch.Tensor):
+        return batch_y.to(device=device, dtype=torch.long).reshape(-1)
+    return torch.as_tensor(batch_y, dtype=torch.long, device=device).reshape(-1)
+
+
+# ---------------------------------------------------------------------------
+# Data adapter
+# ---------------------------------------------------------------------------
+
+class CEMSampleAdapterDataset(Dataset):
+    """Thin wrapper that reorders benchmark samples from `(x, c, y)` to `(x, y, c)`."""
+
+    def __init__(self, sample: ConceptDatasetSample) -> None:
+        self.sample = sample
+
+    def __len__(self) -> int:
+        return len(self.sample)
+
+    def __getitem__(self, idx: int):
+        x, c, y = self.sample[idx]
+        if isinstance(x, np.ndarray):
+            x = x.astype(np.float32, copy=False)
+        y = _to_label_tensor(y)
+        c = _to_float_tensor(c)
+        return x, y, c
+
+
+def make_cem_loader(
+    sample: ConceptDatasetSample,
+    *,
+    batch_size: int,
+    shuffle: bool,
+    num_workers: int = 0,
+    pin_memory: bool = False,
+    drop_last: bool = False,
+) -> DataLoader:
+    """Create a dataloader in the tuple order expected by the official package."""
+
+    dataset = CEMSampleAdapterDataset(sample)
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        drop_last=drop_last,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Backbones
+# ---------------------------------------------------------------------------
+
+class ViTImageBackbone(nn.Module):
+    """Pretrained ViT backbone for image-based concept benchmarks."""
+
+    def __init__(self, *, output_dim: int, freeze_backbone: bool = True) -> None:
+        super().__init__()
+        from transformers import ViTModel
+
+        self.vit = ViTModel.from_pretrained("google/vit-base-patch16-224")
+        if freeze_backbone:
+            for name, p in self.vit.named_parameters():
+                if "encoder.layer.10" not in name and "encoder.layer.11" not in name and "layernorm" not in name:
+                    p.requires_grad = False
+        self.proj = nn.Linear(768, output_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        features = self.vit(pixel_values=x).last_hidden_state[:, 0, :]
+        return self.proj(features)
+
+
+class RobotImageBackbone(nn.Module):
+    """Small CNN aligned with the repo's robot image baselines."""
+
+    def __init__(self, *, input_size: int, output_dim: int) -> None:
+        super().__init__()
+        if input_size >= 128:
+            self.features = nn.Sequential(
+                nn.Conv2d(3, 16, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.MaxPool2d(2, 2),
+                nn.Conv2d(16, 32, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.MaxPool2d(2, 2),
+                nn.Conv2d(32, 64, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.MaxPool2d(2, 2),
+                nn.AdaptiveAvgPool2d((4, 4)),
+            )
+        else:
+            self.features = nn.Sequential(
+                nn.Conv2d(3, 16, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(16, 32, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.MaxPool2d(2, 2),
+                nn.Conv2d(32, 64, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.AdaptiveAvgPool2d((4, 4)),
+            )
+        self.proj = nn.Linear(64 * 4 * 4, output_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.features(x)
+        x = torch.flatten(x, 1)
+        return self.proj(x)
+
+
+class TabularBackbone(nn.Module):
+    """Simple MLP for generic tabular concept benchmarks."""
+
+    def __init__(self, *, input_dim: int, output_dim: int, hidden_dim: int = 128):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, output_dim),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x.float())
+
+
+class SudokuTabularBackbone(nn.Module):
+    """Group-pooling backbone for sudoku tabular boards."""
+
+    _NUM_DIGITS = 10
+    _N_GROUPS = 27
+
+    def __init__(self, *, output_dim: int, embedding_dim: int = 16, hidden_dim: int = 64) -> None:
+        super().__init__()
+        self.embedding = nn.Linear(self._NUM_DIGITS, embedding_dim, bias=False)
+        self.group_head = nn.Sequential(
+            nn.Linear(2 * embedding_dim, hidden_dim),
+            nn.ReLU(),
+        )
+        self.project = nn.Linear(self._N_GROUPS * hidden_dim, output_dim)
+
+    @staticmethod
+    def _pool_groups(x: torch.Tensor, dim: int) -> torch.Tensor:
+        mean = x.mean(dim=dim)
+        maxv = x.amax(dim=dim)
+        return torch.cat([mean, maxv], dim=-1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = F.one_hot(x.long(), self._NUM_DIGITS).float()
+        x = self.embedding(x)
+        x = x.view(x.size(0), 9, 9, -1)
+
+        row_feats = self._pool_groups(x, dim=2)
+        col_feats = self._pool_groups(x, dim=1)
+
+        blocks = x.view(x.size(0), 3, 3, 3, 3, x.size(-1))
+        blocks = blocks.permute(0, 1, 3, 2, 4, 5).contiguous()
+        block_cells = blocks.view(x.size(0), 9, 9, x.size(-1))
+        block_feats = self._pool_groups(block_cells, dim=2)
+
+        groups = torch.cat([row_feats, col_feats, block_feats], dim=1)
+        per_group = self.group_head(groups)
+        flat = per_group.view(per_group.size(0), -1)
+        return self.project(flat)
+
+
+# ---------------------------------------------------------------------------
+# Backbone inference
+# ---------------------------------------------------------------------------
+
+def _default_cem_output_dim(config: Any | None) -> int:
+    emb_size = int(getattr(config, "cem_emb_size", 16))
+    return max(64, emb_size * 8)
+
+
+def _infer_backbone_spec(
+    sample: ConceptDatasetSample,
+    *,
+    benchmark: str,
+    config: Any | None,
+) -> dict[str, Any]:
+    data_type = sample.meta.get("data_type", "tabular")
+
+    if benchmark == "sudoku":
+        use_vit = getattr(config, "use_vit_backbone", False) if config else False
+        if use_vit or data_type == "image":
+            return {"kind": "vit_image", "default_output_dim": _default_cem_output_dim(config)}
+        return {"kind": "sudoku_tabular", "default_output_dim": _default_cem_output_dim(config)}
+
+    if data_type == "image":
+        use_vit = getattr(config, "use_vit_backbone", False) if config else False
+        if use_vit:
+            return {"kind": "vit_image", "default_output_dim": _default_cem_output_dim(config)}
+        input_size = int(sample.meta.get("resolution", 32))
+        try:
+            x0, _, _ = sample[0]
+            if isinstance(x0, torch.Tensor) and x0.ndim >= 3:
+                input_size = int(x0.shape[-1])
+        except Exception:
+            pass
+        return {
+            "kind": "robot_image",
+            "input_size": input_size,
+            "default_output_dim": _default_cem_output_dim(config),
+        }
+
+    x0 = np.asarray(sample.X[0])
+    return {
+        "kind": "tabular",
+        "input_dim": int(x0.reshape(-1).shape[0]),
+        "hidden_dim": 128,
+        "default_output_dim": _default_cem_output_dim(config),
+    }
+
+
+def _make_backbone_factory(backbone_spec: dict[str, Any]):
+    kind = backbone_spec["kind"]
+    default_output_dim = int(backbone_spec.get("default_output_dim", 128))
+
+    def factory(output_dim: int | None = None):
+        used_output_dim = int(output_dim or default_output_dim)
+        if kind == "vit_image":
+            return ViTImageBackbone(output_dim=used_output_dim)
+        if kind == "robot_image":
+            return RobotImageBackbone(
+                input_size=int(backbone_spec["input_size"]),
+                output_dim=used_output_dim,
+            )
+        if kind == "sudoku_tabular":
+            return SudokuTabularBackbone(output_dim=used_output_dim)
+        if kind == "tabular":
+            return TabularBackbone(
+                input_dim=int(backbone_spec["input_dim"]),
+                hidden_dim=int(backbone_spec.get("hidden_dim", 128)),
+                output_dim=used_output_dim,
+            )
+        raise ValueError(f"Unsupported backbone kind: {kind!r}")
+
+    return factory
+
+
+# ---------------------------------------------------------------------------
+# PyTorch Lightning helpers
+# ---------------------------------------------------------------------------
+
+def _device_to_pl_args(device: torch.device) -> dict[str, Any]:
+    if device.type == "cuda":
+        return {"accelerator": "gpu", "devices": 1}
+    return {"accelerator": "cpu", "devices": 1}
+
+
+def _effective_pl_device(device: torch.device) -> torch.device:
+    """Return the device pytorch-lightning will actually use."""
+    if device.type == "cuda":
+        return device
+    return torch.device("cpu")
+
+
+def _build_trainer(
+    *,
+    pl_module: Any,
+    max_epochs: int,
+    patience: int,
+    device: torch.device,
+) -> Any:
+    callbacks = []
+    if patience > 0:
+        callbacks.append(
+            pl_module.callbacks.EarlyStopping(
+                monitor="val_loss",
+                mode="min",
+                patience=patience,
+            )
+        )
+    return pl_module.Trainer(
+        max_epochs=max_epochs,
+        check_val_every_n_epoch=1,
+        callbacks=callbacks,
+        logger=False,
+        enable_checkpointing=False,
+        enable_model_summary=False,
+        deterministic=False,
+        **_device_to_pl_args(device),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Config resolution helpers
+# ---------------------------------------------------------------------------
+
+def _resolve_loader_config(
+    *,
+    batch_size: int,
+    device: torch.device,
+    num_workers: int | None = None,
+    pin_memory: bool | None = None,
+) -> dict[str, Any]:
+    defaults = get_loader_config()
+    return {
+        "batch_size": int(batch_size),
+        "num_workers": int(defaults["num_workers"] if num_workers is None else num_workers),
+        "pin_memory": bool(
+            defaults["pin_memory"] if pin_memory is None else pin_memory
+        )
+        and device.type == "cuda",
+        "device": str(device),
+    }
+
+
+def _resolve_epochs(config: Any, *, benchmark: str, family: str) -> int:
+    attr = f"{family}_max_epochs"
+    override = getattr(config, attr, None)
+    if override is not None:
+        return int(override)
+    if benchmark == "sudoku":
+        return int(getattr(config, "cs_epochs", getattr(config, "epochs", 20)))
+    return int(getattr(config, "epochs", 50))
+
+
+def _resolve_patience(config: Any, *, benchmark: str) -> int:
+    if benchmark == "sudoku":
+        return int(getattr(config, "cs_patience", getattr(config, "patience", 5)))
+    return int(getattr(config, "patience", 10))
+
+
+def _resolve_learning_rate(config: Any) -> float:
+    return float(getattr(config, "learning_rate", 1e-3))
+
+
+# ---------------------------------------------------------------------------
+# Base class and adapters
+# ---------------------------------------------------------------------------
+
+class _OfficialConceptDetectorAdapter(ConceptDetector):
+    def __init__(self, owner: _OfficialBenchmarkModelBase) -> None:
+        super().__init__(model=None)
+        self._owner = owner
+        self._n_concepts = owner.n_concepts
+
+    def predict(self, dataset: ConceptDatasetSample, **kwargs) -> np.ndarray:
+        return (self.predict_proba(dataset, **kwargs) >= 0.5).astype(int)
+
+    def predict_proba(self, dataset: ConceptDatasetSample, **kwargs) -> np.ndarray:
+        _, concept_probs = self._owner._predict_dataset(dataset, cache=True)
+        return concept_probs
+
+
+class _OfficialFrontEndAdapter(FrontEndModel):
+    _kflip_fast_path = False
+    supports_aligned_concept_replay = True
+
+    def __init__(self, owner: _OfficialBenchmarkModelBase) -> None:
+        super().__init__()
+        self._owner = owner
+
+    def fit(self, C: np.ndarray, y: np.ndarray, fit_params: dict | None = None) -> None:
+        raise RuntimeError(
+            "Official CEM/ProbCBM frontends are trained jointly with the wrapped model."
+        )
+
+    def predict(self, C: np.ndarray) -> np.ndarray:
+        return self.predict_proba(C).argmax(axis=1)
+
+    def predict_proba(self, C: np.ndarray) -> np.ndarray:
+        return self._owner.predict_proba_from_concepts(C)
+
+    def predict_proba_from_concepts(self, C: np.ndarray, **kwargs) -> np.ndarray:
+        return self._owner.predict_proba_from_concepts(C, **kwargs)
+
+
+class _OfficialBenchmarkModelBase(ConceptBasedModel):
+    family = "official"
+    supports_aligned_concept_replay = True
+
+    def __init__(
+        self,
+        *,
+        official_model: Any,
+        benchmark: str,
+        concept_names: list[str],
+        class_names: list[str],
+        backbone_spec: dict[str, Any],
+        model_init_kwargs: dict[str, Any],
+        eval_config: dict[str, Any],
+        training_summary: dict[str, Any] | None = None,
+    ) -> None:
+        self.official_model = official_model
+        self.benchmark = benchmark
+        self.concept_names = list(concept_names)
+        self.class_names = list(class_names)
+        self.backbone_spec = copy.deepcopy(backbone_spec)
+        self.model_init_kwargs = copy.deepcopy(model_init_kwargs)
+        self.eval_config = copy.deepcopy(eval_config)
+        self.training_summary = copy.deepcopy(training_summary or {})
+        self._prediction_cache: _PredictionCache | None = None
+        self._dependency_error_message = _format_install_message()
+
+        concept_detector = _OfficialConceptDetectorAdapter(self)
+        label_predictor = _OfficialFrontEndAdapter(self)
+        super().__init__(
+            concept_detector=concept_detector,
+            label_predictor=label_predictor,
+            should_propagate=False,
+        )
+
+    @property
+    def n_concepts(self) -> int:
+        return len(self.concept_names)
+
+    @property
+    def n_classes(self) -> int:
+        return len(self.class_names)
+
+    def fit(self, *args, **kwargs) -> None:
+        raise RuntimeError(
+            f"{self.__class__.__name__} is already trained. Use train_{self.family}_model(...)."
+        )
+
+    def _require_official_model(self) -> Any:
+        if self.official_model is None:
+            raise CEMDependencyError(self._dependency_error_message)
+        return self.official_model
+
+    def _loader_kwargs(self) -> dict[str, Any]:
+        defaults = get_loader_config()
+        return {
+            "batch_size": int(self.eval_config.get("batch_size", defaults["batch_size"])),
+            "num_workers": int(
+                self.eval_config.get("num_workers", defaults["num_workers"])
+            ),
+            "pin_memory": bool(
+                self.eval_config.get("pin_memory", defaults["pin_memory"])
+            ),
+        }
+
+    def _inference_device(self) -> torch.device:
+        configured = self.eval_config.get("device")
+        if configured is None:
+            return _effective_pl_device(determine_device())
+        return _effective_pl_device(torch.device(configured))
+
+    def predict_proba(
+        self,
+        dataset: ConceptDatasetSample,
+        should_propagate: bool | None = None,
+        return_concepts: bool = False,
+    ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+        y_prob, concept_probs = self._predict_dataset(dataset, cache=True)
+        return (y_prob, concept_probs) if return_concepts else y_prob
+
+    def predict(
+        self,
+        dataset: ConceptDatasetSample,
+        should_propagate: bool | None = None,
+    ) -> np.ndarray:
+        return self.predict_proba(dataset, should_propagate=should_propagate).argmax(
+            axis=1
+        )
+
+    def predict_proba_from_concepts(
+        self,
+        concepts: np.ndarray,
+        *,
+        dataset: ConceptDatasetSample | None = None,
+        row_indices: np.ndarray | None = None,
+        source_indices: np.ndarray | None = None,
+        baseline_concepts: np.ndarray | None = None,
+        intervention_mask: np.ndarray | None = None,
+    ) -> np.ndarray:
+        if dataset is not None:
+            self._predict_dataset(dataset, cache=True)
+        cache = self._prediction_cache
+        if cache is None:
+            raise RuntimeError(
+                "No official-model context is cached. Call concept_detector.predict_proba(dataset) "
+                "or predict_proba(dataset) before re-evaluating labels from intervened concepts."
+            )
+        concepts = np.asarray(concepts, dtype=np.float32)
+        if concepts.ndim == 1:
+            concepts = concepts.reshape(1, -1)
+        if concepts.ndim != 2 or concepts.shape[1] != self.n_concepts:
+            raise ValueError(
+                "Concept matrix must have shape (N, n_concepts), got "
+                f"{concepts.shape} for n_concepts={self.n_concepts}."
+            )
+        if row_indices is not None and source_indices is not None:
+            raise ValueError("Pass only one of row_indices or source_indices.")
+        if source_indices is not None:
+            row_indices = source_indices
+
+        if row_indices is None:
+            if concepts.shape != cache.concept_probs.shape:
+                raise ValueError(
+                    "Row-aligned replay requires row_indices/source_indices when the concept "
+                    "matrix does not cover the full cached dataset in the original row order. "
+                    f"Got {concepts.shape} and expected {cache.concept_probs.shape}."
+                )
+            if baseline_concepts is None:
+                if not np.allclose(concepts, cache.concept_probs, atol=1e-6, rtol=1e-6):
+                    raise ValueError(
+                        "Full-dataset replay without dataset/row_indices is only safe when "
+                        "replaying the cached concept predictions exactly. Pass dataset=..., "
+                        "or pass row_indices/source_indices together with baseline_concepts "
+                        "for modified concept matrices."
+                    )
+            else:
+                baseline_candidate = np.asarray(baseline_concepts, dtype=np.float32)
+                if baseline_candidate.ndim == 1:
+                    baseline_candidate = baseline_candidate.reshape(1, -1)
+                if baseline_candidate.shape != cache.concept_probs.shape:
+                    raise ValueError(
+                        "Full-dataset baseline_concepts must match the cached concept matrix "
+                        f"shape, got {baseline_candidate.shape} and expected "
+                        f"{cache.concept_probs.shape}."
+                    )
+                if not np.allclose(baseline_candidate, cache.concept_probs, atol=1e-6, rtol=1e-6):
+                    raise ValueError(
+                        "baseline_concepts must align with the cached dataset rows in their "
+                        "original order. Pass dataset=... to refresh the cache or pass explicit "
+                        "row_indices/source_indices for subset/repeated replay."
+                    )
+            row_indices = np.arange(cache.concept_probs.shape[0], dtype=int)
+        else:
+            row_indices = np.asarray(row_indices)
+            if row_indices.ndim != 1:
+                raise ValueError("row_indices must be a 1D integer array.")
+            if row_indices.shape[0] != concepts.shape[0]:
+                raise ValueError(
+                    "row_indices length must match the number of concept rows, got "
+                    f"{row_indices.shape[0]} and {concepts.shape[0]}."
+                )
+            if not np.issubdtype(row_indices.dtype, np.integer):
+                raise ValueError("row_indices must contain integers.")
+            if row_indices.size and (
+                np.any(row_indices < 0)
+                or np.any(row_indices >= cache.concept_probs.shape[0])
+            ):
+                raise ValueError(
+                    "row_indices must refer to rows in the cached dataset, got "
+                    f"min={int(row_indices.min())} max={int(row_indices.max())} "
+                    f"for cached_rows={cache.concept_probs.shape[0]}."
+                )
+            row_indices = row_indices.astype(int, copy=False)
+
+        if baseline_concepts is None:
+            baseline_concepts = cache.concept_probs[row_indices]
+        else:
+            baseline_concepts = np.asarray(baseline_concepts, dtype=np.float32)
+            if baseline_concepts.ndim == 1:
+                baseline_concepts = baseline_concepts.reshape(1, -1)
+            if baseline_concepts.shape != concepts.shape:
+                raise ValueError(
+                    "baseline_concepts must match the concept matrix shape, got "
+                    f"{baseline_concepts.shape} and expected {concepts.shape}."
+                )
+
+        if intervention_mask is not None:
+            intervention_mask = np.asarray(intervention_mask, dtype=bool)
+            if intervention_mask.shape != concepts.shape:
+                raise ValueError(
+                    "intervention_mask must match the concept matrix shape, got "
+                    f"{intervention_mask.shape} and expected {concepts.shape}."
+                )
+
+        row_cache = _slice_prediction_cache(cache, row_indices)
+        return self._predict_from_cached_concepts(
+            concepts,
+            row_cache,
+            baseline_concepts=baseline_concepts,
+            intervention_mask=intervention_mask,
+        )
+
+    def _predict_dataset(
+        self,
+        dataset: ConceptDatasetSample,
+        *,
+        cache: bool,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        y_prob, concept_probs, prediction_cache = self._run_official_model(dataset)
+        if cache:
+            self._prediction_cache = prediction_cache
+        return y_prob, concept_probs
+
+    def _serialize_common_state(self) -> dict[str, Any]:
+        model = self._require_official_model()
+        state_dict = {
+            key: value.detach().cpu()
+            for key, value in model.state_dict().items()
+        }
+        return {
+            "version": 1,
+            "family": self.family,
+            "benchmark": self.benchmark,
+            "concept_names": copy.deepcopy(self.concept_names),
+            "class_names": copy.deepcopy(self.class_names),
+            "backbone_spec": copy.deepcopy(self.backbone_spec),
+            "model_init_kwargs": copy.deepcopy(self.model_init_kwargs),
+            "eval_config": copy.deepcopy(self.eval_config),
+            "training_summary": copy.deepcopy(self.training_summary),
+            "model_state_dict": state_dict,
+        }
+
+    def __getstate__(self) -> dict[str, Any]:
+        return self._serialize_common_state()
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self._restore_from_serialized_state(state)
+
+    def _restore_from_serialized_state(self, state: dict[str, Any]) -> None:
+        self.family = state["family"]
+        self.benchmark = state["benchmark"]
+        self.concept_names = list(state["concept_names"])
+        self.class_names = list(state["class_names"])
+        self.backbone_spec = copy.deepcopy(state["backbone_spec"])
+        self.model_init_kwargs = copy.deepcopy(state["model_init_kwargs"])
+        self.eval_config = copy.deepcopy(state["eval_config"])
+        self.training_summary = copy.deepcopy(state.get("training_summary", {}))
+        self._prediction_cache = None
+        self._dependency_error_message = _format_install_message()
+
+        try:
+            official_model = self._rebuild_model(
+                model_init_kwargs=self.model_init_kwargs,
+                backbone_spec=self.backbone_spec,
+            )
+        except Exception as exc:
+            if isinstance(exc, (ImportError, ModuleNotFoundError, CEMDependencyError)):
+                self._dependency_error_message = _format_install_message(exc)
+                official_model = None
+            else:
+                raise
+        if official_model is not None:
+            official_model.load_state_dict(state["model_state_dict"])
+            official_model.eval()
+            official_model.cpu()
+
+        self.official_model = official_model
+        concept_detector = _OfficialConceptDetectorAdapter(self)
+        label_predictor = _OfficialFrontEndAdapter(self)
+        ConceptBasedModel.__init__(
+            self,
+            concept_detector=concept_detector,
+            label_predictor=label_predictor,
+            should_propagate=False,
+        )
+
+    def _run_official_model(
+        self, dataset: ConceptDatasetSample,
+    ) -> tuple[np.ndarray, np.ndarray, _PredictionCache]:
+        raise NotImplementedError
+
+    def _predict_from_cached_concepts(
+        self, concepts: np.ndarray, cache: _PredictionCache, *,
+        baseline_concepts: np.ndarray, intervention_mask: np.ndarray | None,
+    ) -> np.ndarray:
+        raise NotImplementedError
+
+    def _rebuild_model(
+        self, *, model_init_kwargs: dict[str, Any], backbone_spec: dict[str, Any],
+    ) -> Any:
+        raise NotImplementedError

@@ -58,6 +58,59 @@ Verify the installation:
 python3 -c "import concept_benchmark; print('OK')"
 ```
 
+### Optional: CEM, ProbCBM, and ECBM Baselines
+
+The repo supports three additional CBM families beyond the standard CBM/DNN:
+
+- **CEM** — Concept Embedding Model (`--cbm-family cem`)
+- **ProbCBM** — Probabilistic Concept Bottleneck Model (`--cbm-family probcbm`)
+- **ECBM** — Energy-based Concept Bottleneck Model (`--cbm-family ecbm`)
+
+**ECBM** is included in the repo and works out of the box. **CEM and ProbCBM** require the official [`mateoespinosa/cem`](https://github.com/mateoespinosa/cem) package — install it with:
+
+```bash
+./scripts/install_cem_repo.sh
+```
+
+If you prefer the manual path:
+
+```bash
+git clone https://github.com/mateoespinosa/cem.git third_party/cem
+python -m pip install "pytorch-lightning>=1.6,<2.0" "torchmetrics<1.0"
+python -m pip install -r third_party/cem/requirements.txt
+python -m pip install -e third_party/cem
+```
+
+Once installed, use `--cbm-family` to select the model in any pipeline script:
+
+```bash
+# Train and evaluate a CEM on the robot benchmark
+python scripts/robot_pipeline.py --seed 1014 --cbm-family cem
+
+# Train and evaluate a ProbCBM on the robot benchmark
+python scripts/robot_pipeline.py --seed 1014 --cbm-family probcbm
+
+# CEM / ProbCBM on tabular sudoku
+python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family cem --stages setup cs intervene
+python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family probcbm --stages setup cs intervene
+```
+
+Key configuration options (set via `--`flags or in the config dataclass):
+
+| Parameter | Default | Description |
+|---|---|---|
+| `cem_emb_size` | 16 | Concept embedding dimension for CEM |
+| `cem_training_intervention_prob` | 0.25 | Intervention probability during CEM training |
+| `probcbm_train_class_mode` | `independent` | ProbCBM class training: `independent` or `sequential` |
+| `probcbm_n_samples_inference` | 50 | Monte Carlo samples during ProbCBM inference |
+
+Notes:
+
+- Existing CBM / DNN / conceptual-safeguards paths do not require these packages.
+- Robot support is implemented for the benchmark pipeline.
+- Sudoku support is currently limited to the tabular variant for `cem` / `probcbm`.
+- Alignment and plotting remain on the original `cbm` path.
+
 ## Quick Start
 
 A concept bottleneck model (CBM) first predicts interpretable *concepts* from inputs (e.g., "has pointy feet"), then uses those concepts to predict the final label. This two-stage design lets users inspect and correct the model's reasoning at test time — an operation called an *intervention*. This package gives you synthetic datasets where the ground-truth concepts are known, so you can measure exactly how much interventions help under different conditions.
@@ -112,6 +165,50 @@ dataset.train.explore()  # opens in the browser
 <p align="center">
   <img src="docs/assets/robot_samples.png" width="600" alt="Sample Glorps and Drents with concept annotations">
 </p>
+
+#### Controlled Semantic Space, Continuous Render Space
+
+The robot benchmark now has two levels of variation:
+
+- `semantic_id`: the finite, interpretable concept combination that determines the concept vector and label.
+- `render_id`: nuisance-only variation such as translation, scale, mild rotation, arm angle, stance, head tilt, foot orientation, stroke jitter, and small palette perturbations.
+
+Legacy behavior is still the default:
+
+```python
+legacy = DatasetGenerator("robot", seed=1014).generate()
+```
+
+Opt into broader image variety without changing the semantics:
+
+```python
+continuous = DatasetGenerator(
+    "robot",
+    seed=1014,
+    render_space_mode="continuous_light",   # or "continuous_heavy"
+    renders_per_robot=6,
+    validate_renders=True,
+    validation_checks={
+        "hands_body_clearance": "off",      # disable one collision rule only
+    },
+    group_split_by_semantic_id=True,        # prevent same semantic robot across splits
+).generate()
+```
+
+Notes:
+
+- `render_space_mode="legacy"` preserves the existing paper-style behavior.
+- `continuous_light` is conservative enough for the default 32x32 images.
+- `continuous_heavy` is a stronger stress test and is better suited to larger renders.
+- `validation_checks` lets you disable individual rules without disabling the whole validator.
+- `group_split_by_semantic_id=True` is opt-in, so paper-default splits stay unchanged.
+- For text data, `include_pose_text=True` adds only minimal neutral descriptors such as `arms angled slightly upward` or `standing with a wider stance`. It is off by default.
+
+Preview the render space without training:
+
+```bash
+python scripts/preview_robot_render_space.py --mode continuous_light --output-dir results/robot_preview
+```
 
 Train CBMs on both concept sets and compare (requires cloning the repo):
 
@@ -254,6 +351,10 @@ To reproduce the paper results — including all intervention regimes, alignment
 ```bash
 python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes   # see --help for all flags
 python scripts/sudoku_pipeline.py --seed 171
+python scripts/robot_pipeline.py --seed 1014 --cbm-family cem
+python scripts/robot_pipeline.py --seed 1014 --cbm-family probcbm
+python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family cem --stages setup cs intervene
+python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family probcbm --stages setup cs intervene
 
 # Add plot to generate figures from results
 python scripts/robot_pipeline.py --seed 1014 --stages setup cbm dnn intervene align collect plot
@@ -354,6 +455,8 @@ dataset.sample(
 
 ```bash
 python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes
+python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes --cbm-family cem
+python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes --cbm-family probcbm
 
 # Add plot to generate figures from results
 python scripts/robot_pipeline.py --seed 1014 --stages setup cbm dnn intervene align collect plot
@@ -396,6 +499,8 @@ dataset = DatasetGenerator(
 
 ```bash
 python scripts/sudoku_pipeline.py --seed 171
+python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family cem --stages setup cs intervene
+python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family probcbm --stages setup cs intervene
 ```
 
 Run `python scripts/sudoku_pipeline.py --help` for the full list of options (including training, intervention, and evaluation parameters).
@@ -812,14 +917,23 @@ The package supports six intervention regimes that simulate different real-world
 | **expert** | Ground truth | Noisy human (80% acc) | Realistic human annotator |
 | **subjective** | Noisy CBM (20% label noise) | Noisy human (80% acc) | Concepts trained on noisy labels |
 | **machine** | LFCBM (GT descriptions) | Noisy human (80% acc) | Machine-discovered concepts |
-| **llm** | LFCBM (LLM descriptions) | LLM (Gemini) | Fully automated with LLM |
-| **clip** | LFCBM (CLIP keywords) | LLM (Gemini) | Fully automated with CLIP |
+| **llm** | LFCBM (LLM descriptions) | LLM (Gemini by default) | Fully automated with LLM |
+| **clip** | LFCBM (CLIP keywords) | LLM (Gemini by default) | Fully automated with CLIP |
 
 Run regimes via the pipeline script:
 
 ```bash
 python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
     --regimes baseline expert subjective machine
+```
+
+The pipeline also exposes an experimental `placeholder3` regime slot for an additional automated baseline. It is not part of the locked paper table above and requires an explicit concepts file. You can keep using the API-backed providers, or switch the intervention judgments to local CLI loops with `--llm-provider codex_exec` or `--llm-provider claude_exec`:
+
+```bash
+python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
+    --regimes placeholder3 \
+    --placeholder3-concepts-file path/to/placeholder3.jsonl \
+    --llm-provider codex_exec
 ```
 
 For a complete end-to-end example using `ConceptInterventionRunner` with training, interventions, and alignment, see [`examples/robot_pipeline_example.py`](examples/robot_pipeline_example.py).

@@ -9,6 +9,18 @@ from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS, RobotBenchmarkCon
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.generators import DatasetGenerator
 
+SMALL_ROBOT_CONCEPTS = {
+    "head_shape": ["square", "round"],
+    "body_shape": ["square", "round"],
+    "has_knees": ["false", "true"],
+    "has_elbows": ["true"],
+    "has_antennae": ["false"],
+    "ears_shape": ["square"],
+    "mouth_type": ["closed"],
+    "hand_shape": ["round_circle"],
+    "foot_shape": ["pointy_4sided"],
+}
+
 
 # ── DatasetGenerator meta ────────────────────────────────────────────
 

@@ -7,7 +7,7 @@ import csv
 import json
 import logging
 import pickle
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Sequence
 from typing import Any
@@ -23,6 +23,15 @@ logger = logging.getLogger(__name__)
 _EPS = 1e-8
 
 
+def _best_available_device() -> torch.device:
+    """Return the best accelerator device available (cuda > mps > cpu)."""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 # --------- Configs and concept set handling ---------
 
 
@@ -31,7 +40,7 @@ class LFTrainingConfig:
     # CLIP backbone
     clip_model: str = "ViT-B-32"
     clip_pretrained: str = "laion2b_s34b_b79k"
-    device: str = "cpu"
+    device: str = field(default_factory=lambda: str(_best_available_device()))
 
     # Projection learning (Wc)
     lr: float = 1e-2
@@ -173,6 +182,7 @@ class _CLIPEncoder:
 
     def _init_model(self) -> None:
         self.device = torch.device(self._device_str)
+        logger.info("Loading CLIP model %s on device: %s", self.model_name, self.device)
         self.backend = "open_clip"
         try:
             import open_clip  # type: ignore
@@ -215,7 +225,8 @@ class _CLIPEncoder:
     def __setstate__(self, state):
         self.model_name = state["model_name"]
         self.pretrained = state["pretrained"]
-        self._device_str = state["_device_str"]
+        # Override pickled device with best available device
+        self._device_str = str(_best_available_device())
         self._loaded = False
 
     @torch.no_grad()
@@ -280,11 +291,18 @@ class _CLIPEncoder:
 
         ds = _ImgDS(paths, self.preprocess)
         dl = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=0)
+        n_batches = len(dl)
+        logger.info(
+            "CLIP encode_images: %d images, batch_size=%d, %d batches, device=%s",
+            len(paths), batch_size, n_batches, self.device,
+        )
         all_feats: list[np.ndarray] = []
-        for xb in dl:
+        for batch_idx, xb in enumerate(dl, 1):
             xb = xb.to(self.device)
             feats = self._encode_image(xb)
             all_feats.append(feats)
+            if batch_idx % 5 == 0 or batch_idx == n_batches:
+                print(f"CLIP encode_images: batch {batch_idx}/{n_batches} done", flush=True)
         x = np.concatenate(all_feats, axis=0)
         x /= np.linalg.norm(x, axis=1, keepdims=True) + _EPS
         return x.astype(np.float32)
@@ -353,7 +371,7 @@ class LabelFreeCBM:
         torch.manual_seed(int(cfg.seed))
         np.random.seed(int(cfg.seed))
 
-        self.encoder = _CLIPEncoder(cfg.clip_model, cfg.clip_pretrained, cfg.device)
+        self.encoder: _CLIPEncoder | None = None
         self.concept_set: LFConceptSet | None = None
 
         # Learned artefacts
@@ -382,6 +400,21 @@ class LabelFreeCBM:
         for k in ("_img_train", "_img_valid", "_img_test", "_txt_concepts"):
             if k not in self.__dict__:
                 self.__dict__[k] = None
+
+    def _get_encoder(self) -> _CLIPEncoder:
+        if self.encoder is None:
+            device = str(_best_available_device())
+            if device != self.cfg.device:
+                logger.warning(
+                    "LFCBM config has device=%s but %s is available — using %s for CLIP",
+                    self.cfg.device, device, device,
+                )
+            self.encoder = _CLIPEncoder(
+                self.cfg.clip_model,
+                self.cfg.clip_pretrained,
+                device,
+            )
+        return self.encoder
 
     # --------- Fit / Transform ---------
 
@@ -413,15 +446,17 @@ class LabelFreeCBM:
 
         self._img_train = _maybe(
             cache / "clip_img_train.npy",
-            lambda: self.encoder.encode_images(train_X, self.cfg.batch_size),
+            lambda: self._get_encoder().encode_images(train_X, self.cfg.batch_size),
         )
         self._img_valid = _maybe(
             cache / "clip_img_valid.npy",
-            lambda: self.encoder.encode_images(valid_X, self.cfg.batch_size),
+            lambda: self._get_encoder().encode_images(valid_X, self.cfg.batch_size),
         )
         self._txt_concepts = _maybe(
             cache / "clip_txt_concepts.npy",
-            lambda: self.encoder.encode_texts(concept_set.texts, self.cfg.batch_size),
+            lambda: self._get_encoder().encode_texts(
+                concept_set.texts, self.cfg.batch_size
+            ),
         )
 
         # 2) CLIP similarity matrix P (train/valid)
@@ -516,9 +551,9 @@ class LabelFreeCBM:
         for C in self.cfg.C_grid:
             clf = LogisticRegression(
                 solver="saga",
+                penalty="elasticnet",
                 l1_ratio=float(self.cfg.l1_ratio),
                 C=float(C),
-                multi_class="multinomial",
                 max_iter=5000,
                 random_state=int(self.cfg.seed),
             )
@@ -552,7 +587,42 @@ class LabelFreeCBM:
     def transform(self, X: Sequence[str | Path]) -> np.ndarray:
         if self.Wc is None:
             raise RuntimeError("Wc not learned. Call fit() first.")
-        img = self.encoder.encode_images(X, self.cfg.batch_size)  # (N, D)
+        # Cache CLIP image embeddings to disk so they're shared across
+        # LFCBM instances (different concept sources, same images).
+        import hashlib
+
+        _x_list = list(X)
+        cache_key = (len(_x_list), str(_x_list[0]), str(_x_list[-1])) if _x_list else (0,)
+        if not hasattr(self, "_clip_embed_cache"):
+            self._clip_embed_cache: dict[tuple, np.ndarray] = {}
+        if cache_key in self._clip_embed_cache:
+            img = self._clip_embed_cache[cache_key]
+        else:
+            # Check disk cache (shared across regimes)
+            disk_hit = False
+            disk_path = None
+            cache_dir = getattr(self.cfg, "cache_dir", None)
+            if cache_dir is not None:
+                # Use parent dir so all regimes share one image cache
+                shared_dir = Path(cache_dir).parent / "lfcbm_shared_img_cache"
+                shared_dir.mkdir(parents=True, exist_ok=True)
+                h = hashlib.sha1()
+                for p in _x_list:
+                    h.update(str(p).encode("utf-8"))
+                h.update(str(len(_x_list)).encode("utf-8"))
+                disk_path = shared_dir / f"clip_img_{h.hexdigest()[:16]}.npy"
+                if disk_path.exists():
+                    img = np.load(disk_path)
+                    disk_hit = True
+                    logger.info("CLIP image embeddings loaded from disk cache: %s", disk_path.name)
+
+            if not disk_hit:
+                img = self._get_encoder().encode_images(X, self.cfg.batch_size)  # (N, D)
+                if disk_path is not None:
+                    np.save(disk_path, img)
+                    logger.info("CLIP image embeddings saved to disk cache: %s", disk_path.name)
+
+            self._clip_embed_cache[cache_key] = img
         Wk = self.Wc.detach().cpu().numpy()  # (Mk, D)
         fc = img @ Wk.T  # (N, Mk)
         return fc.astype(np.float32)

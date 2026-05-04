@@ -84,10 +84,15 @@ def setup_dataset(
     if excluded:
         ds.drop_concepts(excluded)
 
+    groups = (
+        ds.meta.get("semantic_id", ds.meta["row_index"])
+        if config.group_split_by_semantic_id
+        else ds.meta["row_index"]
+    )
     ds.sample(
         test_size=0.15,
         val_size=0.2,
-        groups=ds.meta["row_index"],
+        groups=groups,
         stratify=ds.y,
         seed=config.seed + 1,
     )
