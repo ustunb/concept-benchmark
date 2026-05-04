@@ -118,8 +118,8 @@ AUTOMATED_REGIME_SPECS = {
         "config_attr": "clip_concepts_file",
         "default_filename": "clip.jsonl",
     },
-    "placeholder3": {
-        "config_attr": "placeholder3_concepts_file",
+    "custom": {
+        "config_attr": "custom_concepts_file",
         "default_filename": None,
     },
 }
@@ -2776,16 +2776,16 @@ def _parse_args(argv=None):
         help="Concept descriptions JSONL for the clip automated regime.",
     )
     parser.add_argument(
-        "--placeholder3-concepts-file",
+        "--custom-concepts-file",
         type=str,
         default=None,
-        help="Concept descriptions JSONL for the placeholder3 automated regime.",
+        help="Concept descriptions JSONL for the custom automated regime.",
     )
     parser.add_argument(
         "--regimes",
         nargs="+",
         default=None,
-        help="Intervention regimes (e.g. baseline expert llm placeholder3).",
+        help="Intervention regimes (e.g. baseline expert llm custom).",
     )
     parser.add_argument("--llm-api-key", type=str, default=None)
     parser.add_argument("--force-retrain", action="store_true", dest="force_retrain")
@@ -2847,8 +2847,8 @@ def main(argv=None):
         config.llm_concepts_file = args.llm_concepts_file
     if args.clip_concepts_file:
         config.clip_concepts_file = args.clip_concepts_file
-    if args.placeholder3_concepts_file:
-        config.placeholder3_concepts_file = args.placeholder3_concepts_file
+    if args.custom_concepts_file:
+        config.custom_concepts_file = args.custom_concepts_file
     if args.regimes:
         config.intervention_regimes = args.regimes
     if args.llm_api_key:

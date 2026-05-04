@@ -156,7 +156,7 @@ _ECBM_FINGERPRINT_FIELDS = frozenset(
     }
 )
 ROBOT_VALID_REGIMES = frozenset(
-    {"baseline", "expert", "subjective", "machine", "llm", "clip", "placeholder3"}
+    {"baseline", "expert", "subjective", "machine", "llm", "clip", "custom"}
 )
 ROBOT_TEXT_VALID_REGIMES = frozenset({"baseline", "expert", "subjective", "machine"})
 
@@ -296,7 +296,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     label_free_concepts_file: str = field(default="", metadata={"scope": "image"})
     llm_concepts_file: str = field(default="", metadata={"scope": "image"})
     clip_concepts_file: str = field(default="", metadata={"scope": "image"})
-    placeholder3_concepts_file: str = field(default="", metadata={"scope": "image"})
+    custom_concepts_file: str = field(default="", metadata={"scope": "image"})
     llm_provider: str = "gemini"
     llm_model: str = "gemini-3-flash-preview"
     llm_reasoning_effort: str = ""
@@ -532,7 +532,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 "label_free_concepts_file",
                 "llm_concepts_file",
                 "clip_concepts_file",
-                "placeholder3_concepts_file",
+                "custom_concepts_file",
                 "llm_provider",
                 "llm_model",
                 "llm_reasoning_effort",
@@ -586,7 +586,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             "label_free_concepts_file",
             "llm_concepts_file",
             "clip_concepts_file",
-            "placeholder3_concepts_file",
+            "custom_concepts_file",
             "llm_provider",
             "llm_model",
             "llm_reasoning_effort",

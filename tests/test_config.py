@@ -43,7 +43,7 @@ class TestRobotConfigValidation:
                 "machine",
                 "llm",
                 "clip",
-                "placeholder3",
+                "custom",
             ]
         )
         assert len(cfg.intervention_regimes) == 7
@@ -245,7 +245,7 @@ class TestYAMLRoundTrip:
             seed=42,
             concept_preset="foot_subtypes",
             intervention_regimes=["baseline", "expert"],
-            placeholder3_concepts_file="concepts/placeholder3.jsonl",
+            custom_concepts_file="concepts/custom.jsonl",
         )
         self._assert_roundtrip(cfg, RobotBenchmarkConfig, tmp_path)
 
@@ -286,7 +286,7 @@ class TestModelFingerprintScope:
         changed = RobotBenchmarkConfig(
             llm_concepts_file="custom/llm.jsonl",
             clip_concepts_file="custom/clip.jsonl",
-            placeholder3_concepts_file="custom/placeholder3.jsonl",
+            custom_concepts_file="custom/custom.jsonl",
             llm_provider="anthropic",
             llm_model="claude-3-5-sonnet",
         )

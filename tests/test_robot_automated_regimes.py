@@ -13,8 +13,8 @@ from scripts.robot_pipeline import (
 )
 
 
-def test_placeholder3_is_registered():
-    assert "placeholder3" in AUTOMATED_REGIMES
+def test_custom_is_registered():
+    assert "custom" in AUTOMATED_REGIMES
 
 
 def test_llm_uses_packaged_default_concepts_file():
@@ -24,25 +24,25 @@ def test_llm_uses_packaged_default_concepts_file():
     assert path.exists()
 
 
-def test_placeholder3_requires_explicit_concepts_file():
-    cfg = RobotBenchmarkConfig(intervention_regimes=["baseline", "placeholder3"])
-    with pytest.raises(ValueError, match="config.placeholder3_concepts_file"):
-        _resolve_automated_regime_concepts_file(cfg, "placeholder3")
+def test_custom_requires_explicit_concepts_file():
+    cfg = RobotBenchmarkConfig(intervention_regimes=["baseline", "custom"])
+    with pytest.raises(ValueError, match="config.custom_concepts_file"):
+        _resolve_automated_regime_concepts_file(cfg, "custom")
 
 
-def test_placeholder3_rejects_missing_concepts_path(tmp_path):
+def test_custom_rejects_missing_concepts_path(tmp_path):
     cfg = RobotBenchmarkConfig(
-        placeholder3_concepts_file=str(tmp_path / "missing_placeholder3.jsonl")
+        custom_concepts_file=str(tmp_path / "missing_custom.jsonl")
     )
     with pytest.raises(ValueError, match="does not exist"):
-        _resolve_automated_regime_concepts_file(cfg, "placeholder3")
+        _resolve_automated_regime_concepts_file(cfg, "custom")
 
 
-def test_placeholder3_accepts_explicit_concepts_file(tmp_path):
-    concepts = tmp_path / "placeholder3.jsonl"
+def test_custom_accepts_explicit_concepts_file(tmp_path):
+    concepts = tmp_path / "custom.jsonl"
     concepts.write_text('{"key":"demo","text":"demo"}\n')
-    cfg = RobotBenchmarkConfig(placeholder3_concepts_file=str(concepts))
-    path = _resolve_automated_regime_concepts_file(cfg, "placeholder3")
+    cfg = RobotBenchmarkConfig(custom_concepts_file=str(concepts))
+    path = _resolve_automated_regime_concepts_file(cfg, "custom")
     assert path == concepts.resolve()
 
 
@@ -84,12 +84,12 @@ def test_automated_intervention_settings_honor_runtime_overrides():
 
 
 def test_parse_args_accepts_new_automated_regime_flags(tmp_path):
-    placeholder = tmp_path / "placeholder3.jsonl"
+    placeholder = tmp_path / "custom.jsonl"
     args = _parse_args(
         [
             "--regimes",
             "baseline",
-            "placeholder3",
+            "custom",
             "--llm-provider",
             "codex_exec",
             "--llm-model",
@@ -109,11 +109,11 @@ def test_parse_args_accepts_new_automated_regime_flags(tmp_path):
             "concept_benchmark/concept_descriptions/llm.jsonl",
             "--clip-concepts-file",
             "concept_benchmark/concept_descriptions/clip.jsonl",
-            "--placeholder3-concepts-file",
+            "--custom-concepts-file",
             str(placeholder),
         ]
     )
-    assert args.regimes == ["baseline", "placeholder3"]
+    assert args.regimes == ["baseline", "custom"]
     assert args.llm_provider == "codex_exec"
     assert args.llm_model == "gpt-5"
     assert args.llm_reasoning_effort == "medium"
@@ -122,4 +122,4 @@ def test_parse_args_accepts_new_automated_regime_flags(tmp_path):
     assert args.llm_batch_size == 8
     assert args.llm_batch_sleep == 0.0
     assert args.llm_api_key_env == "GEMINI_API_KEY_ALT"
-    assert Path(args.placeholder3_concepts_file) == placeholder
+    assert Path(args.custom_concepts_file) == placeholder
