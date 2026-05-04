@@ -13,7 +13,9 @@ from concept_benchmark.robots import (
 
 
 def test_from_dataset_infers_image_foot_hierarchy():
-    ds = DatasetGenerator(render_images=False, concept_preset="foot_subtypes").generate()
+    ds = DatasetGenerator(
+        render_images=False, concept_preset="foot_subtypes"
+    ).generate()
     hierarchy = RobotConceptHierarchy.from_dataset(ds)
 
     expected_children = tuple(
@@ -26,9 +28,7 @@ def test_from_dataset_infers_image_foot_hierarchy():
         "foot_shape",
         "pointy",
     )
-    assert "foot_shape_flat_trapezoid" in hierarchy.siblings(
-        "foot_shape_pointy_square"
-    )
+    assert "foot_shape_flat_trapezoid" in hierarchy.siblings("foot_shape_pointy_square")
     assert HierarchyImplication(
         source="foot_shape_pointy_square",
         target="foot_shape",

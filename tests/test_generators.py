@@ -208,7 +208,6 @@ class TestRobotDatasetGenerator:
         assert gen.config.label_formula.weights == {"foot_shape": 8.0}
 
 
-
 # ── Sudoku via DatasetGenerator ──────────────────────────────────────
 
 

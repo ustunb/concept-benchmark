@@ -79,6 +79,7 @@ def _toy_dataset_sample(n: int, k: int) -> ConceptDatasetSample:
         },
     )
 
+
 class _ToyOfficialModule(torch.nn.Module):
     def __init__(self, n_concepts: int) -> None:
         super().__init__()
@@ -209,7 +210,9 @@ def test_official_replay_supports_repeated_rows_with_alignment_metadata():
 
     assert y_prob.shape == (3, 2)
     assert model.last_replay is not None
-    np.testing.assert_allclose(model.last_replay["cached_concepts"], cached[row_indices])
+    np.testing.assert_allclose(
+        model.last_replay["cached_concepts"], cached[row_indices]
+    )
     np.testing.assert_allclose(model.last_replay["baseline_concepts"], baseline)
     np.testing.assert_allclose(
         model.last_replay["effective"],
@@ -237,10 +240,15 @@ def test_official_replay_requires_safe_full_dataset_alignment():
 
     modified_full = cached.copy()
     modified_full[0, 0] = 0.95
-    with pytest.raises(ValueError, match="only safe when replaying the cached concept predictions exactly"):
+    with pytest.raises(
+        ValueError,
+        match="only safe when replaying the cached concept predictions exactly",
+    ):
         model.predict_proba_from_concepts(modified_full)
 
-    with pytest.raises(ValueError, match="baseline_concepts must align with the cached dataset rows"):
+    with pytest.raises(
+        ValueError, match="baseline_concepts must align with the cached dataset rows"
+    ):
         model.predict_proba_from_concepts(
             modified_full,
             baseline_concepts=cached[::-1],

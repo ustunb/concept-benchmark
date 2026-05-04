@@ -292,10 +292,7 @@ class RobotConceptHierarchy:
                             ),
                         )
                     )
-                    if (
-                        max_violations is not None
-                        and len(violations) >= max_violations
-                    ):
+                    if max_violations is not None and len(violations) >= max_violations:
                         return violations
 
         return violations

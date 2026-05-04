@@ -605,9 +605,7 @@ def plot_model_comparison(
 
     # Compute total group width to center the bars
     group_width = (
-        n_models * 2 * bar_w
-        + n_models * pair_gap
-        + (n_models - 1) * model_gap
+        n_models * 2 * bar_w + n_models * pair_gap + (n_models - 1) * model_gap
     )
 
     for m_idx, model_name in enumerate(models):
@@ -622,9 +620,7 @@ def plot_model_comparison(
             accs = []
             for k in budgets:
                 row = df[df["budget"] == k]
-                accs.append(
-                    float(row["accuracy"].values[0]) * 100 if len(row) else 0
-                )
+                accs.append(float(row["accuracy"].values[0]) * 100 if len(row) else 0)
 
             # Position: model block offset + bar within pair
             block_offset = m_idx * (2 * bar_w + pair_gap + model_gap)

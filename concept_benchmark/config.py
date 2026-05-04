@@ -850,9 +850,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     def get_model_path(self, model_class: str, data_type: str | None = None) -> Path:
         """Return the path where a trained model is saved."""
         dt = data_type or self.data_type
-        filename = (
-            f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}"
-        )
+        filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}"
         return results_dir / f"{filename}.model"
 
     def get_results_path(
@@ -860,9 +858,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     ) -> Path:
         """Return the path where results are saved."""
         dt = data_type or self.data_type
-        filename = (
-            f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}"
-        )
+        filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}"
         return results_dir / f"{filename}.results"
 
     def get_alignment_weights(self) -> dict[str, float]:
