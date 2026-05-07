@@ -1,8 +1,8 @@
 # Configuration file for the Sphinx documentation builder.
 
 project = "concept-benchmark"
-copyright = "2025, Skirzynski et al."
-author = "Julian Skirzynski, Harry Cheon, Shreyas Kadekodi, Meredith Stewart, Berk Ustun"
+copyright = "2025, Anonymous Authors"
+author = "Anonymous Authors"
 
 extensions = [
     "sphinx.ext.autodoc",

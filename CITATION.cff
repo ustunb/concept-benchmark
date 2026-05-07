@@ -4,25 +4,11 @@ title: "Measuring What Matters: Synthetic Benchmarks for Concept Bottleneck Mode
 type: software
 version: 0.3.0
 date-released: 2026-01-01
-url: "https://github.com/ustunb/concept-benchmark"
-repository-code: "https://github.com/ustunb/concept-benchmark"
+url: "https://anonymous.4open.science/r/concept-benchmark-84D2"
+repository-code: "https://anonymous.4open.science/r/concept-benchmark-84D2"
 license: MIT
 authors:
-  - family-names: Skirzynski
-    given-names: Julian
-    affiliation: "UC San Diego, CSE"
-  - family-names: Cheon
-    given-names: Harry
-    affiliation: "UC San Diego, CSE"
-  - family-names: Kadekodi
-    given-names: Shreyas
-    affiliation: "UC San Diego, CSE"
-  - family-names: Stewart
-    given-names: Meredith
-    affiliation: "UC San Diego, CSE"
-  - family-names: Ustun
-    given-names: Berk
-    affiliation: "UC San Diego, CSE"
+  - name: "Anonymous Authors"
 keywords:
   - Concept Bottleneck Models
   - Safety

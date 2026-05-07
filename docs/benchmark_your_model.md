@@ -239,4 +239,4 @@ Run the built-in pipeline to generate baseline numbers:
 ./venv/bin/python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes
 ```
 
-For the complete set of expected results across all regimes, see the [README](https://github.com/ustunb/concept-benchmark#readme).
+For the complete set of expected results across all regimes, see the [README](https://anonymous.4open.science/r/concept-benchmark-84D2#readme).

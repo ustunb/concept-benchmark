@@ -42,4 +42,4 @@ The `monotonicity_constraints` dict maps concept names to their required sign: `
 | ideal (7 concepts) | 0.8673 | 0.8657 | +10.2% | -0.4% |
 | subconcept (12 concepts) | 0.7812 | 0.7656 | +6.9% | -8.0% |
 
-For a complete end-to-end example with training, interventions, and alignment, see [`examples/robot_pipeline_example.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/robot_pipeline_example.py).
+For a complete end-to-end example with training, interventions, and alignment, see [`examples/robot_pipeline_example.py`](https://anonymous.4open.science/r/concept-benchmark-84D2/blob/main/examples/robot_pipeline_example.py).

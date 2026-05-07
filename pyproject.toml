@@ -5,11 +5,7 @@ description = "Synthetic benchmarks for evaluating Concept Bottleneck Models."
 license = "MIT"
 readme = "README.md"
 authors = [
-    { name = "Julian Skirzynski" },
-    { name = "Harry Cheon" },
-    { name = "Shreyas Kadekodi" },
-    { name = "Meredith Stewart" },
-    { name = "Berk Ustun" },
+    { name = "Anonymous Authors" },
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -46,7 +42,7 @@ dependencies = [
 explore = ["renumics-spotlight>=1.6"]
 
 [project.urls]
-Repository = "https://github.com/ustunb/concept-benchmark"
+Repository = "https://github.com/anonymous/concept-benchmark"
 
 [dependency-groups]
 dev = [

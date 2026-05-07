@@ -22,7 +22,7 @@ pip install concept-benchmark
 Or install from source (includes training/evaluation code and pipeline scripts):
 
 ```bash
-git clone https://github.com/ustunb/concept-benchmark.git
+git clone https://anonymous.4open.science/r/concept-benchmark-84D2.git
 cd concept-benchmark
 uv sync
 ```

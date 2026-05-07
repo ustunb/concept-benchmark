@@ -2,7 +2,7 @@
 
 The `concept_benchmark.evaluation` module provides metric functions and plotting utilities for evaluating concept bottleneck models. All metrics take numpy arrays and return floats. All plot functions return `(fig, ax)` and accept an optional `ax` parameter for composing multiple plots on one figure.
 
-For formal definitions, see the paper: *Measuring What Matters: Synthetic Benchmarks for Concept Bottleneck Models* (Skirzynski et al.).
+For formal definitions, see the paper: *Measuring What Matters: Synthetic Benchmarks for Concept Bottleneck Models* .
 
 ## Metrics
 
