@@ -58,7 +58,8 @@ Verify the installation:
 python3 -c "import concept_benchmark; print('OK')"
 ```
 
-### Optional: CEM, ProbCBM, and ECBM Baselines
+<details>
+<summary><b>Optional: CEM, ProbCBM, and ECBM Baselines</b></summary>
 
 The repo supports three additional CBM families beyond the standard CBM/DNN:
 
@@ -111,13 +112,13 @@ Notes:
 - Sudoku support is currently limited to the tabular variant for `cem` / `probcbm`.
 - Alignment and plotting remain on the original `cbm` path.
 
+</details>
+
 ## Quick Start
 
 A concept bottleneck model (CBM) first predicts interpretable *concepts* from inputs (e.g., "has pointy feet"), then uses those concepts to predict the final label. This two-stage design lets users inspect and correct the model's reasoning at test time — an operation called an *intervention*. This package gives you synthetic datasets where the ground-truth concepts are known, so you can measure exactly how much interventions help under different conditions.
 
-### Robot Classification
-
-The robot benchmark classifies fictional robots — **Glorps** vs. **Drents** — from their body features:
+**Robot** — classify fictional robots (**Glorps** vs. **Drents**) from body features:
 
 ```python
 from concept_benchmark.robots import DatasetGenerator
@@ -145,80 +146,11 @@ print(dataset.train.concepts)
 #  'foot_shape_pointy_square', 'foot_shape_pointy_4sided']
 ```
 
-See [Robot Parameters](#parameters) for the full list of options (stochastic labels, label formula, image size, subconcepts, etc.).
-
-Inspect the data:
-
-```python
-dataset.train.to_dataframe().head(2)
-#    head_shape  body_shape  has_knees  ...  foot_shape_pointy_4sided  label  class
-# 0           0           0          0  ...                         0      1  glorp
-# 1           0           0          0  ...                         0      1  glorp
-```
-
-For interactive browsing with [Renumics Spotlight](https://github.com/Renumics/spotlight) (`pip install concept-benchmark[explore]`):
-
-```python
-dataset.train.explore()  # opens in the browser
-```
-
 <p align="center">
   <img src="docs/assets/robot_samples.png" width="600" alt="Sample Glorps and Drents with concept annotations">
 </p>
 
-Train CBMs on both concept sets and compare (requires cloning the repo):
-
-```python
-from concept_benchmark.robots import DatasetGenerator
-from concept_benchmark.transforms import ConceptDropGenerator
-from concept_benchmark.evaluation import accuracy, plot_concept_discovery
-from experiments.models import ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier
-import pandas as pd
-
-def train_and_evaluate(concept_preset, drop_list):
-    """Generate data, train CBM, return accuracy."""
-    ds = DatasetGenerator(seed=1014, concept_preset=concept_preset).generate()
-    ds = ConceptDropGenerator(ds, drop_list).generate()
-    ds.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
-
-    cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=ds.train.n_concepts, input_size=32))
-    cbm = ConceptBasedModel(concept_detector=cd)
-    cbm.fit(ds.train, ds.val, concept_fit_params={"epochs": 50, "lr": 1e-3, "patience": 10})
-    return accuracy(cbm.predict(ds.test), ds.test.y)
-
-# Step 1: Train on ideal concepts (7 concepts)
-ideal_acc = train_and_evaluate("ground_truth", [
-    "has_elbows", "hand_shape",
-    "foot_shape_flat_rounded", "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
-    "foot_shape_flat_lshaped", "foot_shape_pointy_4sided", "foot_shape_pointy_square",
-    "foot_shape_pointy_rounded", "foot_shape_flat_5sided", "foot_shape_flat_square",
-    "foot_shape_flat_trapezoid",
-])
-print(f"Ideal CBM: {ideal_acc:.4f}")      # 0.8673
-
-# Step 2: Train on subconcepts (12 concepts)
-sub_acc = train_and_evaluate("foot_subtypes", [
-    "has_elbows", "hand_shape", "foot_shape",
-    "foot_shape_flat_rounded", "foot_shape_flat_lshaped",
-    "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
-])
-print(f"Subconcept CBM: {sub_acc:.4f}")    # 0.7812
-
-# Step 3: Plot the comparison
-ideal_df = pd.DataFrame({"budget": [0], "accuracy": [ideal_acc]})
-sub_df = pd.DataFrame({"budget": [0], "accuracy": [sub_acc]})
-fig, ax = plot_concept_discovery(ideal_df, sub_df, dnn_accuracy=0.8746, budgets=[0])
-```
-
-<p align="center">
-  <img src="docs/assets/concept_discovery.png" width="500" alt="Concept discovery: ideal vs subconcept accuracy">
-</p>
-
-For a complete walkthrough including interventions, alignment, and regime comparisons, see `examples/robot_pipeline_example.py`.
-
-### Sudoku Validation
-
-The Sudoku benchmark determines whether a 9×9 board is valid. 27 concepts capture row, column, and block validity — a board is valid iff all 27 are true:
+**Sudoku** — determine whether a 9×9 board is valid. 27 concepts capture row, column, and block validity:
 
 ```python
 from concept_benchmark.sudoku import DatasetGenerator
@@ -238,89 +170,15 @@ print(dataset.train.C.shape)   # (600, 27) — 27 concept annotations
 print(dataset.train.concepts)  # ['row_valid_1', 'row_valid_2', ..., 'block_valid_9']
 ```
 
-Inspect the data:
-
-```python
-df = dataset.train.to_dataframe()
-show_cols = list(dataset.train.concepts[:5]) + ["label"]
-print(df[show_cols])
-#      row_valid_1  row_valid_2  row_valid_3  row_valid_4  row_valid_5  label
-# 0              1            1            1            1            1      1
-# ..           ...          ...          ...          ...          ...    ...
-# 301            1            0            0            1            1      0
-```
-
 <p align="center">
   <img src="docs/assets/sudoku_samples.png" width="600" alt="Sample Sudoku boards generated by the benchmark">
 </p>
 
-Train a concept-supervised model and evaluate selective classification (requires cloning the repo):
-
-```python
-from concept_benchmark.sudoku import DatasetGenerator
-from concept_benchmark.evaluation import plot_selective_classification
-from experiments.models import ConceptDetector, FrontEndModel, ConceptBasedModel, GroupPoolingConceptSudokuCNN
-from experiments.utils import determine_device, get_loader_config
-import numpy as np
-
-# Generate data and train CS model
-dataset = DatasetGenerator(seed=171, n_boards=1000, max_cell_swaps=9).generate()
-dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=171)
-
-cd = ConceptDetector(model=GroupPoolingConceptSudokuCNN())
-cd.fit(dataset.train, dataset.val, fit_params={
-    "epochs": 100, "lr": 1e-3, "patience": 20,
-    "device": str(determine_device()), **get_loader_config(),
-})
-fe = FrontEndModel()
-fe.fit(dataset.train.C, dataset.train.y)
-cbm = ConceptBasedModel(concept_detector=cd, label_predictor=fe)
-
-# Selective classification — abstain when uncertain
-# Binary concept predictions → frontend probability → confidence score
-# (for concept-level uncertainty propagation, use cd.predict_proba() instead)
-C_pred = cd.predict(dataset.test).astype(np.float32)
-label_proba = fe.predict_proba(C_pred)[:, 1]
-y_pred = fe.predict(C_pred)
-confidence = np.abs(label_proba - 0.5)
-
-# Find threshold for 95% selective accuracy
-for tau in np.linspace(0, 0.5, 500):
-    keep = confidence >= tau
-    if keep.sum() > 0 and np.mean(y_pred[keep] == dataset.test.y[keep]) >= 0.95:
-        break
-
-sel_acc = np.mean(y_pred[keep] == dataset.test.y[keep])
-cov = keep.mean()
-print(f"CS model: selective_acc={sel_acc:.3f}, coverage={cov:.3f}")  # ~0.98, ~1.0
-```
-
-<p align="center">
-  <img src="docs/assets/selective_classification.png" width="500" alt="Selective classification: DNN vs CBM">
-</p>
-
-For a complete walkthrough including selective classification and interventions, see `examples/sudoku_quickstart.py`.
-
-### Full Experiment Pipelines
-
-To reproduce the paper results — including all intervention regimes, alignment constraints, and selective classification — use the pipeline scripts (requires cloning the repo):
-
-```bash
-python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes   # see --help for all flags
-python scripts/sudoku_pipeline.py --seed 171
-python scripts/robot_pipeline.py --seed 1014 --cbm-family cem
-python scripts/robot_pipeline.py --seed 1014 --cbm-family probcbm
-python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family cem --stages setup cs intervene
-python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family probcbm --stages setup cs intervene
-
-# Add plot to generate figures from results
-python scripts/robot_pipeline.py --seed 1014 --stages setup cbm dnn intervene align collect plot
-```
+For complete walkthroughs including training and evaluation, see [`examples/robot_pipeline_example.py`](examples/robot_pipeline_example.py) and [`examples/sudoku_quickstart.py`](examples/sudoku_quickstart.py).
 
 ## Benchmarks
 
 ### Robot Classification
-
 
 <p align="center">
   <img src="docs/assets/robot_concepts.png" width="400" alt="Robot with annotated concepts">
@@ -376,6 +234,21 @@ dataset = DatasetGenerator(
 ).generate()
 ```
 
+#### Inspecting the data
+
+```python
+dataset.train.to_dataframe().head(2)
+#    head_shape  body_shape  has_knees  ...  foot_shape_pointy_4sided  label  class
+# 0           0           0          0  ...                         0      1  glorp
+# 1           0           0          0  ...                         0      1  glorp
+```
+
+For interactive browsing with [Renumics Spotlight](https://github.com/Renumics/spotlight) (`pip install concept-benchmark[explore]`):
+
+```python
+dataset.train.explore()  # opens in the browser
+```
+
 #### Post-processing
 
 After generating, you can drop concepts and split into train/val/test:
@@ -421,6 +294,58 @@ python scripts/robot_pipeline.py --seed 1014 --stages setup cbm dnn intervene al
 
 Run `python scripts/robot_pipeline.py --help` for the full list of options (including training, intervention, and regime parameters).
 
+#### Training and evaluation
+
+Train CBMs on both concept sets and compare (requires cloning the repo):
+
+```python
+from concept_benchmark.robots import DatasetGenerator
+from concept_benchmark.transforms import ConceptDropGenerator
+from concept_benchmark.evaluation import accuracy, plot_concept_discovery
+from experiments.models import ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier
+import pandas as pd
+
+def train_and_evaluate(concept_preset, drop_list):
+    """Generate data, train CBM, return accuracy."""
+    ds = DatasetGenerator(seed=1014, concept_preset=concept_preset).generate()
+    ds = ConceptDropGenerator(ds, drop_list).generate()
+    ds.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
+
+    cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=ds.train.n_concepts, input_size=32))
+    cbm = ConceptBasedModel(concept_detector=cd)
+    cbm.fit(ds.train, ds.val, concept_fit_params={"epochs": 50, "lr": 1e-3, "patience": 10})
+    return accuracy(cbm.predict(ds.test), ds.test.y)
+
+# Step 1: Train on ideal concepts (7 concepts)
+ideal_acc = train_and_evaluate("ground_truth", [
+    "has_elbows", "hand_shape",
+    "foot_shape_flat_rounded", "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
+    "foot_shape_flat_lshaped", "foot_shape_pointy_4sided", "foot_shape_pointy_square",
+    "foot_shape_pointy_rounded", "foot_shape_flat_5sided", "foot_shape_flat_square",
+    "foot_shape_flat_trapezoid",
+])
+print(f"Ideal CBM: {ideal_acc:.4f}")      # 0.8673
+
+# Step 2: Train on subconcepts (12 concepts)
+sub_acc = train_and_evaluate("foot_subtypes", [
+    "has_elbows", "hand_shape", "foot_shape",
+    "foot_shape_flat_rounded", "foot_shape_flat_lshaped",
+    "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
+])
+print(f"Subconcept CBM: {sub_acc:.4f}")    # 0.7812
+
+# Step 3: Plot the comparison
+ideal_df = pd.DataFrame({"budget": [0], "accuracy": [ideal_acc]})
+sub_df = pd.DataFrame({"budget": [0], "accuracy": [sub_acc]})
+fig, ax = plot_concept_discovery(ideal_df, sub_df, dnn_accuracy=0.8746, budgets=[0])
+```
+
+<p align="center">
+  <img src="docs/assets/concept_discovery.png" width="500" alt="Concept discovery: ideal vs subconcept accuracy">
+</p>
+
+For a complete walkthrough including interventions, alignment, and regime comparisons, see [`examples/robot_pipeline_example.py`](examples/robot_pipeline_example.py).
+
 ### Sudoku Validation
 
 This benchmark targets automation settings where the system handles routine cases and defers uncertain ones to a human. The task is to determine whether a 9×9 Sudoku board is valid, i.e., contains the digits 1–9 exactly once in each row, column, and block. The 27 concepts correspond to the validity of each row, column, and 3×3 block. A board is valid if and only if all 27 concepts are true (AND structure), so a single violated concept is enough to invalidate the board. When the model abstains, a human can verify specific concepts (e.g., "is row 5 valid?") to resolve the uncertainty.
@@ -452,6 +377,18 @@ dataset = DatasetGenerator(
 ).generate()
 ```
 
+#### Inspecting the data
+
+```python
+df = dataset.train.to_dataframe()
+show_cols = list(dataset.train.concepts[:5]) + ["label"]
+print(df[show_cols])
+#      row_valid_1  row_valid_2  row_valid_3  row_valid_4  row_valid_5  label
+# 0              1            1            1            1            1      1
+# ..           ...          ...          ...          ...          ...    ...
+# 301            1            0            0            1            1      0
+```
+
 #### Pipeline
 
 ```bash
@@ -462,6 +399,54 @@ python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family pr
 
 Run `python scripts/sudoku_pipeline.py --help` for the full list of options (including training, intervention, and evaluation parameters).
 
+#### Training and evaluation
+
+Train a concept-supervised model and evaluate selective classification (requires cloning the repo):
+
+```python
+from concept_benchmark.sudoku import DatasetGenerator
+from experiments.models import ConceptDetector, FrontEndModel, ConceptBasedModel, GroupPoolingConceptSudokuCNN
+from experiments.utils import determine_device, get_loader_config
+import numpy as np
+
+# Generate data and train CS model
+dataset = DatasetGenerator(seed=171, n_boards=1000, max_cell_swaps=9).generate()
+dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=171)
+
+cd = ConceptDetector(model=GroupPoolingConceptSudokuCNN())
+cd.fit(dataset.train, dataset.val, fit_params={
+    "epochs": 100, "lr": 1e-3, "patience": 20,
+    "device": str(determine_device()), **get_loader_config(),
+})
+fe = FrontEndModel()
+fe.fit(dataset.train.C, dataset.train.y)
+cbm = ConceptBasedModel(concept_detector=cd, label_predictor=fe)
+
+# Selective classification — abstain when uncertain
+# Binary concept predictions → frontend probability → confidence score
+# (for concept-level uncertainty propagation, use cd.predict_proba() instead)
+C_pred = cd.predict(dataset.test).astype(np.float32)
+label_proba = fe.predict_proba(C_pred)[:, 1]
+y_pred = fe.predict(C_pred)
+confidence = np.abs(label_proba - 0.5)
+
+# Find threshold for 95% selective accuracy
+for tau in np.linspace(0, 0.5, 500):
+    keep = confidence >= tau
+    if keep.sum() > 0 and np.mean(y_pred[keep] == dataset.test.y[keep]) >= 0.95:
+        break
+
+sel_acc = np.mean(y_pred[keep] == dataset.test.y[keep])
+cov = keep.mean()
+print(f"CS model: selective_acc={sel_acc:.3f}, coverage={cov:.3f}")  # ~0.98, ~1.0
+```
+
+<p align="center">
+  <img src="docs/assets/selective_classification.png" width="500" alt="Selective classification: DNN vs CBM">
+</p>
+
+For a complete walkthrough including selective classification and interventions, see [`examples/sudoku_quickstart.py`](examples/sudoku_quickstart.py).
+
 <details>
 <summary><h2 style="display:inline">Benchmark Your Own Model</h2></summary>
 
@@ -471,7 +456,7 @@ This guide shows how to evaluate your own concept bottleneck model on the benchm
 
 ### Getting data for your model
 
-Generate a dataset as shown in the [Quick Start](#robot-classification), then access the splits:
+Generate a dataset as shown in the [Quick Start](#quick-start), then access the splits:
 
 ```python
 train, val, test = dataset.train, dataset.val, dataset.test
