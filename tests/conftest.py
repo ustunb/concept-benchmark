@@ -13,6 +13,21 @@ from PIL import Image
 from concept_benchmark.data import ConceptDataset
 
 
+# Some CUDA + cuDNN combinations (e.g. cuDNN 9.x with GTX 10xx series) raise
+# CUDNN_STATUS_NOT_INITIALIZED on the first conv2d call but work fine with
+# cuDNN disabled. Detect that case once at session start and turn off cuDNN
+# globally so the regression tests can run on heterogeneous hardware.
+if torch.cuda.is_available() and torch.backends.cudnn.enabled:
+    try:
+        _probe_x = torch.randn(1, 1, 4, 4, device="cuda")
+        _probe_w = torch.randn(1, 1, 3, 3, device="cuda")
+        torch.nn.functional.conv2d(_probe_x, _probe_w)
+        del _probe_x, _probe_w
+    except RuntimeError as _e:
+        if "cuDNN" in str(_e) or "GET was unable" in str(_e):
+            torch.backends.cudnn.enabled = False
+
+
 def _any_state_diff(state_a, state_b):
     """Return True if any parameter tensor differs between two state dicts."""
     for k in state_a:
