@@ -159,6 +159,8 @@ def make_tabular_dataset(
         C=C,
         y=y,
         meta=meta,
+        input_type="tabular",
+        classes=tuple(range(n_classes)),
         transform=transform,
         concept_transform=concept_transform,
         target_transform=target_transform,
@@ -314,6 +316,8 @@ def make_image_dataset(
         C=C,
         y=y,
         meta=meta,
+        input_type="image",
+        classes=tuple(range(n_classes)),
         cvindices=cv or None,
     )
     return ds, cv

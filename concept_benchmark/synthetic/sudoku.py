@@ -218,7 +218,15 @@ def create_sudoku_dataset(
     if data_type == "image":
         kwargs.setdefault("preprocess", sudoku_image_preprocess)
 
-    return ConceptDataset(X=X, C=C, y=y, meta=meta, **kwargs)
+    return ConceptDataset(
+        X=X,
+        C=C,
+        y=y,
+        meta=meta,
+        input_type=data_type,
+        classes=(0, 1),
+        **kwargs,
+    )
 
 
 def default_transform(board: np.ndarray) -> np.ndarray:

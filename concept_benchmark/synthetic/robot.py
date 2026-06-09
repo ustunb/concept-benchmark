@@ -264,6 +264,8 @@ def create_robot_text_dataset(
         C=np.asarray(C_out, dtype=np.int8),
         y=np.asarray(y_out, dtype=np.int32),
         meta=meta,
+        input_type="text",
+        classes=tuple(classes),
     )
 
 
@@ -444,6 +446,8 @@ def create_robot_image_dataset(
         C=C,
         y=y,
         meta=meta,
+        input_type="image",
+        classes=(0, 1),
         base_dir=image_dir,
     )
 

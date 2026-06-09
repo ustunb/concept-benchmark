@@ -386,11 +386,11 @@ def test_description(tab_small):
     assert len(desc) > 0
     assert "ConceptDataset" in desc
     assert str(tab_small.n) in desc
-    assert tab_small._full.meta.get("data_type", "unknown") in desc
+    assert tab_small._full.input_type in desc
     for concept in tab_small.concepts:
         assert concept in desc
     for cls in tab_small.classes:
-        assert cls in desc
+        assert str(cls) in desc
 
 
 def test_repr_multiline(tab_small):

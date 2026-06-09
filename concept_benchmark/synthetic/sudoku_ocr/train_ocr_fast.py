@@ -186,7 +186,14 @@ def build_ocr_concept_dataset(
     meta["dataset_name"] = f"{meta.get('dataset_name', 'sudoku')}_ocr_inferred_full"
     meta["img_paths"] = img_paths
 
-    ocr_ds = ConceptDataset(X=pred_X_full, C=tab_ds.C, y=tab_ds.y, meta=meta)
+    ocr_ds = ConceptDataset(
+        X=pred_X_full,
+        C=tab_ds.C,
+        y=tab_ds.y,
+        meta=meta,
+        input_type="tabular",
+        classes=tuple(tab_ds.classes),
+    )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     save_object(ocr_ds, out_path, overwrite=True)
     logger.info("[INFO] saved OCR-inferred ConceptDataset to %s", out_path)

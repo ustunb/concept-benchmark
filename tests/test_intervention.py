@@ -399,7 +399,7 @@ class TestRunner:
             "concepts": [f"z{i}" for i in range(k)],
             "data_type": "tabular",
         }
-        sample = ConceptDatasetSample(X=X, C=C, y=y, meta=meta)
+        sample = ConceptDatasetSample(X=X, C=C, y=y, meta=meta, input_type="tabular", classes=(0, 1))
 
         fe = FrontEndModel()
         fe.fit((C > 0.5).astype(float), y)
@@ -445,6 +445,8 @@ class TestRunner:
                 "concepts": ["z0", "z1", "z2"],
                 "data_type": "tabular",
             },
+            input_type="tabular",
+            classes=(0, 1),
         )
 
         fe = _RecordingAlignedFrontEnd()
@@ -515,6 +517,8 @@ class TestRunner:
                 "concepts": ["z0", "z1", "z2"],
                 "data_type": "tabular",
             },
+            input_type="tabular",
+            classes=(0, 1),
         )
         concept_proba = np.array(
             [
@@ -555,6 +559,8 @@ class TestRunner:
                 "concepts": ["z0", "z1", "z2"],
                 "data_type": "tabular",
             },
+            input_type="tabular",
+            classes=(0, 1),
         )
         concept_proba = np.array(
             [

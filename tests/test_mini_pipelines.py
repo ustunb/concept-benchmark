@@ -33,7 +33,14 @@ def _tabular_dataset(n=60, k=4, seed=42, concept_names=None):
         "concepts": concept_names,
         "data_type": "tabular",
     }
-    ds = ConceptDataset(X=X, C=C, y=y, meta=meta)
+    ds = ConceptDataset(
+        X=X,
+        C=C,
+        y=y,
+        meta=meta,
+        input_type="tabular",
+        classes=(0, 1),
+    )
     ds.sample(test_size=0.2, val_size=0.2, stratify=ds.y, seed=seed)
     return ds
 

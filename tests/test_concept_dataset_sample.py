@@ -82,6 +82,8 @@ def test_transforms_applied_and_types_respected(tab_small):
         C=tab_small.C,
         y=tab_small.y,
         meta=tab_small._full.meta,
+        input_type=tab_small._full.input_type,
+        classes=tab_small._full.classes,
         transform=tx,
         concept_transform=tc,
         target_transform=ty,
@@ -129,20 +131,21 @@ def test_sample_meta_deep_equal_numpy_and_dataframe(tab_small):
         "arr": np.array([1, 2, 3], dtype=np.int32),
         "df": pd.DataFrame({"u": [1, 2], "v": [3, 4]}),
     }
-    s1 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=meta)
-    s2 = ConceptDatasetSample(X=s.X.copy(), C=s.C.copy(), y=s.y.copy(), meta={**meta})
+    it, cls = s.input_type, s.classes
+    s1 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=meta, input_type=it, classes=cls)
+    s2 = ConceptDatasetSample(X=s.X.copy(), C=s.C.copy(), y=s.y.copy(), meta={**meta}, input_type=it, classes=cls)
     assert s1 == s2
 
     # Change DataFrame content -> inequality
     meta2 = {**meta}
     meta2["df"] = pd.DataFrame({"u": [1, 2], "v": [3, 5]})
-    s3 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=meta2)
+    s3 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=meta2, input_type=it, classes=cls)
     assert s1 != s3
 
     # Change numpy array content -> inequality
     meta3 = {**meta}
     meta3["arr"] = np.array([1, 2, 9], dtype=np.int32)
-    s4 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=meta3)
+    s4 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=meta3, input_type=it, classes=cls)
     assert s1 != s4
 
 
@@ -155,11 +158,12 @@ def test_sample_transform_identity_matters(tab_small):
     def g(z):
         return z
 
-    s1 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=s.meta, transform=f)
-    s2 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=s.meta, transform=f)
+    it, cls = s.input_type, s.classes
+    s1 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=s.meta, input_type=it, classes=cls, transform=f)
+    s2 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=s.meta, input_type=it, classes=cls, transform=f)
     assert s1 == s2  # same function object
 
-    s3 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=s.meta, transform=g)
+    s3 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=s.meta, input_type=it, classes=cls, transform=g)
     assert s1 != s3  # different function object
 
 

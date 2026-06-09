@@ -160,6 +160,8 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
         C=ds.C,
         y=ds.y,
         meta=meta,
+        input_type="text",
+        classes=tuple(ds.classes),
     )
 
     return data

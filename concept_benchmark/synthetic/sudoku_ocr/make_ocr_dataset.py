@@ -449,7 +449,14 @@ def generate_sudoku_pipeline_data(
     tab_meta_full["data_type"] = "tabular"
     tab_meta_full["transform"] = "default_transform"
     tab_meta_full["dataset_name"] = tab_ds_name
-    tab_ds = ConceptDataset(X=X_tab, C=ds.C, y=ds.y, meta=tab_meta_full)
+    tab_ds = ConceptDataset(
+        X=X_tab,
+        C=ds.C,
+        y=ds.y,
+        meta=tab_meta_full,
+        input_type="tabular",
+        classes=tuple(ds.classes),
+    )
 
     tab_save_dir = tab_dataset_dir
     save_dataset_pkl(tab_ds, tab_meta_full, tab_save_dir)

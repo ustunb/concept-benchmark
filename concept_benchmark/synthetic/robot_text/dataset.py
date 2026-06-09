@@ -66,6 +66,8 @@ def build_text_dataset(
         C=C_arr,
         y=y_arr,
         meta={"concepts": tuple(names), "classes": (0, 1), "data_type": "text"},
+        input_type="text",
+        classes=(0, 1),
     )
     ds._row_index = np.asarray(row_index, dtype=int)
     return ds

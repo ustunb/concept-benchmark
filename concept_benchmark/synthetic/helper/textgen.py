@@ -534,6 +534,8 @@ def create_robot_text_dataset(
         C=np.asarray(C_out, dtype=np.int8),
         y=np.asarray(y_out, dtype=np.int32),
         meta=meta,
+        input_type="text",
+        classes=tuple(classes),
     )
 
 

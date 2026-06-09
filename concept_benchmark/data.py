@@ -5,6 +5,7 @@ __all__ = [
     "ConceptDatasetSample",
     "ConceptImageDatasetSample",
     "DataLoader",
+    "InputType",
 ]
 
 import io
@@ -12,6 +13,9 @@ import platform
 import warnings
 from collections.abc import Callable, Mapping, Set
 from pathlib import Path
+from typing import Literal
+
+InputType = Literal["image", "tabular", "text"]
 
 import numpy as np
 import pandas as pd
@@ -249,6 +253,9 @@ class ConceptDataset:
         C: np.ndarray,
         y: np.ndarray,
         meta: dict,
+        *,
+        input_type: InputType,
+        classes: tuple[int, ...],
         cvindices: dict | None = None,
         transform: Callable | None = None,
         concept_transform: Callable | None = None,
@@ -258,6 +265,13 @@ class ConceptDataset:
         has_label_noise: bool = False,
         **kwargs,
     ) -> None:
+        if input_type not in ("image", "tabular", "text"):
+            raise ValueError(
+                f"input_type must be 'image', 'tabular', or 'text'; got {input_type!r}"
+            )
+        self.input_type = input_type
+        self._classes_tuple = tuple(classes)
+
         self._init_kwargs = dict(kwargs)
         self._has_concept_noise = bool(has_concept_noise)
         self._has_concept_missing = bool(has_concept_missing)
@@ -286,10 +300,10 @@ class ConceptDataset:
             except (TypeError, ValueError) as e:
                 raise ValueError(f"cannot convert y to np.ndarray: {e!r}")
 
-        if meta.get("data_type") == "image":
+        if input_type == "image":
             # do not cast X
             SampleClass = ConceptImageDatasetSample
-        elif meta.get("data_type") == "text":
+        elif input_type == "text":
             SampleClass = ConceptDatasetSample
             X = X.astype(object)
         else:
@@ -305,6 +319,8 @@ class ConceptDataset:
             C=C,
             y=y,
             meta=meta,
+            input_type=input_type,
+            classes=self._classes_tuple,
             transform=transform,
             concept_transform=concept_transform,
             target_transform=target_transform,
@@ -433,9 +449,8 @@ class ConceptDataset:
     @property
     def description(self) -> str:
         """Human-readable summary of the dataset."""
-        data_type = self._full.meta.get("data_type", "unknown")
         lines = [
-            f"{self.__class__.__name__} ({data_type})",
+            f"{self.__class__.__name__} ({self._full.input_type})",
             f"  Samples: {self.n} (train={self.train.n}, val={self.validation.n}, test={self.test.n})",
             f"  Concepts ({self.n_concepts}): {self.concepts}",
             f"  Classes ({self.n_classes}): {self.classes}",
@@ -491,7 +506,7 @@ class ConceptDataset:
         return chk
 
     def __repr__(self):
-        dt = self._full.meta.get("data_type", "unknown")
+        dt = self._full.input_type
         concepts = list(self.concepts)
         if len(concepts) > 5:
             concepts_str = str(concepts[:5])[:-1] + ", ...]"
@@ -521,6 +536,8 @@ class ConceptDataset:
             C=self._full.base_concepts.copy(),
             y=self._full.base_labels.copy(),
             meta=self._full.meta,
+            input_type=self._full.input_type,
+            classes=self._full.classes,
             cvindices=self._cvindices,
             **self._init_kwargs,
         )
@@ -802,6 +819,8 @@ class ConceptDataset:
             C=embedded_full.C,
             y=embedded_full.y,
             meta=embedded_full.meta,
+            input_type=embedded_full.input_type,
+            classes=embedded_full.classes,
             cvindices=self._cvindices,
             **self._init_kwargs,
         )
@@ -1165,6 +1184,8 @@ class ConceptDatasetSample(Dataset):
         y: np.ndarray,
         meta: dict,
         *,
+        input_type: InputType,
+        classes: tuple[int, ...] | None = None,
         parent: "ConceptDataset" = None,
         indices: np.ndarray | None = None,
         transform: Callable | None = None,
@@ -1175,9 +1196,11 @@ class ConceptDatasetSample(Dataset):
         has_label_noise: bool = False,
         **kwargs,
     ) -> None:
-        if not {"classes", "concepts", "data_type"}.issubset(meta.keys()):
+        if "concepts" not in meta:
+            raise ValueError("metadata dict must contain key 'concepts'")
+        if input_type not in ("image", "tabular", "text"):
             raise ValueError(
-                "metadata dict must contain keys 'classes', 'concepts', and 'data_type'"
+                f"input_type must be 'image', 'tabular', or 'text'; got {input_type!r}"
             )
 
         self.parent = parent
@@ -1190,8 +1213,14 @@ class ConceptDatasetSample(Dataset):
         self._y_base = np.asarray(y, dtype=np.int32)
         self._label_noise_labels: np.ndarray | None = None
         self._meta = meta
-        self.classes, self.concepts = meta["classes"], meta["concepts"]
-        self.data_type = meta["data_type"]
+        self.input_type = input_type
+        # `classes` is either passed explicitly (preferred) or read from meta for
+        # construction sites still using the meta dict. The concepts list always
+        # comes from meta because it's the canonical source today.
+        if classes is None:
+            classes = tuple(meta.get("classes", ()))
+        self.classes = tuple(classes)
+        self.concepts = meta["concepts"]
 
         self._C_base = np.asarray(C, dtype=np.int8)
         self.n = len(self._X)
@@ -1224,8 +1253,10 @@ class ConceptDatasetSample(Dataset):
         for old, new in renames.items():
             if old in state and new not in state:
                 state[new] = state.pop(old)
-        if "task" in state and "data_type" not in state:
-            state["data_type"] = state.pop("task")
+        if "task" in state and "input_type" not in state:
+            state["input_type"] = state.pop("task")
+        if "data_type" in state and "input_type" not in state:
+            state["input_type"] = state.pop("data_type")
         self.__dict__.update(state)
 
     @property
@@ -1235,13 +1266,12 @@ class ConceptDatasetSample(Dataset):
 
     @meta.setter
     def meta(self, value: dict) -> None:
-        if not {"classes", "concepts", "data_type"}.issubset(value.keys()):
-            raise ValueError(
-                "metadata dict must contain keys 'classes', 'concepts', and 'data_type'"
-            )
+        if "concepts" not in value:
+            raise ValueError("metadata dict must contain key 'concepts'")
         self._meta = value
-        self.classes, self.concepts = value["classes"], value["concepts"]
-        self.data_type = value["data_type"]
+        self.concepts = value["concepts"]
+        if "classes" in value:
+            self.classes = tuple(value["classes"])
 
     @property
     def X(self) -> np.ndarray:
@@ -1470,9 +1500,8 @@ class ConceptDatasetSample(Dataset):
         return x, c, y
 
     def __repr__(self):
-        dt = self.meta.get("data_type", "unknown")
         lines = [
-            f"ConceptDatasetSample({dt}, {self.n} samples, {self.n_concepts} concepts)",
+            f"ConceptDatasetSample({self.input_type}, {self.n} samples, {self.n_concepts} concepts)",
             "",
             _data_preview(self),
         ]
@@ -1519,6 +1548,8 @@ class ConceptDatasetSample(Dataset):
             C=self.base_concepts[indices],
             y=self.base_labels[indices],
             meta=filtered_meta,
+            input_type=self.input_type,
+            classes=self.classes,
             indices=indices,
             has_concept_noise=self.has_concept_noise,
             has_concept_missing=self.has_concept_missing,
@@ -1577,8 +1608,7 @@ class ConceptDatasetSample(Dataset):
         """
         parts: list[pd.DataFrame] = []
         if include_X:
-            data_type = self.meta.get("data_type", "tabular")
-            if data_type == "text":
+            if self.input_type == "text":
                 parts.append(pd.DataFrame({"text": list(self.X)}))
             else:
                 # Tabular / fallback: one column per feature dimension
@@ -1675,7 +1705,6 @@ class ConceptDatasetSample(Dataset):
         embedded_X = np.concatenate(embedded_X, axis=0)
 
         embed_meta = dict(self.meta)
-        embed_meta["data_type"] = "tabular"
 
         new_sample = ConceptDatasetSample(
             parent=self.parent,
@@ -1683,6 +1712,8 @@ class ConceptDatasetSample(Dataset):
             C=self.base_concepts,
             y=self.base_labels,
             meta=embed_meta,
+            input_type="tabular",
+            classes=self.classes,
             indices=self.indices,
             has_concept_noise=self.has_concept_noise,
             has_concept_missing=self.has_concept_missing,
@@ -1855,6 +1886,8 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
             C=self.base_concepts[indices],
             y=self.base_labels[indices],
             meta=filtered_meta,
+            input_type=self.input_type,
+            classes=self.classes,
             indices=indices,
             has_concept_noise=self.has_concept_noise,
             has_concept_missing=self.has_concept_missing,

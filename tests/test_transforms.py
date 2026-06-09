@@ -28,7 +28,7 @@ def _make_dataset(n=60, k=4, seed=42):
         "concepts": concepts,
         "data_type": "tabular",
     }
-    ds = ConceptDataset(X, C, y, meta)
+    ds = ConceptDataset(X, C, y, meta, input_type="tabular", classes=(0, 1))
     ds.sample(test_size=0.2, val_size=0.2, seed=seed)
     return ds
 
@@ -178,6 +178,8 @@ def test_noise_before_sampling():
         C,
         y,
         {"classes": ["a", "b"], "concepts": ["c0", "c1", "c2"], "data_type": "tabular"},
+        input_type="tabular",
+        classes=(0, 1),
     )
 
     noisy = ConceptNoiseGenerator(ds, p=0.5, seed=7).generate()
