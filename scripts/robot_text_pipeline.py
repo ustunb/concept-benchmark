@@ -355,7 +355,7 @@ def train_lfcbm(
 
     Returns a ConceptBasedModel with LabelFreeDetector as concept source.
     """
-    from concept_benchmark.synthetic.robot_text.lfcbm import LabelFreeDetector
+    from concept_benchmark.synthetic.robot.text.lfcbm import LabelFreeDetector
 
     set_deterministic_seed(config.seed)
 

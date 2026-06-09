@@ -15,8 +15,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from concept_benchmark.config import ROBOT_CONCEPTS
-from concept_benchmark.synthetic.helper.robot_catalog import build_robot_instance_catalog
-from concept_benchmark.synthetic.helper.robot_draw import draw_robot, render_state_from_metadata
+from concept_benchmark.synthetic.robot.catalog import build_robot_instance_catalog
+from concept_benchmark.synthetic.robot.draw import draw_robot, render_state_from_metadata
 
 
 SINGLE_SEMANTIC = {k: v[:1] for k, v in ROBOT_CONCEPTS.items()}

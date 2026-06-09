@@ -62,7 +62,7 @@ def _load_sudoku_image_dataset(config):
 
 def setup_dataset(config: SudokuBenchmarkConfig) -> None:
     """Generate sudoku dataset (image + tabular + OCR sidecar)."""
-    from concept_benchmark.synthetic.sudoku_ocr.make_ocr_dataset import (
+    from concept_benchmark.synthetic.sudoku.ocr.make_ocr_dataset import (
         generate_sudoku_pipeline_data,
     )
 
@@ -80,7 +80,7 @@ def train_ocr(config: SudokuBenchmarkConfig) -> None:
     cmd = [
         sys.executable,
         "-m",
-        "concept_benchmark.synthetic.sudoku_ocr.train_ocr_fast",
+        "concept_benchmark.synthetic.sudoku.ocr.train_ocr_fast",
         "--seed",
         str(config.seed),
         "--max-corrupt",

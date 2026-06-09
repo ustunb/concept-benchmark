@@ -8,8 +8,8 @@ import numpy as np
 import pandas as pd
 
 from concept_benchmark.data import ConceptDatasetSample
-from concept_benchmark.synthetic.robot_text.catalog import CORE_CONCEPT_NAMES
-from concept_benchmark.synthetic.robot_text.corpus import (
+from concept_benchmark.synthetic.robot.text.catalog import CORE_CONCEPT_NAMES
+from concept_benchmark.synthetic.robot.text.corpus import (
     concept_vector_from_row,
     load_jsonl,
     render_from_corpus,

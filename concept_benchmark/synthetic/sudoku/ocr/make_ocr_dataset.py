@@ -22,7 +22,7 @@ from concept_benchmark.synthetic.sudoku import (
     default_transform,
     image_transform,
 )
-from concept_benchmark.synthetic.sudoku_ocr.ocr_utils import DATA_SUDOKU
+from concept_benchmark.synthetic.sudoku.ocr.ocr_utils import DATA_SUDOKU
 from concept_benchmark.config import SudokuBenchmarkConfig
 
 

@@ -16,8 +16,8 @@ from tqdm.auto import tqdm
 
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.paths import data_dir
-from concept_benchmark.synthetic.helper.sudoku_handwriting import _get_default_font
-from concept_benchmark.synthetic.helper.sudoku_utils import (
+from .handwriting import _get_default_font
+from .utils import (
     generate_invalid_board,
     generate_valid_board,
     get_concepts,
@@ -25,7 +25,7 @@ from concept_benchmark.synthetic.helper.sudoku_utils import (
     normalize_digits,
     cell_digit_concept_vector,
 )
-from concept_benchmark.synthetic.helper.sudoku_handwriting import (
+from .handwriting import (
     SimpleHandwrittenGenerator,
     AdvancedHandwrittenGenerator,
     _build_given_mask,

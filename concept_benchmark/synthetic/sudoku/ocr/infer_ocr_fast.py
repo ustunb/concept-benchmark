@@ -14,7 +14,7 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-from concept_benchmark.synthetic.sudoku_ocr.ocr_utils import (
+from concept_benchmark.synthetic.sudoku.ocr.ocr_utils import (
     DATA_SUDOKU,
     TinyResNet,
     load_sidecars,

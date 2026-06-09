@@ -110,7 +110,7 @@ def test_sudoku_board_generation():
     cmd = [
         sys.executable,
         "-m",
-        "concept_benchmark.synthetic.sudoku_ocr.make_ocr_dataset",
+        "concept_benchmark.synthetic.sudoku.ocr.make_ocr_dataset",
         "--n",
         "3",
         "--n-samples",
@@ -133,7 +133,7 @@ def test_sudoku_board_generation():
 def test_robot_text_generation_and_training():
     """Generate ~20 robot text descriptions and train a tiny text detector."""
     from concept_benchmark.synthetic.robot import create_robot_text_dataset
-    from concept_benchmark.synthetic.helper.robot_catalog import generate_robot_catalog
+    from concept_benchmark.synthetic.robot.catalog import generate_robot_catalog
 
     # Step 1: Generate catalog (no images)
     catalog_df, _ = generate_robot_catalog(

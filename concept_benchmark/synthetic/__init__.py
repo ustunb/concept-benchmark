@@ -1,4 +1,4 @@
 # Only expose subpackages, no deep imports
-from . import helper
+from . import robot, sudoku
 
-__all__ = ["helper"]
+__all__ = ["robot", "sudoku"]

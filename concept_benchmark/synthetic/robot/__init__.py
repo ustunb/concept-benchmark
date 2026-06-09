@@ -9,13 +9,13 @@ import pandas as pd
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.formula import LabelFormula
 
-from .helper.robot_catalog import (
+from .catalog import (
     ALL_ROBOT_FEATURES,
     OUTCOME_MISSING,
     OUTCOME_NAME,
     generate_robot_catalog,
 )
-from .helper import textgen as text_helper
+from . import textgen as text_helper
 
 
 def create_synthetic_dataset(data_type: str = "image", **kwargs) -> ConceptDataset:

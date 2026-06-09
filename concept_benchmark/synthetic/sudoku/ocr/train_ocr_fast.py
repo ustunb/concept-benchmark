@@ -21,7 +21,7 @@ from tqdm.auto import tqdm
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.ext.fileutils import load as load_object, save as save_object
 
-from concept_benchmark.synthetic.sudoku_ocr.ocr_utils import (
+from concept_benchmark.synthetic.sudoku.ocr.ocr_utils import (
     SudokuCellDataset,
     TinyResNet,
     compute_class_weights,
