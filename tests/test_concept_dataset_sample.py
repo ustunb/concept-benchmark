@@ -116,7 +116,11 @@ def test_embed_returns_tabular_and_preserves_indices(tab_small):
     )
     assert isinstance(emb, ConceptDatasetSample)
     assert emb.meta.get("data_type") == "tabular"
-    assert isinstance(emb.inputs, np.ndarray) and emb.inputs.ndim == 2 and emb.inputs.shape[1] == 2
+    assert (
+        isinstance(emb.inputs, np.ndarray)
+        and emb.inputs.ndim == 2
+        and emb.inputs.shape[1] == 2
+    )
     np.testing.assert_array_equal(emb.C, s.C)
     np.testing.assert_array_equal(emb.y, s.y)
     np.testing.assert_array_equal(emb.indices, s.indices)
@@ -132,20 +136,33 @@ def test_sample_meta_deep_equal_numpy_and_dataframe(tab_small):
         "df": pd.DataFrame({"u": [1, 2], "v": [3, 4]}),
     }
     it, cls = s.input_type, s.classes
-    s1 = ConceptDatasetSample(inputs=s.inputs, C=s.C, y=s.y, meta=meta, input_type=it, classes=cls)
-    s2 = ConceptDatasetSample(inputs=s.inputs.copy(), C=s.C.copy(), y=s.y.copy(), meta={**meta}, input_type=it, classes=cls)
+    s1 = ConceptDatasetSample(
+        inputs=s.inputs, C=s.C, y=s.y, meta=meta, input_type=it, classes=cls
+    )
+    s2 = ConceptDatasetSample(
+        inputs=s.inputs.copy(),
+        C=s.C.copy(),
+        y=s.y.copy(),
+        meta={**meta},
+        input_type=it,
+        classes=cls,
+    )
     assert s1 == s2
 
     # Change DataFrame content -> inequality
     meta2 = {**meta}
     meta2["df"] = pd.DataFrame({"u": [1, 2], "v": [3, 5]})
-    s3 = ConceptDatasetSample(inputs=s.inputs, C=s.C, y=s.y, meta=meta2, input_type=it, classes=cls)
+    s3 = ConceptDatasetSample(
+        inputs=s.inputs, C=s.C, y=s.y, meta=meta2, input_type=it, classes=cls
+    )
     assert s1 != s3
 
     # Change numpy array content -> inequality
     meta3 = {**meta}
     meta3["arr"] = np.array([1, 2, 9], dtype=np.int32)
-    s4 = ConceptDatasetSample(inputs=s.inputs, C=s.C, y=s.y, meta=meta3, input_type=it, classes=cls)
+    s4 = ConceptDatasetSample(
+        inputs=s.inputs, C=s.C, y=s.y, meta=meta3, input_type=it, classes=cls
+    )
     assert s1 != s4
 
 
@@ -159,11 +176,35 @@ def test_sample_transform_identity_matters(tab_small):
         return z
 
     it, cls = s.input_type, s.classes
-    s1 = ConceptDatasetSample(inputs=s.inputs, C=s.C, y=s.y, meta=s.meta, input_type=it, classes=cls, transform=f)
-    s2 = ConceptDatasetSample(inputs=s.inputs, C=s.C, y=s.y, meta=s.meta, input_type=it, classes=cls, transform=f)
+    s1 = ConceptDatasetSample(
+        inputs=s.inputs,
+        C=s.C,
+        y=s.y,
+        meta=s.meta,
+        input_type=it,
+        classes=cls,
+        transform=f,
+    )
+    s2 = ConceptDatasetSample(
+        inputs=s.inputs,
+        C=s.C,
+        y=s.y,
+        meta=s.meta,
+        input_type=it,
+        classes=cls,
+        transform=f,
+    )
     assert s1 == s2  # same function object
 
-    s3 = ConceptDatasetSample(inputs=s.inputs, C=s.C, y=s.y, meta=s.meta, input_type=it, classes=cls, transform=g)
+    s3 = ConceptDatasetSample(
+        inputs=s.inputs,
+        C=s.C,
+        y=s.y,
+        meta=s.meta,
+        input_type=it,
+        classes=cls,
+        transform=g,
+    )
     assert s1 != s3  # different function object
 
 

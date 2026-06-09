@@ -34,7 +34,9 @@ def _tiny_tabular_dataset(n=40, d=8, k=4, seed=7):
         "concepts": [f"concept_{i}" for i in range(k)],
         "data_type": "tabular",
     }
-    ds = ConceptDataset(inputs=X, C=C, y=y, meta=meta, input_type="tabular", classes=(0, 1))
+    ds = ConceptDataset(
+        inputs=X, C=C, y=y, meta=meta, input_type="tabular", classes=(0, 1)
+    )
     ds.sample(test_size=0.2, val_size=0.2, stratify=ds.y, seed=seed)
     return ds
 

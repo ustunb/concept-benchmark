@@ -254,7 +254,9 @@ class TestInterventionConfig:
             concept_costs=np.array([1.0, 2.0, 1.0]),
         )
         # Both instances pick only concept 1 (cost 2 -> fills budget exactly).
-        np.testing.assert_array_equal(mask, [[False, True, False], [False, True, False]])
+        np.testing.assert_array_equal(
+            mask, [[False, True, False], [False, True, False]]
+        )
 
     def test_unit_costs_match_count_budget(self):
         """With unit costs and integer per_instance_budget=k, behavior is
@@ -442,7 +444,9 @@ class TestRunner:
             "concepts": [f"z{i}" for i in range(k)],
             "data_type": "tabular",
         }
-        sample = ConceptDatasetSample(inputs=X, C=C, y=y, meta=meta, input_type="tabular", classes=(0, 1))
+        sample = ConceptDatasetSample(
+            inputs=X, C=C, y=y, meta=meta, input_type="tabular", classes=(0, 1)
+        )
 
         fe = FrontEndModel()
         fe.fit((C > 0.5).astype(float), y)

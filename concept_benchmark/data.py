@@ -386,7 +386,9 @@ class ConceptDataset:
 
         # Filter cost dict to retained concepts
         self.concept_costs = {
-            name: self.concept_costs[name] for name in new_concepts if name in self.concept_costs
+            name: self.concept_costs[name]
+            for name in new_concepts
+            if name in self.concept_costs
         }
 
         assert self.__check_rep__()

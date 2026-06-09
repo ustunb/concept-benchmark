@@ -55,7 +55,9 @@ def test_to_dataframe_include_X_text():
     C = np.array([[1, 0], [0, 1], [1, 1]], dtype=np.int8)
     y = np.array([0, 1, 0], dtype=np.int32)
     meta = {"classes": ["a", "b"], "concepts": ["c0", "c1"], "data_type": "text"}
-    sample = ConceptDatasetSample(inputs=texts, C=C, y=y, meta=meta, input_type="text", classes=(0, 1))
+    sample = ConceptDatasetSample(
+        inputs=texts, C=C, y=y, meta=meta, input_type="text", classes=(0, 1)
+    )
     df = sample.to_dataframe(include_X=True)
     assert "text" in df.columns
     assert list(df["text"]) == ["hello world", "foo bar", "baz qux"]
