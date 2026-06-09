@@ -379,7 +379,7 @@ def run_interventions(
     # Compute baseline predictions ONCE for consistent coverage across k values
     interv_cfg_k0 = InterventionConfig(
         abstention_threshold=cs_t,
-        max_concepts_per_instance=0,
+        per_instance_budget=0,
         random_state=config.seed,
     )
     result_k0 = cs_runner.run(cs_strategy, interv_cfg_k0, data.test)
@@ -400,7 +400,7 @@ def run_interventions(
     for budget in budgets:
         interv_cfg = InterventionConfig(
             abstention_threshold=cs_t,
-            max_concepts_per_instance=budget,
+            per_instance_budget=budget,
             random_state=config.seed,
         )
         result = cs_runner.run(cs_strategy, interv_cfg, data.test, y_prob_baseline=y_prob_baseline)

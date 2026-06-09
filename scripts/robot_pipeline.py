@@ -876,7 +876,7 @@ def _test_interventions(
             continue
 
         config = InterventionConfig(
-            max_concepts_per_instance=budget,
+            per_instance_budget=budget,
             random_state=settings.seed,
             score_threshold=settings.intervention_threshold,
             intervention_noise_rate=1.0 - human_acc,
@@ -1159,7 +1159,7 @@ def _test_interventions(
                     max_budget = max(int(b) for b in budgets)
                     maxK = int(min(max_budget, batch.C_pred.shape[1]))
                     config_max = InterventionConfig(
-                        max_concepts_per_instance=maxK,
+                        per_instance_budget=maxK,
                         random_state=settings.seed,
                         score_threshold=settings.intervention_threshold,
                         intervention_noise_rate=1.0 - human_acc,

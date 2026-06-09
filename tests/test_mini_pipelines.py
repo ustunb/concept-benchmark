@@ -95,7 +95,7 @@ def test_robot_intervention_end_to_end():
 
     runner = ConceptInterventionRunner(cbm)
     config = InterventionConfig(
-        max_concepts_per_instance=1,
+        per_instance_budget=1,
         score_threshold=0.1,
         random_state=0,
     )

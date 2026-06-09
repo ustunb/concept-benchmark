@@ -91,7 +91,7 @@ class TestKFlip:
     def test_requires_positive_k(self):
         model = _make_model()
         batch = _make_batch()
-        config = InterventionConfig(max_concepts_per_instance=0)
+        config = InterventionConfig(per_instance_budget=0)
         strat = KFlipInterventionStrategy()
         with pytest.raises(InterventionError, match="positive integer"):
             strat.propose(model, batch, config)
@@ -99,7 +99,7 @@ class TestKFlip:
     def test_requires_k_not_none(self):
         model = _make_model()
         batch = _make_batch()
-        config = InterventionConfig()  # max_concepts_per_instance=None
+        config = InterventionConfig()  # per_instance_budget=None
         strat = KFlipInterventionStrategy()
         with pytest.raises(InterventionError, match="positive integer"):
             strat.propose(model, batch, config)
@@ -109,7 +109,7 @@ class TestKFlip:
         model = _make_model(k=k)
         batch = _make_batch(n=8, k=k)
         config = InterventionConfig(
-            max_concepts_per_instance=2,
+            per_instance_budget=2,
             score_threshold=0.1,
             random_state=0,
         )
@@ -123,7 +123,7 @@ class TestKFlip:
         model = _make_model(k=k)
         batch = _make_batch(n=10, k=k)
         config = InterventionConfig(
-            max_concepts_per_instance=2,
+            per_instance_budget=2,
             score_threshold=0.0,  # select everything
             random_state=0,
         )
@@ -137,10 +137,10 @@ class TestKFlip:
         model = _make_model(k=k)
         batch = _make_batch(n=10, k=k)
         low = InterventionConfig(
-            max_concepts_per_instance=2, score_threshold=0.01, random_state=0
+            per_instance_budget=2, score_threshold=0.01, random_state=0
         )
         high = InterventionConfig(
-            max_concepts_per_instance=2, score_threshold=0.99, random_state=0
+            per_instance_budget=2, score_threshold=0.99, random_state=0
         )
         strat_low = KFlipInterventionStrategy()
         strat_high = KFlipInterventionStrategy()
@@ -153,7 +153,7 @@ class TestKFlip:
         model = _make_model(k=k)
         batch = _make_batch(n=6, k=k)
         config = InterventionConfig(
-            max_concepts_per_instance=1,
+            per_instance_budget=1,
             score_threshold=0.1,
             random_state=0,
         )
@@ -168,7 +168,7 @@ class TestKFlip:
         model = _make_model(k=k)
         batch = _make_batch(n=8, k=k, seed=7)
         config = InterventionConfig(
-            max_concepts_per_instance=1,
+            per_instance_budget=1,
             score_threshold=0.1,
             random_state=0,
         )
@@ -179,7 +179,7 @@ class TestKFlip:
         # General path (disable fast path)
         model.label_predictor._kflip_fast_path = False
         config2 = InterventionConfig(
-            max_concepts_per_instance=1,
+            per_instance_budget=1,
             score_threshold=0.1,
             random_state=0,
         )
@@ -198,7 +198,7 @@ class TestKFlip:
         model = _make_model(k=k)
         batch = _make_batch(n=8, k=k)
         config = InterventionConfig(
-            max_concepts_per_instance=2,
+            per_instance_budget=2,
             score_threshold=0.0,
             random_state=0,
         )
@@ -213,7 +213,7 @@ class TestKFlip:
         model = _make_model(k=k)
         batch = _make_batch(n=10, k=k, seed=3)
         config = InterventionConfig(
-            max_concepts_per_instance=3,
+            per_instance_budget=3,
             score_threshold=0.0,
             random_state=0,
         )
@@ -232,7 +232,7 @@ class TestKFlip:
         model = _make_model(k=k)
         batch = _make_batch(n=6, k=k)
         config = InterventionConfig(
-            max_concepts_per_instance=2,
+            per_instance_budget=2,
             score_threshold=0.1,
             random_state=0,
         )
@@ -266,7 +266,7 @@ class TestKFlip:
             model,
             batch,
             InterventionConfig(
-                max_concepts_per_instance=1,
+                per_instance_budget=1,
                 score_threshold=0.0,
                 random_state=0,
             ),

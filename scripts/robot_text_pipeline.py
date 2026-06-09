@@ -480,7 +480,7 @@ def _run_text_regime(config, regime, model, data, budgets, threshold):
 
     for budget in budgets:
         interv_config = InterventionConfig(
-            max_concepts_per_instance=budget,
+            per_instance_budget=budget,
             random_state=config.seed,
             score_threshold=threshold,
             intervention_noise_rate=err_prob,

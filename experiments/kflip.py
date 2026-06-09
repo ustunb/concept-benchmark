@@ -22,7 +22,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
     """Intervention strategy based on concept-flip probability.
 
     For each instance the strategy enumerates candidate subsets of up to
-    *k* concepts (from ``config.max_concepts_per_instance``).  For every
+    *k* concepts (from ``config.per_instance_budget``).  For every
     subset it computes the probability that replacing those concepts with
     their ground-truth values would change the downstream label.  The
     subset with the highest flip probability is selected, and instances
@@ -44,7 +44,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
 
     Config mapping
     --------------
-    - ``config.max_concepts_per_instance`` → *k* (must be > 0)
+    - ``config.per_instance_budget`` → *k* (must be > 0)
     - ``config.score_threshold`` → minimum flip probability to intervene
     - Budgets and instance selection use the standard
       ``_select_instances`` / ``_apply_ordering`` helpers.
@@ -75,10 +75,10 @@ class KFlipInterventionStrategy(InterventionStrategy):
     ) -> StrategyProposal:
         # --- inputs and guards
         n_samples, n_concepts = batch.C_pred.shape
-        k = config.max_concepts_per_instance
+        k = config.per_instance_budget
         if k is None or int(k) <= 0:
             raise InterventionError(
-                "KFlip requires config.max_concepts_per_instance (k) to be a positive integer."
+                "KFlip requires config.per_instance_budget (k) to be a positive integer."
             )
         k = int(min(k, n_concepts))
         threshold = float(config.score_threshold)

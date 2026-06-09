@@ -256,6 +256,7 @@ class ConceptDataset:
         *,
         input_type: InputType,
         classes: tuple[int, ...],
+        concept_costs: dict[str, int] | None = None,
         cvindices: dict | None = None,
         transform: Callable | None = None,
         concept_transform: Callable | None = None,
@@ -271,6 +272,17 @@ class ConceptDataset:
             )
         self.input_type = input_type
         self._classes_tuple = tuple(classes)
+        # `concept_costs` keys default to 1 for each concept name. With unit
+        # costs and integer per_instance_budget=k, the intervention selection
+        # logic reduces exactly to "at most k concepts per instance".
+        concept_names_list = list(meta.get("concepts", []))
+        if concept_costs is None:
+            concept_costs = {}
+        self.concept_costs = {
+            name: int(concept_costs.get(name, 1)) for name in concept_names_list
+        }
+        if any(v < 0 for v in self.concept_costs.values()):
+            raise ValueError("concept_costs values must be non-negative.")
 
         self._init_kwargs = dict(kwargs)
         self._has_concept_noise = bool(has_concept_noise)
@@ -371,6 +383,11 @@ class ConceptDataset:
                 sample._concept_missing_mask = sample._concept_missing_mask[
                     :, keep_indices
                 ]
+
+        # Filter cost dict to retained concepts
+        self.concept_costs = {
+            name: self.concept_costs[name] for name in new_concepts if name in self.concept_costs
+        }
 
         assert self.__check_rep__()
         return self
@@ -577,6 +594,14 @@ class ConceptDataset:
     def inputs(self):
         """Raw inputs of the full dataset (feature matrix, paths, or text array)."""
         return self._full.inputs
+
+    @property
+    def concept_costs_array(self) -> np.ndarray:
+        """Per-concept costs as a 1D numpy array ordered by self.concepts."""
+        return np.asarray(
+            [int(self.concept_costs.get(name, 1)) for name in self.concepts],
+            dtype=np.float64,
+        )
 
     @property
     def C(self):
