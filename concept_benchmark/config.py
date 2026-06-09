@@ -27,6 +27,7 @@ import yaml
 
 from concept_benchmark.formula import F, LabelFormula
 from concept_benchmark.paths import data_dir, results_dir
+from concept_benchmark.types import CBMTrainingMode
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +139,7 @@ _PROBCBM_FINGERPRINT_FIELDS = frozenset(
         "probcbm_latent_dim",
         "probcbm_n_samples_inference",
         "probcbm_intervention_prob",
-        "probcbm_train_class_mode",
+        "training_mode",
         "probcbm_max_epochs",
     }
 )
@@ -171,6 +172,21 @@ def _dict_sha256(d: dict, *, truncate: int | None = None) -> str:
     return h[:truncate] if truncate is not None else h
 
 
+def _enums_to_strings(value):
+    """Recursively convert any Enum value to its raw string/int value for YAML safety."""
+    from enum import Enum
+
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {k: _enums_to_strings(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_enums_to_strings(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_enums_to_strings(v) for v in value)
+    return value
+
+
 class _BenchmarkConfigBase:
     """Shared serialization and hashing for benchmark configs."""
 
@@ -178,11 +194,13 @@ class _BenchmarkConfigBase:
 
     def _prepare_asdict(self) -> dict:
         """Return a JSON/YAML-safe dict. Override for special field handling."""
-        return asdict(self)
+        return _enums_to_strings(asdict(self))
 
     @classmethod
     def _restore_from_yaml_dict(cls, d: dict) -> dict:
         """Post-process loaded YAML dict before passing to constructor."""
+        if "training_mode" in d and isinstance(d["training_mode"], str):
+            d["training_mode"] = CBMTrainingMode(d["training_mode"])
         return d
 
     def _scoped_field_names(self, scope: str) -> frozenset[str]:
@@ -267,7 +285,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     probcbm_latent_dim: int = 8
     probcbm_n_samples_inference: int = 50
     probcbm_intervention_prob: float = 0.25
-    probcbm_train_class_mode: str = "independent"
+    training_mode: CBMTrainingMode = CBMTrainingMode.Independent
     probcbm_max_epochs: int | None = None
     ecbm_emb_size: int = 8
     ecbm_hid_size: int = 64
@@ -470,7 +488,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
 
     def _prepare_asdict(self) -> dict:
         """Return a JSON/YAML-safe dict, serializing label_formula."""
-        d = asdict(self)
+        d = _enums_to_strings(asdict(self))
         d["label_formula"] = self.label_formula.to_dict()
         return d
 
@@ -479,6 +497,8 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         """Convert label_formula dict back to LabelFormula on load."""
         if "label_formula" in d and isinstance(d["label_formula"], dict):
             d["label_formula"] = LabelFormula.from_dict(d["label_formula"])
+        if "training_mode" in d and isinstance(d["training_mode"], str):
+            d["training_mode"] = CBMTrainingMode(d["training_mode"])
         return d
 
     def to_dict(self) -> dict[str, Any]:
@@ -552,7 +572,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 "probcbm_latent_dim",
                 "probcbm_n_samples_inference",
                 "probcbm_intervention_prob",
-                "probcbm_train_class_mode",
+                "training_mode",
                 "probcbm_max_epochs",
             }
             for k in _exclude:
@@ -748,7 +768,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     probcbm_latent_dim: int = 8
     probcbm_n_samples_inference: int = 50
     probcbm_intervention_prob: float = 0.25
-    probcbm_train_class_mode: str = "independent"
+    training_mode: CBMTrainingMode = CBMTrainingMode.Independent
     probcbm_max_epochs: int | None = None
 
     # Intervention

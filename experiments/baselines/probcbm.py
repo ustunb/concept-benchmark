@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional as F
 
 from concept_benchmark.data import ConceptDatasetSample
+from concept_benchmark.types import CBMTrainingMode
 from concept_benchmark.utils import determine_device
 
 from experiments.baselines._common import (
@@ -231,7 +232,7 @@ def train_probcbm_model(
         "use_neg_concept": True,
         "pred_class": True,
         "use_scale": True,
-        "train_class_mode": config.probcbm_train_class_mode,
+        "train_class_mode": config.training_mode,
         "latent_dim": int(getattr(config, "probcbm_latent_dim", 8)),
         "learning_rate": _resolve_learning_rate(config),
         "optimizer": "adam",
@@ -269,7 +270,7 @@ def train_probcbm_model(
         model = deps.ProbCBM(**model_init_kwargs)
         patience = _resolve_patience(config, benchmark=benchmark)
 
-        if model.train_class_mode == "sequential":
+        if model.train_class_mode == CBMTrainingMode.Sequential:
             # Phase 1: train concept predictor only
             model.stage = "concept"
             classify_params = set(model.params_to_classify())
