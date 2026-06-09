@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
+from enum import Enum
 
 
-class CBMTrainingMode(StrEnum):
+class CBMTrainingMode(str, Enum):
     """How a CBM front-end (label predictor) is trained relative to the backend.
 
     Independent: front-end fits on ground-truth concepts ``C``. Composed CBM
