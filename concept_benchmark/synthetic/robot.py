@@ -141,12 +141,10 @@ def create_robot_text_dataset(
         "Head: {head_shape}. Body: {body_shape}. Elbows: {has_elbows}. Knees: {has_knees}. Feet: {foot_shape}.",
     ]
 
+    _has_cm_col = include_color and color_mode_col in df.columns
+    _default_cms = colorish(df) if include_color else "grayscale"
     for i, row in df.iterrows():
-        cms = (
-            row.get(color_mode_col, None)
-            if (include_color and color_mode_col in df.columns)
-            else (colorish(df) if include_color else "grayscale")
-        )
+        cms = row.get(color_mode_col, None) if _has_cm_col else _default_cms
         knees_b = tbool(row.get(knees_col, False))
         elbows_b = tbool(row.get(elbows_col, False))
         ant_b = tbool(row.get("has_antennae", False))
