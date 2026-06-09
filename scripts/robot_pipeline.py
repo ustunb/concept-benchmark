@@ -462,10 +462,12 @@ def _clone_sample_with_C(sample, C_new, concept_names=None):
         meta["concepts"] = list(concept_names)
     return sample.__class__(
         parent=sample.parent,
-        X=sample.X,
+        inputs=sample.inputs,
         C=C_new.astype(np.float32),
         y=sample.y,
         meta=meta,
+        input_type=sample.input_type,
+        classes=sample.classes,
         transform=sample.transform,
         concept_transform=sample.concept_transform,
         target_transform=sample.target_transform,
@@ -604,8 +606,8 @@ def train_lfcbm(
     # Extract image paths from dataset — X contains bare filenames like
     # "robot_003.png", so we prepend the image directory.
     image_dir = data_dir / "robot_images"
-    train_paths = [str(image_dir / p) for p in data.train.X]
-    valid_paths = [str(image_dir / p) for p in data.validation.X]
+    train_paths = [str(image_dir / p) for p in data.train.inputs]
+    valid_paths = [str(image_dir / p) for p in data.validation.inputs]
 
     stats = lfcbm.fit(
         train_X=train_paths,
@@ -902,7 +904,7 @@ def _test_interventions(
 
             def _dataset_sig():
                 h = hashlib.sha1()
-                for pth in map(str, test.X):
+                for pth in map(str, test.inputs):
                     h.update(pth.encode("utf-8"))
                     h.update(b"\x00")
                 return h.hexdigest()
@@ -1020,7 +1022,7 @@ def _test_interventions(
                             raise
 
             def _resolve_img_path(i: int) -> str:
-                p = Path(str(test.X[i]))
+                p = Path(str(test.inputs[i]))
                 if p.is_absolute():
                     return str(p)
                 return str((data_dir / "robot_images" / p).resolve())
@@ -1181,7 +1183,7 @@ def _test_interventions(
 
                 def _dataset_sig():
                     h = hashlib.sha1()
-                    for pth in map(str, test.X):
+                    for pth in map(str, test.inputs):
                         h.update(pth.encode("utf-8"))
                         h.update(b"\x00")
                     return h.hexdigest()
@@ -1578,7 +1580,7 @@ def _prepare_automated_regime_backend(config, regime, data):
     lf = _load_or_train_regime_lfcbm(config, regime, data)
 
     image_dir = data_dir / "robot_images"
-    test_paths = [str(image_dir / p) for p in data.test.X]
+    test_paths = [str(image_dir / p) for p in data.test.inputs]
     print(f"Computing concept_proba for {len(test_paths)} test images (regime={regime})...", flush=True)
     P_te = lf.concept_proba(test_paths)
     print(f"concept_proba done, shape={P_te.shape}", flush=True)
@@ -1618,8 +1620,8 @@ def _load_or_train_regime_lfcbm(config, regime, data):
     )
     lf = LabelFreeCBM(cfg)
     image_dir = data_dir / "robot_images"
-    train_paths = [str(image_dir / p) for p in data.train.X]
-    valid_paths = [str(image_dir / p) for p in data.validation.X]
+    train_paths = [str(image_dir / p) for p in data.train.inputs]
+    valid_paths = [str(image_dir / p) for p in data.validation.inputs]
     stats = lf.fit(
         train_X=train_paths,
         train_y=data.train.y.astype(int),
@@ -1646,7 +1648,7 @@ def _prepare_lfcbm_labeled_data(lf, data):
         sample = getattr(data, name, None)
         if sample is None:
             continue
-        paths = [str(image_dir / p) for p in sample.X]
+        paths = [str(image_dir / p) for p in sample.inputs]
         print(f"LFCBM concept_proba for {name} ({len(paths)} images)...", flush=True)
         C_new = (lf.concept_proba(paths) >= 0.5).astype(np.float32)
         splits[name] = _clone_sample_with_C(sample, C_new, concept_names=concept_names)
@@ -1746,7 +1748,7 @@ def _prepare_model_for_concept_source(config, concept_source, family, data):
         if family == "cbm":
             # Use LFCBM end-to-end (FEOnProbs)
             image_dir = data_dir / "robot_images"
-            test_paths = [str(image_dir / p) for p in data.test.X]
+            test_paths = [str(image_dir / p) for p in data.test.inputs]
             c_preds = lf.concept_proba(test_paths)
             model = ConceptBasedModel(
                 concept_detector=None,
@@ -2024,7 +2026,7 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
         lfcbm_obj = lfcbm_bundle["lfcbm"]
         fe_machine = lfcbm_bundle["frontend"]
         image_dir = data_dir / "robot_images"
-        test_paths = [str(image_dir / p) for p in data.test.X]
+        test_paths = [str(image_dir / p) for p in data.test.inputs]
         c_preds = lfcbm_obj.concept_proba(test_paths)
         regime_concept_names = list(lfcbm_obj.concept_set.keys)
         regime_model = ConceptBasedModel(

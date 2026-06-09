@@ -155,7 +155,7 @@ def make_tabular_dataset(
     )
     cv = make_cvindices(n=n, K=K) if with_cv else {}
     ds = ConceptDataset(
-        X=X,
+        inputs=X,
         C=C,
         y=y,
         meta=meta,
@@ -312,7 +312,7 @@ def make_image_dataset(
     )
     cv = make_cvindices(n=n, K=K) if with_cv else {}
     ds = ConceptDataset(
-        X=X_paths,
+        inputs=X_paths,
         C=C,
         y=y,
         meta=meta,
@@ -400,6 +400,6 @@ def tabular_train_valid() -> tuple:
     ds, _ = make_tabular_dataset(n=32, d=8, k=2, n_classes=2, with_cv=True, K=5)
     ds.split("K05N01", fold_num_validation=4, fold_num_test=5)
     train, valid = ds.train, ds.validation
-    d = train.X.shape[1]
+    d = train.inputs.shape[1]
     k = train.n_concepts
     return train, valid, d, k

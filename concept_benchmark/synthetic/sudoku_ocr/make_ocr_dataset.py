@@ -225,7 +225,7 @@ def build_ocr_preprocessing(
         return
 
     candidates = (1 - starters).astype(int)
-    X_paths = np.asarray(ds.X)
+    X_paths = np.asarray(ds.inputs)
 
     ocr_dir = dataset_dir / "ocr_preprocessing"
     ocr_dir.mkdir(parents=True, exist_ok=True)
@@ -375,7 +375,7 @@ def generate_sudoku_pipeline_data(
             dataset_name=dataset_name,
         )
 
-    X, C, y = ds.X, ds.C, ds.y
+    X, C, y = ds.inputs, ds.C, ds.y
 
     meta = getattr(ds, "meta", None)
     if meta is None:
@@ -450,7 +450,7 @@ def generate_sudoku_pipeline_data(
     tab_meta_full["transform"] = "default_transform"
     tab_meta_full["dataset_name"] = tab_ds_name
     tab_ds = ConceptDataset(
-        X=X_tab,
+        inputs=X_tab,
         C=ds.C,
         y=ds.y,
         meta=tab_meta_full,

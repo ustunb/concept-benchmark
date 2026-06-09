@@ -317,9 +317,9 @@ def train_dnn(
         data = load(config.get_dataset_path())
 
     acc, tok, model = _train_dnn_text(
-        X_tr=data.train.X,
+        X_tr=data.train.inputs,
         y_tr=data.train.y,
-        X_te=data.test.X,
+        X_te=data.test.inputs,
         y_te=data.test.y,
         model_id=config.dnn_model_name,
         epochs=config.dnn_epochs,
@@ -329,7 +329,7 @@ def train_dnn(
     )
 
     # Platt calibration on validation
-    calibrator = _fit_platt(data.validation.X, data.validation.y, tok, model, device)
+    calibrator = _fit_platt(data.validation.inputs, data.validation.y, tok, model, device)
 
     metrics = {"accuracy": acc, "seed": config.seed, "model": config.dnn_model_name}
     logger.info("DNN Test Accuracy: %.4f", acc)
@@ -392,12 +392,12 @@ def train_lfcbm(
     }
 
     det_lf = LabelFreeDetector(lf_settings)
-    det_lf.fit([str(x) for x in data.train.X], y=data.train.y.astype(int))
+    det_lf.fit([str(x) for x in data.train.inputs], y=data.train.y.astype(int))
 
     # Use LFCBM predictions as concept features to train a student detector
     if config.concept_output_type == "binary":
         det_lf.settings["lf_mode"] = "hard"
-    C_train = det_lf.predict([str(x) for x in data.train.X])
+    C_train = det_lf.predict([str(x) for x in data.train.inputs])
 
     # Build a CBM with a simple frontend trained on LFCBM concepts
     fe = FrontEndModel()

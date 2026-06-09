@@ -399,7 +399,7 @@ class TestRunner:
             "concepts": [f"z{i}" for i in range(k)],
             "data_type": "tabular",
         }
-        sample = ConceptDatasetSample(X=X, C=C, y=y, meta=meta, input_type="tabular", classes=(0, 1))
+        sample = ConceptDatasetSample(inputs=X, C=C, y=y, meta=meta, input_type="tabular", classes=(0, 1))
 
         fe = FrontEndModel()
         fe.fit((C > 0.5).astype(float), y)
@@ -437,7 +437,7 @@ class TestRunner:
             dtype=np.float32,
         )
         sample = ConceptDatasetSample(
-            X=np.zeros((2, 2), dtype=np.float32),
+            inputs=np.zeros((2, 2), dtype=np.float32),
             C=C_true.astype(np.int8),
             y=np.array([0, 1], dtype=np.int32),
             meta={
@@ -506,7 +506,7 @@ class TestRunner:
         from experiments.models import ConceptBasedModel
 
         sample = ConceptDatasetSample(
-            X=np.zeros((3, 2), dtype=np.float32),
+            inputs=np.zeros((3, 2), dtype=np.float32),
             C=np.array(
                 [[1, 0, 0], [0, 1, 1], [1, 1, 0]],
                 dtype=np.int8,
@@ -548,7 +548,7 @@ class TestRunner:
         from experiments.models import ConceptBasedModel
 
         sample = ConceptDatasetSample(
-            X=np.zeros((3, 2), dtype=np.float32),
+            inputs=np.zeros((3, 2), dtype=np.float32),
             C=np.array(
                 [[1, 0, 0], [0, 1, 1], [1, 1, 0]],
                 dtype=np.int8,

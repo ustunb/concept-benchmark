@@ -248,7 +248,7 @@ def train_probcbm_model(
         helper_config["early_stopping_best_model"] = False
         with tempfile.TemporaryDirectory(dir=_REPO_ROOT) as tmpdir:
             model, helper_metrics = deps.train_prob_cbm(
-                input_shape=np.asarray(train_dataset.X[0]).shape,
+                input_shape=np.asarray(train_dataset.inputs[0]).shape,
                 n_concepts=train_dataset.n_concepts,
                 n_tasks=train_dataset.n_classes,
                 config=helper_config,

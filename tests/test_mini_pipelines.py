@@ -34,7 +34,7 @@ def _tabular_dataset(n=60, k=4, seed=42, concept_names=None):
         "data_type": "tabular",
     }
     ds = ConceptDataset(
-        X=X,
+        inputs=X,
         C=C,
         y=y,
         meta=meta,

@@ -530,7 +530,7 @@ def create_robot_text_dataset(
         "row_index": idxs,
     }
     return ConceptDataset(
-        X=list(X),
+        inputs=list(X),
         C=np.asarray(C_out, dtype=np.int8),
         y=np.asarray(y_out, dtype=np.int32),
         meta=meta,

@@ -187,7 +187,7 @@ def build_ocr_concept_dataset(
     meta["img_paths"] = img_paths
 
     ocr_ds = ConceptDataset(
-        X=pred_X_full,
+        inputs=pred_X_full,
         C=tab_ds.C,
         y=tab_ds.y,
         meta=meta,

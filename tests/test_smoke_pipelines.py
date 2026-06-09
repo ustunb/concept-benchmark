@@ -159,8 +159,8 @@ def test_robot_text_generation_and_training():
         rng_seed=42,
     )
     assert ds.n >= 10, f"Expected >=10 text samples, got {ds.n}"
-    assert isinstance(ds.X[0], str), "X should contain text strings"
-    assert len(ds.X[0]) > 10, "Text descriptions should be non-trivial"
+    assert isinstance(ds.inputs[0], str), "X should contain text strings"
+    assert len(ds.inputs[0]) > 10, "Text descriptions should be non-trivial"
 
     # Step 3: Verify concepts and labels are consistent
     assert ds.C.shape[0] == ds.n

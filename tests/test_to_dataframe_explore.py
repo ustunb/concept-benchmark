@@ -26,7 +26,7 @@ def test_to_dataframe_default_matches_old(tab_small):
 def test_to_dataframe_include_X_tabular_columns(tab_small):
     sample = tab_small.train
     df = sample.to_dataframe(include_X=True)
-    d = sample.X.shape[1]
+    d = sample.inputs.shape[1]
     expected_x_cols = [f"x_{j}" for j in range(d)]
     expected_cols = expected_x_cols + list(sample.concepts) + ["label", "class"]
     assert list(df.columns) == expected_cols
@@ -35,9 +35,9 @@ def test_to_dataframe_include_X_tabular_columns(tab_small):
 def test_to_dataframe_include_X_tabular_values(tab_small):
     sample = tab_small.train
     df = sample.to_dataframe(include_X=True)
-    d = sample.X.shape[1]
+    d = sample.inputs.shape[1]
     x_cols = [f"x_{j}" for j in range(d)]
-    np.testing.assert_array_almost_equal(df[x_cols].values, sample.X)
+    np.testing.assert_array_almost_equal(df[x_cols].values, sample.inputs)
 
 
 def test_to_dataframe_include_X_tabular_row_count(tab_small):
@@ -55,7 +55,7 @@ def test_to_dataframe_include_X_text():
     C = np.array([[1, 0], [0, 1], [1, 1]], dtype=np.int8)
     y = np.array([0, 1, 0], dtype=np.int32)
     meta = {"classes": ["a", "b"], "concepts": ["c0", "c1"], "data_type": "text"}
-    sample = ConceptDatasetSample(X=texts, C=C, y=y, meta=meta, input_type="text", classes=(0, 1))
+    sample = ConceptDatasetSample(inputs=texts, C=C, y=y, meta=meta, input_type="text", classes=(0, 1))
     df = sample.to_dataframe(include_X=True)
     assert "text" in df.columns
     assert list(df["text"]) == ["hello world", "foo bar", "baz qux"]

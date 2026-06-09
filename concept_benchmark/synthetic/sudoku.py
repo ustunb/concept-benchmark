@@ -219,7 +219,7 @@ def create_sudoku_dataset(
         kwargs.setdefault("preprocess", sudoku_image_preprocess)
 
     return ConceptDataset(
-        X=X,
+        inputs=X,
         C=C,
         y=y,
         meta=meta,

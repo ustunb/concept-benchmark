@@ -20,7 +20,7 @@ class MeanEmbedder(torch.nn.Module):
 def test_constructor_tabular_basics(tab_small):
     ds = tab_small
     assert isinstance(ds, ConceptDataset)
-    assert ds.n == len(ds.X)
+    assert ds.n == len(ds.inputs)
     assert ds.n_concepts == ds.C.shape[1]
     assert ds.n_classes == len(ds.classes)
     assert ds.train.n == ds.n and ds.validation.n == 0 and ds.test.n == 0
@@ -32,14 +32,14 @@ def test_copy_equality_and_independence(tab_small):
     cpy = ds.__copy__()
     assert cpy == ds
     # Mutate copy's data; original must not change and equality should break
-    before = ds.X.copy()
-    if isinstance(cpy.X, np.ndarray):
-        cpy.X[0, 0] += 1.0
+    before = ds.inputs.copy()
+    if isinstance(cpy.inputs, np.ndarray):
+        cpy.inputs[0, 0] += 1.0
     else:
         # If X is not ndarray in future, replace with an equivalent mutation
         raise AssertionError("Unexpected X type in tabular dataset")
     assert cpy != ds
-    np.testing.assert_array_equal(ds.X, before)
+    np.testing.assert_array_equal(ds.inputs, before)
 
 
 # ---------- CV indices and splitting ----------
@@ -93,9 +93,9 @@ def test_embed_updates_full_and_preserves_splits(tab_medium_cv):
         n_te,
     )
     assert (
-        isinstance(embed_ds.X, np.ndarray)
-        and embed_ds.X.ndim == 2
-        and embed_ds.X.shape[1] == 2
+        isinstance(embed_ds.inputs, np.ndarray)
+        and embed_ds.inputs.ndim == 2
+        and embed_ds.inputs.shape[1] == 2
     )
 
 
@@ -521,7 +521,7 @@ class TestSample:
         ds2, _ = self._make(n=100, d=4, k=3, n_classes=2, seed=77)
         ds1.sample(test_size=0.2, val_size=0.2, seed=42)
         ds2.sample(test_size=0.2, val_size=0.2, seed=42)
-        np.testing.assert_array_equal(ds1.X, ds2.X)
+        np.testing.assert_array_equal(ds1.inputs, ds2.inputs)
         np.testing.assert_array_equal(ds1.C, ds2.C)
         np.testing.assert_array_equal(ds1.train.y, ds2.train.y)
         np.testing.assert_array_equal(ds1.test.y, ds2.test.y)

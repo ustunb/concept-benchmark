@@ -249,7 +249,7 @@ class ConceptDataset:
 
     def __init__(
         self,
-        X: np.ndarray,
+        inputs: np.ndarray,
         C: np.ndarray,
         y: np.ndarray,
         meta: dict,
@@ -282,11 +282,11 @@ class ConceptDataset:
             has_label_noise=self._has_label_noise,
         )
 
-        if not isinstance(X, np.ndarray):
+        if not isinstance(inputs, np.ndarray):
             try:
-                X = np.asarray(X)
+                inputs = np.asarray(inputs)
             except (TypeError, ValueError) as e:
-                raise ValueError(f"cannot convert X to np.ndarray: {e!r}")
+                raise ValueError(f"cannot convert inputs to np.ndarray: {e!r}")
 
         if not isinstance(C, np.ndarray):
             try:
@@ -301,21 +301,21 @@ class ConceptDataset:
                 raise ValueError(f"cannot convert y to np.ndarray: {e!r}")
 
         if input_type == "image":
-            # do not cast X
+            # do not cast inputs
             SampleClass = ConceptImageDatasetSample
         elif input_type == "text":
             SampleClass = ConceptDatasetSample
-            X = X.astype(object)
+            inputs = inputs.astype(object)
         else:
             SampleClass = ConceptDatasetSample
-            X = X.astype(np.float32)
+            inputs = inputs.astype(np.float32)
 
         C = C.astype(np.int8)
         y = y.astype(np.int32)
 
         self._full = SampleClass(
             parent=self,
-            X=X,
+            inputs=inputs,
             C=C,
             y=y,
             meta=meta,
@@ -532,7 +532,7 @@ class ConceptDataset:
 
     def __copy__(self):
         cpy = ConceptDataset(
-            X=self.X,
+            inputs=self.inputs,
             C=self._full.base_concepts.copy(),
             y=self._full.base_labels.copy(),
             meta=self._full.meta,
@@ -574,9 +574,9 @@ class ConceptDataset:
         return self._full.n_classes
 
     @property
-    def X(self):
-        """Feature matrix of the full dataset."""
-        return self._full.X
+    def inputs(self):
+        """Raw inputs of the full dataset (feature matrix, paths, or text array)."""
+        return self._full.inputs
 
     @property
     def C(self):
@@ -815,7 +815,7 @@ class ConceptDataset:
         # Create a new ConceptDataset using the embedded features while
         # preserving metadata and CV indices from the original dataset.
         new_ds = ConceptDataset(
-            X=embedded_full.X,
+            inputs=embedded_full.inputs,
             C=embedded_full.C,
             y=embedded_full.y,
             meta=embedded_full.meta,
@@ -1179,7 +1179,7 @@ class ConceptDatasetSample(Dataset):
 
     def __init__(
         self,
-        X: np.ndarray,
+        inputs: np.ndarray,
         C: np.ndarray,
         y: np.ndarray,
         meta: dict,
@@ -1209,7 +1209,7 @@ class ConceptDatasetSample(Dataset):
         self.target_transform = target_transform
         self._extra_kwargs = dict(kwargs)
 
-        self._X = X
+        self._inputs = inputs
         self._y_base = np.asarray(y, dtype=np.int32)
         self._label_noise_labels: np.ndarray | None = None
         self._meta = meta
@@ -1223,7 +1223,7 @@ class ConceptDatasetSample(Dataset):
         self.concepts = meta["concepts"]
 
         self._C_base = np.asarray(C, dtype=np.int8)
-        self.n = len(self._X)
+        self.n = len(self._inputs)
         if self._y_base.ndim != 1:
             self._y_base = self._y_base.reshape(-1)
         if self._y_base.shape[0] != self.n:
@@ -1274,14 +1274,14 @@ class ConceptDatasetSample(Dataset):
             self.classes = tuple(value["classes"])
 
     @property
-    def X(self) -> np.ndarray:
-        """Feature matrix (or path array for image data)."""
-        return self._X
+    def inputs(self) -> np.ndarray:
+        """Raw inputs: feature matrix for tabular, path array for image, text array for text."""
+        return self._inputs
 
-    @X.setter
-    def X(self, value: np.ndarray) -> None:
-        self._X = value
-        self.n = len(self._X)
+    @inputs.setter
+    def inputs(self, value: np.ndarray) -> None:
+        self._inputs = value
+        self.n = len(self._inputs)
 
     @property
     def y(self) -> np.ndarray:
@@ -1460,7 +1460,7 @@ class ConceptDatasetSample(Dataset):
             return False
         if not np.array_equal(self.base_labels, other.base_labels):
             return False
-        if not np.array_equal(self.X, other.X):
+        if not np.array_equal(self.inputs, other.inputs):
             return False
         if not np.array_equal(self.base_concepts, other.base_concepts):
             return False
@@ -1479,7 +1479,7 @@ class ConceptDatasetSample(Dataset):
 
     def __getitem__(self, idx):
         """Return ``(x, c, y)`` for the given index, with transforms applied."""
-        x = self.X[idx]
+        x = self.inputs[idx]
         c = self.C[idx]
         y = self.y[idx]
 
@@ -1544,7 +1544,7 @@ class ConceptDatasetSample(Dataset):
 
         new_sample = self.__class__(
             parent=self.parent,
-            X=self.X[indices],
+            inputs=self.inputs[indices],
             C=self.base_concepts[indices],
             y=self.base_labels[indices],
             meta=filtered_meta,
@@ -1609,10 +1609,10 @@ class ConceptDatasetSample(Dataset):
         parts: list[pd.DataFrame] = []
         if include_X:
             if self.input_type == "text":
-                parts.append(pd.DataFrame({"text": list(self.X)}))
+                parts.append(pd.DataFrame({"text": list(self.inputs)}))
             else:
                 # Tabular / fallback: one column per feature dimension
-                X_arr = np.asarray(self.X)
+                X_arr = np.asarray(self.inputs)
                 if X_arr.ndim == 1:
                     X_arr = X_arr.reshape(-1, 1)
                 x_cols = {f"x_{j}": X_arr[:, j] for j in range(X_arr.shape[1])}
@@ -1708,7 +1708,7 @@ class ConceptDatasetSample(Dataset):
 
         new_sample = ConceptDatasetSample(
             parent=self.parent,
-            X=embedded_X,
+            inputs=embedded_X,
             C=self.base_concepts,
             y=self.base_labels,
             meta=embed_meta,
@@ -1768,7 +1768,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
 
     def __init__(
         self,
-        X: np.ndarray,
+        inputs: np.ndarray,
         C: np.ndarray,
         y: np.ndarray,
         meta: dict,
@@ -1783,7 +1783,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         **kwargs,
     ) -> None:
         super().__init__(
-            X=X,
+            inputs=inputs,
             C=C,
             y=y,
             meta=meta,
@@ -1805,7 +1805,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        img_path, c, y = self.X[idx], self.C[idx], self.y[idx]
+        img_path, c, y = self.inputs[idx], self.C[idx], self.y[idx]
 
         if self.base_dir is not None:
             img_path = self.base_dir / img_path
@@ -1837,7 +1837,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         """
         parts: list[pd.DataFrame] = []
         if include_X:
-            resolved = [str(self.base_dir / p) for p in self.X]
+            resolved = [str(self.base_dir / p) for p in self.inputs]
             parts.append(pd.DataFrame({"image": resolved}))
         parts.append(pd.DataFrame(self.C, columns=self.concepts))
         df = pd.concat(parts, axis=1)
@@ -1882,7 +1882,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
 
         new_sample = self.__class__(
             parent=self.parent,
-            X=self.X[indices],
+            inputs=self.inputs[indices],
             C=self.base_concepts[indices],
             y=self.base_labels[indices],
             meta=filtered_meta,

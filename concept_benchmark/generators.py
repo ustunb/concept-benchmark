@@ -156,7 +156,7 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
     meta = dict(ds.meta)
     meta["row_index"] = row_index
     data = ConceptDataset(
-        X=np.array(ds.X, dtype=object),
+        inputs=np.array(ds.inputs, dtype=object),
         C=ds.C,
         y=ds.y,
         meta=meta,
