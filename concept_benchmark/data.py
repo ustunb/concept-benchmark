@@ -1274,14 +1274,14 @@ class ConceptDatasetSample(Dataset):
             "_concept_noise_enabled": "_has_concept_noise",
             "_concept_missing_enabled": "_has_concept_missing",
             "_label_noise_enabled": "_has_label_noise",
+            "_X": "_inputs",
+            "data_type": "input_type",
         }
         for old, new in renames.items():
             if old in state and new not in state:
                 state[new] = state.pop(old)
         if "task" in state and "input_type" not in state:
             state["input_type"] = state.pop("task")
-        if "data_type" in state and "input_type" not in state:
-            state["input_type"] = state.pop("data_type")
         self.__dict__.update(state)
 
     @property
