@@ -53,7 +53,6 @@ def _load_sudoku_image_dataset(config):
     """
     img_dir = config.get_dataset_path(data_type="image")
     data = load(img_dir / "sudoku_dataset.pkl")
-    data.meta["data_type"] = "image"
     return data
 
 
@@ -62,7 +61,7 @@ def _load_sudoku_image_dataset(config):
 
 def setup_dataset(config: SudokuBenchmarkConfig) -> None:
     """Generate sudoku dataset (image + tabular + OCR sidecar)."""
-    from concept_benchmark.synthetic.sudoku_ocr.make_ocr_dataset import (
+    from concept_benchmark.synthetic.sudoku.ocr.make_ocr_dataset import (
         generate_sudoku_pipeline_data,
     )
 
@@ -80,7 +79,7 @@ def train_ocr(config: SudokuBenchmarkConfig) -> None:
     cmd = [
         sys.executable,
         "-m",
-        "concept_benchmark.synthetic.sudoku_ocr.train_ocr_fast",
+        "concept_benchmark.synthetic.sudoku.ocr.train_ocr_fast",
         "--seed",
         str(config.seed),
         "--max-corrupt",
@@ -379,7 +378,7 @@ def run_interventions(
     # Compute baseline predictions ONCE for consistent coverage across k values
     interv_cfg_k0 = InterventionConfig(
         abstention_threshold=cs_t,
-        max_concepts_per_instance=0,
+        per_instance_budget=0,
         random_state=config.seed,
     )
     result_k0 = cs_runner.run(cs_strategy, interv_cfg_k0, data.test)
@@ -400,7 +399,7 @@ def run_interventions(
     for budget in budgets:
         interv_cfg = InterventionConfig(
             abstention_threshold=cs_t,
-            max_concepts_per_instance=budget,
+            per_instance_budget=budget,
             random_state=config.seed,
         )
         result = cs_runner.run(cs_strategy, interv_cfg, data.test, y_prob_baseline=y_prob_baseline)

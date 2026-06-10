@@ -14,7 +14,7 @@ import pandas as pd
 from PIL import Image
 from tqdm import tqdm
 
-from .robot_draw import (
+from .draw import (
     ALL_ROBOT_FEATURES,
     COLOR_SCHEMES,
     draw_robot,

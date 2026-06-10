@@ -34,7 +34,9 @@ def _tiny_tabular_dataset(n=40, d=8, k=4, seed=7):
         "concepts": [f"concept_{i}" for i in range(k)],
         "data_type": "tabular",
     }
-    ds = ConceptDataset(X=X, C=C, y=y, meta=meta)
+    ds = ConceptDataset(
+        inputs=X, C=C, y=y, meta=meta, input_type="tabular", classes=(0, 1)
+    )
     ds.sample(test_size=0.2, val_size=0.2, stratify=ds.y, seed=seed)
     return ds
 
@@ -69,7 +71,7 @@ class _TinyCEMConfig:
 
 def _toy_dataset_sample(n: int, k: int) -> ConceptDatasetSample:
     return ConceptDatasetSample(
-        X=np.zeros((n, 2), dtype=np.float32),
+        inputs=np.zeros((n, 2), dtype=np.float32),
         C=np.zeros((n, k), dtype=np.int8),
         y=np.zeros(n, dtype=np.int32),
         meta={
@@ -77,6 +79,8 @@ def _toy_dataset_sample(n: int, k: int) -> ConceptDatasetSample:
             "concepts": [f"concept_{i}" for i in range(k)],
             "data_type": "tabular",
         },
+        input_type="tabular",
+        classes=(0, 1),
     )
 
 
@@ -158,7 +162,7 @@ def test_cem_sample_adapter_reorders_to_x_y_c():
 
     x, y, c = adapter[0]
 
-    assert np.allclose(np.asarray(x), ds.train.X[0])
+    assert np.allclose(np.asarray(x), ds.train.inputs[0])
     assert int(y.item()) == int(ds.train.y[0])
     assert c.dtype == torch.float32
     assert np.allclose(c.numpy(), ds.train.C[0])

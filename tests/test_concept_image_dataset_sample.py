@@ -33,10 +33,12 @@ def test_transform_to_tensor_and_loader_batching(img_small):
 
     s = ConceptImageDatasetSample(
         parent=img_small,
-        X=img_small.X,
+        inputs=img_small.inputs,
         C=img_small.C,
         y=img_small.y,
         meta=img_small._full.meta,
+        input_type="image",
+        classes=img_small._full.classes,
         base_dir=img_small._full.base_dir,
         transform=to_tensor,
     )
@@ -68,18 +70,22 @@ def test_equality_checks_base_dir(img_small, tmp_path):
     base2 = tmp_path / "b"
     s1 = ConceptImageDatasetSample(
         parent=img_small,
-        X=img_small.X,
+        inputs=img_small.inputs,
         C=img_small.C,
         y=img_small.y,
         meta=img_small._full.meta,
+        input_type="image",
+        classes=img_small._full.classes,
         base_dir=base1,
     )
     s2 = ConceptImageDatasetSample(
         parent=img_small,
-        X=img_small.X,
+        inputs=img_small.inputs,
         C=img_small.C,
         y=img_small.y,
         meta=img_small._full.meta,
+        input_type="image",
+        classes=img_small._full.classes,
         base_dir=base2,
     )
     assert s1 != s2  # base_dir differs

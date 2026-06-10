@@ -8,7 +8,7 @@ import pero
 from PIL import Image as PILImage
 from PIL import ImageFilter as PILImageFilter
 
-from .utils import generate_color_schemes
+from .colors import generate_color_schemes
 
 ROBOT_TYPES = ("glorp", "drent")
 

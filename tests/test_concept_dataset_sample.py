@@ -34,7 +34,7 @@ def test_filter_slices_and_preserves_meta_and_transforms(tab_small):
     idx[: n // 2] = True
     sub = sample.filter(indices=idx)
     assert sub.n == idx.sum()
-    np.testing.assert_array_equal(sub.X, sample.X[idx])
+    np.testing.assert_array_equal(sub.inputs, sample.inputs[idx])
     np.testing.assert_array_equal(sub.C, sample.C[idx])
     np.testing.assert_array_equal(sub.y, sample.y[idx])
     assert sub.meta == sample.meta
@@ -78,10 +78,12 @@ def test_transforms_applied_and_types_respected(tab_small):
 
     s = ConceptDatasetSample(
         parent=tab_small,
-        X=tab_small.X,
+        inputs=tab_small.inputs,
         C=tab_small.C,
         y=tab_small.y,
         meta=tab_small._full.meta,
+        input_type=tab_small._full.input_type,
+        classes=tab_small._full.classes,
         transform=tx,
         concept_transform=tc,
         target_transform=ty,
@@ -91,7 +93,7 @@ def test_transforms_applied_and_types_respected(tab_small):
     assert isinstance(x, torch.Tensor) and x.dtype == torch.float32
     assert isinstance(c, torch.Tensor) and c.dtype == torch.float32
     assert isinstance(y, torch.Tensor) and y.dtype == torch.int64
-    np.testing.assert_allclose(x.numpy(), tab_small.X[0] * 2)
+    np.testing.assert_allclose(x.numpy(), tab_small.inputs[0] * 2)
     np.testing.assert_allclose(c.numpy(), tab_small.C[0] + 1)
     np.testing.assert_equal(y.item(), int(tab_small.y[0]))
 
@@ -113,8 +115,12 @@ def test_embed_returns_tabular_and_preserves_indices(tab_small):
         MeanEmbedder(), batch_size=8, shuffle=False, device="cpu", num_workers=0
     )
     assert isinstance(emb, ConceptDatasetSample)
-    assert emb.meta.get("data_type") == "tabular"
-    assert isinstance(emb.X, np.ndarray) and emb.X.ndim == 2 and emb.X.shape[1] == 2
+    assert emb.input_type == "tabular"
+    assert (
+        isinstance(emb.inputs, np.ndarray)
+        and emb.inputs.ndim == 2
+        and emb.inputs.shape[1] == 2
+    )
     np.testing.assert_array_equal(emb.C, s.C)
     np.testing.assert_array_equal(emb.y, s.y)
     np.testing.assert_array_equal(emb.indices, s.indices)
@@ -129,20 +135,34 @@ def test_sample_meta_deep_equal_numpy_and_dataframe(tab_small):
         "arr": np.array([1, 2, 3], dtype=np.int32),
         "df": pd.DataFrame({"u": [1, 2], "v": [3, 4]}),
     }
-    s1 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=meta)
-    s2 = ConceptDatasetSample(X=s.X.copy(), C=s.C.copy(), y=s.y.copy(), meta={**meta})
+    it, cls = s.input_type, s.classes
+    s1 = ConceptDatasetSample(
+        inputs=s.inputs, C=s.C, y=s.y, meta=meta, input_type=it, classes=cls
+    )
+    s2 = ConceptDatasetSample(
+        inputs=s.inputs.copy(),
+        C=s.C.copy(),
+        y=s.y.copy(),
+        meta={**meta},
+        input_type=it,
+        classes=cls,
+    )
     assert s1 == s2
 
     # Change DataFrame content -> inequality
     meta2 = {**meta}
     meta2["df"] = pd.DataFrame({"u": [1, 2], "v": [3, 5]})
-    s3 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=meta2)
+    s3 = ConceptDatasetSample(
+        inputs=s.inputs, C=s.C, y=s.y, meta=meta2, input_type=it, classes=cls
+    )
     assert s1 != s3
 
     # Change numpy array content -> inequality
     meta3 = {**meta}
     meta3["arr"] = np.array([1, 2, 9], dtype=np.int32)
-    s4 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=meta3)
+    s4 = ConceptDatasetSample(
+        inputs=s.inputs, C=s.C, y=s.y, meta=meta3, input_type=it, classes=cls
+    )
     assert s1 != s4
 
 
@@ -155,11 +175,36 @@ def test_sample_transform_identity_matters(tab_small):
     def g(z):
         return z
 
-    s1 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=s.meta, transform=f)
-    s2 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=s.meta, transform=f)
+    it, cls = s.input_type, s.classes
+    s1 = ConceptDatasetSample(
+        inputs=s.inputs,
+        C=s.C,
+        y=s.y,
+        meta=s.meta,
+        input_type=it,
+        classes=cls,
+        transform=f,
+    )
+    s2 = ConceptDatasetSample(
+        inputs=s.inputs,
+        C=s.C,
+        y=s.y,
+        meta=s.meta,
+        input_type=it,
+        classes=cls,
+        transform=f,
+    )
     assert s1 == s2  # same function object
 
-    s3 = ConceptDatasetSample(X=s.X, C=s.C, y=s.y, meta=s.meta, transform=g)
+    s3 = ConceptDatasetSample(
+        inputs=s.inputs,
+        C=s.C,
+        y=s.y,
+        meta=s.meta,
+        input_type=it,
+        classes=cls,
+        transform=g,
+    )
     assert s1 != s3  # different function object
 
 

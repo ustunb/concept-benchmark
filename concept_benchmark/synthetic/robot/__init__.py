@@ -9,13 +9,13 @@ import pandas as pd
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.formula import LabelFormula
 
-from .helper.robot_catalog import (
+from .catalog import (
     ALL_ROBOT_FEATURES,
     OUTCOME_MISSING,
     OUTCOME_NAME,
     generate_robot_catalog,
 )
-from .helper import textgen as text_helper
+from . import textgen as text_helper
 
 
 def create_synthetic_dataset(data_type: str = "image", **kwargs) -> ConceptDataset:
@@ -141,12 +141,10 @@ def create_robot_text_dataset(
         "Head: {head_shape}. Body: {body_shape}. Elbows: {has_elbows}. Knees: {has_knees}. Feet: {foot_shape}.",
     ]
 
+    _has_cm_col = include_color and color_mode_col in df.columns
+    _default_cms = colorish(df) if include_color else "grayscale"
     for i, row in df.iterrows():
-        cms = (
-            row.get(color_mode_col, None)
-            if (include_color and color_mode_col in df.columns)
-            else (colorish(df) if include_color else "grayscale")
-        )
+        cms = row.get(color_mode_col, None) if _has_cm_col else _default_cms
         knees_b = tbool(row.get(knees_col, False))
         elbows_b = tbool(row.get(elbows_col, False))
         ant_b = tbool(row.get("has_antennae", False))
@@ -255,17 +253,18 @@ def create_robot_text_dataset(
     C_out = C[idxs]
     y_out = y[idxs]
     meta = {
-        "data_type": "text",
         "templates": list(templates),
         "concepts": concept_names,
         "classes": classes,
         "row_index": idxs,
     }
     return ConceptDataset(
-        X=list(X),
+        inputs=list(X),
         C=np.asarray(C_out, dtype=np.int8),
         y=np.asarray(y_out, dtype=np.int32),
         meta=meta,
+        input_type="text",
+        classes=tuple(classes),
     )
 
 
@@ -431,7 +430,6 @@ def create_robot_image_dataset(
         "unfiltered_concepts": list(copy_features.keys()),
         "UC": UC,
         "df_indices": catalog_df.index.to_numpy(),
-        "data_type": "image",
         "image_dir": image_dir,
         "resolution": eff_resolution,
         "color_mode": color_mode,
@@ -442,10 +440,12 @@ def create_robot_image_dataset(
     }
 
     robot_dataset = ConceptDataset(
-        X=X,
+        inputs=X,
         C=C,
         y=y,
         meta=meta,
+        input_type="image",
+        classes=(0, 1),
         base_dir=image_dir,
     )
 

@@ -22,7 +22,7 @@ from concept_benchmark.synthetic.sudoku import (
     default_transform,
     image_transform,
 )
-from concept_benchmark.synthetic.sudoku_ocr.ocr_utils import DATA_SUDOKU
+from concept_benchmark.synthetic.sudoku.ocr.ocr_utils import DATA_SUDOKU
 from concept_benchmark.config import SudokuBenchmarkConfig
 
 
@@ -225,7 +225,7 @@ def build_ocr_preprocessing(
         return
 
     candidates = (1 - starters).astype(int)
-    X_paths = np.asarray(ds.X)
+    X_paths = np.asarray(ds.inputs)
 
     ocr_dir = dataset_dir / "ocr_preprocessing"
     ocr_dir.mkdir(parents=True, exist_ok=True)
@@ -375,7 +375,7 @@ def generate_sudoku_pipeline_data(
             dataset_name=dataset_name,
         )
 
-    X, C, y = ds.X, ds.C, ds.y
+    X, C, y = ds.inputs, ds.C, ds.y
 
     meta = getattr(ds, "meta", None)
     if meta is None:
@@ -449,7 +449,14 @@ def generate_sudoku_pipeline_data(
     tab_meta_full["data_type"] = "tabular"
     tab_meta_full["transform"] = "default_transform"
     tab_meta_full["dataset_name"] = tab_ds_name
-    tab_ds = ConceptDataset(X=X_tab, C=ds.C, y=ds.y, meta=tab_meta_full)
+    tab_ds = ConceptDataset(
+        inputs=X_tab,
+        C=ds.C,
+        y=ds.y,
+        meta=tab_meta_full,
+        input_type="tabular",
+        classes=tuple(ds.classes),
+    )
 
     tab_save_dir = tab_dataset_dir
     save_dataset_pkl(tab_ds, tab_meta_full, tab_save_dir)

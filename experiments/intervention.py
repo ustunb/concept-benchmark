@@ -133,6 +133,7 @@ class InterventionBatch:
     C_true: np.ndarray
     y_true: np.ndarray | None = None
     instance_ids: np.ndarray | None = None
+    concept_costs: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         if self.C_pred.shape != self.C_true.shape:
@@ -144,6 +145,17 @@ class InterventionBatch:
             self.instance_ids = np.arange(self.C_pred.shape[0])
         if self.instance_ids.shape[0] != self.C_pred.shape[0]:
             raise ValueError("Length of instance_ids must match the number of samples.")
+        if self.concept_costs is None:
+            self.concept_costs = np.ones(self.C_pred.shape[1], dtype=np.float64)
+        else:
+            self.concept_costs = np.asarray(self.concept_costs, dtype=np.float64)
+            if self.concept_costs.shape != (self.C_pred.shape[1],):
+                raise ValueError(
+                    "concept_costs must have one value per concept; got"
+                    f" shape {self.concept_costs.shape} for {self.C_pred.shape[1]} concepts."
+                )
+            if (self.concept_costs < 0).any():
+                raise ValueError("concept_costs must be non-negative.")
 
     @property
     def n_samples(self) -> int:
@@ -160,7 +172,7 @@ class InterventionConfig:
 
     Different strategies use different subsets of these fields:
 
-    * **KFlipInterventionStrategy** — ``max_concepts_per_instance`` (the *k*
+    * **KFlipInterventionStrategy** — ``per_instance_budget`` (the *k*
       budget) and ``score_threshold`` (minimum flip probability).
     * **ConceptualSafeguardsStrategy** — ``abstention_threshold`` (abstention margin),
       ``concept_order``, and budget fields.
@@ -182,7 +194,7 @@ class InterventionConfig:
         instance_budget: Maximum number of instances that may receive at least
             one correction.  Same semantics as ``concept_budget`` but with
             ``n_samples`` as the reference population.
-        max_concepts_per_instance: Optional cap on the number of concepts that
+        per_instance_budget: Optional cap on the number of concepts that
             may be corrected within a single instance.
         random_state: Seed controlling reproducibility for strategies that rely
             on stochastic choices.
@@ -213,7 +225,7 @@ class InterventionConfig:
     abstention_threshold: float | None = None
     concept_budget: float | None = None
     instance_budget: float | None = None
-    max_concepts_per_instance: int | None = None
+    per_instance_budget: int | None = None
     random_state: int | None = None
     concept_order: Sequence[int] | None = None
     shuffle_candidates: bool = False
@@ -243,10 +255,12 @@ class InterventionConfig:
     def resolve_instance_budget(self, total: int) -> int:
         return self._resolve_budget(self.instance_budget, total)
 
-    def per_instance_limit(self, n_concepts: int) -> int:
-        if self.max_concepts_per_instance is None:
-            return n_concepts
-        return max(0, min(n_concepts, int(self.max_concepts_per_instance)))
+    def per_instance_limit(self, n_concepts: int) -> float:
+        """Per-instance cost cap. With default unit costs and integer budget k,
+        equivalent to 'at most k concepts per instance'."""
+        if self.per_instance_budget is None:
+            return float("inf")
+        return max(0.0, float(self.per_instance_budget))
 
     @staticmethod
     def _resolve_budget(budget: float | None, total: int) -> int:
@@ -342,25 +356,31 @@ class InterventionStrategy:
         *,
         config: InterventionConfig,
         start_total: int = 0,
+        concept_costs: np.ndarray | None = None,
     ) -> int:
         n_concepts = mask.shape[1]
         per_instance_limit = config.per_instance_limit(n_concepts)
         total_limit = config.resolve_concept_budget(mask.size)
+        if concept_costs is None:
+            concept_costs = np.ones(n_concepts, dtype=np.float64)
+        else:
+            concept_costs = np.asarray(concept_costs, dtype=np.float64)
         total_applied = start_total
 
         for idx in instances:
-            applied_here = 0
+            cost_here = 0.0
             for concept in order:
                 if concept < 0 or concept >= n_concepts:
                     continue
                 if mask[idx, concept]:
                     continue
-                if applied_here >= per_instance_limit:
-                    break
+                ccost = float(concept_costs[concept])
+                if cost_here + ccost > per_instance_limit:
+                    continue
                 if total_applied >= total_limit:
                     return total_applied
                 mask[idx, concept] = True
-                applied_here += 1
+                cost_here += ccost
                 total_applied += 1
         return total_applied
 
@@ -457,7 +477,9 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
             else np.arange(batch.n_concepts)
         )
         mask = np.zeros_like(batch.C_pred, dtype=bool)
-        self._apply_ordering(mask, order, selected, config=config)
+        self._apply_ordering(
+            mask, order, selected, config=config, concept_costs=batch.concept_costs
+        )
         return StrategyProposal(
             mask=mask,
             ordering_used=order,
@@ -565,7 +587,9 @@ class OrderedCBMStrategy(InterventionStrategy):
             rng=config.rng,
         )
         mask = np.zeros_like(batch.C_pred, dtype=bool)
-        self._apply_ordering(mask, order, selected, config=config)
+        self._apply_ordering(
+            mask, order, selected, config=config, concept_costs=batch.concept_costs
+        )
         details: dict[str, Any] = {}
         if "error_deltas" in self.state:
             details["validation_error_deltas"] = self.state["error_deltas"]
@@ -625,6 +649,7 @@ class RandomInterventionStrategy(InterventionStrategy):
                     [idx],
                     config=config,
                     start_total=total_applied,
+                    concept_costs=batch.concept_costs,
                 )
                 if total_applied >= total_limit:
                     break
@@ -637,6 +662,7 @@ class RandomInterventionStrategy(InterventionStrategy):
                 selected,
                 config=config,
                 start_total=total_applied,
+                concept_costs=batch.concept_costs,
             )
             ordering_used = order
 
@@ -676,12 +702,12 @@ class ScoreIntervention(InterventionStrategy):
         scores = np.zeros(n_samples, dtype=float)
         selected = np.array([], dtype=int)
 
-        m = config.max_concepts_per_instance
+        m = config.per_instance_budget
         threshold = config.score_threshold
 
         if (m is None) or (m > n_concepts) or (m <= 0):
             warnings.warn(
-                "max_concepts_per_instance is None, <= 0, or larger than the number of concepts; defaulting to all concepts.",
+                "per_instance_budget is None, <= 0, or larger than the number of concepts; defaulting to all concepts.",
                 RuntimeWarning,
                 stacklevel=2,
             )
@@ -1057,11 +1083,13 @@ class ConceptInterventionRunner:
                 "Concept ground truth and predictions must have the same shape."
             )
         y_true = labels if labels is not None else getattr(dataset, "y", None)
+        ds_concept_costs = getattr(dataset, "concept_costs_array", None)
         return InterventionBatch(
             C_pred=C_pred,
             C_true=C_true,
             y_true=y_true,
             instance_ids=instance_ids,
+            concept_costs=ds_concept_costs,
         )
 
 

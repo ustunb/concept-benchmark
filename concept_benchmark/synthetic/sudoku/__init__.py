@@ -16,8 +16,8 @@ from tqdm.auto import tqdm
 
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.paths import data_dir
-from concept_benchmark.synthetic.helper.sudoku_handwriting import _get_default_font
-from concept_benchmark.synthetic.helper.sudoku_utils import (
+from .handwriting import _get_default_font
+from .utils import (
     generate_invalid_board,
     generate_valid_board,
     get_concepts,
@@ -25,7 +25,7 @@ from concept_benchmark.synthetic.helper.sudoku_utils import (
     normalize_digits,
     cell_digit_concept_vector,
 )
-from concept_benchmark.synthetic.helper.sudoku_handwriting import (
+from .handwriting import (
     SimpleHandwrittenGenerator,
     AdvancedHandwrittenGenerator,
     _build_given_mask,
@@ -197,7 +197,6 @@ def create_sudoku_dataset(
         "classes": [0, 1],
         "concepts": concept_names,
         "boards": np.array(board_list),
-        "data_type": data_type,
         "transform": getattr(
             transform,
             "__name__",
@@ -218,7 +217,15 @@ def create_sudoku_dataset(
     if data_type == "image":
         kwargs.setdefault("preprocess", sudoku_image_preprocess)
 
-    return ConceptDataset(X=X, C=C, y=y, meta=meta, **kwargs)
+    return ConceptDataset(
+        inputs=X,
+        C=C,
+        y=y,
+        meta=meta,
+        input_type=data_type,
+        classes=(0, 1),
+        **kwargs,
+    )
 
 
 def default_transform(board: np.ndarray) -> np.ndarray:

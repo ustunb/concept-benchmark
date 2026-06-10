@@ -434,7 +434,7 @@ def _infer_backbone_spec(
     benchmark: str,
     config: Any | None,
 ) -> dict[str, Any]:
-    data_type = sample.meta.get("data_type", "tabular")
+    data_type = sample.input_type
 
     if benchmark == "sudoku":
         use_vit = getattr(config, "use_vit_backbone", False) if config else False
@@ -459,7 +459,7 @@ def _infer_backbone_spec(
             "default_output_dim": _default_cem_output_dim(config),
         }
 
-    x0 = np.asarray(sample.X[0])
+    x0 = np.asarray(sample.inputs[0])
     return {
         "kind": "tabular",
         "input_dim": int(x0.reshape(-1).shape[0]),

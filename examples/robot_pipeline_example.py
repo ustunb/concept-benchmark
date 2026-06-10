@@ -135,7 +135,7 @@ for k in budgets:
         result = runner.run(
             strategy=KFlipInterventionStrategy(),
             config=InterventionConfig(
-                max_concepts_per_instance=k,
+                per_instance_budget=k,
                 score_threshold=0.2,
             ),
             dataset=test,

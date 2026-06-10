@@ -21,7 +21,14 @@ classifiers = [
 requires-python = ">=3.10"
 
 dependencies = [
-    "numpy>=2.2.6",
+    # Numerical and ML stack: PINNED to the exact versions used to produce the
+    # paper numbers (CBM ideal=0.8673, DNN=0.8746) at commit 388bdc4f
+    # (Apr 13 2026). Conv2d output and Bernoulli RNG vary across versions, so
+    # any upgrade will silently drift the reference numbers. Do not relax
+    # these pins without re-running tests/test_robot_pipeline_regression.py.
+    "numpy==2.2.6",
+    "torch==2.8.0",
+    "torchvision==0.23.0",
     "pandas>=2.3.1",
     "scikit-learn>=1.7.0",
     "scipy>=1.15.3",
@@ -29,8 +36,6 @@ dependencies = [
     "dill>=0.3.8",
     "matplotlib>=3.10.3",
     "psutil>=7.0.0",
-    "torch>=2.7.1",
-    "torchvision>=0.23.0",
     "pillow>=10.0.0",
     "colorir>=2.0.0",
     "pero>=0.18.0",

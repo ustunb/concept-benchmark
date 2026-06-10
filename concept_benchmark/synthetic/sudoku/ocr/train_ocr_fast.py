@@ -21,7 +21,7 @@ from tqdm.auto import tqdm
 from concept_benchmark.data import ConceptDataset
 from concept_benchmark.ext.fileutils import load as load_object, save as save_object
 
-from concept_benchmark.synthetic.sudoku_ocr.ocr_utils import (
+from concept_benchmark.synthetic.sudoku.ocr.ocr_utils import (
     SudokuCellDataset,
     TinyResNet,
     compute_class_weights,
@@ -181,12 +181,18 @@ def build_ocr_concept_dataset(
         pred_X_full[i] = pred_board.reshape(-1)
 
     meta = dict(tab_ds.meta)
-    meta["data_type"] = meta.get("data_type", "tabular")
     meta["transform"] = "ocr_inferred"
     meta["dataset_name"] = f"{meta.get('dataset_name', 'sudoku')}_ocr_inferred_full"
     meta["img_paths"] = img_paths
 
-    ocr_ds = ConceptDataset(X=pred_X_full, C=tab_ds.C, y=tab_ds.y, meta=meta)
+    ocr_ds = ConceptDataset(
+        inputs=pred_X_full,
+        C=tab_ds.C,
+        y=tab_ds.y,
+        meta=meta,
+        input_type="tabular",
+        classes=tuple(tab_ds.classes),
+    )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     save_object(ocr_ds, out_path, overwrite=True)
     logger.info("[INFO] saved OCR-inferred ConceptDataset to %s", out_path)

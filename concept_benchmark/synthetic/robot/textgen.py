@@ -523,17 +523,18 @@ def create_robot_text_dataset(
     C_out = C[idxs]
     y_out = y[idxs]
     meta = {
-        "data_type": "text",
         "templates": list(templates),
         "concepts": concept_names,
         "classes": classes,
         "row_index": idxs,
     }
     return ConceptDataset(
-        X=list(X),
+        inputs=list(X),
         C=np.asarray(C_out, dtype=np.int8),
         y=np.asarray(y_out, dtype=np.int32),
         meta=meta,
+        input_type="text",
+        classes=tuple(classes),
     )
 
 

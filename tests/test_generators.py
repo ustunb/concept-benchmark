@@ -255,7 +255,7 @@ class TestSudokuDatasetGenerator:
         ).generate()
         assert isinstance(ds, ConceptDataset)
         assert ds.C.shape[1] == 27
-        assert ds.X is not None
+        assert ds.inputs is not None
         ds.sample(test_size=0.2, val_size=0.2, stratify=ds.y, seed=42)
         assert len(ds.train.y) + len(ds.validation.y) + len(ds.test.y) == 10
 

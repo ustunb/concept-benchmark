@@ -107,16 +107,16 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
     to prevent template leakage across splits.
     """
     from concept_benchmark.data import ConceptDataset
-    from concept_benchmark.synthetic.robot_text.catalog import (
+    from concept_benchmark.synthetic.robot.text.catalog import (
         compute_label,
         enumerate_robot_concepts,
     )
-    from concept_benchmark.synthetic.robot_text.corpus import (
+    from concept_benchmark.synthetic.robot.text.corpus import (
         compute_text_concept_names,
         get_corpus_path,
     )
-    from concept_benchmark.synthetic.robot_text.dataset import build_text_dataset
-    from concept_benchmark.synthetic.helper.robot_catalog import collapse_robot_subtypes
+    from concept_benchmark.synthetic.robot.text.dataset import build_text_dataset
+    from concept_benchmark.synthetic.robot.catalog import collapse_robot_subtypes
 
     set_deterministic_seed(config.seed)
 
@@ -156,10 +156,12 @@ def generate_robot_text_dataset(config: RobotBenchmarkConfig) -> ConceptDataset:
     meta = dict(ds.meta)
     meta["row_index"] = row_index
     data = ConceptDataset(
-        X=np.array(ds.X, dtype=object),
+        inputs=np.array(ds.inputs, dtype=object),
         C=ds.C,
         y=ds.y,
         meta=meta,
+        input_type="text",
+        classes=tuple(ds.classes),
     )
 
     return data

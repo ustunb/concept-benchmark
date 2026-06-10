@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from concept_benchmark.synthetic.robot_text.catalog import CORE_CONCEPT_NAMES
+from concept_benchmark.synthetic.robot.text.catalog import CORE_CONCEPT_NAMES
 
 if TYPE_CHECKING:
     from concept_benchmark.config import RobotBenchmarkConfig
@@ -389,7 +389,7 @@ def get_corpus_path(config: RobotBenchmarkConfig) -> Path:
         p = (
             package_dir
             / "synthetic"
-            / "helper"
+            / "robot"
             / "static"
             / "text_templates"
             / "hard_corpus.jsonl"
@@ -401,4 +401,4 @@ def get_corpus_path(config: RobotBenchmarkConfig) -> Path:
         if config.template_complexity == "medium"
         else "templates_simple.txt"
     )
-    return package_dir / "synthetic" / "helper" / "static" / "text_templates" / name
+    return package_dir / "synthetic" / "robot" / "static" / "text_templates" / name

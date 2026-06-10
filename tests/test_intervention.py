@@ -207,7 +207,7 @@ class TestInterventionConfig:
         cfg = InterventionConfig()
         assert cfg.abstention_threshold is None
         assert cfg.concept_budget is None
-        assert cfg.max_concepts_per_instance is None
+        assert cfg.per_instance_budget is None
         assert cfg.random_state is None
         assert cfg.score_threshold == 0.2
 
@@ -219,17 +219,62 @@ class TestInterventionConfig:
         np.testing.assert_array_equal(v1, v2)
 
     def test_per_instance_limit(self):
-        cfg = InterventionConfig(max_concepts_per_instance=3)
-        assert cfg.per_instance_limit(10) == 3
-        assert cfg.per_instance_limit(2) == 2
+        cfg = InterventionConfig(per_instance_budget=3)
+        # Now a cost cap, not a count cap. With default unit costs and
+        # budget=k, equivalent to "at most k concepts per instance".
+        assert cfg.per_instance_limit(10) == 3.0
+        assert cfg.per_instance_limit(2) == 3.0
 
     def test_per_instance_limit_none(self):
         cfg = InterventionConfig()
-        assert cfg.per_instance_limit(7) == 7
+        # None -> infinite cost budget (unbounded).
+        assert cfg.per_instance_limit(7) == float("inf")
 
     def test_tau_validation(self):
         with pytest.raises(ValueError, match="abstention_threshold must lie within"):
             InterventionConfig(abstention_threshold=0.8)
+
+    def test_cost_weighted_apply_ordering(self):
+        """With non-unit costs and a per_instance_budget cap, _apply_ordering
+        must skip concepts whose cost would exceed the remaining budget."""
+        from experiments.intervention import InterventionStrategy
+
+        # 2 instances, 3 concepts, costs [1, 2, 1], budget=2.
+        # Order = [1, 0, 2]: concept 1 costs 2 -> fills budget; 0 and 2 don't fit
+        # (1 + 0 = 1 <= 2 ok? wait — after picking 1 we have cost_here=2; next
+        # candidate has ccost=1, 2+1=3 > 2, skip). So instance gets {1}.
+        # With unit costs and budget=2, same order picks {1, 0} (count 2).
+        mask = np.zeros((2, 3), dtype=bool)
+        cfg = InterventionConfig(per_instance_budget=2)
+        InterventionStrategy._apply_ordering(
+            mask,
+            order=[1, 0, 2],
+            instances=[0, 1],
+            config=cfg,
+            concept_costs=np.array([1.0, 2.0, 1.0]),
+        )
+        # Both instances pick only concept 1 (cost 2 -> fills budget exactly).
+        np.testing.assert_array_equal(
+            mask, [[False, True, False], [False, True, False]]
+        )
+
+    def test_unit_costs_match_count_budget(self):
+        """With unit costs and integer per_instance_budget=k, behavior is
+        identical to the legacy 'at most k concepts per instance' semantics."""
+        from experiments.intervention import InterventionStrategy
+
+        mask = np.zeros((1, 5), dtype=bool)
+        cfg = InterventionConfig(per_instance_budget=3)
+        InterventionStrategy._apply_ordering(
+            mask,
+            order=[0, 1, 2, 3, 4],
+            instances=[0],
+            config=cfg,
+            concept_costs=None,  # default unit costs
+        )
+        # 3 concepts picked = budget exhausted
+        assert mask[0].sum() == 3
+        np.testing.assert_array_equal(mask[0], [True, True, True, False, False])
 
     def test_resolve_budget_fraction(self):
         cfg = InterventionConfig(concept_budget=0.5)
@@ -282,7 +327,7 @@ class TestOrderedCBMStrategy:
         k = 4
         model = _make_cbm(k=k)
         batch = _make_batch(n=10, k=k)
-        config = InterventionConfig(max_concepts_per_instance=2, random_state=0)
+        config = InterventionConfig(per_instance_budget=2, random_state=0)
         strat = OrderedCBMStrategy()
         strat.prepare(model, batch, config)
         proposal = strat.propose(model, batch, config)
@@ -293,7 +338,7 @@ class TestOrderedCBMStrategy:
         k = 4
         model = _make_cbm(k=k)
         batch = _make_batch(n=10, k=k)
-        config = InterventionConfig(max_concepts_per_instance=1, random_state=0)
+        config = InterventionConfig(per_instance_budget=1, random_state=0)
         strat = OrderedCBMStrategy()
         strat.prepare(model, batch, config)
         proposal = strat.propose(model, batch, config)
@@ -309,7 +354,7 @@ class TestRandomInterventionStrategy:
         k = 4
         model = _make_cbm(k=k)
         batch = _make_batch(n=10, k=k)
-        config = InterventionConfig(max_concepts_per_instance=2, random_state=0)
+        config = InterventionConfig(per_instance_budget=2, random_state=0)
         strat = RandomInterventionStrategy()
         proposal = strat.propose(model, batch, config)
         assert proposal.mask.shape == (10, k)
@@ -319,8 +364,8 @@ class TestRandomInterventionStrategy:
         k = 4
         model = _make_cbm(k=k)
         batch = _make_batch(n=10, k=k)
-        config1 = InterventionConfig(max_concepts_per_instance=2, random_state=99)
-        config2 = InterventionConfig(max_concepts_per_instance=2, random_state=99)
+        config1 = InterventionConfig(per_instance_budget=2, random_state=99)
+        config2 = InterventionConfig(per_instance_budget=2, random_state=99)
         strat1 = RandomInterventionStrategy()
         strat2 = RandomInterventionStrategy()
         m1 = strat1.propose(model, batch, config1).mask
@@ -353,7 +398,7 @@ class TestConceptualSafeguardsStrategy:
             y_true=np.zeros(10, dtype=np.int32),
         )
         config = InterventionConfig(
-            abstention_threshold=0.3, max_concepts_per_instance=2, random_state=0
+            abstention_threshold=0.3, per_instance_budget=2, random_state=0
         )
         strat = ConceptualSafeguardsStrategy()
         proposal = strat.propose(model, batch, config)
@@ -369,7 +414,7 @@ class TestScoreIntervention:
         model = _make_cbm(k=k)
         batch = _make_batch(n=8, k=k)
         config = InterventionConfig(
-            max_concepts_per_instance=2,
+            per_instance_budget=2,
             score_threshold=0.1,
             random_state=0,
         )
@@ -399,7 +444,9 @@ class TestRunner:
             "concepts": [f"z{i}" for i in range(k)],
             "data_type": "tabular",
         }
-        sample = ConceptDatasetSample(X=X, C=C, y=y, meta=meta)
+        sample = ConceptDatasetSample(
+            inputs=X, C=C, y=y, meta=meta, input_type="tabular", classes=(0, 1)
+        )
 
         fe = FrontEndModel()
         fe.fit((C > 0.5).astype(float), y)
@@ -409,7 +456,7 @@ class TestRunner:
     def test_run_shapes(self):
         model, sample = self._make_runner_data()
         runner = ConceptInterventionRunner(model)
-        config = InterventionConfig(max_concepts_per_instance=2, random_state=0)
+        config = InterventionConfig(per_instance_budget=2, random_state=0)
         strat = RandomInterventionStrategy()
         # Pass concept_proba explicitly since model has no concept_detector
         C_pred = sample.C.copy()
@@ -437,7 +484,7 @@ class TestRunner:
             dtype=np.float32,
         )
         sample = ConceptDatasetSample(
-            X=np.zeros((2, 2), dtype=np.float32),
+            inputs=np.zeros((2, 2), dtype=np.float32),
             C=C_true.astype(np.int8),
             y=np.array([0, 1], dtype=np.int32),
             meta={
@@ -445,6 +492,8 @@ class TestRunner:
                 "concepts": ["z0", "z1", "z2"],
                 "data_type": "tabular",
             },
+            input_type="tabular",
+            classes=(0, 1),
         )
 
         fe = _RecordingAlignedFrontEnd()
@@ -458,7 +507,7 @@ class TestRunner:
         )
         result = ConceptInterventionRunner(model).run(
             _FixedMaskStrategy(mask),
-            InterventionConfig(max_concepts_per_instance=1, random_state=0),
+            InterventionConfig(per_instance_budget=1, random_state=0),
             sample,
             concept_proba=C_pred,
             instance_ids=instance_ids,
@@ -487,7 +536,7 @@ class TestRunner:
     def test_applies_ground_truth(self):
         model, sample = self._make_runner_data(n=10, k=3)
         runner = ConceptInterventionRunner(model)
-        config = InterventionConfig(max_concepts_per_instance=3, random_state=0)
+        config = InterventionConfig(per_instance_budget=3, random_state=0)
         strat = RandomInterventionStrategy()
         C_pred = sample.C.copy()
         result = runner.run(strat, config, sample, concept_proba=C_pred)
@@ -504,7 +553,7 @@ class TestRunner:
         from experiments.models import ConceptBasedModel
 
         sample = ConceptDatasetSample(
-            X=np.zeros((3, 2), dtype=np.float32),
+            inputs=np.zeros((3, 2), dtype=np.float32),
             C=np.array(
                 [[1, 0, 0], [0, 1, 1], [1, 1, 0]],
                 dtype=np.int8,
@@ -515,6 +564,8 @@ class TestRunner:
                 "concepts": ["z0", "z1", "z2"],
                 "data_type": "tabular",
             },
+            input_type="tabular",
+            classes=(0, 1),
         )
         concept_proba = np.array(
             [
@@ -529,7 +580,7 @@ class TestRunner:
         model = ConceptBasedModel(concept_detector=None, label_predictor=fe)
         ConceptInterventionRunner(model).prepare(
             _ReplayDuringPrepareStrategy(),
-            InterventionConfig(max_concepts_per_instance=1, random_state=0),
+            InterventionConfig(per_instance_budget=1, random_state=0),
             sample,
             concept_proba=concept_proba,
         )
@@ -544,7 +595,7 @@ class TestRunner:
         from experiments.models import ConceptBasedModel
 
         sample = ConceptDatasetSample(
-            X=np.zeros((3, 2), dtype=np.float32),
+            inputs=np.zeros((3, 2), dtype=np.float32),
             C=np.array(
                 [[1, 0, 0], [0, 1, 1], [1, 1, 0]],
                 dtype=np.int8,
@@ -555,6 +606,8 @@ class TestRunner:
                 "concepts": ["z0", "z1", "z2"],
                 "data_type": "tabular",
             },
+            input_type="tabular",
+            classes=(0, 1),
         )
         concept_proba = np.array(
             [
@@ -569,7 +622,7 @@ class TestRunner:
         model = ConceptBasedModel(concept_detector=None, label_predictor=fe)
         result = ConceptInterventionRunner(model).run(
             _ReplayDuringProposeStrategy(),
-            InterventionConfig(max_concepts_per_instance=1, random_state=0),
+            InterventionConfig(per_instance_budget=1, random_state=0),
             sample,
             concept_proba=concept_proba,
         )

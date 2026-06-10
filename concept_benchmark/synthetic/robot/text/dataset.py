@@ -8,8 +8,8 @@ import numpy as np
 import pandas as pd
 
 from concept_benchmark.data import ConceptDatasetSample
-from concept_benchmark.synthetic.robot_text.catalog import CORE_CONCEPT_NAMES
-from concept_benchmark.synthetic.robot_text.corpus import (
+from concept_benchmark.synthetic.robot.text.catalog import CORE_CONCEPT_NAMES
+from concept_benchmark.synthetic.robot.text.corpus import (
     concept_vector_from_row,
     load_jsonl,
     render_from_corpus,
@@ -62,10 +62,12 @@ def build_text_dataset(
     C_arr = np.stack(C, axis=0).astype(np.float32)
     y_arr = np.asarray(y, dtype=int)
     ds = ConceptDatasetSample(
-        X=[str(t) for t in X],
+        inputs=[str(t) for t in X],
         C=C_arr,
         y=y_arr,
-        meta={"concepts": tuple(names), "classes": (0, 1), "data_type": "text"},
+        meta={"concepts": tuple(names), "classes": (0, 1)},
+        input_type="text",
+        classes=(0, 1),
     )
     ds._row_index = np.asarray(row_index, dtype=int)
     return ds
@@ -153,14 +155,16 @@ def kfold_by_robot_identity(
 
     def _subset(mask):
         idx = np.where(mask)[0]
-        X_sub = [ds.X[i] for i in idx]
+        X_sub = [ds.inputs[i] for i in idx]
         C_sub = ds.C[idx]
         y_sub = ds.y[idx]
         return ConceptDatasetSample(
-            X=X_sub,
+            inputs=X_sub,
             C=C_sub,
             y=y_sub,
-            meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text"},
+            meta={"concepts": ds.concepts, "classes": ds.classes},
+            input_type="text",
+            classes=ds.classes,
         )
 
     val_mask = fold_arr == val_fold
@@ -186,18 +190,19 @@ def kfold_by_robot_identity(
         pool = np.arange(len(test_ds.y), dtype=int)
         replace = deployment_size > pool.size
         idx_dep = rng_dep.choice(pool, size=deployment_size, replace=replace)
-        X_dep = [test_ds.X[i] for i in idx_dep]
+        X_dep = [test_ds.inputs[i] for i in idx_dep]
         C_dep = test_ds.C[idx_dep]
         y_dep = test_ds.y[idx_dep]
         dep = ConceptDatasetSample(
-            X=X_dep,
+            inputs=X_dep,
             C=C_dep,
             y=y_dep,
             meta={
                 "concepts": test_ds.concepts,
                 "classes": test_ds.classes,
-                "data_type": "text",
             },
+            input_type="text",
+            classes=test_ds.classes,
         )
         ds.test = dep
     else:
