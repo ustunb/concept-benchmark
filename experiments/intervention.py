@@ -477,7 +477,9 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
             else np.arange(batch.n_concepts)
         )
         mask = np.zeros_like(batch.C_pred, dtype=bool)
-        self._apply_ordering(mask, order, selected, config=config, concept_costs=batch.concept_costs)
+        self._apply_ordering(
+            mask, order, selected, config=config, concept_costs=batch.concept_costs
+        )
         return StrategyProposal(
             mask=mask,
             ordering_used=order,
@@ -585,7 +587,9 @@ class OrderedCBMStrategy(InterventionStrategy):
             rng=config.rng,
         )
         mask = np.zeros_like(batch.C_pred, dtype=bool)
-        self._apply_ordering(mask, order, selected, config=config, concept_costs=batch.concept_costs)
+        self._apply_ordering(
+            mask, order, selected, config=config, concept_costs=batch.concept_costs
+        )
         details: dict[str, Any] = {}
         if "error_deltas" in self.state:
             details["validation_error_deltas"] = self.state["error_deltas"]

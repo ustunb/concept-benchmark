@@ -523,7 +523,6 @@ def create_robot_text_dataset(
     C_out = C[idxs]
     y_out = y[idxs]
     meta = {
-        "data_type": "text",
         "templates": list(templates),
         "concepts": concept_names,
         "classes": classes,

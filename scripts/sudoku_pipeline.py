@@ -53,7 +53,6 @@ def _load_sudoku_image_dataset(config):
     """
     img_dir = config.get_dataset_path(data_type="image")
     data = load(img_dir / "sudoku_dataset.pkl")
-    data.meta["data_type"] = "image"
     return data
 
 

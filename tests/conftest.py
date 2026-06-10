@@ -13,18 +13,21 @@ from PIL import Image
 from concept_benchmark.data import ConceptDataset
 
 
-# Some CUDA + cuDNN combinations (e.g. cuDNN 9.x with GTX 10xx series) raise
-# CUDNN_STATUS_NOT_INITIALIZED on the first conv2d call but work fine with
-# cuDNN disabled. Detect that case once at session start and turn off cuDNN
-# globally so the regression tests can run on heterogeneous hardware.
-if torch.cuda.is_available() and torch.backends.cudnn.enabled:
+@pytest.fixture(scope="session", autouse=True)
+def _disable_broken_cudnn():
+    """Auto-disable cuDNN if first conv2d raises CUDNN_STATUS_NOT_INITIALIZED.
+
+    Some CUDA + cuDNN combos (cuDNN 9.x + GTX 10xx Pascal on DSMLP) hit the
+    error on first conv but work with cuDNN disabled. Detect once per session.
+    """
+    if not (torch.cuda.is_available() and torch.backends.cudnn.enabled):
+        return
     try:
-        _probe_x = torch.randn(1, 1, 4, 4, device="cuda")
-        _probe_w = torch.randn(1, 1, 3, 3, device="cuda")
-        torch.nn.functional.conv2d(_probe_x, _probe_w)
-        del _probe_x, _probe_w
-    except RuntimeError as _e:
-        if "cuDNN" in str(_e) or "GET was unable" in str(_e):
+        _x = torch.randn(1, 1, 4, 4, device="cuda")
+        _w = torch.randn(1, 1, 3, 3, device="cuda")
+        torch.nn.functional.conv2d(_x, _w)
+    except RuntimeError as e:
+        if "cuDNN" in str(e) or "GET was unable" in str(e):
             torch.backends.cudnn.enabled = False
 
 

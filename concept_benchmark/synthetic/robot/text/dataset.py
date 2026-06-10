@@ -65,7 +65,7 @@ def build_text_dataset(
         inputs=[str(t) for t in X],
         C=C_arr,
         y=y_arr,
-        meta={"concepts": tuple(names), "classes": (0, 1), "data_type": "text"},
+        meta={"concepts": tuple(names), "classes": (0, 1)},
         input_type="text",
         classes=(0, 1),
     )
@@ -162,7 +162,7 @@ def kfold_by_robot_identity(
             inputs=X_sub,
             C=C_sub,
             y=y_sub,
-            meta={"concepts": ds.concepts, "classes": ds.classes, "data_type": "text"},
+            meta={"concepts": ds.concepts, "classes": ds.classes},
             input_type="text",
             classes=ds.classes,
         )
@@ -200,7 +200,6 @@ def kfold_by_robot_identity(
             meta={
                 "concepts": test_ds.concepts,
                 "classes": test_ds.classes,
-                "data_type": "text",
             },
             input_type="text",
             classes=test_ds.classes,

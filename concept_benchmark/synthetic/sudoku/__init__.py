@@ -197,7 +197,6 @@ def create_sudoku_dataset(
         "classes": [0, 1],
         "concepts": concept_names,
         "boards": np.array(board_list),
-        "data_type": data_type,
         "transform": getattr(
             transform,
             "__name__",

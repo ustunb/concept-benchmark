@@ -86,7 +86,7 @@ def test_embed_updates_full_and_preserves_splits(tab_medium_cv):
     n_tr, n_va, n_te = ds.train.n, ds.validation.n, ds.test.n
     model = MeanEmbedder()
     embed_ds = ds.embed(model, batch_size=4, shuffle=False, device="cpu", num_workers=0)
-    assert ds._full.meta.get("data_type") == "tabular"
+    assert ds._full.input_type == "tabular"
     assert (embed_ds.train.n, embed_ds.validation.n, embed_ds.test.n) == (
         n_tr,
         n_va,

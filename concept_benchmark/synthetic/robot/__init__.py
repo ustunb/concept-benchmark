@@ -253,7 +253,6 @@ def create_robot_text_dataset(
     C_out = C[idxs]
     y_out = y[idxs]
     meta = {
-        "data_type": "text",
         "templates": list(templates),
         "concepts": concept_names,
         "classes": classes,
@@ -431,7 +430,6 @@ def create_robot_image_dataset(
         "unfiltered_concepts": list(copy_features.keys()),
         "UC": UC,
         "df_indices": catalog_df.index.to_numpy(),
-        "data_type": "image",
         "image_dir": image_dir,
         "resolution": eff_resolution,
         "color_mode": color_mode,

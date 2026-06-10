@@ -1246,6 +1246,10 @@ class ConceptDatasetSample(Dataset):
         # comes from meta because it's the canonical source today.
         if classes is None:
             classes = tuple(meta.get("classes", ()))
+        if len(classes) == 0:
+            raise ValueError(
+                "classes must be a non-empty tuple, either as kwarg or in meta['classes']"
+            )
         self.classes = tuple(classes)
         self.concepts = meta["concepts"]
 

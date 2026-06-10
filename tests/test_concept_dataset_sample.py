@@ -115,7 +115,7 @@ def test_embed_returns_tabular_and_preserves_indices(tab_small):
         MeanEmbedder(), batch_size=8, shuffle=False, device="cpu", num_workers=0
     )
     assert isinstance(emb, ConceptDatasetSample)
-    assert emb.meta.get("data_type") == "tabular"
+    assert emb.input_type == "tabular"
     assert (
         isinstance(emb.inputs, np.ndarray)
         and emb.inputs.ndim == 2

@@ -181,7 +181,6 @@ def build_ocr_concept_dataset(
         pred_X_full[i] = pred_board.reshape(-1)
 
     meta = dict(tab_ds.meta)
-    meta["data_type"] = meta.get("data_type", "tabular")
     meta["transform"] = "ocr_inferred"
     meta["dataset_name"] = f"{meta.get('dataset_name', 'sudoku')}_ocr_inferred_full"
     meta["img_paths"] = img_paths
