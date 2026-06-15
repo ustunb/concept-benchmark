@@ -158,3 +158,5 @@ examples/.ipynb_checkpoints
 
 
 /results/
+.ultraplan/
+huggingface_export/
