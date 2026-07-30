@@ -706,6 +706,20 @@ def train_dnn(
     train_acc = compute_accuracy(model, train_loader, device=device)
     valid_acc = compute_accuracy(model, valid_loader, device=device)
     test_acc = compute_accuracy(model, test_loader, device=device)
+    try:
+        import numpy as _np
+        _pp=[]; _tt=[]
+        model.eval()
+        with torch.no_grad():
+            for _X, _, _yy in test_loader:
+                _o = model(_X.to(device)).squeeze()
+                _pp += list((_o > 0.5).long().cpu().numpy().ravel())
+                _tt += list(_np.asarray(_yy.cpu().numpy()).astype(int).ravel())
+        _pp=_np.array(_pp); _tt=_np.array(_tt)
+        _r0=((_pp==0)&(_tt==0)).sum()/max((_tt==0).sum(),1); _r1=((_pp==1)&(_tt==1)).sum()/max((_tt==1).sum(),1)
+        print("DNN-DIAG pred_P1=%.3f true_P1=%.3f acc=%.3f recall0=%.3f recall1=%.3f distinct=%d" % (_pp.mean(), _tt.mean(), (_pp==_tt).mean(), _r0, _r1, len(set(_pp.tolist()))), flush=True)
+    except Exception as _e:
+        print("DNN-DIAG failed: %r" % (_e,), flush=True)
     logger.info("Training Accuracy: %.2f%%", train_acc * 100)
     logger.info("Validation Accuracy: %.2f%%", valid_acc * 100)
     logger.info("Test Accuracy: %.2f%%", test_acc * 100)
@@ -720,6 +734,25 @@ def train_dnn(
 # ── Intervention helper ───────────────────────────────────────────────
 
 
+def _intervention_encoding() -> str:
+    """hard (default): revealed concepts set to hard 0/1 then binarized.
+    koh595: revealed concepts set to 5th/95th-pct training activation (Koh 2020)."""
+    import os as _os
+    return _os.environ.get("INTERVENTION_ENCODING", "hard").lower()
+
+
+def _calibrate_revealed(C, mask, pct5, pct95):
+    """Revealed concepts -> in-distribution 5/95-pct values; rest stay continuous."""
+    C_cal = np.asarray(C, dtype=float).copy()
+    hi = np.broadcast_to(np.asarray(pct95, dtype=float), C_cal.shape)
+    lo = np.broadcast_to(np.asarray(pct5, dtype=float), C_cal.shape)
+    rev_hi = mask & (C_cal >= 0.5)
+    rev_lo = mask & (C_cal < 0.5)
+    C_cal[rev_hi] = hi[rev_hi]
+    C_cal[rev_lo] = lo[rev_lo]
+    return C_cal
+
+
 def _test_interventions(
     prob_test,
     settings: InterventionSettings,
@@ -730,6 +763,8 @@ def _test_interventions(
     model=None,
     *,
     cache_only: bool = False,
+    pct5=None,
+    pct95=None,
 ):
     """Run interventions for each budget and return results dict.
 
@@ -845,6 +880,12 @@ def _test_interventions(
                     baseline_concepts=(C_pred >= 0.5).astype(np.float32),
                     intervention_mask=mask,
                 )
+            elif _intervention_encoding() == "koh595" and pct5 is not None:
+                y_prob_after = fe.predict_proba(
+                    _calibrate_revealed(C_intervened, mask, pct5, pct95))
+            elif _intervention_encoding() == "hard_revealed":
+                y_prob_after = fe.predict_proba(
+                    _calibrate_revealed(C_intervened, mask, 0.0, 1.0))
             else:
                 C_binary = (C_intervened >= 0.5).astype(int)
                 y_prob_after = fe.predict_proba(C_binary)
@@ -1478,6 +1519,12 @@ def _test_interventions(
                     baseline_concepts=C_before,
                     intervention_mask=overwrite_mask,
                 )
+            elif _intervention_encoding() == "koh595" and pct5 is not None:
+                y_prob_after = fe.predict_proba(
+                    _calibrate_revealed(C_after, overwrite_mask, pct5, pct95))
+            elif _intervention_encoding() == "hard_revealed":
+                y_prob_after = fe.predict_proba(
+                    _calibrate_revealed(C_after, overwrite_mask, 0.0, 1.0))
             else:
                 C_final_binary = (C_after >= 0.5).astype(int)
                 y_prob_after = fe.predict_proba(C_final_binary)
@@ -1520,6 +1567,12 @@ def _test_interventions(
                     baseline_concepts=result.C_pred,
                     intervention_mask=result.mask,
                 )
+            elif _intervention_encoding() == "koh595" and pct5 is not None:
+                result.y_prob_after = fe.predict_proba(
+                    _calibrate_revealed(result.C_intervened, result.mask, pct5, pct95))
+            elif _intervention_encoding() == "hard_revealed":
+                result.y_prob_after = fe.predict_proba(
+                    _calibrate_revealed(result.C_intervened, result.mask, 0.0, 1.0))
             else:
                 C_final_binary = (result.C_intervened >= 0.5).astype(int)
                 result.y_prob_after = fe.predict_proba(C_final_binary)
@@ -1754,6 +1807,11 @@ def _prepare_model_for_concept_source(config, concept_source, family, data):
                 concept_detector=None,
                 label_predictor=FEOnProbs(lf.classifier),
             )
+            if _intervention_encoding() == "koh595":
+                train_paths = [str(image_dir / p) for p in data.train.inputs]
+                P_tr = lf.concept_proba(train_paths)
+                model._koh_pct5 = np.percentile(P_tr, 5, axis=0)
+                model._koh_pct95 = np.percentile(P_tr, 95, axis=0)
             return model, c_preds, list(lf.concept_set.keys), data_lf.test
         else:
             # Train family model on LFCBM-labeled data
@@ -1769,6 +1827,10 @@ def _prepare_model_for_concept_source(config, concept_source, family, data):
                 )
                 save(model, model_path, overwrite=True)
             c_preds = model.concept_detector.predict_proba(data_lf.test)
+            if _intervention_encoding() == "koh595":
+                P_tr = model.concept_detector.predict_proba(data_lf.train)
+                model._koh_pct5 = np.percentile(P_tr, 5, axis=0)
+                model._koh_pct95 = np.percentile(P_tr, 95, axis=0)
             return model, c_preds, list(lf.concept_set.keys), data_lf.test
     else:
         # GT concepts: load the baseline model for this family
@@ -1853,6 +1915,8 @@ def _run_cell(config, concept_source, intervention_source, family, data,
             fe=model.label_predictor,
             test=test_data,
             concept_names=concept_names,
+            pct5=getattr(model, "_koh_pct5", None),
+            pct95=getattr(model, "_koh_pct95", None),
             model=model if supports_aligned else None,
             cache_only=bool(
                 expert_type == "llm" and getattr(config, "llm_cache_only", False)
@@ -2714,6 +2778,10 @@ def _parse_args(argv=None):
         default="ground_truth",
     )
     parser.add_argument(
+        "--label", choices=["default", "balanced"], default="default",
+        help="Label rule: default (paper) or balanced 2-of-3 over mouth/body/knees.",
+    )
+    parser.add_argument(
         "--cbm-family",
         choices=["cbm", "cem", "probcbm", "ecbm"],
         default=None,
@@ -2750,6 +2818,10 @@ def _parse_args(argv=None):
     )
     parser.add_argument(
         "--strategy", type=str, default=None, choices=["up_to_k", "exactly_k"]
+    )
+    parser.add_argument(
+        "--training-mode", type=str, default=None,
+        choices=["independent", "sequential", "joint"],
     )
     parser.add_argument("--llm-provider", type=str, default=None)
     parser.add_argument("--llm-model", type=str, default=None)
@@ -2816,6 +2888,23 @@ def main(argv=None):
     # in create_robot_image_dataset).  Pin it here so regeneration reproduces
     # the exact same stochastic labels.
     config.rng_seed = 12345
+
+    if getattr(args, "training_mode", None):
+        from concept_benchmark.types import CBMTrainingMode as _TM
+        config.training_mode = _TM(args.training_mode)
+
+    if getattr(args, "label", "default") == "balanced":
+        import os as _os
+        from concept_benchmark.formula import F, LabelFormula
+        _p = _os.environ.get("BSPEC", "1,5,8,5,-3").split(",")
+        _nvis, _wv, _wf, _wk, _we, _c = int(_p[0]), float(_p[1]), float(_p[2]), float(_p[3]), float(_p[4]), float(_p[5])
+        _vis = [F("mouth_type").closed, F("body_shape").round, F("head_shape").round, F("has_antennae").true, F("ears_shape").triangle]
+        _score = _wf * F("foot_shape").pointy - _wk * F("has_knees").true - _we * F("has_elbows").true + _c
+        for _i in range(_nvis):
+            _score = _score + _wv * _vis[_i]
+        config.label_formula = LabelFormula(score=_score, temperature=float(_os.environ.get("TEMP", "4.2")), stochastic=True)
+        print("[balanced] BSPEC(nvis,wv,wf,wk,c)=" + _os.environ.get("BSPEC", ""), flush=True)
+        config.image_size = _os.environ.get("IMGSIZE", config.image_size)
 
     if args.budgets:
         config.intervention_budgets = parse_budgets(args.budgets)
