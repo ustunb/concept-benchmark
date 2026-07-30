@@ -17,3 +17,4 @@ class CBMTrainingMode(str, Enum):
 
     Independent = "independent"
     Sequential = "sequential"
+    Joint = "joint"
