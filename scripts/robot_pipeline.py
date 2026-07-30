@@ -2823,6 +2823,7 @@ def _parse_args(argv=None):
         "--training-mode", type=str, default=None,
         choices=["independent", "sequential", "joint"],
     )
+    parser.add_argument("--probcbm-intervention-prob", type=float, default=None)
     parser.add_argument("--llm-provider", type=str, default=None)
     parser.add_argument("--llm-model", type=str, default=None)
     parser.add_argument("--llm-reasoning-effort", type=str, default=None)
@@ -2892,6 +2893,8 @@ def main(argv=None):
     if getattr(args, "training_mode", None):
         from concept_benchmark.types import CBMTrainingMode as _TM
         config.training_mode = _TM(args.training_mode)
+    if getattr(args, "probcbm_intervention_prob", None) is not None:
+        config.probcbm_intervention_prob = args.probcbm_intervention_prob
 
     if getattr(args, "label", "default") == "balanced":
         import os as _os
