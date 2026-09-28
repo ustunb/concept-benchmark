@@ -352,7 +352,7 @@ def run_interventions(
         logger.info("  Raw test accuracy: %.4f", raw_acc)
         budgets = [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
         rows = [{"budget": b, "accuracy": raw_acc, "predictions_intervened_on": 0,
-                 "total_concept_checks": 0, "total_concept_edits_made": 0,
+                 "total_concept_checks": 0, "row_checks": 0, "col_checks": 0, "block_checks": 0, "total_concept_edits_made": 0,
                  "selective_accuracy_after": float("nan"), "coverage_after": 0.0}
                 for b in [0] + budgets]
         cs_intervention_df = pd.DataFrame(rows)
@@ -384,14 +384,26 @@ def run_interventions(
     result_k0 = cs_runner.run(cs_strategy, interv_cfg_k0, data.test)
     y_prob_baseline = result_k0.y_prob_after  # = y_prob_before since k=0
 
+    # Validation baseline: the decision threshold is refit here at every budget,
+    # because intervening shifts the probability distribution it was tuned on.
+    val_k0 = cs_runner.run(cs_strategy, interv_cfg_k0, data.validation)
+    y_prob_baseline_val = val_k0.y_prob_after
+    val_y = np.asarray(data.validation.y)
+    dt_0, _ = _decision_threshold_sweep(val_y, y_prob_baseline_val[:, 1])
+    k0_sel_acc, k0_cov = _selective_at_thresholds(
+        data.test.y, result_k0.y_prob_after[:, 1], cs_t, dt_0
+    )
+
     no_interv = {
         "budget": 0,
         "accuracy": float((result_k0.y_pred_after == data.test.y).mean()),
         "predictions_intervened_on": 0,
-        "total_concept_checks": 0,
+        "total_concept_checks": 0, "row_checks": 0, "col_checks": 0, "block_checks": 0,
         "total_concept_edits_made": 0,
-        "selective_accuracy_after": result_k0.strategy_metrics.get("selective_acc_after", cs_sel_acc),
-        "coverage_after": result_k0.strategy_metrics.get("coverage_after", cs_sel_cov),
+        "selective_accuracy_after": k0_sel_acc,
+        "coverage_after": k0_cov,
+        "decision_threshold": dt_0,
+        "abstention_threshold": cs_t,
     }
 
     rows = [no_interv]
@@ -402,24 +414,38 @@ def run_interventions(
             per_instance_budget=budget,
             random_state=config.seed,
         )
+        val_result = cs_runner.run(
+            cs_strategy, interv_cfg, data.validation,
+            y_prob_baseline=y_prob_baseline_val,
+        )
+        dt_k, _ = _decision_threshold_sweep(val_y, val_result.y_prob_after[:, 1])
         result = cs_runner.run(cs_strategy, interv_cfg, data.test, y_prob_baseline=y_prob_baseline)
         acc_intervened = float((result.y_pred_after == data.test.y).mean())
         predictions_intervened_on = int(np.sum(np.any(result.mask, axis=1)))
         total_concept_checks = int(np.sum(result.mask))
+        row_checks = int(result.mask[:, 0:9].sum())
+        col_checks = int(result.mask[:, 9:18].sum())
+        block_checks = int(result.mask[:, 18:27].sum())
         pred_binary = (result.C_pred >= 0.5).astype(int)
         final_binary = (result.C_intervened >= 0.5).astype(int)
         total_concept_edits_made = int(np.sum(pred_binary != final_binary))
-        selective_acc_after = result.strategy_metrics.get("selective_acc_after", None)
-        coverage_after = result.strategy_metrics.get("coverage_after", None)
+        selective_acc_after, coverage_after = _selective_at_thresholds(
+            data.test.y, result.y_prob_after[:, 1], cs_t, dt_k
+        )
         rows.append(
             {
                 "budget": budget,
                 "accuracy": acc_intervened,
                 "predictions_intervened_on": predictions_intervened_on,
                 "total_concept_checks": total_concept_checks,
+                "row_checks": row_checks,
+                "col_checks": col_checks,
+                "block_checks": block_checks,
                 "total_concept_edits_made": total_concept_edits_made,
                 "selective_accuracy_after": selective_acc_after,
                 "coverage_after": coverage_after,
+                "decision_threshold": dt_k,
+                "abstention_threshold": cs_t,
             }
         )
 
@@ -533,7 +559,7 @@ def collect_results(
             if "tau" in sel_df.columns:
                 sel_df = sel_df.rename(columns={"tau": "target_accuracy"})
 
-            for model in ["dnn", "cs"]:
+            for model in ["dnn"]:
                 model_df = sel_df[
                     (sel_df["model"] == model) & (sel_df["target_accuracy"] == target)
                 ]
@@ -545,7 +571,7 @@ def collect_results(
                     {
                         "dataset": label,
                         "model": model,
-                        "budget": 0 if model == "cs" else "",
+                        "budget": "",
                         "target_accuracy": target,
                         "raw_test_acc": round(float(r["raw_test_acc"]), 4),
                         "selective_acc": round(float(sel_acc), 4)
@@ -566,8 +592,6 @@ def collect_results(
             interv_df = pd.read_csv(interv_csv)
             for _, r in interv_df.iterrows():
                 budget = int(r["budget"])
-                if budget == 0:
-                    continue  # already have k=0 from selective CSV
                 pio = int(r["predictions_intervened_on"])
                 tcc = int(r["total_concept_checks"])
                 avg_cps = round(tcc / pio, 2) if pio > 0 else 0.0
@@ -579,7 +603,9 @@ def collect_results(
                         "model": "cs",
                         "budget": budget,
                         "target_accuracy": target,
-                        "raw_test_acc": "",
+                        "raw_test_acc": round(float(r["accuracy"]), 4)
+                        if budget == 0
+                        else "",
                         "selective_acc": round(float(sel_acc), 4)
                         if pd.notna(sel_acc)
                         else "",
@@ -870,6 +896,23 @@ def _selective_metrics(
     acc = float((preds == y_true[mask]).mean())
     coverage = float(mask.mean())
     return acc, coverage
+
+
+def _selective_at_thresholds(y_true, prob_pos, abstention_t, decision_t):
+    """Selective accuracy and coverage under the intervention abstention rule.
+
+    Mirrors the abstention expression used by ConceptualSafeguardsStrategy so the
+    coverage figure is unchanged, but scores kept predictions with the tuned
+    decision threshold instead of a hard 0.5 cut.
+    """
+    y_true = np.asarray(y_true).astype(int)
+    prob_pos = np.asarray(prob_pos, dtype=float).reshape(-1)
+    abstain = (prob_pos >= abstention_t) & (prob_pos <= 1.0 - abstention_t)
+    covered = ~abstain
+    if not covered.any():
+        return float("nan"), 0.0
+    preds = (prob_pos[covered] >= decision_t).astype(int)
+    return float((preds == y_true[covered]).mean()), float(covered.mean())
 
 
 def _cs_val_probs(model, dataset):
