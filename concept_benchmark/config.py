@@ -650,7 +650,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         if self.data_type == "text":
             return results_dir / f"robot_text_seed{self.seed}.data"
         filename = (
-            f"robot_{self.data_type}_{self.renders_per_robot}{self._preset_suffix}"
+            f"robot_{self.data_type}_{self.renders_per_robot}{self._preset_suffix}_seed{self.seed}"
         )
         return results_dir / f"{filename}.data"
 
@@ -658,10 +658,11 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         """Return the path where a trained model is saved."""
         if self.data_type == "text":
             return results_dir / f"robot_text_{model_class}_seed{self.seed}.model"
+        seed_tag = "" if "lfcbm" in model_class else f"_seed{self.seed}"
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}_{self.renders_per_robot}"
             f"{self._preset_suffix}"
-            f"_{model_class}.model"
+            f"_{model_class}{seed_tag}.model"
         )
         return results_dir / filename
 
@@ -672,7 +673,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         filename = f"robot_{self.data_type}_{self._labeling_tag}"
         if model_class in {"cbm", "cem", "probcbm", "ecbm"}:
             filename += self._preset_suffix
-        filename += f"_{model_class}_results.csv"
+        filename += f"_{model_class}_seed{self.seed}_results.csv"
         return results_dir / filename
 
     def get_interpretation_path(self, model_class: str = "ecbm") -> Path:
@@ -684,7 +685,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             )
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}"
-            f"{self._preset_suffix}_{model_class}_interpretation.json"
+            f"{self._preset_suffix}_{model_class}_seed{self.seed}_interpretation.json"
         )
         return results_dir / filename
 
@@ -707,7 +708,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}"
             f"{self._preset_suffix}"
-            f"_alignment.json"
+            f"_seed{self.seed}_alignment.json"
         )
         return results_dir / filename
 
@@ -870,7 +871,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     def get_model_path(self, model_class: str, data_type: str | None = None) -> Path:
         """Return the path where a trained model is saved."""
         dt = data_type or self.data_type
-        filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}"
+        filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}"
         return results_dir / f"{filename}.model"
 
     def get_results_path(
@@ -878,7 +879,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     ) -> Path:
         """Return the path where results are saved."""
         dt = data_type or self.data_type
-        filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}"
+        filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}"
         return results_dir / f"{filename}.results"
 
     def get_alignment_weights(self) -> dict[str, float]:
