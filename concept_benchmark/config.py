@@ -658,7 +658,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         """Return the path where a trained model is saved."""
         if self.data_type == "text":
             return results_dir / f"robot_text_{model_class}_seed{self.seed}.model"
-        seed_tag = "" if "lfcbm" in model_class else f"_seed{self.seed}"
+        seed_tag = f"_seed{self.seed}"
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}_{self.renders_per_robot}"
             f"{self._preset_suffix}"

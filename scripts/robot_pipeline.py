@@ -599,7 +599,7 @@ def train_lfcbm(
     cfg = LFTrainingConfig(
         device=device_str,
         seed=config.seed,
-        cache_dir=config.get_model_path("lfcbm").parent / "lfcbm_cache",
+        cache_dir=config.get_model_path("lfcbm").parent / f"lfcbm_seed{config.seed}" / "lfcbm_cache",
     )
     lfcbm = LabelFreeCBM(cfg)
 
@@ -1669,7 +1669,7 @@ def _load_or_train_regime_lfcbm(config, regime, data):
     cfg = LFTrainingConfig(
         device=device_str,
         seed=config.seed,
-        cache_dir=config.get_model_path("lfcbm").parent / f"lfcbm_{regime}_cache",
+        cache_dir=config.get_model_path("lfcbm").parent / f"lfcbm_seed{config.seed}" / f"lfcbm_{regime}_cache",
     )
     lf = LabelFreeCBM(cfg)
     image_dir = data_dir / "robot_images"
