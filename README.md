@@ -866,17 +866,10 @@ Run regimes via the pipeline script:
 
 ```bash
 python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
-    --regimes baseline expert subjective machine
+    --regimes baseline expert machine
 ```
 
-The pipeline also exposes a `custom` regime slot for an additional automated baseline with your own concept descriptions. It requires an explicit concepts file. You can use API-backed providers or switch to local CLI loops with `--llm-provider codex_exec` or `--llm-provider claude_exec`:
-
-```bash
-python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
-    --regimes custom \
-    --custom-concepts-file path/to/my_concepts.jsonl \
-    --llm-provider codex_exec
-```
+Custom automated concept sets (`custom`, `placeholder3`) are not yet wired into the intervene stage; the pipeline rejects them with an error rather than silently running a different cell.
 
 For a complete end-to-end example using `ConceptInterventionRunner` with training, interventions, and alignment, see [`examples/robot_pipeline_example.py`](examples/robot_pipeline_example.py).
 

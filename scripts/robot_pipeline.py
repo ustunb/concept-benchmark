@@ -2145,29 +2145,33 @@ def run_interventions(
     )
     thresholds = config.intervention_thresholds
 
+    # --regimes names specific (concept source, intervention source) pairs; otherwise every combination runs
+    cells = getattr(config, "intervention_cells", None) or [
+        (cs, isrc) for cs in concept_sources for isrc in intervention_sources
+    ]
+
     all_dfs = []
-    total = len(concept_sources) * len(intervention_sources)
+    total = len(cells)
     idx = 0
     out_path = config.get_results_path(family)
-    for cs in concept_sources:
-        for isrc in intervention_sources:
-            idx += 1
-            print(f"[{idx}/{total}] {cs} × {isrc} × {family}", flush=True)
-            try:
-                cell_df = _run_cell(
-                    config, cs, isrc, family, data, budgets, thresholds,
-                )
-                all_dfs.append(cell_df)
-                # Save incrementally after each cell
-                partial = pd.concat(all_dfs, axis=0).reset_index(drop=True)
-                partial["model_family"] = family
-                partial["n"] = data.test.n
-                partial["missing_fraction"] = missing_fraction
-                partial["missing_mechanism"] = missing_mechanism
-                partial.to_csv(out_path, index=False)
-                print(f"  Saved {len(partial)} rows to {out_path}", flush=True)
-            except (FileNotFoundError, NotImplementedError) as e:
-                logger.warning("Skipping %s × %s: %s", cs, isrc, e)
+    for cs, isrc in cells:
+        idx += 1
+        print(f"[{idx}/{total}] {cs} × {isrc} × {family}", flush=True)
+        try:
+            cell_df = _run_cell(
+                config, cs, isrc, family, data, budgets, thresholds,
+            )
+            all_dfs.append(cell_df)
+            # Save incrementally after each cell
+            partial = pd.concat(all_dfs, axis=0).reset_index(drop=True)
+            partial["model_family"] = family
+            partial["n"] = data.test.n
+            partial["missing_fraction"] = missing_fraction
+            partial["missing_mechanism"] = missing_mechanism
+            partial.to_csv(out_path, index=False)
+            print(f"  Saved {len(partial)} rows to {out_path}", flush=True)
+        except (FileNotFoundError, NotImplementedError) as e:
+            logger.warning("Skipping %s × %s: %s", cs, isrc, e)
 
     if not all_dfs:
         logger.warning("No cells produced results.")
@@ -2826,6 +2830,28 @@ def _parse_args(argv=None):
     return parser.parse_args(argv)
 
 
+def _cells_from_regimes(args, config) -> list[tuple[str, str]]:
+    """Translate --regimes into the (concept source, intervention source) pairs the intervene stage runs."""
+    if args.concept_sources or args.intervention_sources:
+        raise ValueError(
+            "--regimes already sets concept and intervention sources; "
+            "use either --regimes or --concept-sources/--intervention-sources"
+        )
+    unsupported = [r for r in args.regimes if r not in _REGIME_TO_CELL]
+    if unsupported:
+        raise ValueError(
+            f"regimes {unsupported} have no intervention cell; "
+            f"supported: {sorted(_REGIME_TO_CELL)}"
+        )
+    # baseline/expert intervene on the preset's own human-annotated concepts
+    preset_cs = "ground_truth" if config.concept_preset == "ground_truth" else "human_concepts"
+    cells = []
+    for regime in args.regimes:
+        cs, isrc = _REGIME_TO_CELL[regime]
+        cells.append((preset_cs if cs == "human_concepts" else cs, isrc))
+    return list(dict.fromkeys(cells))
+
+
 def main(argv=None):
     args = _parse_args(argv)
 
@@ -2902,6 +2928,8 @@ def main(argv=None):
         config.custom_concepts_file = args.custom_concepts_file
     if args.regimes:
         config.intervention_regimes = args.regimes
+        if "intervene" in args.stages:
+            config.intervention_cells = _cells_from_regimes(args, config)
     if args.llm_api_key:
         config.llm_api_key = args.llm_api_key
     if args.force_retrain:

@@ -28,7 +28,7 @@ python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes --st
 
 ```bash
 python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
-    --regimes baseline expert subjective machine \
+    --regimes baseline expert machine \
     --strategy exactly_k --budgets 1 2 3 4 5 \
     --stages intervene collect
 ```
@@ -53,16 +53,7 @@ python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
     --llm-provider codex_exec
 ```
 
-An additional experimental automated regime slot is available for resubmittal work:
-
-```bash
-python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
-    --regimes placeholder3 \
-    --strategy exactly_k --budgets 1 2 3 4 5 \
-    --stages intervene collect \
-    --placeholder3-concepts-file path/to/placeholder3.jsonl \
-    --llm-provider claude_exec
-```
+Custom automated concept sets (`custom`, `placeholder3`) are not yet wired into the intervene stage; the pipeline rejects them with an error rather than silently running a different cell.
 
 ## Sudoku Benchmark
 
