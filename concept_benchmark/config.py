@@ -461,6 +461,13 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         return "stochastic" if self.label_formula.stochastic else "deterministic"
 
     @property
+    def _seed_tag(self) -> str:
+        """``'_seed{seed}'``, plus ``'_labels{rng_seed}'`` when labels come from another seed."""
+        if self.rng_seed is None or self.rng_seed == self.seed:
+            return f"_seed{self.seed}"
+        return f"_seed{self.seed}_labels{self.rng_seed}"
+
+    @property
     def _preset_suffix(self) -> str:
         """``'_subconcept'`` or ``'_ideal'`` for filename construction."""
         return "_subconcept" if self.concept_preset == "foot_subtypes" else "_ideal"
@@ -650,7 +657,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         if self.data_type == "text":
             return results_dir / f"robot_text_seed{self.seed}.data"
         filename = (
-            f"robot_{self.data_type}_{self.renders_per_robot}{self._preset_suffix}_seed{self.seed}"
+            f"robot_{self.data_type}_{self.renders_per_robot}{self._preset_suffix}{self._seed_tag}"
         )
         return results_dir / f"{filename}.data"
 
@@ -658,7 +665,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         """Return the path where a trained model is saved."""
         if self.data_type == "text":
             return results_dir / f"robot_text_{model_class}_seed{self.seed}.model"
-        seed_tag = f"_seed{self.seed}"
+        seed_tag = self._seed_tag
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}_{self.renders_per_robot}"
             f"{self._preset_suffix}"
@@ -673,7 +680,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         filename = f"robot_{self.data_type}_{self._labeling_tag}"
         if model_class in {"cbm", "cem", "probcbm", "ecbm"}:
             filename += self._preset_suffix
-        filename += f"_{model_class}_seed{self.seed}_results.csv"
+        filename += f"_{model_class}{self._seed_tag}_results.csv"
         return results_dir / filename
 
     def get_interpretation_path(self, model_class: str = "ecbm") -> Path:
@@ -685,7 +692,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             )
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}"
-            f"{self._preset_suffix}_{model_class}_seed{self.seed}_interpretation.json"
+            f"{self._preset_suffix}_{model_class}{self._seed_tag}_interpretation.json"
         )
         return results_dir / filename
 
@@ -708,7 +715,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}"
             f"{self._preset_suffix}"
-            f"_seed{self.seed}_alignment.json"
+            f"{self._seed_tag}_alignment.json"
         )
         return results_dir / filename
 

@@ -599,7 +599,7 @@ def train_lfcbm(
     cfg = LFTrainingConfig(
         device=device_str,
         seed=config.seed,
-        cache_dir=config.get_model_path("lfcbm").parent / f"lfcbm_seed{config.seed}" / "lfcbm_cache",
+        cache_dir=config.get_model_path("lfcbm").parent / f"lfcbm{config._seed_tag}" / "lfcbm_cache",
     )
     lfcbm = LabelFreeCBM(cfg)
 
@@ -753,35 +753,6 @@ def _calibrate_revealed(C, mask, pct5, pct95):
     return C_cal
 
 
-def _load_llm_votes(settings, concept_names, test, prob_test):
-    """Cached LLM votes as a concept matrix; concepts the LLM did not judge keep the prediction."""
-    import hashlib
-    import json
-    from pathlib import Path
-
-    def _sig(items):
-        h = hashlib.sha1()
-        for x in map(str, items):
-            h.update(x.encode("utf-8"))
-            h.update(b"\x00")
-        return h.hexdigest()
-
-    cache_path = (
-        Path(settings.run_dir)
-        / "cache"
-        / f"llm_interventions_{_sig(concept_names)}_{_sig(test.inputs)}.jsonl"
-    )
-    if not cache_path.exists():
-        raise FileNotFoundError(f"LLM cache not found at {cache_path}")
-    C_llm = np.full_like(prob_test, np.nan, dtype=np.float32)
-    with open(cache_path, "r", encoding="utf-8") as f:
-        for line in f:
-            rec = json.loads(line)
-            for k, v in rec.get("votes_idx", {}).items():
-                C_llm[int(rec["i"]), int(k)] = float(v)
-    return np.where(np.isnan(C_llm), (prob_test >= 0.5).astype(np.float32), C_llm)
-
-
 def _test_interventions(
     prob_test,
     settings: InterventionSettings,
@@ -814,6 +785,7 @@ def _test_interventions(
 
     intervention_results = {}
     rng = np.random.default_rng(settings.seed)
+    torch.manual_seed(settings.seed)
     budgets = list(settings.budgets)
     human_acc = settings.intervention_accuracy
     err_prob = 1.0 - human_acc
@@ -886,71 +858,6 @@ def _test_interventions(
             continue
 
         n_concepts = prob_test.shape[1]
-        if int(budget) >= n_concepts:
-            # k=max: intervene on ALL concepts
-            C_pred = prob_test.copy()
-            if settings.intervention_expert.lower() == "llm" and cache_only:
-                # the LLM supplies the revealed values at every budget, including k=max;
-                # its cached votes are used as-is (no extra noise), as in the budget<max path
-                C_intervened = _load_llm_votes(settings, concept_names, test, prob_test)
-            else:
-                # replace with ground truth
-                C_gt = test.C.astype(np.float32)
-                # Apply intervention noise
-                if err_prob > 0:
-                    mistake_draw = rng.random(C_gt.shape) < err_prob
-                    C_noisy = C_gt.copy()
-                    C_noisy[mistake_draw] = 1.0 - C_gt[mistake_draw]
-                    C_intervened = C_noisy
-                else:
-                    C_intervened = C_gt.copy()
-
-            mask = np.ones_like(C_pred, dtype=bool)
-
-            if supports_aligned and model is not None:
-                y_prob_after = predict_label_proba_from_concepts(
-                    model,
-                    C_intervened,
-                    row_indices=np.arange(C_intervened.shape[0], dtype=int),
-                    baseline_concepts=(C_pred >= 0.5).astype(np.float32),
-                    intervention_mask=mask,
-                )
-            elif _intervention_encoding() == "koh595" and pct5 is not None:
-                y_prob_after = fe.predict_proba(
-                    _calibrate_revealed(C_intervened, mask, pct5, pct95))
-            elif _intervention_encoding() == "hard_revealed":
-                y_prob_after = fe.predict_proba(
-                    _calibrate_revealed(C_intervened, mask, 0.0, 1.0))
-            else:
-                C_binary = (C_intervened >= 0.5).astype(int)
-                y_prob_after = fe.predict_proba(C_binary)
-            y_pred_after = np.argmax(y_prob_after, axis=1)
-
-            acc_after = float((y_pred_after == test.y.astype(int)).mean())
-            C_pred_binary = (C_pred >= 0.5).astype(int)
-            C_final_binary = (C_intervened >= 0.5).astype(int)
-            edits = int(np.sum(C_pred_binary != C_final_binary))
-            n_samples = prob_test.shape[0]
-            y_pred_before = np.argmax(fe.predict_proba((C_pred >= 0.5).astype(int)), axis=1) if not supports_aligned else np.argmax(y_prob_after, axis=1)
-
-            key = f"top_{budget}_human_acc_{int(human_acc * 100)}"
-            intervention_results[key] = {
-                "accuracy": acc_after,
-                "accuracy_gain": acc_after - acc_det,
-                "predictions_intervened_on": n_samples,
-                "predictions_changed": int(np.sum(y_pred_after != y_pred_before)),
-                "interventions_rate": 1.0,
-                "intervention_rate": 1.0,
-                "avg_edits_per_intervention": edits / n_samples,
-                "total_concept_checks": n_samples * n_concepts,
-                "total_concept_confirmations": n_samples * n_concepts,
-                "total_concept_edits_made": edits,
-                "concepts_intervened": {},
-                "concepts_edits": {},
-            }
-            print(f"  k=max short-circuit: acc={acc_after:.4f}", flush=True)
-            continue
-
         config = InterventionConfig(
             per_instance_budget=budget,
             random_state=settings.seed,
@@ -959,7 +866,9 @@ def _test_interventions(
         )
 
         strategy = KFlipInterventionStrategy(
-            use_exact_k=(settings.intervention_strategy == "exactly_k"),
+            # k=max corrects every concept of the rows KFlip selects, with the same threshold as k<max
+            use_exact_k=(settings.intervention_strategy == "exactly_k")
+            or int(budget) >= n_concepts,
         )
 
         if settings.intervention_expert.lower() == "llm" and cache_only:
@@ -1704,7 +1613,7 @@ def _load_or_train_regime_lfcbm(config, regime, data):
     cfg = LFTrainingConfig(
         device=device_str,
         seed=config.seed,
-        cache_dir=config.get_model_path("lfcbm").parent / f"lfcbm_seed{config.seed}" / f"lfcbm_{regime}_cache",
+        cache_dir=config.get_model_path("lfcbm").parent / f"lfcbm{config._seed_tag}" / f"lfcbm_{regime}_cache",
     )
     lf = LabelFreeCBM(cfg)
     image_dir = data_dir / "robot_images"
@@ -1832,6 +1741,17 @@ def _prepare_model_for_concept_source(config, concept_source, family, data):
         # Auto-discovered concepts: load LFCBM, get concept labels, train family
         lf = _load_or_train_regime_lfcbm(config, lfcbm_key, data)
         data_lf = _prepare_lfcbm_labeled_data(lf, data)
+        test_truth = data_lf.test
+        if concept_source == "machine_annotation":
+            # machine-annotated concepts are the human concepts, so interventions reveal
+            # the human ground truth; llm/clip concepts have none and keep the LFCBM labels
+            lf_names = list(lf.concept_set.keys)
+            gt_names = list(data.test.concepts)
+            missing = [n for n in lf_names if n not in gt_names]
+            if missing:
+                raise ValueError(f"machine concepts without human ground truth: {missing}")
+            C_gt = data.test.C[:, [gt_names.index(n) for n in lf_names]]
+            test_truth = _clone_sample_with_C(data_lf.test, C_gt, concept_names=lf_names)
 
         if family == "cbm":
             # Use LFCBM end-to-end (FEOnProbs)
@@ -1847,7 +1767,7 @@ def _prepare_model_for_concept_source(config, concept_source, family, data):
                 P_tr = lf.concept_proba(train_paths)
                 model._koh_pct5 = np.percentile(P_tr, 5, axis=0)
                 model._koh_pct95 = np.percentile(P_tr, 95, axis=0)
-            return model, c_preds, list(lf.concept_set.keys), data_lf.test
+            return model, c_preds, list(lf.concept_set.keys), test_truth
         else:
             # Train family model on LFCBM-labeled data
             model_key = f"{family}_{lfcbm_key}"
@@ -1866,13 +1786,13 @@ def _prepare_model_for_concept_source(config, concept_source, family, data):
                 P_tr = model.concept_detector.predict_proba(data_lf.train)
                 model._koh_pct5 = np.percentile(P_tr, 5, axis=0)
                 model._koh_pct95 = np.percentile(P_tr, 95, axis=0)
-            return model, c_preds, list(lf.concept_set.keys), data_lf.test
+            return model, c_preds, list(lf.concept_set.keys), test_truth
     else:
         # GT concepts: load the baseline model for this family
         if concept_source == "ground_truth":
             # Use ideal preset (7 concepts) — need a separate config
             gt_config = RobotBenchmarkConfig(seed=config.seed)
-            gt_config.rng_seed = getattr(config, "rng_seed", 12345)
+            gt_config.rng_seed = config.rng_seed
             gt_config.cbm_family = family
             gt_data = load(gt_config.get_dataset_path())
             model = load(gt_config.get_model_path(family))
@@ -2799,6 +2719,12 @@ def _parse_args(argv=None):
     )
     parser.add_argument("--seed", type=int, default=1014)
     parser.add_argument(
+        "--label-seed",
+        type=int,
+        default=None,
+        help="Seed for drawing labels from the stochastic labeling rule (default: --seed).",
+    )
+    parser.add_argument(
         "--stages",
         nargs="+",
         default=list(ROBOT_STAGES),
@@ -2920,10 +2846,9 @@ def main(argv=None):
     else:
         config = RobotBenchmarkConfig(seed=args.seed)
 
-    # Paper data was generated with rng_seed=12345 (the old hardcoded default
-    # in create_robot_image_dataset).  Pin it here so regeneration reproduces
-    # the exact same stochastic labels.
-    config.rng_seed = 12345
+    # Labels are drawn from the stochastic labeling rule with --label-seed (default: --seed).
+    # The original single-seed paper data used --label-seed 12345.
+    config.rng_seed = args.label_seed if args.label_seed is not None else config.seed
 
     if getattr(args, "training_mode", None):
         from concept_benchmark.types import CBMTrainingMode as _TM
