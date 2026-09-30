@@ -753,6 +753,35 @@ def _calibrate_revealed(C, mask, pct5, pct95):
     return C_cal
 
 
+def _load_llm_votes(settings, concept_names, test, prob_test):
+    """Cached LLM votes as a concept matrix; concepts the LLM did not judge keep the prediction."""
+    import hashlib
+    import json
+    from pathlib import Path
+
+    def _sig(items):
+        h = hashlib.sha1()
+        for x in map(str, items):
+            h.update(x.encode("utf-8"))
+            h.update(b"\x00")
+        return h.hexdigest()
+
+    cache_path = (
+        Path(settings.run_dir)
+        / "cache"
+        / f"llm_interventions_{_sig(concept_names)}_{_sig(test.inputs)}.jsonl"
+    )
+    if not cache_path.exists():
+        raise FileNotFoundError(f"LLM cache not found at {cache_path}")
+    C_llm = np.full_like(prob_test, np.nan, dtype=np.float32)
+    with open(cache_path, "r", encoding="utf-8") as f:
+        for line in f:
+            rec = json.loads(line)
+            for k, v in rec.get("votes_idx", {}).items():
+                C_llm[int(rec["i"]), int(k)] = float(v)
+    return np.where(np.isnan(C_llm), (prob_test >= 0.5).astype(np.float32), C_llm)
+
+
 def _test_interventions(
     prob_test,
     settings: InterventionSettings,
@@ -858,17 +887,23 @@ def _test_interventions(
 
         n_concepts = prob_test.shape[1]
         if int(budget) >= n_concepts:
-            # k=max: intervene on ALL concepts → just replace with ground truth
-            C_gt = test.C.astype(np.float32)
+            # k=max: intervene on ALL concepts
             C_pred = prob_test.copy()
-            # Apply intervention noise
-            if err_prob > 0:
-                mistake_draw = rng.random(C_gt.shape) < err_prob
-                C_noisy = C_gt.copy()
-                C_noisy[mistake_draw] = 1.0 - C_gt[mistake_draw]
-                C_intervened = C_noisy
+            if settings.intervention_expert.lower() == "llm" and cache_only:
+                # the LLM supplies the revealed values at every budget, including k=max;
+                # its cached votes are used as-is (no extra noise), as in the budget<max path
+                C_intervened = _load_llm_votes(settings, concept_names, test, prob_test)
             else:
-                C_intervened = C_gt.copy()
+                # replace with ground truth
+                C_gt = test.C.astype(np.float32)
+                # Apply intervention noise
+                if err_prob > 0:
+                    mistake_draw = rng.random(C_gt.shape) < err_prob
+                    C_noisy = C_gt.copy()
+                    C_noisy[mistake_draw] = 1.0 - C_gt[mistake_draw]
+                    C_intervened = C_noisy
+                else:
+                    C_intervened = C_gt.copy()
 
             mask = np.ones_like(C_pred, dtype=bool)
 
