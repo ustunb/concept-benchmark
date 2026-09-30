@@ -5,6 +5,7 @@ This file contains classes to represent and manipulate a set of all possible rob
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 from collections.abc import Sequence
 import hashlib
@@ -89,6 +90,14 @@ def convert_to_grayscale(image_path):
     img.save(image_path)
 
 
+def _hash_drawing_inputs(catalog_df, resolution, color_mode, blur) -> str:
+    """Hash everything that determines the robot images: each robot's features and the render settings."""
+    h = hashlib.sha256()
+    h.update(catalog_df.to_csv(index=True).encode("utf-8"))
+    h.update(json.dumps([resolution, color_mode, blur], sort_keys=True, default=str).encode("utf-8"))
+    return h.hexdigest()
+
+
 def generate_robot_catalog(
     *,
     concepts: dict,
@@ -153,6 +162,18 @@ def generate_robot_catalog(
     output_path = Path(output_directory)
     output_path.mkdir(parents=True, exist_ok=True)
 
+    # Images depend only on what is drawn (features per robot, resolution, color mode, blur),
+    # never on labels or seeds, so they are kept until the drawing itself changes
+    signature_file = output_path / ".drawing_signature"
+    drawing_signature = _hash_drawing_inputs(init_catalog_df, resolution, color_mode, blur)
+    if draw:
+        is_same_drawing = (
+            signature_file.exists() and signature_file.read_text() == drawing_signature
+        )
+        if not is_same_drawing:
+            for old_png in output_path.glob("robot_*.png"):
+                old_png.unlink()
+
     png_filenames = []
     n_skipped = 0
     n_generated = 0
@@ -211,6 +232,8 @@ def generate_robot_catalog(
         color_lefts.append(color_left)
         color_rights.append(color_right)
 
+    if draw:
+        signature_file.write_text(drawing_signature)
     if draw and verbose:
         print(f"Images: {n_generated} generated, {n_skipped} skipped (already existed)")
 

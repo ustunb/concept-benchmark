@@ -2431,7 +2431,7 @@ def run(
     Args:
         config: Benchmark configuration. Defaults to ideal.
         stages: List of stages to run. Default: all.
-        force_setup: If True, delete cached images/data before regenerating.
+        force_setup: If True, regenerate the dataset even if its fingerprint matches.
         missing_fraction: Fraction of concept labels to mask.
         missing_mechanism: Missingness mechanism ("mcar" or "mnar").
     """
@@ -2469,7 +2469,6 @@ def run(
 
     if "setup" in stages:
         logger.info("=== [%d/%d] Setup ===", _si["setup"], n_stages)
-        import shutil
 
         fp_path = config.get_dataset_path().with_suffix(".fingerprint")
         current_fp = config.setup_fingerprint()
@@ -2484,10 +2483,8 @@ def run(
                 )
             else:
                 logger.info("Config changed since last setup — regenerating data")
-            # Clear cached images and dataset
-            img_dir = config.to_dict()["output_directory"]
-            if Path(img_dir).exists():
-                shutil.rmtree(img_dir)
+            # Clear the cached dataset; robot images are kept, since the catalog
+            # redraws them only when what is drawn changes (not for new labels or seeds)
             ds_path = config.get_dataset_path()
             if ds_path.exists():
                 ds_path.unlink()
