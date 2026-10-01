@@ -130,6 +130,7 @@ class _PredictionCache:
     probcbm_pred_mean: torch.Tensor | None = None
     probcbm_pred_logsigma: torch.Tensor | None = None
     ecbm_features: torch.Tensor | None = None
+    ecbm_concept_logits: torch.Tensor | None = None
 
 
 def _slice_prediction_cache(
@@ -166,6 +167,11 @@ def _slice_prediction_cache(
             None
             if cache.ecbm_features is None
             else cache.ecbm_features.index_select(0, tensor_index)
+        ),
+        ecbm_concept_logits=(
+            None
+            if cache.ecbm_concept_logits is None
+            else cache.ecbm_concept_logits.index_select(0, tensor_index)
         ),
     )
 

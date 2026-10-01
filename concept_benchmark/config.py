@@ -145,14 +145,11 @@ _PROBCBM_FINGERPRINT_FIELDS = frozenset(
 )
 _ECBM_FINGERPRINT_FIELDS = frozenset(
     {
-        "ecbm_emb_size",
         "ecbm_hid_size",
         "ecbm_lambda_xy",
         "ecbm_lambda_xc",
         "ecbm_lambda_cy",
         "ecbm_weight_decay",
-        "ecbm_inference_steps",
-        "ecbm_inference_lr",
         "ecbm_max_epochs",
     }
 )
@@ -287,14 +284,13 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     probcbm_intervention_prob: float = 0.25
     training_mode: CBMTrainingMode = CBMTrainingMode.Independent
     probcbm_max_epochs: int | None = None
-    ecbm_emb_size: int = 8
     ecbm_hid_size: int = 64
-    ecbm_lambda_xy: float = 1.0
+    # Training energy weights; the authors' default is 3/1/1 (xmed-lab/ECBM main.py). Inference and
+    # intervention weights are fixed in experiments/baselines/ecbm.py as in the authors' code.
+    ecbm_lambda_xy: float = 3.0
     ecbm_lambda_xc: float = 1.0
     ecbm_lambda_cy: float = 1.0
     ecbm_weight_decay: float = 1e-4
-    ecbm_inference_steps: int = 10
-    ecbm_inference_lr: float = 0.1
     ecbm_max_epochs: int | None = None
 
     # Intervention
@@ -418,10 +414,6 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 f"intervention_strategy must be one of {sorted(VALID_STRATEGIES)}, "
                 f"got {self.intervention_strategy!r}"
             )
-        if self.ecbm_inference_steps < 1:
-            raise ValueError("ecbm_inference_steps must be positive")
-        if self.ecbm_inference_lr <= 0.0:
-            raise ValueError("ecbm_inference_lr must be positive")
 
     def _validate_image(self):
         """Validate image-specific parameters."""

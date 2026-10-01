@@ -302,7 +302,6 @@ class TestModelFingerprintScope:
             probcbm_hidden_dim=32,
             probcbm_latent_dim=16,
             ecbm_hid_size=128,
-            ecbm_inference_steps=10,
         )
         assert base.model_fingerprint("dnn") == changed.model_fingerprint("dnn")
         assert base.get_model_path("dnn") == changed.get_model_path("dnn")
