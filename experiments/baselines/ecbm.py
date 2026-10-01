@@ -35,8 +35,6 @@ from experiments.baselines._common import (
     _resolve_learning_rate,
     _resolve_loader_config,
     _resolve_patience,
-    _stack_numpy,
-    _stack_tensors,
 )
 
 # Gradient inference settings from the authors' inference configs (configs/*_inference.json) and
@@ -210,13 +208,27 @@ def _run_gradient_inference(
     y_logits: torch.Tensor,
     c_logits: torch.Tensor,
     weights: tuple[float, float, float],
+    batch_size: int | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Optimize the label and concept variables until the stopping rule fires (GradientInference.run_optim).
 
-    The rule is utils.EarlyStopping(patience=10, delta=1) on the mean x->y energy: stop after 10 consecutive
-    steps in which it does not drop by more than 1 below its best value.
+    The authors run this per test batch: the loss is a batch mean and the rule is utils.EarlyStopping(patience=10,
+    delta=1) on the batch's mean x->y energy, i.e. stop after 10 consecutive steps in which it does not drop by
+    more than 1 below its best value. Rows are split into consecutive batches of `batch_size` (one batch if None)
+    and all batches are optimized at once: each batch's loss depends only on its own rows and Adam updates every
+    entry independently, so this matches running the batches one after another; a batch whose rule has fired
+    keeps its values while the others continue.
     """
     lambda_xy, lambda_xc, lambda_cy = weights
+    n = features.shape[0]
+    size = n if batch_size is None else int(batch_size)
+    group = torch.div(torch.arange(n, device=features.device), size, rounding_mode="floor")
+    n_groups = int(group[-1]) + 1
+    counts = torch.bincount(group, minlength=n_groups).to(features.dtype)
+
+    def batch_mean(values: torch.Tensor) -> torch.Tensor:
+        return torch.zeros(n_groups, device=values.device, dtype=values.dtype).index_add_(0, group, values) / counts
+
     y_logits = nn.Parameter(y_logits.detach().clone())
     c_logits = nn.Parameter(c_logits.detach().clone())
     optimizer = torch.optim.Adam(
@@ -225,23 +237,36 @@ def _run_gradient_inference(
     requires_grad = [p.requires_grad for p in model.parameters()]
     for p in model.parameters():
         p.requires_grad_(False)
-    best, counter = None, 0
+    best = torch.full((n_groups,), float("nan"), device=features.device)
+    counter = torch.zeros(n_groups, dtype=torch.long, device=features.device)
+    active = torch.ones(n_groups, dtype=torch.bool, device=features.device)
     try:
         with torch.enable_grad():
             for _ in range(INFERENCE_MAX_STEPS):
                 optimizer.zero_grad()
                 xy_en, cy_en, xc_en = model.inference_energies(features, y_logits, c_logits)
-                loss = lambda_xy * xy_en.mean() + lambda_xc * xc_en.mean(dim=0).sum() + lambda_cy * cy_en.mean()
-                score = -float(xy_en.mean().detach())
-                if best is None:
-                    best = score
-                elif score <= best + INFERENCE_DELTA:
-                    counter += 1
-                else:
-                    best, counter = score, 0
-                loss.backward()
+                xy_mean = batch_mean(xy_en)
+                loss = (
+                    lambda_xy * xy_mean
+                    + lambda_xc * batch_mean(xc_en.sum(dim=1))
+                    + lambda_cy * batch_mean(cy_en)
+                )
+                score = -xy_mean.detach()
+                first = torch.isnan(best)
+                improved = ~first & (score > best + INFERENCE_DELTA)
+                stalled = ~first & ~improved
+                best = torch.where(first | improved, score, best)
+                counter = torch.where(improved, torch.zeros_like(counter), counter + stalled.long())
+                frozen_y = y_logits.detach().clone()
+                frozen_c = c_logits.detach().clone()
+                loss[active].sum().backward()
                 optimizer.step()
-                if counter >= INFERENCE_PATIENCE:
+                with torch.no_grad():
+                    done_rows = ~active[group]
+                    y_logits[done_rows] = frozen_y[done_rows]
+                    c_logits[done_rows] = frozen_c[done_rows]
+                active = active & (counter < INFERENCE_PATIENCE)
+                if not bool(active.any()):
                     break
     finally:
         for p, flag in zip(model.parameters(), requires_grad):
@@ -249,12 +274,14 @@ def _run_gradient_inference(
     return y_logits.detach(), c_logits.detach()
 
 
-def _infer_labels_and_concepts(model: _ECBMNet, features: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def _infer_labels_and_concepts(
+    model: _ECBMNet, features: torch.Tensor, batch_size: int | None = None
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Prediction without interventions: start from uniform variables (GradientInference.inference:80-97)."""
     bs = features.shape[0]
     y0 = torch.zeros(bs, model.num_classes, device=features.device)
     c0 = torch.zeros(bs, model.n_concepts, 2, device=features.device)
-    return _run_gradient_inference(model, features, y0, c0, INFERENCE_WEIGHTS)
+    return _run_gradient_inference(model, features, y0, c0, INFERENCE_WEIGHTS, batch_size)
 
 
 def _intervene(
@@ -263,6 +290,7 @@ def _intervene(
     c_logits: torch.Tensor,
     concepts: torch.Tensor,
     mask: torch.Tensor,
+    batch_size: int | None = None,
 ) -> torch.Tensor:
     """Prediction after an intervention (GradientInference.inference:126-143).
 
@@ -273,7 +301,7 @@ def _intervene(
     forced = (target - 0.5) * (2 * INTERVENTION_LOGIT)
     c_start = torch.where(mask.unsqueeze(-1), forced, c_logits)
     y0 = torch.zeros(features.shape[0], model.num_classes, device=features.device)
-    y_logits, _ = _run_gradient_inference(model, features, y0, c_start, INTERVENTION_WEIGHTS)
+    y_logits, _ = _run_gradient_inference(model, features, y0, c_start, INTERVENTION_WEIGHTS, batch_size)
     return y_logits
 
 
@@ -325,30 +353,25 @@ class ECBMBenchmarkModel(_OfficialBenchmarkModelBase):
         device = self._inference_device()
         loader = dataset.loader(shuffle=False, **self._loader_kwargs())
 
-        label_chunks: list[np.ndarray] = []
-        concept_chunks: list[np.ndarray] = []
         feature_chunks: list[torch.Tensor] = []
-        logit_chunks: list[torch.Tensor] = []
         model.to(device)
         for batch_x, _, _ in loader:
             batch_x = _prepare_batch_features(batch_x, device=device)
             with torch.no_grad():
-                features = model.extract_features(batch_x)
-            y_logits, c_logits = _infer_labels_and_concepts(model, features)
-            label_chunks.append(torch.softmax(y_logits, dim=-1).cpu().numpy().astype(np.float32))
-            concept_chunks.append(torch.softmax(c_logits, dim=-1)[..., 1].cpu().numpy().astype(np.float32))
-            feature_chunks.append(features.detach().cpu())
-            logit_chunks.append(c_logits.cpu())
+                feature_chunks.append(model.extract_features(batch_x))
+        features = torch.cat(feature_chunks, dim=0)
+        # the loader's batches, run side by side (see _run_gradient_inference)
+        y_logits, c_logits = _infer_labels_and_concepts(model, features, self._inference_batch_size())
         model.cpu()
 
-        label_probs = _stack_numpy(label_chunks, cols=self.n_classes)
-        concept_probs = _stack_numpy(concept_chunks, cols=self.n_concepts)
+        label_probs = torch.softmax(y_logits, dim=-1).cpu().numpy().astype(np.float32)
+        concept_probs = torch.softmax(c_logits, dim=-1)[..., 1].cpu().numpy().astype(np.float32)
         cache = _PredictionCache(
             dataset_id=id(dataset),
             concept_probs=concept_probs,
             label_probs=label_probs,
-            ecbm_features=_stack_tensors(feature_chunks),
-            ecbm_concept_logits=_stack_tensors(logit_chunks),
+            ecbm_features=features.detach().cpu(),
+            ecbm_concept_logits=c_logits.cpu(),
         )
         return label_probs, concept_probs, cache
 
@@ -375,18 +398,16 @@ class ECBMBenchmarkModel(_OfficialBenchmarkModelBase):
         if next(model.parameters()).device != device:
             model.to(device)
         model.eval()
-        batch_size = self._inference_batch_size()
-        for start in range(0, rows.size, batch_size):
-            idx = rows[start:start + batch_size]
-            t_idx = torch.as_tensor(idx, dtype=torch.long)
-            y_logits = _intervene(
-                model,
-                cache.ecbm_features.index_select(0, t_idx).to(device),
-                cache.ecbm_concept_logits.index_select(0, t_idx).to(device),
-                torch.as_tensor(concepts[idx], dtype=torch.float32, device=device),
-                torch.as_tensor(intervention_mask[idx], dtype=torch.bool, device=device),
-            )
-            out[idx] = torch.softmax(y_logits, dim=-1).cpu().numpy().astype(np.float32)
+        t_idx = torch.as_tensor(rows, dtype=torch.long)
+        y_logits = _intervene(
+            model,
+            cache.ecbm_features.index_select(0, t_idx).to(device),
+            cache.ecbm_concept_logits.index_select(0, t_idx).to(device),
+            torch.as_tensor(concepts[rows], dtype=torch.float32, device=device),
+            torch.as_tensor(intervention_mask[rows], dtype=torch.bool, device=device),
+            self._inference_batch_size(),
+        )
+        out[rows] = torch.softmax(y_logits, dim=-1).cpu().numpy().astype(np.float32)
         return out
 
     def _rebuild_model(

@@ -133,6 +133,19 @@ def main() -> None:
     p_y = torch.softmax(ours._intervene(port, x, p_c_logits, c, mask), -1)
     checks.append(("intervention label", o_y, p_y))
 
+    # Running many test batches side by side must match running them one after another.
+    xs = torch.randn(150, feat)
+    serial = torch.cat([ours._infer_labels_and_concepts(port, xs[i:i + 32])[0] for i in range(0, 150, 32)])
+    parallel = ours._infer_labels_and_concepts(port, xs, batch_size=32)[0]
+    checks.append(("batched inference", torch.softmax(serial, -1), torch.softmax(parallel, -1)))
+    cs = (torch.rand(150, n_concepts) > 0.5).float()
+    ms = torch.rand(150, n_concepts) > 0.5
+    cl = torch.randn(150, n_concepts, 2)
+    serial = torch.cat([ours._intervene(port, xs[i:i + 32], cl[i:i + 32], cs[i:i + 32], ms[i:i + 32])
+                        for i in range(0, 150, 32)])
+    parallel = ours._intervene(port, xs, cl, cs, ms, batch_size=32)
+    checks.append(("batched intervention", torch.softmax(serial, -1), torch.softmax(parallel, -1)))
+
     worst = 0.0
     for name, a, b in checks:
         diff = float((a.detach() - b.detach()).abs().max())
