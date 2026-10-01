@@ -121,7 +121,7 @@ MISSING_PROPORTION = 0.2
 
 VALID_STRATEGIES = frozenset({"up_to_k", "exactly_k"})
 VALID_ROBOT_CBM_FAMILIES = frozenset({"cbm", "cem", "probcbm", "ecbm"})
-VALID_SUDOKU_CBM_FAMILIES = frozenset({"cbm", "cem", "probcbm"})
+VALID_SUDOKU_CBM_FAMILIES = frozenset({"cbm", "cem", "probcbm", "ecbm"})
 VALID_CBM_FAMILIES = VALID_ROBOT_CBM_FAMILIES
 _CEM_FINGERPRINT_FIELDS = frozenset(
     {
