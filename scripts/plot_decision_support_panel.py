@@ -1,12 +1,12 @@
 """Build Figure 1(a) (decision support) from balanced-rule sweep runs.
 
-Reads `run_{tag}_s{seed}_{ground_truth,foot_subtypes}/results/` folders (experiments/skew_sweep.py output) and
+Reads either the installed files in results/paper/robot/balanced_rule (`--prefix`, the default source) or raw
+`run_{tag}_s{seed}_{ground_truth,foot_subtypes}/results/` folders (experiments/skew_sweep.py output, `--tag`), and
 writes a standalone TikZ panel in the paper's style: CBM accuracy under perfect interventions on
 `true_concepts` and `human_concepts` against the DNN, shaded over the range of runs (or mean ± SE), with the
 Gain at k=max (CBM on true concepts minus DNN, paired per seed). Compiles the PDF with pdflatex.
 
-    python scripts/plot_decision_support_panel.py results/_incoming/final_B duniforme3 \
-        --seeds 1014-1023 --out results/paper/figures/fig_decision_support
+    python scripts/plot_decision_support_panel.py --out results/paper/figures/fig_decision_support
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import statistics as st
 import subprocess
 from pathlib import Path
 
+REPO = Path(__file__).resolve().parent.parent
 BUDGET_LABELS = ["0", "1", "3", "max"]
 
 PREAMBLE = r"""\documentclass[border=2pt]{standalone}
@@ -64,6 +65,21 @@ def read_run(run_dir: Path, variant: str) -> tuple[float, list[float]]:
     collect = next(results.glob(f"robot_{variant}_seed*_results.csv"))
     dnn = next(float(r["accuracy"]) for r in csv.DictReader(collect.open()) if r["model"] == "dnn")
     cell = next(results.glob(f"robot_image_stochastic_{variant}_cbm_seed*_results.csv"))
+    rows = sorted(
+        (r for r in csv.DictReader(cell.open()) if r["intervention_source"] == "perfect"),
+        key=lambda r: int(r["budget"]),
+    )
+    if len(rows) != len(BUDGET_LABELS):
+        raise ValueError(f"{cell}: expected {len(BUDGET_LABELS)} budgets, got {len(rows)}")
+    return 100 * dnn, [100 * float(r["accuracy"]) for r in rows]
+
+
+def read_installed(root: Path, prefix: str, seed: int, concepts: str) -> tuple[float, list[float]]:
+    """Same as `read_run`, from the installed results tree (results/paper/robot/balanced_rule)."""
+    base = f"{prefix}__concepts-{concepts}"
+    summary = root / f"{base}__arch-cbm-and-dnn__seed-{seed}__results.csv"
+    dnn = next(float(r["accuracy"]) for r in csv.DictReader(summary.open()) if r["model"] == "dnn")
+    cell = root / f"{base}__arch-cbm__isrc-perfect__strategy-upto__seed-{seed}__results.csv"
     rows = sorted(
         (r for r in csv.DictReader(cell.open()) if r["intervention_source"] == "perfect"),
         key=lambda r: int(r["budget"]),
@@ -140,8 +156,11 @@ def parse_seeds(text: str) -> list[int]:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("root", type=Path, help="Directory holding the run_{tag}_s{seed}_{preset} folders.")
-    ap.add_argument("tag", help="Run tag, e.g. duniforme3.")
+    ap.add_argument("--root", type=Path, default=REPO / "results/paper/robot/balanced_rule",
+                    help="Installed balanced_rule folder, or a folder of raw run_{tag}_s{seed}_{preset} runs.")
+    ap.add_argument("--prefix", default="robot__rule-balanced__sampling-uniform__elbows-concept",
+                    help="File-name prefix of the installed runs.")
+    ap.add_argument("--tag", default=None, help="Read raw run folders with this tag (e.g. duniforme3) instead.")
     ap.add_argument("--seeds", default="1014-1023", help="Seed range 'a-b' or list 'a,b,c'.")
     ap.add_argument("--band", choices=["range", "se"], default="range", help="Shading: range over runs or mean ± SE.")
     ap.add_argument("--out", type=Path, required=True, help="Output path without extension (.tex and .pdf).")
@@ -150,8 +169,12 @@ def main() -> None:
     seeds = parse_seeds(args.seeds)
     true_runs, human_runs, dnn_runs, gains = [], [], [], []
     for seed in seeds:
-        dnn, true_acc = read_run(args.root / f"run_{args.tag}_s{seed}_ground_truth", "ideal")
-        _, human_acc = read_run(args.root / f"run_{args.tag}_s{seed}_foot_subtypes", "subconcept")
+        if args.tag:
+            dnn, true_acc = read_run(args.root / f"run_{args.tag}_s{seed}_ground_truth", "ideal")
+            _, human_acc = read_run(args.root / f"run_{args.tag}_s{seed}_foot_subtypes", "subconcept")
+        else:
+            dnn, true_acc = read_installed(args.root, args.prefix, seed, "true")
+            _, human_acc = read_installed(args.root, args.prefix, seed, "human")
         true_runs.append(true_acc)
         human_runs.append(human_acc)
         dnn_runs.append(dnn)
