@@ -4,7 +4,7 @@ Rule (the appendix rule at elbows weight e = 3):
     s = 6*(mouth closed + body round + head round + antennae + ears triangle) + 8*pointy - 3*knees - e*elbows + c(e)
     c(e) balances the classes over the full robot catalog (c(3) = -16, the appendix intercept)
     P(Glorp) = sigma(4.2 * s)
-HasElbows drives the label but is not a concept. The training skew over foot subtypes and the elbows weight change;
+HasElbows drives the label; it is not a concept unless --is-elbows-concept is given. The training skew over foot subtypes and the elbows weight change;
 the test set stays uniform. The split itself is the committed `setup_dataset`, given a different constraint list.
 
 Run from a code checkout whose data/robot_images already holds the rendered images:
@@ -88,7 +88,7 @@ def train_subtype_fractions(config: RobotBenchmarkConfig) -> dict[str, float]:
     return {k: round(float(v), 4) for k, v in subtype.iloc[rows].value_counts(normalize=True).items()}
 
 
-def check_rule(config: RobotBenchmarkConfig, dominant: float | None, elbows_weight: float) -> dict:
+def check_rule(config: RobotBenchmarkConfig, dominant: float | None, elbows_weight: float, is_elbows_concept: bool) -> dict:
     """Read the rule and the training skew back out of the saved dataset."""
     data = load(config.get_dataset_path())
     formula = data.meta["labeling_function"]
@@ -101,6 +101,7 @@ def check_rule(config: RobotBenchmarkConfig, dominant: float | None, elbows_weig
     fractions = train_subtype_fractions(config)
     check = {
         "dominant_fraction": dominant,
+        "is_elbows_concept": is_elbows_concept,
         "elbows_weight": elbows_weight,
         "intercept": intercept_for(elbows_weight),
         "formula": str(formula),
@@ -111,7 +112,7 @@ def check_rule(config: RobotBenchmarkConfig, dominant: float | None, elbows_weig
         "train_subtype_fractions": fractions,
     }
     assert formula.temperature == TEMPERATURE, check
-    assert "has_elbows" not in check["concepts"], check
+    assert ("has_elbows" in check["concepts"]) == is_elbows_concept, check
     assert 0.45 < check["class_balance"] < 0.55, check
     if dominant is not None:
         for name in DOMINANT:
@@ -124,6 +125,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dominant-fraction", required=True, help="Training share of each dominant subtype, or 'uniform'.")
     ap.add_argument("--elbows-weight", type=float, default=APPENDIX_ELBOWS_WEIGHT)
+    ap.add_argument("--is-elbows-concept", action="store_true", help="Keep HasElbows in the concept set.")
     ap.add_argument("--seed", type=int, required=True)
     ap.add_argument("--preset", choices=["ground_truth", "foot_subtypes"], required=True)
     ap.add_argument("--is-setup-only", action="store_true", help="Build and check the dataset, then stop.")
@@ -144,9 +146,15 @@ def main() -> None:
 
     # setup_dataset imports the constraint list at call time, so this swaps only the training skew
     benchmark_config.ROBOT_SAMPLING_CONSTRAINTS = skew_constraints(dominant)
+    if args.is_elbows_concept:
+        # setup_dataset also imports the exclusion lists at call time; keep elbows as a concept
+        benchmark_config.PRESET_EXCLUDED_CONCEPTS = {
+            preset: tuple(c for c in excluded if c != "has_elbows")
+            for preset, excluded in benchmark_config.PRESET_EXCLUDED_CONCEPTS.items()
+        }
     setup_dataset(config)
 
-    check = check_rule(config, dominant, args.elbows_weight)
+    check = check_rule(config, dominant, args.elbows_weight, args.is_elbows_concept)
     config.get_dataset_path().with_name("rule_check.json").write_text(json.dumps(check, indent=2))
     print("RULE CHECK", json.dumps({k: v for k, v in check.items() if k != "concepts"}), flush=True)
     if args.is_setup_only:
