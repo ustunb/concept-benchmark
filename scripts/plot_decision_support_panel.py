@@ -3,7 +3,7 @@
 Reads either the installed files in results/paper/robot/balanced_rule (`--prefix`, the default source) or raw
 `run_{tag}_s{seed}_{ground_truth,foot_subtypes}/results/` folders (experiments/skew_sweep.py output, `--tag`), and
 writes a standalone TikZ panel in the paper's style: CBM accuracy under perfect interventions on
-`true_concepts` and `human_concepts` against the DNN, shaded over the range of runs (or mean ± SE), with the
+`true_concepts` and `human_concepts` against the DNN, shaded mean ± SE (or the range over runs), with the
 Gain at k=max (CBM on true concepts minus DNN, paired per seed). Compiles the PDF with pdflatex.
 
     python scripts/plot_decision_support_panel.py --out results/paper/figures/fig_decision_support
@@ -158,11 +158,11 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", type=Path, default=REPO / "results/paper/robot/balanced_rule",
                     help="Installed balanced_rule folder, or a folder of raw run_{tag}_s{seed}_{preset} runs.")
-    ap.add_argument("--prefix", default="robot__rule-balanced__sampling-uniform__elbows-concept",
+    ap.add_argument("--prefix", default="robot__rule-balanced__sampling-skew0.30__elbows-weight2",
                     help="File-name prefix of the installed runs.")
     ap.add_argument("--tag", default=None, help="Read raw run folders with this tag (e.g. duniforme3) instead.")
     ap.add_argument("--seeds", default="1014-1023", help="Seed range 'a-b' or list 'a,b,c'.")
-    ap.add_argument("--band", choices=["range", "se"], default="range", help="Shading: range over runs or mean ± SE.")
+    ap.add_argument("--band", choices=["se", "range"], default="se", help="Shading: mean ± SE (default) or range over runs.")
     ap.add_argument("--out", type=Path, required=True, help="Output path without extension (.tex and .pdf).")
     args = ap.parse_args()
 
