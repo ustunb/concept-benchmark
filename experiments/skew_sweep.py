@@ -9,6 +9,11 @@ the test set stays uniform. The split itself is the committed `setup_dataset`, g
 
 Run from a code checkout whose data/robot_images already holds the rendered images:
     python experiments/skew_sweep.py --dominant-fraction 0.40 --elbows-weight 1.5 --seed 2004 --preset ground_truth
+
+To train or evaluate other models on an existing dataset of this rule, skip the setup and pass pipeline options
+after `--` (as for scripts/robot_pipeline.py; --stages selects the stages):
+    python experiments/skew_sweep.py --dominant-fraction 0.30 --elbows-weight 2 --seed 1014 --preset foot_subtypes \
+        --skip-setup -- --cbm-family cem --concept-sources machine_annotation --intervention-sources perfect --stages intervene
 """
 
 from __future__ import annotations
@@ -26,7 +31,7 @@ from concept_benchmark.config import RobotBenchmarkConfig
 from concept_benchmark.ext.fileutils import load
 from concept_benchmark.formula import F, LabelFormula
 from concept_benchmark.synthetic.robot.catalog import generate_robot_catalog
-from scripts.robot_pipeline import run, setup_dataset
+from scripts.robot_pipeline import _apply_cli_args, _parse_args, run, setup_dataset
 
 TEMPERATURE = 4.2
 DOMINANT = ("foot_shape_pointy_4sided", "foot_shape_flat_5sided")
@@ -129,6 +134,8 @@ def main() -> None:
     ap.add_argument("--seed", type=int, required=True)
     ap.add_argument("--preset", choices=["ground_truth", "foot_subtypes"], required=True)
     ap.add_argument("--is-setup-only", action="store_true", help="Build and check the dataset, then stop.")
+    ap.add_argument("--skip-setup", action="store_true", help="Use the dataset already built for this rule and seed.")
+    ap.add_argument("pipeline_args", nargs=argparse.REMAINDER, help="Pipeline options after `--`.")
     args = ap.parse_args()
     dominant = None if args.dominant_fraction == "uniform" else float(args.dominant_fraction)
 
@@ -152,15 +159,24 @@ def main() -> None:
             preset: tuple(c for c in excluded if c != "has_elbows")
             for preset, excluded in benchmark_config.PRESET_EXCLUDED_CONCEPTS.items()
         }
-    setup_dataset(config)
-
-    check = check_rule(config, dominant, args.elbows_weight, args.is_elbows_concept)
-    config.get_dataset_path().with_name("rule_check.json").write_text(json.dumps(check, indent=2))
-    print("RULE CHECK", json.dumps({k: v for k, v in check.items() if k != "concepts"}), flush=True)
+    if not args.skip_setup:
+        setup_dataset(config)
+        check = check_rule(config, dominant, args.elbows_weight, args.is_elbows_concept)
+        config.get_dataset_path().with_name("rule_check.json").write_text(json.dumps(check, indent=2))
+        print("RULE CHECK", json.dumps({k: v for k, v in check.items() if k != "concepts"}), flush=True)
+    elif not config.get_dataset_path().exists():
+        raise SystemExit(f"--skip-setup: no dataset at {config.get_dataset_path()}")
     if args.is_setup_only:
         return
 
-    run(config, stages=["cbm", "dnn", "intervene", "collect"])
+    passthrough = [a for a in args.pipeline_args if a != "--"]
+    if not passthrough:
+        run(config, stages=["cbm", "dnn", "intervene", "collect"])
+        return
+    pipeline_args = _parse_args(["--seed", str(args.seed), *passthrough])
+    config.force_retrain = False  # train only what is missing (pass --force-retrain to override)
+    _apply_cli_args(config, pipeline_args)
+    run(config, stages=pipeline_args.stages)
 
 
 if __name__ == "__main__":

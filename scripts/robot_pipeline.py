@@ -2852,27 +2852,8 @@ def _cells_from_regimes(args, config) -> list[tuple[str, str]]:
     return list(dict.fromkeys(cells))
 
 
-def main(argv=None):
-    args = _parse_args(argv)
-
-    unknown = set(args.stages) - set(ROBOT_STAGES)
-    if unknown:
-        raise ValueError(
-            f"unknown stages: {sorted(unknown)}. Valid: {list(ROBOT_STAGES)}"
-        )
-
-    if args.config:
-        config = RobotBenchmarkConfig.from_yaml(args.config)
-    elif args.concept_preset == "foot_subtypes":
-        config = RobotBenchmarkConfig.default_subconcept()
-        config.seed = args.seed
-    else:
-        config = RobotBenchmarkConfig(seed=args.seed)
-
-    # Labels are drawn from the stochastic labeling rule with --label-seed (default: --seed).
-    # The original single-seed paper data used --label-seed 12345.
-    config.rng_seed = args.label_seed if args.label_seed is not None else config.seed
-
+def _apply_cli_args(config: RobotBenchmarkConfig, args) -> None:
+    """Copy the command-line options that set model, intervention and LLM settings onto `config`."""
     if getattr(args, "training_mode", None):
         from concept_benchmark.types import CBMTrainingMode as _TM
         config.training_mode = _TM(args.training_mode)
@@ -2934,6 +2915,30 @@ def main(argv=None):
         config.llm_api_key = args.llm_api_key
     if args.force_retrain:
         config.force_retrain = True
+
+
+def main(argv=None):
+    args = _parse_args(argv)
+
+    unknown = set(args.stages) - set(ROBOT_STAGES)
+    if unknown:
+        raise ValueError(
+            f"unknown stages: {sorted(unknown)}. Valid: {list(ROBOT_STAGES)}"
+        )
+
+    if args.config:
+        config = RobotBenchmarkConfig.from_yaml(args.config)
+    elif args.concept_preset == "foot_subtypes":
+        config = RobotBenchmarkConfig.default_subconcept()
+        config.seed = args.seed
+    else:
+        config = RobotBenchmarkConfig(seed=args.seed)
+
+    # Labels are drawn from the stochastic labeling rule with --label-seed (default: --seed).
+    # The original single-seed paper data used --label-seed 12345.
+    config.rng_seed = args.label_seed if args.label_seed is not None else config.seed
+
+    _apply_cli_args(config, args)
     missing_fraction = args.missing_fraction or 0.0
     missing_mechanism = args.missing_mechanism or "mcar"
 
