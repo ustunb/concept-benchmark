@@ -115,9 +115,6 @@ def build_tex(true_runs, human_runs, dnn_runs, gains, band_kind: str) -> str:
     ymin = 5 * int(min(human_lo) // 5) - 1
     ymax = top + 4.0
     return PREAMBLE + rf"""
-\node[anchor=south west] at (0cm,4.78cm)
-  {{\fontsize{{9}}{{11}}\selectfont\bfseries\color{{titlec}}Decision support}};
-\draw[hair, line width=0.4pt] (0cm,4.70cm) -- (6.2cm,4.70cm);
 \begin{{axis}}[bbvalue, at={{(0cm,0cm)}}, anchor=south west,
   xlabel={{Intervention budget $k$}}, ylabel={{Accuracy}},
   ymin={ymin:.0f}, ymax={ymax:.1f},

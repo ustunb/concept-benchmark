@@ -5,12 +5,17 @@ For the Figure 1a runs (balanced rule, results/paper/robot/balanced_rule), sets 
 for test robots whose foot subtype is listed in `human_concepts` and those whose subtype is not. Also checks that
 unlisted-subtype robots have every FootShape concept equal to 0.
 
+With --images, also runs the human-concept CBM's concept detector on the test robots and reports, for robots with
+an unlisted subtype, how often any FootShape detector fires (a wrong prediction, since every true value is 0) and
+how often the firing subtype is on the correct Pointy/Flat side, plus accuracy before interventions.
+
 Run from a code checkout of `grid-seeded-lfcbm` (models are pickled with that code):
-    cd <checkout> && PYTHONPATH=. python <repo>/scripts/check_unlisted_subtypes.py
+    cd <checkout> && PYTHONPATH=. python <repo>/scripts/check_unlisted_subtypes.py [--images <robot_images>]
 """
 
 from __future__ import annotations
 
+import argparse
 import statistics as st
 from pathlib import Path
 
@@ -52,15 +57,54 @@ def accuracy_by_subtype(concepts: str, seed: int, listed_subtypes: set[str]) -> 
     return correct[listed].mean(), correct[~listed].mean(), (~listed).mean()
 
 
+def detector_on_unlisted(seed: int, listed_subtypes: set[str], images: Path) -> tuple[float, float, float, float]:
+    """Share of unlisted-subtype robots with any FootShape detector firing, share of those firing on the correct
+    Pointy/Flat side, and k=0 accuracy on unlisted vs listed robots (human_concepts CBM)."""
+    data = load(PAPER / f"robot/datasets/{PREFIX}__concepts-human__seed-{seed}__dataset.data")
+    model = load(PAPER / f"models/robot/balanced/{PREFIX}__concepts-human__arch-cbm__seed-{seed}__model.pt")
+    allow_old_sklearn(model, set())
+    for cfg_name in ("_eval_config", "eval_config"):
+        cfg = getattr(model.concept_detector, cfg_name, None)
+        if isinstance(cfg, dict):
+            cfg["device"] = "cuda" if __import__("torch").cuda.is_available() else "cpu"
+    test = data.test
+    test.base_dir = Path(images)
+    probs = model.concept_detector.predict_proba(test)
+    names = list(test.concepts)
+    foot = [i for i, n in enumerate(names) if n.startswith("foot_shape_")]
+    fired = probs[:, foot] >= 0.5
+    catalog = data.meta["catalog_df"]
+    rows = catalog.index.get_indexer(test.meta["df_indices"])
+    side = catalog["foot_shape"].astype(str).to_numpy()[rows]
+    subtype = (catalog["foot_shape"].astype(str) + "_" + catalog["foot_shape_subtype"].astype(str)).to_numpy()[rows]
+    unlisted = ~np.isin(subtype, list(listed_subtypes))
+    any_fired = fired.any(axis=1)
+    fired_side = np.array([names[foot[j]].split("_")[2] for j in range(len(foot))])  # pointy/flat per concept
+    best = probs[:, foot].argmax(axis=1)
+    same_side = fired_side[best] == side
+    pred = model.label_predictor.predict_proba((probs >= 0.5).astype(int)).argmax(axis=1)
+    correct = pred == np.asarray(test.y).astype(int)
+    return (any_fired[unlisted].mean(), same_side[unlisted & any_fired].mean(),
+            correct[unlisted].mean(), correct[~unlisted].mean())
+
+
 def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--images", type=Path, default=None, help="Robot images; enables the detector check.")
+    args = ap.parse_args()
     human = load(PAPER / f"robot/datasets/{PREFIX}__concepts-human__seed-{SEEDS[0]}__dataset.data")
     listed = {c.removeprefix("foot_shape_") for c in human.train.concepts if c.startswith("foot_shape_")}
     print("FootShape subtypes in human_concepts:", ", ".join(sorted(listed)))
+    ms = lambda v: f"{100 * st.mean(v):.1f} ± {100 * st.stdev(v) / len(v) ** 0.5:.1f}"
     for concepts in ("true", "human"):
         on_listed, on_unlisted, share = zip(*(accuracy_by_subtype(concepts, s, listed) for s in SEEDS))
-        ms = lambda v: f"{100 * st.mean(v):.1f} ± {100 * st.stdev(v) / len(v) ** 0.5:.1f}"
         print(f"{concepts:5} concepts, full intervention: listed-subtype robots {ms(on_listed)} | "
               f"unlisted-subtype robots {ms(on_unlisted)} (unlisted share {100 * st.mean(share):.1f}%)")
+    if args.images is not None:
+        fired, same_side, k0_unlisted, k0_listed = zip(*(detector_on_unlisted(s, listed, args.images) for s in SEEDS))
+        print(f"human concepts, detectors on unlisted-subtype robots: some FootShape detector fires on {ms(fired)}% "
+              f"(true value 0); of those, the most confident fires on the correct Pointy/Flat side in {ms(same_side)}%")
+        print(f"human concepts, no intervention: accuracy {ms(k0_unlisted)} on unlisted vs {ms(k0_listed)} on listed robots")
 
 
 if __name__ == "__main__":
