@@ -90,7 +90,7 @@ The paper reports a selective-accuracy target of 0.95 (`--target-accuracy`; the 
 python scripts/sudoku_pipeline.py --seed 171 --cell-px 18 --target-accuracy 0.95 --stages cs intervene selective diagnose
 ```
 
-Single sudoku seeds can change a lot across GPU models (coverage can halve at 18px), so compare means over the ten seeds.
+Single sudoku seeds can change a lot across GPU models (coverage can halve at 18px), so compare means over the ten seeds. ProbCBM also samples at prediction time, and these samples are not seeded when the evaluation stages run on their own, so its sudoku numbers vary by a few boards between runs.
 
 Data generation (`setup`, `ocr`) takes about five minutes per seed; skip it on later runs with `--stages cs dnn intervene selective collect`.
 
