@@ -223,6 +223,7 @@ _ECBM_FINGERPRINT_FIELDS = frozenset(
         "ecbm_max_epochs",
     }
 )
+_REMOVED_ROBOT_FIELDS = frozenset({"ecbm_emb_size", "ecbm_inference_steps", "ecbm_inference_lr"})
 ROBOT_VALID_REGIMES = frozenset(
     {"baseline", "expert", "subjective", "machine", "llm", "clip", "custom"}
 )
@@ -577,9 +578,14 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
 
     @classmethod
     def _restore_from_yaml_dict(cls, d: dict) -> dict:
-        """Convert label_formula dict back to LabelFormula on load."""
+        """Convert label_formula dict back to LabelFormula on load, and read configs saved by older versions."""
         if "label_formula" in d and isinstance(d["label_formula"], dict):
             d["label_formula"] = LabelFormula.from_dict(d["label_formula"])
+        if "label_formula" in d and "label_rule" not in d:
+            d["label_rule"] = "sparse"  # before 0.4.0 every config used the sparse rule's training split
+        for name in _REMOVED_ROBOT_FIELDS & d.keys():
+            logger.warning("Ignoring %r: the setting was removed in 0.4.0.", name)
+            del d[name]
         if "training_mode" in d and isinstance(d["training_mode"], str):
             d["training_mode"] = CBMTrainingMode(d["training_mode"])
         return d

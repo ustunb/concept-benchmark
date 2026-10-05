@@ -33,10 +33,13 @@ def load_original(root: Path):
     backbone = types.ModuleType("networks.backbone")
     backbone.get_model = lambda *a, **k: nn.Identity()
     sys.modules["networks.backbone"] = backbone
-    spec = importlib.util.spec_from_file_location("networks.EBM", root / "networks/EBM.py")
+    spec = importlib.util.spec_from_file_location(
+        "networks.EBM", root / "networks/EBM.py"
+    )
     ebm = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(ebm)
     import numpy
+
     numpy.Inf = numpy.inf  # utils.py predates NumPy 2
     sys.path.insert(0, str(root))  # utils.py imports the authors' metrics.py
     spec = importlib.util.spec_from_file_location("ecbm_utils", root / "utils.py")
@@ -50,7 +53,9 @@ def run_optim_original(module, utils, x, y_prob, c_prob, weights, patience=10):
     lambda_xy, lambda_xc, lambda_cy = weights
     module.y_prob = nn.Parameter(y_prob.clone())
     module.c_prob = nn.Parameter(c_prob.clone())
-    optim = torch.optim.Adam([{"params": [module.c_prob], "lr": 0.1}, {"params": [module.y_prob], "lr": 0.1}])
+    optim = torch.optim.Adam(
+        [{"params": [module.c_prob], "lr": 0.1}, {"params": [module.y_prob], "lr": 0.1}]
+    )
     stop = utils.EarlyStopping(patience=patience)
     with torch.enable_grad():
         running = True
@@ -61,7 +66,11 @@ def run_optim_original(module, utils, x, y_prob, c_prob, weights, patience=10):
             cpt_loss = torch.zeros([])
             for i in range(c_en.shape[1]):
                 cpt_loss += c_en[:, i, :].mean()
-            loss = lambda_xy * xy_en.mean() + lambda_xc * cpt_loss + lambda_cy * cy_en.mean()
+            loss = (
+                lambda_xy * xy_en.mean()
+                + lambda_xc * cpt_loss
+                + lambda_cy * cy_en.mean()
+            )
             stop(xy_en.mean(), None)
             loss.backward(retain_graph=True)
             optim.step()
@@ -77,16 +86,38 @@ def main() -> None:
     torch.manual_seed(0)
     ebm, utils = load_original(args.original)
     n_classes, n_concepts, hid, feat, bs = 2, 7, 64, 128, 32
-    original = ebm.EBM_GL(Namespace(cy_perturb_prob=0.2, cy_permute_prob=0.2), num_classes=n_classes,
-                          input_size=feat, hid_size=hid, cpt_size=n_concepts)
-    original.cy_augment = lambda c_gt, permute_ratio, permute_prob=0.2: c_gt  # augmentation off for the comparison
-    port = ours._ECBMNet(n_concepts=n_concepts, n_tasks=n_classes, hid_size=hid, feature_dim=feat,
-                         lambda_xy=3, lambda_xc=1, lambda_cy=1, c_extractor_arch=lambda d: nn.Identity())
+    original = ebm.EBM_GL(
+        Namespace(cy_perturb_prob=0.2, cy_permute_prob=0.2),
+        num_classes=n_classes,
+        input_size=feat,
+        hid_size=hid,
+        cpt_size=n_concepts,
+    )
+    original.cy_augment = lambda c_gt, permute_ratio, permute_prob=0.2: (
+        c_gt
+    )  # augmentation off for the comparison
+    port = ours._ECBMNet(
+        n_concepts=n_concepts,
+        n_tasks=n_classes,
+        hid_size=hid,
+        feature_dim=feat,
+        lambda_xy=3,
+        lambda_xc=1,
+        lambda_cy=1,
+        c_extractor_arch=lambda d: nn.Identity(),
+    )
     missing, unexpected = port.load_state_dict(
-        {k: v for k, v in original.state_dict().items() if k not in ("y_prob", "c_prob", "fc_c.weight", "fc_c.bias")},
+        {
+            k: v
+            for k, v in original.state_dict().items()
+            if k not in ("y_prob", "c_prob", "fc_c.weight", "fc_c.bias")
+        },
         strict=False,
     )
-    assert not unexpected and all(k.startswith("backbone") for k in missing), (missing, unexpected)
+    assert not unexpected and all(k.startswith("backbone") for k in missing), (
+        missing,
+        unexpected,
+    )
     original.eval()
     port.eval()
 
@@ -96,15 +127,23 @@ def main() -> None:
 
     o_xy, o_cy, o_xc = original(x, c, True, use_cy=True)
     p_xy, p_cy, p_xc = port.training_energies(x, c, augment=False)
-    checks += [("training xy", o_xy, p_xy), ("training cy", o_cy, p_cy), ("training xc", o_xc, p_xc)]
+    checks += [
+        ("training xy", o_xy, p_xy),
+        ("training cy", o_cy, p_cy),
+        ("training xc", o_xc, p_xc),
+    ]
 
-    spec = importlib.util.spec_from_file_location("ecbm_loss", args.original / "loss.py")
+    spec = importlib.util.spec_from_file_location(
+        "ecbm_loss", args.original / "loss.py"
+    )
     loss_mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(loss_mod)
     y = torch.randint(0, n_classes, (bs,))
     o_label = loss_mod.EBMLoss_label(list(range(n_classes)), device="cpu")
     o_concept = loss_mod.EBMLoss_concept(list(range(n_concepts)), device="cpu")
-    o_loss = 3 * o_label(o_xy, y) + 1 * o_concept(o_xc, c) + 1 * o_label(o_cy, y)  # LitModel.training_step
+    o_loss = (
+        3 * o_label(o_xy, y) + 1 * o_concept(o_xc, c) + 1 * o_label(o_cy, y)
+    )  # LitModel.training_step
     original_augment = ours._flip_concepts
     ours._flip_concepts = lambda present: present
     p_loss, _ = ours._ecbm_losses(port, x, c, y)
@@ -117,34 +156,67 @@ def main() -> None:
     original.c_prob = nn.Parameter(c_var.clone())
     o_xy, o_cy, o_xc, _ = original(x, None, False, use_cy=True)
     p_xy, p_cy, p_xc = port.inference_energies(x, y_var.squeeze(-1), c_var)
-    checks += [("inference xy", o_xy.view(-1), p_xy), ("inference cy", o_cy.view(-1), p_cy),
-               ("inference xc", o_xc.squeeze(-1), p_xc)]
+    checks += [
+        ("inference xy", o_xy.view(-1), p_xy),
+        ("inference cy", o_cy.view(-1), p_cy),
+        ("inference xc", o_xc.squeeze(-1), p_xc),
+    ]
 
-    o_y = run_optim_original(original, utils, x, torch.zeros(bs, n_classes, 1), torch.zeros(bs, n_concepts, 2),
-                             ours.INFERENCE_WEIGHTS)
+    o_y = run_optim_original(
+        original,
+        utils,
+        x,
+        torch.zeros(bs, n_classes, 1),
+        torch.zeros(bs, n_concepts, 2),
+        ours.INFERENCE_WEIGHTS,
+    )
     o_c_logits = original.c_prob.detach().clone()
     p_y_logits, p_c_logits = ours._infer_labels_and_concepts(port, x)
-    checks += [("inference label", o_y, torch.softmax(p_y_logits, -1)), ("inference concepts", o_c_logits, p_c_logits)]
+    checks += [
+        ("inference label", o_y, torch.softmax(p_y_logits, -1)),
+        ("inference concepts", o_c_logits, p_c_logits),
+    ]
 
     mask = torch.rand(bs, n_concepts) > 0.5
     forced = (torch.nn.functional.one_hot(c.long(), 2).float() - 0.5) * 10
-    o_y = run_optim_original(original, utils, x, torch.zeros(bs, n_classes, 1),
-                             torch.where(mask.unsqueeze(-1), forced, o_c_logits), ours.INTERVENTION_WEIGHTS)
+    o_y = run_optim_original(
+        original,
+        utils,
+        x,
+        torch.zeros(bs, n_classes, 1),
+        torch.where(mask.unsqueeze(-1), forced, o_c_logits),
+        ours.INTERVENTION_WEIGHTS,
+    )
     p_y = torch.softmax(ours._intervene(port, x, p_c_logits, c, mask), -1)
     checks.append(("intervention label", o_y, p_y))
 
     # Running many test batches side by side must match running them one after another.
     xs = torch.randn(150, feat)
-    serial = torch.cat([ours._infer_labels_and_concepts(port, xs[i:i + 32])[0] for i in range(0, 150, 32)])
+    serial = torch.cat(
+        [
+            ours._infer_labels_and_concepts(port, xs[i : i + 32])[0]
+            for i in range(0, 150, 32)
+        ]
+    )
     parallel = ours._infer_labels_and_concepts(port, xs, batch_size=32)[0]
-    checks.append(("batched inference", torch.softmax(serial, -1), torch.softmax(parallel, -1)))
+    checks.append(
+        ("batched inference", torch.softmax(serial, -1), torch.softmax(parallel, -1))
+    )
     cs = (torch.rand(150, n_concepts) > 0.5).float()
     ms = torch.rand(150, n_concepts) > 0.5
     cl = torch.randn(150, n_concepts, 2)
-    serial = torch.cat([ours._intervene(port, xs[i:i + 32], cl[i:i + 32], cs[i:i + 32], ms[i:i + 32])
-                        for i in range(0, 150, 32)])
+    serial = torch.cat(
+        [
+            ours._intervene(
+                port, xs[i : i + 32], cl[i : i + 32], cs[i : i + 32], ms[i : i + 32]
+            )
+            for i in range(0, 150, 32)
+        ]
+    )
     parallel = ours._intervene(port, xs, cl, cs, ms, batch_size=32)
-    checks.append(("batched intervention", torch.softmax(serial, -1), torch.softmax(parallel, -1)))
+    checks.append(
+        ("batched intervention", torch.softmax(serial, -1), torch.softmax(parallel, -1))
+    )
 
     worst = 0.0
     for name, a, b in checks:

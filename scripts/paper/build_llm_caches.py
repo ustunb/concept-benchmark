@@ -53,15 +53,23 @@ def sha1_of(items) -> str:
 
 def read_descriptions(name: str) -> list[dict]:
     raw = subprocess.check_output(
-        ["git", "show", f"origin/balanced-baseline:concept_benchmark/concept_descriptions/{name}.jsonl"],
+        [
+            "git",
+            "show",
+            f"origin/balanced-baseline:concept_benchmark/concept_descriptions/{name}.jsonl",
+        ],
         cwd=REPO,
     ).decode()
     return [json.loads(line) for line in raw.splitlines() if line.strip()]
 
 
-def build_concept_lists(true_names: list[str], human_names: list[str]) -> dict[str, list[tuple[str, str]]]:
+def build_concept_lists(
+    true_names: list[str], human_names: list[str]
+) -> dict[str, list[tuple[str, str]]]:
     """Return {cache: [(concept_name, question)]}, names in the order the pipeline hashes them."""
-    subtypes = {r["key"]: r["text"] for r in read_descriptions("gt_concepts_subconcept")}
+    subtypes = {
+        r["key"]: r["text"] for r in read_descriptions("gt_concepts_subconcept")
+    }
 
     def human_question(name: str) -> str:
         if name in TRUE_QUESTIONS:
@@ -72,7 +80,10 @@ def build_concept_lists(true_names: list[str], human_names: list[str]) -> dict[s
         "true": [(n, TRUE_QUESTIONS[n]) for n in true_names],
         "human": [(n, human_question(n)) for n in human_names],
         "llm": [
-            (r.get("key", r["text"]), f"1 if this describes the robot: '{r['text']}', 0 otherwise")
+            (
+                r.get("key", r["text"]),
+                f"1 if this describes the robot: '{r['text']}', 0 otherwise",
+            )
             for r in read_descriptions("llm")
         ],
         "clip": [
@@ -103,7 +114,12 @@ class CacheFile:
             for i, votes in rows:
                 if i in self.done:
                     continue
-                fh.write(json.dumps({"i": i, "votes_idx": {str(j): v for j, v in enumerate(votes)}}) + "\n")
+                fh.write(
+                    json.dumps(
+                        {"i": i, "votes_idx": {str(j): v for j, v in enumerate(votes)}}
+                    )
+                    + "\n"
+                )
                 self.done.add(i)
 
 
@@ -119,7 +135,13 @@ class Budget:
         return self.usd >= self.max_usd
 
 
-def ask(client, model: str, images: list[Path], concepts: list[tuple[str, str]], budget: Budget):
+def ask(
+    client,
+    model: str,
+    images: list[Path],
+    concepts: list[tuple[str, str]],
+    budget: Budget,
+):
     """One labelled request; returns {label_index: votes} for complete, well-formed answers only."""
     labels = [f"img_{k}" for k in range(len(images))]
     keys = [f"q{j}" for j in range(len(concepts))]
@@ -138,7 +160,10 @@ def ask(client, model: str, images: list[Path], concepts: list[tuple[str, str]],
         property_ordering=keys,
     )
     schema = types.Schema(
-        type=types.Type.OBJECT, properties={lab: item for lab in labels}, required=labels, property_ordering=labels
+        type=types.Type.OBJECT,
+        properties={lab: item for lab in labels},
+        required=labels,
+        property_ordering=labels,
     )
     for label, path in zip(labels, images):
         parts += [f"{label}:", Image.open(path).convert("RGB")]
@@ -147,7 +172,9 @@ def ask(client, model: str, images: list[Path], concepts: list[tuple[str, str]],
             resp = client.models.generate_content(
                 model=model,
                 contents=parts,
-                config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=schema),
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json", response_schema=schema
+                ),
             )
             u = resp.usage_metadata
             budget.add(u.prompt_token_count or 0, u.candidates_token_count or 0)
@@ -155,7 +182,9 @@ def ask(client, model: str, images: list[Path], concepts: list[tuple[str, str]],
             break
         except json.JSONDecodeError:
             return {}
-        except Exception as e:  # rate limits and transient server errors: back off and retry
+        except (
+            Exception
+        ) as e:  # rate limits and transient server errors: back off and retry
             msg = str(e)
             if not any(code in msg for code in ("429", "500", "502", "503", "504")):
                 raise
@@ -177,7 +206,12 @@ def ask(client, model: str, images: list[Path], concepts: list[tuple[str, str]],
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--seed-tests", type=Path, required=True, help="JSON with per-seed test inputs and concept names")
+    ap.add_argument(
+        "--seed-tests",
+        type=Path,
+        required=True,
+        help="JSON with per-seed test inputs and concept names",
+    )
     ap.add_argument("--image-dir", type=Path, required=True)
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--seeds", nargs="+", required=True)
@@ -185,7 +219,12 @@ def main() -> None:
     ap.add_argument("--model", default="gemini-2.5-flash-lite")
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--max-usd", type=float, default=5.0)
-    ap.add_argument("--limit", type=int, default=0, help="only the first N test robots per seed (dry runs)")
+    ap.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="only the first N test robots per seed (dry runs)",
+    )
     args = ap.parse_args()
 
     tests = json.loads(args.seed_tests.read_text())
@@ -203,9 +242,14 @@ def main() -> None:
             name = f"llm_interventions_{sha1_of([n for n, _ in concepts])}_{t['dsig']}.jsonl"
             cf = CacheFile(args.out_dir / name, len(concepts))
             todo = [i for i in range(len(inputs)) if i not in cf.done]
-            print(f"seed {seed} {cache:5} -> {name[:40]}… done {len(cf.done)}, todo {len(todo)}", flush=True)
+            print(
+                f"seed {seed} {cache:5} -> {name[:40]}… done {len(cf.done)}, todo {len(todo)}",
+                flush=True,
+            )
             for s in range(0, len(todo), BATCH_SIZE):
-                jobs.append((seed, cache, cf, concepts, todo[s : s + BATCH_SIZE], inputs))
+                jobs.append(
+                    (seed, cache, cf, concepts, todo[s : s + BATCH_SIZE], inputs)
+                )
 
     def run(job):
         seed, cache, cf, concepts, idxs, inputs = job
@@ -213,7 +257,13 @@ def main() -> None:
         for _ in range(4):  # re-ask robots whose answers came back missing or malformed
             if not pending or budget.exhausted():
                 break
-            got = ask(client, args.model, [args.image_dir / inputs[i] for i in pending], concepts, budget)
+            got = ask(
+                client,
+                args.model,
+                [args.image_dir / inputs[i] for i in pending],
+                concepts,
+                budget,
+            )
             cf.append([(pending[k], v) for k, v in got.items()])
             pending = [i for k, i in enumerate(pending) if k not in got]
         return len(idxs) - len(pending), pending
@@ -226,7 +276,10 @@ def main() -> None:
         while True:
             time.sleep(30)
             rows = sum(len(c.done) for c in caches.values())
-            print(f"[{time.time() - started:.0f}s] rows written {rows} | ${budget.usd:.3f}", flush=True)
+            print(
+                f"[{time.time() - started:.0f}s] rows written {rows} | ${budget.usd:.3f}",
+                flush=True,
+            )
 
     threading.Thread(target=report, daemon=True).start()
     with ThreadPoolExecutor(args.workers) as pool:
@@ -242,7 +295,9 @@ def main() -> None:
                     flush=True,
                 )
             if budget.exhausted():
-                print(f"STOP: budget ${args.max_usd} reached; rerun to resume", flush=True)
+                print(
+                    f"STOP: budget ${args.max_usd} reached; rerun to resume", flush=True
+                )
                 pool.shutdown(cancel_futures=True)
                 break
 

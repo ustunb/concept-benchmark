@@ -59,8 +59,8 @@ def _lighten_color(color, alpha=0.4):
 
 
 def _pct_labels(values):
-    """Format an array of percentage values as label strings."""
-    return [f"{v:.1f}%" for v in values]
+    """Format an array of percentage values as label strings (empty for missing values)."""
+    return ["" if np.isnan(v) else f"{v:.1f}%" for v in values]
 
 
 def _summarize_runs(frame: pd.DataFrame, by: list[str], value: str) -> pd.DataFrame:
@@ -128,15 +128,44 @@ def plot_intervention_curve(
             for i, name in enumerate(names)
         ]
 
-    plotted, tick_labels = [], None
-    for name, rows, line_color in series:
-        summary = _summarize_runs(rows, ["budget"], metric).sort_values("budget")
-        budgets = summary["budget"].to_numpy()
+    if results.empty or results[metric].isna().all():
+        raise ValueError(f"no {metric!r} values to plot")
+    summaries = [
+        (
+            name,
+            _summarize_runs(rows, ["budget"], metric).sort_values("budget"),
+            line_color,
+        )
+        for name, rows, line_color in series
+    ]
+    budget_lists = [list(summary["budget"]) for _, summary, _ in summaries]
+    is_same = all(budgets == budget_lists[0] for budgets in budget_lists)
+    is_same_but_largest = not is_same and all(
+        budgets[:-1] == budget_lists[0][:-1] for budgets in budget_lists
+    )
+    if (
+        is_same or is_same_but_largest
+    ):  # each line's largest budget shares the last position
+        positions = {
+            budget: i for budgets in budget_lists for i, budget in enumerate(budgets)
+        }
+        tick_labels = [str(b) for b in budget_lists[0]]
+        if is_same_but_largest:
+            tick_labels[-1] = "max"
+    else:  # lines with different budgets: one position per budget that occurs
+        every_budget = sorted(
+            {budget for budgets in budget_lists for budget in budgets}
+        )
+        positions = {budget: i for i, budget in enumerate(every_budget)}
+        tick_labels = [str(b) for b in every_budget]
+
+    plotted = []
+    for name, summary, line_color in summaries:
+        x = np.array([positions[budget] for budget in summary["budget"]])
         values, errors = (
             summary["mean"].to_numpy() * 100,
             summary["se"].to_numpy() * 100,
         )
-        x = np.arange(len(budgets))
         ax.plot(x, values, marker="o", color=line_color, linewidth=2, label=name)
         if errors.any():
             ax.fill_between(
@@ -148,14 +177,6 @@ def plot_intervention_curve(
                 linewidth=0,
             )
         plotted.append((x, values))
-        labels = [str(b) for b in budgets]
-        if tick_labels is not None and labels != tick_labels:
-            labels = (
-                tick_labels[:-1] + ["max"]
-                if len(labels) == len(tick_labels)
-                else labels
-            )
-        tick_labels = labels
     ax.set_xticks(np.arange(len(tick_labels)))
     ax.set_xticklabels(tick_labels)
 
@@ -244,14 +265,16 @@ def plot_intervention_heatmap(
     columns = list(columns)
     run_keys = [rows, *columns] + (["seed"] if "seed" in results.columns else [])
     changes = []
-    for key, run in results.groupby(run_keys, sort=False):
+    for key, run in results.groupby(run_keys, sort=False, dropna=False):
         before = run.loc[run["budget"] == 0, metric]
         after = run.loc[run["budget"] != 0, metric]
         if len(before) and len(after):
             changes.append((*key, 100 * (after.mean() - before.iloc[0])))
+    if not changes:
+        raise ValueError("no run has both a budget of 0 and a larger budget")
     table = (
         pd.DataFrame(changes, columns=[*run_keys, "change"])
-        .groupby([rows, *columns], sort=False)["change"]
+        .groupby([rows, *columns], sort=False, dropna=False)["change"]
         .mean()
         .unstack(columns)
     )
@@ -402,6 +425,8 @@ def plot_alignment_comparison(
     ax : Axes, optional
         Existing axes to plot on (single panel only).
     """
+    if results.empty:
+        raise ValueError("no alignment results to plot")
     metrics = [m for m in ("accuracy_before", "accuracy_after") if m in results.columns]
     titles = {
         "accuracy_before": "Accuracy before interventions",
@@ -425,10 +450,14 @@ def plot_alignment_comparison(
         )
         for m, model in enumerate(models):
             means = (
-                np.array([summary.loc[(c, model), "mean"] for c in concept_sets]) * 100
+                np.array(
+                    [summary["mean"].get((c, model), np.nan) for c in concept_sets]
+                )
+                * 100
             )
             errors = (
-                np.array([summary.loc[(c, model), "se"] for c in concept_sets]) * 100
+                np.array([summary["se"].get((c, model), 0.0) for c in concept_sets])
+                * 100
             )
             y = (
                 np.arange(len(concept_sets))
@@ -805,7 +834,7 @@ def plot_automation(
             label="DNN baseline",
         )
     ax.set_xticks(x)
-    ax.set_xticklabels([str(b) for b in budgets[:-1]] + ["max"])
+    ax.set_xticklabels(["max" if b == n_concepts else str(b) for b in budgets])
     ax.set_xlabel("Concept checks per instance (k)", fontsize=style.FONT_SIZE)
     ax.set_ylabel("Share of instances (%)", fontsize=style.FONT_SIZE)
     ax.yaxis.set_major_formatter(style.pct_formatter())
@@ -915,11 +944,13 @@ def plot_answer_reliance(
         ["seed"] if "seed" in results.columns else []
     )
     changes = []
-    for key, run in results.groupby(run_keys, sort=False):
+    for key, run in results.groupby(run_keys, sort=False, dropna=False):
         before = run.loc[run["budget"] == 0, metric]
         after = run.loc[run["budget"] != 0, metric]
         if len(before) and len(after):
             changes.append((*key, 100 * (after.mean() - before.iloc[0])))
+    if not changes:
+        raise ValueError("no run has both a budget of 0 and a larger budget")
     summary = _summarize_runs(
         pd.DataFrame(changes, columns=[*run_keys, "change"]),
         [group, "intervention_source"],
@@ -944,7 +975,7 @@ def plot_answer_reliance(
         )
         ax.bar_label(
             bars,
-            labels=[f"{m:+.1f}%" for m in means],
+            labels=["" if np.isnan(m) else f"{m:+.1f}%" for m in means],
             padding=3,
             fontsize=style.FONT_SIZE_ANNOT,
         )

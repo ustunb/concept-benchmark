@@ -18,7 +18,10 @@ from pathlib import Path
 
 from _common import BALANCED_TAG, PAPER_RESULTS, compile_tex, mean_se
 
-RESULTS = PAPER_RESULTS / f"robot/alignment/{BALANCED_TAG}__arch-cbm__isrc-perfect__alignment.csv"
+RESULTS = (
+    PAPER_RESULTS
+    / f"robot/alignment/{BALANCED_TAG}__arch-cbm__isrc-perfect__alignment.csv"
+)
 SETS = (("true", 0), ("human", 1))  # concept set, row (bottom to top)
 
 
@@ -31,36 +34,73 @@ def per_seed() -> dict[tuple[str, str, str], list[float]]:
             after = st.mean(float(r[f"k{k}_{which}"]) for k in ("1", "3", "max"))
             out.setdefault(("k0", r["concepts"], which), []).append(k0)
             out.setdefault(("delta", r["concepts"], which), []).append(after - k0)
-            out.setdefault(("kmax", r["concepts"], which), []).append(float(r[f"kmax_{which}"]))
+            out.setdefault(("kmax", r["concepts"], which), []).append(
+                float(r[f"kmax_{which}"])
+            )
     return out
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", type=Path, required=True, help="Output path without extension (.tex and .pdf).")
+    ap.add_argument(
+        "--out",
+        type=Path,
+        required=True,
+        help="Output path without extension (.tex and .pdf).",
+    )
     args = ap.parse_args()
     values = per_seed()
     stat = {k: mean_se(v) for k, v in values.items()}
     for (metric, c, which), (m, se) in sorted(stat.items()):
-        print(f"{metric:6s} {c:6s} {which:6s} {m:6.2f} ± {se:.2f}  (n={len(values[(metric, c, which)])})")
+        print(
+            f"{metric:6s} {c:6s} {which:6s} {m:6.2f} ± {se:.2f}  (n={len(values[(metric, c, which)])})"
+        )
 
     def bars(metric: str, which: str) -> str:
-        return " ".join(f"({stat[(metric, c, which)][0]:.2f},{y}) +- ({stat[(metric, c, which)][1]:.2f},0)" for c, y in SETS)
+        return " ".join(
+            f"({stat[(metric, c, which)][0]:.2f},{y}) +- ({stat[(metric, c, which)][1]:.2f},0)"
+            for c, y in SETS
+        )
 
     def labels(metric: str, which: str, shift: str, signed: bool) -> str:
         rows = []
         for c, y in SETS:
             m, se = stat[(metric, c, which)]
             text = f"{m:+.1f}" if signed else f"{m:.1f}"
-            rows.append(rf"\node[anchor=west, font=\fontsize{{7.5}}{{9}}\selectfont, yshift={shift}] at (axis cs:{m + se:.2f},{y}) {{${text}\%$}};")
+            rows.append(
+                rf"\node[anchor=west, font=\fontsize{{7.5}}{{9}}\selectfont, yshift={shift}] at (axis cs:{m + se:.2f},{y}) {{${text}\%$}};"
+            )
         return "\n".join(rows)
 
-    def panel(metric: str, at: str, xlabel: str, extra: str, signed: bool, ticklabels: bool, legend: bool) -> str:
-        yt = r"yticklabels={\texttt{true\_concepts},\texttt{human\_concepts}}" if ticklabels else "yticklabels={,}"
-        leg = (r"""legend to name=alignlegend, legend style={draw=none, fill=none, font=\fontsize{7.5}{9}\selectfont, legend columns=2,
+    def panel(
+        metric: str,
+        at: str,
+        xlabel: str,
+        extra: str,
+        signed: bool,
+        ticklabels: bool,
+        legend: bool,
+    ) -> str:
+        yt = (
+            r"yticklabels={\texttt{true\_concepts},\texttt{human\_concepts}}"
+            if ticklabels
+            else "yticklabels={,}"
+        )
+        leg = (
+            r"""legend to name=alignlegend, legend style={draw=none, fill=none, font=\fontsize{7.5}{9}\selectfont, legend columns=2,
                 /tikz/every even column/.append style={column sep=8pt}},
-  legend image code/.code={\draw[#1, draw=none] (0cm,-0.09cm) rectangle (0.32cm,0.09cm);},""" if legend else "")
-        entries = ((r"\addlegendentry{\textsf{CBM}}", r"\addlegendentry{Constrained \textsf{CBM}}") if legend else ("", ""))
+  legend image code/.code={\draw[#1, draw=none] (0cm,-0.09cm) rectangle (0.32cm,0.09cm);},"""
+            if legend
+            else ""
+        )
+        entries = (
+            (
+                r"\addlegendentry{\textsf{CBM}}",
+                r"\addlegendentry{Constrained \textsf{CBM}}",
+            )
+            if legend
+            else ("", "")
+        )
         return rf"""\begin{{axis}}[bars, at={{({at},0cm)}}, anchor=south west, {yt}, xlabel={{{xlabel}}}, {extra}, {leg}]
 \addplot[fill=cons, draw=none] coordinates {{{bars(metric, "after")}}};
 {entries[1]}
@@ -70,7 +110,8 @@ def main() -> None:
 {labels(metric, "before", "5.2pt", signed)}
 \end{{axis}}"""
 
-    tex = r"""\documentclass[border=2pt]{standalone}
+    tex = (
+        r"""\documentclass[border=2pt]{standalone}
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.17}
 \definecolor{cons}{HTML}{E3A9AB}
@@ -91,16 +132,38 @@ def main() -> None:
     error bars/x dir=both, error bars/x explicit, error bars/error bar style={annot, line width=0.6pt},
   },
 }
-""" + panel("k0", "0cm", "Accuracy before interventions", "xmin=70, xmax=96, xtick={70,80,90}", False, True, True) + "\n" + \
-        panel("kmax", "4.5cm", "Accuracy after interventions", "xmin=70, xmax=96, xtick={70,80,90}", False, False, False) + r"""
+"""
+        + panel(
+            "k0",
+            "0cm",
+            "Accuracy before interventions",
+            "xmin=70, xmax=96, xtick={70,80,90}",
+            False,
+            True,
+            True,
+        )
+        + "\n"
+        + panel(
+            "kmax",
+            "4.5cm",
+            "Accuracy after interventions",
+            "xmin=70, xmax=96, xtick={70,80,90}",
+            False,
+            False,
+            False,
+        )
+        + r"""
 \node[anchor=south] at (4.05cm,3.15cm) {\pgfplotslegendfromname{alignlegend}};
 \end{tikzpicture}
 \end{document}
 """
+    )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     tex_path = args.out.with_suffix(".tex")
     tex_path.write_text(tex)
-    compile_tex(tex_path, passes=2)  # the second pass places the legend drawn outside the axes
+    compile_tex(
+        tex_path, passes=2
+    )  # the second pass places the legend drawn outside the axes
     print(f"wrote {args.out.with_suffix('.pdf')}")
 
 

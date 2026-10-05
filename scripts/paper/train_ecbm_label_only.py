@@ -19,7 +19,11 @@ def main() -> None:
     ap.add_argument("--seed", type=int, required=True)
     args = ap.parse_args()
     config = RobotBenchmarkConfig(
-        seed=args.seed, concept_preset="foot_subtypes", cbm_family="ecbm", ecbm_lambda_xc=0.0, ecbm_lambda_cy=0.0
+        seed=args.seed,
+        concept_preset="foot_subtypes",
+        cbm_family="ecbm",
+        ecbm_lambda_xc=0.0,
+        ecbm_lambda_cy=0.0,
     )
     config.rng_seed = args.seed
     run(config, stages=["cbm"])

@@ -30,12 +30,24 @@ from measure_probcbm_response import find_official
 
 def class_proba(official, concepts: torch.Tensor) -> torch.Tensor:
     """Class probabilities when every concept is replaced by its prototype (as in the intervention replay)."""
-    protos = F.normalize(official.concept_vectors, p=2, dim=-1)  # [2, C, D]: 0 = absent, 1 = present
-    emb = concepts.unsqueeze(-1) * protos[1].unsqueeze(0) + (1 - concepts).unsqueeze(-1) * protos[0].unsqueeze(0)
-    emb = emb.reshape(emb.shape[0], 1, -1)  # one sample per robot, concepts concatenated
+    protos = F.normalize(
+        official.concept_vectors, p=2, dim=-1
+    )  # [2, C, D]: 0 = absent, 1 = present
+    emb = concepts.unsqueeze(-1) * protos[1].unsqueeze(0) + (1 - concepts).unsqueeze(
+        -1
+    ) * protos[0].unsqueeze(0)
+    emb = emb.reshape(
+        emb.shape[0], 1, -1
+    )  # one sample per robot, concepts concatenated
     with torch.no_grad():
         class_emb = official.head(emb)
-        dist = torch.sqrt(((class_emb.unsqueeze(1) - official.class_mean.unsqueeze(1).unsqueeze(0)) ** 2).mean(-1) + 1e-10)
+        dist = torch.sqrt(
+            (
+                (class_emb.unsqueeze(1) - official.class_mean.unsqueeze(1).unsqueeze(0))
+                ** 2
+            ).mean(-1)
+            + 1e-10
+        )
         if getattr(official, "use_scale", False):
             dist = official.class_negative_scale * dist
         return F.softmax(-dist, dim=1).mean(dim=-1)
@@ -69,10 +81,19 @@ def measure(seed: int, root: Path) -> list[dict]:
     for j, name in enumerate(names):
         flipped = truth.clone()
         flipped[:, j] = 1 - flipped[:, j]
-        changed = float((class_proba(official, flipped).numpy().argmax(axis=1) != pred).mean())
-        rows.append({**common, "concept": name,
-                     "proto_cosine": round(float(F.cosine_similarity(protos[0, j], protos[1, j], dim=0)), 4),
-                     "flip_changes": round(changed, 4)})
+        changed = float(
+            (class_proba(official, flipped).numpy().argmax(axis=1) != pred).mean()
+        )
+        rows.append(
+            {
+                **common,
+                "concept": name,
+                "proto_cosine": round(
+                    float(F.cosine_similarity(protos[0, j], protos[1, j], dim=0)), 4
+                ),
+                "flip_changes": round(changed, 4),
+            }
+        )
     return rows
 
 
@@ -87,11 +108,16 @@ def main() -> None:
         r = measure(seed, args.pipeline_root)
         rows += r
         c = r[0]
-        print(f"seed {seed}: acc(all true) {c['acc_all_true']}  majority share {c['majority_share']}  "
-              f"P(Glorp) std {c['p_glorp_std']}  scale {c['scale']}  class-mean dist {c['class_mean_dist']}", flush=True)
+        print(
+            f"seed {seed}: acc(all true) {c['acc_all_true']}  majority share {c['majority_share']}  "
+            f"P(Glorp) std {c['p_glorp_std']}  scale {c['scale']}  class-mean dist {c['class_mean_dist']}",
+            flush=True,
+        )
         for x in r:
-            print(f"    {x['concept']:12} present/absent cosine {x['proto_cosine']:+.3f}   flip changes {x['flip_changes']:.3f}",
-                  flush=True)
+            print(
+                f"    {x['concept']:12} present/absent cosine {x['proto_cosine']:+.3f}   flip changes {x['flip_changes']:.3f}",
+                flush=True,
+            )
     with args.out.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=list(rows[0]))
         w.writeheader()

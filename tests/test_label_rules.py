@@ -81,3 +81,25 @@ def test_generate_splits_follows_the_rule(rule, preset, n_concepts):
             train_shares[name.removeprefix("foot_shape_")]
             >= constraint["min_fraction"] - 1e-3
         )
+
+
+def test_yaml_round_trip_keeps_the_rule(tmp_path):
+    config = RobotBenchmarkConfig(label_rule="sparse", concept_preset="foot_subtypes")
+    loaded = RobotBenchmarkConfig.from_yaml(config.to_yaml(tmp_path / "config.yaml"))
+    assert loaded == config
+    assert loaded.sampling_constraints == config.sampling_constraints
+
+
+def test_config_saved_before_label_rules_loads_as_the_sparse_rule(tmp_path):
+    import yaml
+
+    saved = RobotBenchmarkConfig(label_rule="sparse")._prepare_asdict()
+    del saved["label_rule"]
+    saved["ecbm_inference_steps"] = 10  # a setting that no longer exists
+    path = tmp_path / "old.yaml"
+    path.write_text(yaml.dump(saved))
+    loaded = RobotBenchmarkConfig.from_yaml(path)
+    assert loaded.label_rule == "sparse"
+    assert loaded.sampling_constraints == list(
+        ROBOT_LABEL_RULES["sparse"].sampling_constraints
+    )

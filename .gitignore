@@ -161,9 +161,9 @@ examples/.ipynb_checkpoints
 .ultraplan/
 huggingface_export/
 
-# Local data, caches, notes and agent tooling
-data/
-experiments/_*
-notes/
+# Local data, caches, notes and agent tooling (anchored: the package has its own data/ folder)
+/data/
+/experiments/_*
+/notes/
 .claude/
-docs/paper_results_index.csv
+/docs/paper_results_index.csv

@@ -23,19 +23,29 @@ import numpy as np
 
 from _common import BALANCED_TAG, INTERVENTION_RECORDS
 
-ARCH_TAG = {"cbm": "arch-cbm", "cem": "arch-cem", "probcbm": "arch-probcbm__mode-joint", "ecbm": "arch-ecbm"}
+ARCH_TAG = {
+    "cbm": "arch-cbm",
+    "cem": "arch-cem",
+    "probcbm": "arch-probcbm__mode-joint",
+    "ecbm": "arch-ecbm",
+}
 SEEDS = tuple(range(1014, 1024))
 ARCHS = ("cbm", "cem", "probcbm", "ecbm")
 SETS = ("true", "human")
 WHO = ("perfect", "expert", "llm")
-SKIP = {("probcbm", "true", 1014)}  # record of the replaced model; the paper uses the retrained one
+SKIP = {
+    ("probcbm", "true", 1014)
+}  # record of the replaced model; the paper uses the retrained one
 
 
 def load(arch: str, concepts: str, who: str, seed: int) -> dict[str, dict]:
     """Budget label ("1", "3", "max") -> record of one installed intervention cell."""
     out = {}
     for budget in ("1", "3", "max"):
-        path = INTERVENTION_RECORDS / f"{BALANCED_TAG}__concepts-{concepts}__{ARCH_TAG[arch]}__isrc-{who}__budget-{budget}__seed-{seed}__records.npz"
+        path = (
+            INTERVENTION_RECORDS
+            / f"{BALANCED_TAG}__concepts-{concepts}__{ARCH_TAG[arch]}__isrc-{who}__budget-{budget}__seed-{seed}__records.npz"
+        )
         out[budget] = np.load(path)
     return out
 
@@ -46,7 +56,10 @@ def summarize(d) -> dict[str, float]:
     truth = d["C_true"].astype(int)
     det = (d["C_pred"] >= 0.5).astype(int)
     ans = (d["C_answer"] >= 0.5).astype(int)
-    before, after = d["y_pred_before"].astype(int) == y, d["y_pred_after"].astype(int) == y
+    before, after = (
+        d["y_pred_before"].astype(int) == y,
+        d["y_pred_after"].astype(int) == y,
+    )
     return {
         "asked": 100 * sel.mean(),
         "det": 100 * (det[mask] == truth[mask]).mean(),
@@ -62,16 +75,32 @@ def summarize(d) -> dict[str, float]:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--by-concept", action="store_true", help="also list the asked concepts and per-concept accuracies at k=1")
+    ap.add_argument(
+        "--by-concept",
+        action="store_true",
+        help="also list the asked concepts and per-concept accuracies at k=1",
+    )
     args = ap.parse_args()
-    cols = ("asked", "det", "ans", "before", "after", "fix", "break", "acc_before", "acc_after")
+    cols = (
+        "asked",
+        "det",
+        "ans",
+        "before",
+        "after",
+        "fix",
+        "break",
+        "acc_before",
+        "acc_after",
+    )
     for concepts in SETS:
         print(f"\n=== {concepts}_concepts ===")
         print(f"{'':26s}" + "".join(f"{c:>11s}" for c in cols))
         for arch in ARCHS:
             for who in WHO:
                 rows = defaultdict(list)
-                per_concept = defaultdict(lambda: [0, 0, 0, 0])  # asked, det right, answer right, robots
+                per_concept = defaultdict(
+                    lambda: [0, 0, 0, 0]
+                )  # asked, det right, answer right, robots
                 for seed in SEEDS:
                     if (arch, concepts, seed) in SKIP:
                         continue
@@ -85,14 +114,25 @@ def main() -> None:
                         pc = per_concept[str(name)]
                         pc[0] += int(m.sum())
                         pc[1] += int(((d["C_pred"][m, j] >= 0.5) == truth[m, j]).sum())
-                        pc[2] += int(((d["C_answer"][m, j] >= 0.5) == truth[m, j]).sum())
+                        pc[2] += int(
+                            ((d["C_answer"][m, j] >= 0.5) == truth[m, j]).sum()
+                        )
                 for k in ("1", "3", "max"):
-                    print(f"{arch:8s}{who:8s} k={k:4s}   " + "".join(f"{st.mean(r[c] for r in rows[k]):11.1f}" for c in cols))
+                    print(
+                        f"{arch:8s}{who:8s} k={k:4s}   "
+                        + "".join(
+                            f"{st.mean(r[c] for r in rows[k]):11.1f}" for c in cols
+                        )
+                    )
                 if args.by_concept:
                     total = sum(v[0] for v in per_concept.values())
-                    for name, (n, dr, ar, _) in sorted(per_concept.items(), key=lambda kv: -kv[1][0]):
+                    for name, (n, dr, ar, _) in sorted(
+                        per_concept.items(), key=lambda kv: -kv[1][0]
+                    ):
                         if n / total >= 0.02:
-                            print(f"{'':12s}k=1 asks {name:28s} {100 * n / total:5.1f}% of questions | detector {100 * dr / n:5.1f}% | answer {100 * ar / n:5.1f}%")
+                            print(
+                                f"{'':12s}k=1 asks {name:28s} {100 * n / total:5.1f}% of questions | detector {100 * dr / n:5.1f}% | answer {100 * ar / n:5.1f}%"
+                            )
 
 
 if __name__ == "__main__":

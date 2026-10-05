@@ -65,18 +65,24 @@ def find_official(obj, seen=None):
 def response_curve(model, arch, probs, truth, y, pred0, rng_seed=0):
     """Accuracy and changed share after intervening on m random concepts per robot, m = 0..all."""
     n, c = probs.shape
-    order = np.argsort(np.random.default_rng(rng_seed).random((n, c)), axis=1)  # random concept order per robot
+    order = np.argsort(
+        np.random.default_rng(rng_seed).random((n, c)), axis=1
+    )  # random concept order per robot
     out = []
     for m in range(c + 1):
         mask = np.zeros((n, c), dtype=bool)
         np.put_along_axis(mask, order[:, :m], True, axis=1)
-        pred = label_proba(model, arch, np.where(mask, truth, probs), probs, mask if m else None).argmax(axis=1)
+        pred = label_proba(
+            model, arch, np.where(mask, truth, probs), probs, mask if m else None
+        ).argmax(axis=1)
         out.append((m, float((pred == y).mean()), float((pred != pred0).mean())))
     return out
 
 
 def measure(arch, concepts_name, seed, images, pipeline_root, listed):
-    model_file, data_file = model_and_data_files(arch, concepts_name, seed, pipeline_root)
+    model_file, data_file = model_and_data_files(
+        arch, concepts_name, seed, pipeline_root
+    )
     data = load(data_file)
     test = data.test
     test.base_dir = Path(images)
@@ -92,35 +98,69 @@ def measure(arch, concepts_name, seed, images, pipeline_root, listed):
 
     if arch == "probcbm":
         official = find_official(model)
-        settings = {k: getattr(official, k, None) for k in ("train_class_mode", "intervention_prob", "n_samples_inference")}
+        settings = {
+            k: getattr(official, k, None)
+            for k in ("train_class_mode", "intervention_prob", "n_samples_inference")
+        }
         print(f"  probcbm {concepts_name} {seed} settings: {settings}", flush=True)
         for j, name in enumerate(names):
             if name in RULE_CONCEPTS:
                 t = truth[:, j] >= 0.5
-                rows.append({**common, "measure": "detection", "mode": "", "concept": name,
-                             "m": "", "value": round(float(((probs[:, j] >= 0.5) == t).mean()), 4),
-                             "extra": round(float(roc_auc_score(t, probs[:, j])), 4)})
+                rows.append(
+                    {
+                        **common,
+                        "measure": "detection",
+                        "mode": "",
+                        "concept": name,
+                        "m": "",
+                        "value": round(float(((probs[:, j] >= 0.5) == t).mean()), 4),
+                        "extra": round(float(roc_auc_score(t, probs[:, j])), 4),
+                    }
+                )
 
     modes = ["sampled", "mean"] if arch == "probcbm" else [""]
     cache = find_cache(model) if arch == "probcbm" else None
     logsigma = cache.probcbm_pred_logsigma if cache is not None else None
     for mode in modes:
         if cache is not None:
-            cache.probcbm_pred_logsigma = logsigma if mode == "sampled" else None  # None -> mean embeddings
+            cache.probcbm_pred_logsigma = (
+                logsigma if mode == "sampled" else None
+            )  # None -> mean embeddings
         for m, acc, changed in response_curve(model, arch, probs, truth, y, pred0):
-            rows.append({**common, "measure": "intervene_m", "mode": mode, "concept": "", "m": m,
-                         "value": round(acc, 4), "extra": round(changed, 4)})
+            rows.append(
+                {
+                    **common,
+                    "measure": "intervene_m",
+                    "mode": mode,
+                    "concept": "",
+                    "m": m,
+                    "value": round(acc, 4),
+                    "extra": round(changed, 4),
+                }
+            )
         if concepts_name == "human":
             catalog = data.meta["catalog_df"]
             idx = catalog.index.get_indexer(test.meta["df_indices"])
-            subtype = (catalog["foot_shape"].astype(str) + "_" + catalog["foot_shape_subtype"].astype(str)).to_numpy()[idx]
+            subtype = (
+                catalog["foot_shape"].astype(str)
+                + "_"
+                + catalog["foot_shape_subtype"].astype(str)
+            ).to_numpy()[idx]
             is_listed = np.isin(subtype, list(listed))
             mask = np.ones_like(probs, dtype=bool)
             pred = label_proba(model, arch, truth, probs, mask).argmax(axis=1)
             for group, sel in (("listed", is_listed), ("unlisted", ~is_listed)):
-                rows.append({**common, "measure": "all_concepts_by_subtype", "mode": mode, "concept": group, "m": "",
-                             "value": round(float((pred[sel] == y[sel]).mean()), 4),
-                             "extra": round(float((pred0[sel] == y[sel]).mean()), 4)})
+                rows.append(
+                    {
+                        **common,
+                        "measure": "all_concepts_by_subtype",
+                        "mode": mode,
+                        "concept": group,
+                        "m": "",
+                        "value": round(float((pred[sel] == y[sel]).mean()), 4),
+                        "extra": round(float((pred0[sel] == y[sel]).mean()), 4),
+                    }
+                )
     if cache is not None:
         cache.probcbm_pred_logsigma = logsigma
     return rows
@@ -138,18 +178,31 @@ def main() -> None:
     writer = None
     for seed in map(int, args.seeds.split(",")):
         human = load(model_and_data_files("cbm", "human", seed, args.pipeline_root)[1])
-        listed = {c.removeprefix("foot_shape_") for c in human.train.concepts if c.startswith("foot_shape_")}
+        listed = {
+            c.removeprefix("foot_shape_")
+            for c in human.train.concepts
+            if c.startswith("foot_shape_")
+        }
         for arch in args.archs.split(","):
             for concepts_name in ("true", "human"):
-                rows = measure(arch, concepts_name, seed, args.images, args.pipeline_root, listed)
+                rows = measure(
+                    arch, concepts_name, seed, args.images, args.pipeline_root, listed
+                )
                 if writer is None:
                     writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
                     writer.writeheader()
                 writer.writerows(rows)
                 fh.flush()
-                curve = [r for r in rows if r["measure"] == "intervene_m" and r["mode"] in ("", "sampled")]
-                print(f"{arch:8} {concepts_name:5} {seed}: acc by m " +
-                      " ".join(f"{r['value']:.3f}" for r in curve), flush=True)
+                curve = [
+                    r
+                    for r in rows
+                    if r["measure"] == "intervene_m" and r["mode"] in ("", "sampled")
+                ]
+                print(
+                    f"{arch:8} {concepts_name:5} {seed}: acc by m "
+                    + " ".join(f"{r['value']:.3f}" for r in curve),
+                    flush=True,
+                )
     fh.close()
     print(f"wrote {args.out}")
 

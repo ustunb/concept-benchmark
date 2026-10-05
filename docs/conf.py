@@ -69,6 +69,7 @@ def _copy_readme_assets(app, exception):
 def setup(app):
     app.connect("build-finished", _copy_readme_assets)
 
+
 # -- Myst settings -----------------------------------------------------------
 suppress_warnings = ["myst.xref_missing"]
 

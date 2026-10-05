@@ -294,7 +294,10 @@ class _CLIPEncoder:
         n_batches = len(dl)
         logger.info(
             "CLIP encode_images: %d images, batch_size=%d, %d batches, device=%s",
-            len(paths), batch_size, n_batches, self.device,
+            len(paths),
+            batch_size,
+            n_batches,
+            self.device,
         )
         all_feats: list[np.ndarray] = []
         for batch_idx, xb in enumerate(dl, 1):
@@ -302,7 +305,10 @@ class _CLIPEncoder:
             feats = self._encode_image(xb)
             all_feats.append(feats)
             if batch_idx % 5 == 0 or batch_idx == n_batches:
-                print(f"CLIP encode_images: batch {batch_idx}/{n_batches} done", flush=True)
+                print(
+                    f"CLIP encode_images: batch {batch_idx}/{n_batches} done",
+                    flush=True,
+                )
         x = np.concatenate(all_feats, axis=0)
         x /= np.linalg.norm(x, axis=1, keepdims=True) + _EPS
         return x.astype(np.float32)
@@ -407,7 +413,9 @@ class LabelFreeCBM:
             if device != self.cfg.device:
                 logger.warning(
                     "LFCBM config has device=%s but %s is available — using %s for CLIP",
-                    self.cfg.device, device, device,
+                    self.cfg.device,
+                    device,
+                    device,
                 )
             self.encoder = _CLIPEncoder(
                 self.cfg.clip_model,
@@ -592,7 +600,9 @@ class LabelFreeCBM:
         import hashlib
 
         _x_list = list(X)
-        cache_key = (len(_x_list), str(_x_list[0]), str(_x_list[-1])) if _x_list else (0,)
+        cache_key = (
+            (len(_x_list), str(_x_list[0]), str(_x_list[-1])) if _x_list else (0,)
+        )
         if not hasattr(self, "_clip_embed_cache"):
             self._clip_embed_cache: dict[tuple, np.ndarray] = {}
         if cache_key in self._clip_embed_cache:
@@ -614,13 +624,20 @@ class LabelFreeCBM:
                 if disk_path.exists():
                     img = np.load(disk_path)
                     disk_hit = True
-                    logger.info("CLIP image embeddings loaded from disk cache: %s", disk_path.name)
+                    logger.info(
+                        "CLIP image embeddings loaded from disk cache: %s",
+                        disk_path.name,
+                    )
 
             if not disk_hit:
-                img = self._get_encoder().encode_images(X, self.cfg.batch_size)  # (N, D)
+                img = self._get_encoder().encode_images(
+                    X, self.cfg.batch_size
+                )  # (N, D)
                 if disk_path is not None:
                     np.save(disk_path, img)
-                    logger.info("CLIP image embeddings saved to disk cache: %s", disk_path.name)
+                    logger.info(
+                        "CLIP image embeddings saved to disk cache: %s", disk_path.name
+                    )
 
             self._clip_embed_cache[cache_key] = img
         Wk = self.Wc.detach().cpu().numpy()  # (Mk, D)

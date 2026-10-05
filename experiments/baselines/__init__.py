@@ -1,4 +1,5 @@
 """Baseline model wrappers: CEM, ProbCBM, and ECBM."""
+
 from experiments.baselines._common import (  # noqa: F401
     CEMDependencyError,
     CEMSampleAdapterDataset,

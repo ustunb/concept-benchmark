@@ -42,7 +42,10 @@ if FIXED_PROTOTYPES or VIB_BETA is not None:
             self.loss_concept.vib_beta = float(VIB_BETA)
 
     module.ProbCBM.__init__ = patched_init
-    print(f"ProbCBM patched: fixed prototypes={FIXED_PROTOTYPES}, vib_beta={VIB_BETA}", flush=True)
+    print(
+        f"ProbCBM patched: fixed prototypes={FIXED_PROTOTYPES}, vib_beta={VIB_BETA}",
+        flush=True,
+    )
 
 sys.argv = ["scripts/robot_pipeline.py", *sys.argv[1:]]
 runpy.run_path("scripts/robot_pipeline.py", run_name="__main__")

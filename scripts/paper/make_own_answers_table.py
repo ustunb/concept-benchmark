@@ -18,21 +18,39 @@ from pathlib import Path
 from _common import BALANCED_RULE, BALANCED_TAG, read_budget_rows
 
 SEEDS = tuple(range(1014, 1024))
-ARCHS = [("cbm", "arch-cbm", "\\CBM{}"), ("cem", "arch-cem", "\\CEM{}"),
-         ("probcbm", "arch-probcbm__mode-joint", "\\ProbCBM{}"), ("ecbm", "arch-ecbm", "\\ECBM{}")]
-CONCEPT_SETS = [("true", "true\\_concepts"), ("human", "human\\_concepts"), ("machine", "machine\\_annotation"),
-                ("llm", "llm\\_concepts"), ("clip", "clip\\_concepts")]
+ARCHS = [
+    ("cbm", "arch-cbm", "\\CBM{}"),
+    ("cem", "arch-cem", "\\CEM{}"),
+    ("probcbm", "arch-probcbm__mode-joint", "\\ProbCBM{}"),
+    ("ecbm", "arch-ecbm", "\\ECBM{}"),
+]
+CONCEPT_SETS = [
+    ("true", "true\\_concepts"),
+    ("human", "human\\_concepts"),
+    ("machine", "machine\\_annotation"),
+    ("llm", "llm\\_concepts"),
+    ("clip", "clip\\_concepts"),
+]
 AUTOMATED = {"machine", "llm", "clip"}
 # the installed perfect cell of this run comes from a retrained model; its own-answer cell was run on the replaced
 # model, so the pair is left out
 EXCLUDED = {("probcbm", "true", 1014)}
 
 
-def read_cell(arch_tag: str, concepts: str, isrc: str, seed: int, is_label_free: bool) -> list[dict]:
-    files = [f for f in BALANCED_RULE.glob(f"{BALANCED_TAG}__concepts-{concepts}__{arch_tag}__isrc-{isrc}__strategy-upto*__seed-{seed}__results.csv")
-             if "enc-" not in f.name or ("enc-koh595" in f.name) == is_label_free]
+def read_cell(
+    arch_tag: str, concepts: str, isrc: str, seed: int, is_label_free: bool
+) -> list[dict]:
+    files = [
+        f
+        for f in BALANCED_RULE.glob(
+            f"{BALANCED_TAG}__concepts-{concepts}__{arch_tag}__isrc-{isrc}__strategy-upto*__seed-{seed}__results.csv"
+        )
+        if "enc-" not in f.name or ("enc-koh595" in f.name) == is_label_free
+    ]
     if len(files) != 1:
-        raise SystemExit(f"{concepts} {arch_tag} {isrc} seed {seed}: expected one cell, found {[f.name for f in files]}")
+        raise SystemExit(
+            f"{concepts} {arch_tag} {isrc} seed {seed}: expected one cell, found {[f.name for f in files]}"
+        )
     rows = read_budget_rows(files[0])
     if len(rows) != 4:
         raise SystemExit(f"{files[0].name}: expected budgets 0, 1, 3, max")
@@ -61,14 +79,24 @@ def summarize() -> dict[tuple[str, str], dict[str, float]]:
                     continue
                 is_label_free = arch == "cbm" and concepts in AUTOMATED
                 self_rows = read_cell(arch_tag, concepts, "self", seed, is_label_free)
-                perfect_rows = read_cell(arch_tag, concepts, "perfect", seed, is_label_free)
-                if [r["predictions_intervened_on"] for r in self_rows] != [r["predictions_intervened_on"] for r in perfect_rows]:
-                    raise SystemExit(f"{concepts} {arch} seed {seed}: the two cells intervene on different numbers of robots")
+                perfect_rows = read_cell(
+                    arch_tag, concepts, "perfect", seed, is_label_free
+                )
+                if [r["predictions_intervened_on"] for r in self_rows] != [
+                    r["predictions_intervened_on"] for r in perfect_rows
+                ]:
+                    raise SystemExit(
+                        f"{concepts} {arch} seed {seed}: the two cells intervene on different numbers of robots"
+                    )
                 c, s = change_on_intervened(self_rows)
                 own += c
                 shares += s
                 true += change_on_intervened(perfect_rows)[0]
-            out[(concepts, arch)] = {"share": st.mean(shares), "own": st.mean(own), "true": st.mean(true)}
+            out[(concepts, arch)] = {
+                "share": st.mean(shares),
+                "own": st.mean(own),
+                "true": st.mean(true),
+            }
     return out
 
 
@@ -96,8 +124,12 @@ def main() -> None:
         for i, (arch, _, macro) in enumerate(ARCHS):
             row = summary[(concepts, arch)]
             first = rf"\multirow{{4}}{{*}}{{\textds{{{name}}}}}" if i == 0 else ""
-            lines.append(f"{first} & {macro} & {signed(row['own'])} & {signed(row['true'])} \\\\")
-            print(f"{concepts:8s}{arch:8s} robots intervened on {row['share']:5.1f}%  own answers {row['own']:+6.1f}  true values {row['true']:+6.1f}")
+            lines.append(
+                f"{first} & {macro} & {signed(row['own'])} & {signed(row['true'])} \\\\"
+            )
+            print(
+                f"{concepts:8s}{arch:8s} robots intervened on {row['share']:5.1f}%  own answers {row['own']:+6.1f}  true values {row['true']:+6.1f}"
+            )
     lines += [r"\bottomrule", r"\end{tabular}"]
     args.out.write_text("\n".join(lines) + "\n")
     print(f"wrote {args.out}")

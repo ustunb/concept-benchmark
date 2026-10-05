@@ -35,20 +35,35 @@ from sudoku_pipeline import (
 )
 
 CONFIDENCE = PAPER_RESULTS / "sudoku/confidence"
-ARCHS = [("cbm", "\\CBM{}"), ("cem", "\\CEM{}"), ("probcbm", "\\ProbCBM{}"), ("ecbm", "\\ECBM{}")]
+ARCHS = [
+    ("cbm", "\\CBM{}"),
+    ("cem", "\\CEM{}"),
+    ("probcbm", "\\ProbCBM{}"),
+    ("ecbm", "\\ECBM{}"),
+]
 RESOLUTIONS = (50, 18)
 
 
 def seeds(res: int) -> list[int]:
-    return sorted(int(f.name.split("seed-")[1].split("__")[0]) for f in CONFIDENCE.glob(f"sudoku__arch-cbm__res-{res}px__seed-*__confidence.npz"))
+    return sorted(
+        int(f.name.split("seed-")[1].split("__")[0])
+        for f in CONFIDENCE.glob(
+            f"sudoku__arch-cbm__res-{res}px__seed-*__confidence.npz"
+        )
+    )
 
 
 def confidence(arch: str, res: int, seed: int):
-    return np.load(CONFIDENCE / f"sudoku__arch-{arch}__res-{res}px__seed-{seed}__confidence.npz")
+    return np.load(
+        CONFIDENCE / f"sudoku__arch-{arch}__res-{res}px__seed-{seed}__confidence.npz"
+    )
 
 
 def cell(arch: str, res: int, seed: int, tau: str) -> list[dict]:
-    path = SUDOKU_CELLS / f"sudoku__arch-{arch}__res-{res}px__tau-{tau}__threshold-per-budget__seed-{seed}__interventions.csv"
+    path = (
+        SUDOKU_CELLS
+        / f"sudoku__arch-{arch}__res-{res}px__tau-{tau}__threshold-per-budget__seed-{seed}__interventions.csv"
+    )
     return read_budget_rows(path)
 
 
@@ -61,10 +76,24 @@ def classwise(tau: float) -> dict[tuple[int, str], tuple[float, float]]:
             for seed in seeds(res):
                 d = confidence(arch, res, seed)
                 decision, _ = _decision_threshold_sweep(d["y_val"], d["p_val"])
-                t, _ = _selective_accuracy_threshold(d["y_val"], d["p_val"], tau, decision)
-                single.append(0.0 if t is None else 100 * _selective_at_thresholds(d["y_test"], d["p_test"], t, decision)[1])
-                t_pos, t_neg = _classwise_accuracy_thresholds(d["y_val"], d["p_val"], tau, decision)
-                per_class.append(100 * _selective_at_classwise_thresholds(d["y_test"], d["p_test"], t_pos, t_neg, decision)[1])
+                t, _ = _selective_accuracy_threshold(
+                    d["y_val"], d["p_val"], tau, decision
+                )
+                single.append(
+                    0.0
+                    if t is None
+                    else 100
+                    * _selective_at_thresholds(d["y_test"], d["p_test"], t, decision)[1]
+                )
+                t_pos, t_neg = _classwise_accuracy_thresholds(
+                    d["y_val"], d["p_val"], tau, decision
+                )
+                per_class.append(
+                    100
+                    * _selective_at_classwise_thresholds(
+                        d["y_test"], d["p_test"], t_pos, t_neg, decision
+                    )[1]
+                )
             out[(res, arch)] = (st.mean(single), st.mean(per_class))
     return out
 
@@ -80,10 +109,15 @@ def confirmed(tau: str, res: int = 18) -> dict[str, dict]:
             values.append(value)
             rows = cell(arch, res, seed, tau)
             required = 1.0 - float(rows[0]["abstention_threshold"])
-            before, after = float(rows[0]["coverage_after"]), float(rows[-1]["coverage_after"])
+            before, after = (
+                float(rows[0]["coverage_after"]),
+                float(rows[-1]["coverage_after"]),
+            )
             if before >= 1.0:
                 continue  # nothing deferred
-            (less if value > required else more).append(100 * (after - before) / (1.0 - before))
+            (less if value > required else more).append(
+                100 * (after - before) / (1.0 - before)
+            )
         out[arch] = {"confidence": st.median(values), "less": less, "more": more}
     return out
 
@@ -93,14 +127,23 @@ def print_error_breakdown() -> None:
     for res in RESOLUTIONS:
         print(f"\n{res} px, test boards of all seeds")
         for arch, _ in ARCHS:
-            p, y, C, Cp = (np.concatenate([confidence(arch, res, s)[k] for s in seeds(res)]) for k in ("p_test", "y_test", "C_test", "Cp_test"))
+            p, y, C, Cp = (
+                np.concatenate([confidence(arch, res, s)[k] for s in seeds(res)])
+                for k in ("p_test", "y_test", "C_test", "Cp_test")
+            )
             called_valid, violated, flagged = p >= 0.5, C == 0, Cp < 0.5
             n_violated = violated.sum(axis=1)
-            accepted = " ".join(f"{100 * called_valid[(n_violated >= a) & (n_violated <= b)].mean():3.0f}%" if ((n_violated >= a) & (n_violated <= b)).any() else "   -"
-                                for a, b in bins)
-            print(f"  {arch:8s} invalid boards called valid {100 * called_valid[y == 0].mean():4.1f}% | valid boards called invalid {100 * (~called_valid[y == 1]).mean():4.1f}%"
-                  f" | detector misses {100 * (violated & ~flagged).sum() / violated.sum():4.1f}% of violations, flags {100 * (~violated & flagged).sum() / (~violated).sum():5.2f}% of satisfied constraints"
-                  f" | accepted with 1/2/3/4/5/6-8/9+ violations: {accepted}")
+            accepted = " ".join(
+                f"{100 * called_valid[(n_violated >= a) & (n_violated <= b)].mean():3.0f}%"
+                if ((n_violated >= a) & (n_violated <= b)).any()
+                else "   -"
+                for a, b in bins
+            )
+            print(
+                f"  {arch:8s} invalid boards called valid {100 * called_valid[y == 0].mean():4.1f}% | valid boards called invalid {100 * (~called_valid[y == 1]).mean():4.1f}%"
+                f" | detector misses {100 * (violated & ~flagged).sum() / violated.sum():4.1f}% of violations, flags {100 * (~violated & flagged).sum() / (~violated).sum():5.2f}% of satisfied constraints"
+                f" | accepted with 1/2/3/4/5/6-8/9+ violations: {accepted}"
+            )
 
 
 def spread(values: list[float]) -> str:
@@ -118,35 +161,58 @@ def main() -> None:
     args = ap.parse_args()
 
     kept = classwise(float(args.tau))
-    print(f"boards kept at tau={args.tau}: single threshold / one threshold per predicted class")
+    print(
+        f"boards kept at tau={args.tau}: single threshold / one threshold per predicted class"
+    )
     for (res, arch), (a, b) in kept.items():
         print(f"  {res}px {arch:8s} {a:5.1f}% / {b:5.1f}%")
     if args.classwise_out:
-        lines = [r"\begin{tabular}{@{}llrr@{}}", r"\toprule",
-                 r"\textheader{Resolution} & \textheader{Model} & \textheader{Single threshold} & \textheader{Threshold per class} \\"]
+        lines = [
+            r"\begin{tabular}{@{}llrr@{}}",
+            r"\toprule",
+            r"\textheader{Resolution} & \textheader{Model} & \textheader{Single threshold} & \textheader{Threshold per class} \\",
+        ]
         for res in RESOLUTIONS:
             lines.append(r"\midrule")
             for i, (arch, macro) in enumerate(ARCHS):
-                first = rf"\multirow{{4}}{{*}}{{\textds{{{res}\,px}}}}" if i == 0 else ""
-                lines.append(f"{first} & {macro} & {kept[(res, arch)][0]:.1f}\\% & {kept[(res, arch)][1]:.1f}\\% \\\\")
+                first = (
+                    rf"\multirow{{4}}{{*}}{{\textds{{{res}\,px}}}}" if i == 0 else ""
+                )
+                lines.append(
+                    f"{first} & {macro} & {kept[(res, arch)][0]:.1f}\\% & {kept[(res, arch)][1]:.1f}\\% \\\\"
+                )
         lines += [r"\bottomrule", r"\end{tabular}"]
         args.classwise_out.write_text("\n".join(lines) + "\n")
         print(f"wrote {args.classwise_out}")
 
     summary = confirmed(args.tau)
-    print("\nconfidence in a valid board with every concept true (18 px), and deferred boards recovered at budget = all concepts")
+    print(
+        "\nconfidence in a valid board with every concept true (18 px), and deferred boards recovered at budget = all concepts"
+    )
     for arch, _ in ARCHS:
         s = summary[arch]
-        print(f"  {arch:8s} {s['confidence']:.3f} | requires less: {len(s['less'])} seeds, recovered {[round(v) for v in s['less']]} | requires more: {len(s['more'])} seeds, recovered {[round(v) for v in s['more']]}")
+        print(
+            f"  {arch:8s} {s['confidence']:.3f} | requires less: {len(s['less'])} seeds, recovered {[round(v) for v in s['less']]} | requires more: {len(s['more'])} seeds, recovered {[round(v) for v in s['more']]}"
+        )
     if args.confirmed_out:
-        lines = [r"\begin{tabular}{@{}lrrrrr@{}}", r"\toprule",
-                 r"& & \multicolumn{2}{c}{\textheader{Requires less}} & \multicolumn{2}{c}{\textheader{Requires more}} \\",
-                 r"\cmidrule(lr){3-4} \cmidrule(lr){5-6}",
-                 r"\textheader{Model} & \textheader{Confidence} & seeds & recovered & seeds & recovered \\", r"\midrule"]
+        lines = [
+            r"\begin{tabular}{@{}lrrrrr@{}}",
+            r"\toprule",
+            r"& & \multicolumn{2}{c}{\textheader{Requires less}} & \multicolumn{2}{c}{\textheader{Requires more}} \\",
+            r"\cmidrule(lr){3-4} \cmidrule(lr){5-6}",
+            r"\textheader{Model} & \textheader{Confidence} & seeds & recovered & seeds & recovered \\",
+            r"\midrule",
+        ]
         for arch, macro in ARCHS:
             s = summary[arch]
-            value = f"{s['confidence']:.3f}" if s["confidence"] > 0.995 else f"{s['confidence']:.2f}"
-            lines.append(f"{macro} & {value} & {len(s['less'])} & {spread(s['less'])} & {len(s['more'])} & {spread(s['more'])} \\\\")
+            value = (
+                f"{s['confidence']:.3f}"
+                if s["confidence"] > 0.995
+                else f"{s['confidence']:.2f}"
+            )
+            lines.append(
+                f"{macro} & {value} & {len(s['less'])} & {spread(s['less'])} & {len(s['more'])} & {spread(s['more'])} \\\\"
+            )
         lines += [r"\bottomrule", r"\end{tabular}"]
         args.confirmed_out.write_text("\n".join(lines) + "\n")
         print(f"wrote {args.confirmed_out}")

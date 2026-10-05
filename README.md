@@ -775,9 +775,9 @@ cbm = ConceptBasedModel(concept_detector=cd, label_predictor=fe)
 
 # Configure the intervention
 config = InterventionConfig(
-    max_concepts_per_instance=3,  # correct up to 3 concepts per sample
-    score_threshold=0.2,          # only intervene on concepts with
-                                  # probability within 0.2 of 0.5
+    per_instance_budget=3,  # correct up to 3 concepts per sample
+    score_threshold=0.2,          # intervene when the label would change
+                                  # with probability 0.2 or more
 )
 
 # Run interventions
@@ -864,7 +864,7 @@ Use it with the runner:
 ```python
 result = runner.run(
     strategy=UncertaintyStrategy(),
-    config=InterventionConfig(max_concepts_per_instance=3, score_threshold=0.2),
+    config=InterventionConfig(per_instance_budget=3, score_threshold=0.2),
     dataset=test,
 )
 ```

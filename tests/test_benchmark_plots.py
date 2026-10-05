@@ -11,6 +11,7 @@ matplotlib.use("Agg")  # non-interactive backend for CI
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import pytest
 
 from concept_benchmark.evaluation.plots import (
     plot_alignment_comparison,
@@ -238,4 +239,70 @@ def test_confidence_marks_the_abstention_band():
         "valid",
         "Abstains",
     ]
+    plt.close(fig)
+
+
+def test_intervention_curve_places_lines_with_different_budgets_on_one_axis():
+    rows = [{"model": "a", "budget": b, "accuracy": 0.8} for b in (0, 1, 3, 5)]
+    rows += [{"model": "b", "budget": b, "accuracy": 0.7} for b in (0, 1, 3)]
+    fig, ax = plot_intervention_curve(pd.DataFrame(rows), group="model")
+    assert [tick.get_text() for tick in ax.get_xticklabels()] == ["0", "1", "3", "5"]
+    assert list(ax.get_lines()[0].get_xdata()) == [0, 1, 2, 3]
+    assert list(ax.get_lines()[1].get_xdata()) == [0, 1, 2]
+    assert ax.get_xlim()[1] > 3
+    plt.close(fig)
+
+
+def test_automation_labels_max_only_at_every_concept():
+    rows = [
+        {"budget": b, "coverage_after": 0.8, "total_concept_checks": 10 * b}
+        for b in (0, 1, 3)
+    ]
+    fig, ax = plot_automation(pd.DataFrame(rows), n_instances=200, n_concepts=27)
+    assert [tick.get_text() for tick in ax.get_xticklabels()] == ["0", "1", "3"]
+    plt.close(fig)
+
+
+def test_plots_reject_inputs_without_data():
+    empty = pd.DataFrame(
+        {
+            "budget": [],
+            "accuracy": [],
+            "model_family": [],
+            "concept_source": [],
+            "intervention_source": [],
+        }
+    )
+    for plot in (
+        plot_intervention_curve,
+        plot_intervention_heatmap,
+        plot_answer_reliance,
+    ):
+        with pytest.raises(ValueError):
+            plot(empty)
+    with pytest.raises(ValueError):
+        plot_alignment_comparison(
+            pd.DataFrame({"concepts": [], "model": [], "accuracy_before": []})
+        )
+
+
+def test_heatmap_keeps_rows_with_a_missing_key():
+    runs = _robot_runs(sources=("perfect",))
+    runs.loc[runs["model_family"] == "cem", "concept_source"] = np.nan
+    fig, ax = plot_intervention_heatmap(runs)
+    assert ax.images[0].get_array().shape[0] == 2  # both models are still shown
+    plt.close(fig)
+
+
+def test_alignment_comparison_tolerates_a_missing_model():
+    rows = [
+        {"concepts": "true_concepts", "model": "CBM", "accuracy_before": 0.84},
+        {
+            "concepts": "true_concepts",
+            "model": "Constrained CBM",
+            "accuracy_before": 0.90,
+        },
+        {"concepts": "human_concepts", "model": "CBM", "accuracy_before": 0.78},
+    ]
+    fig, ax = plot_alignment_comparison(pd.DataFrame(rows))
     plt.close(fig)

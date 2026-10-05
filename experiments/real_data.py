@@ -47,7 +47,9 @@ CUB_N_CLASSES = 25
 CUB_CLIP = ("ViT-B-32", "laion2b_s34b_b79k")
 CUB_BUDGETS = [1, 10, "max"]
 CUB_SEED = 0
-CUB_LABEL_PREDICTOR = dict(hidden_layer_sizes=(128,), max_iter=800, random_state=CUB_SEED)
+CUB_LABEL_PREDICTOR = dict(
+    hidden_layer_sizes=(128,), max_iter=800, random_state=CUB_SEED
+)
 
 
 class _RowPredictor(FrontEndModel):
@@ -64,10 +66,19 @@ class _RowPredictor(FrontEndModel):
     def predict_proba(self, C: np.ndarray) -> np.ndarray:
         raise AssertionError("KFlip should use aligned replay for this predictor.")
 
-    def predict_proba_from_concepts(self, concepts, *, row_indices=None, baseline_concepts=None, intervention_mask=None):
+    def predict_proba_from_concepts(
+        self,
+        concepts,
+        *,
+        row_indices=None,
+        baseline_concepts=None,
+        intervention_mask=None,
+    ):
         full = np.repeat(self.base_row[None, :], len(concepts), axis=0)
         if intervention_mask is not None:
-            values = np.where(np.asarray(concepts) >= 0.5, self.value_one, self.value_zero)
+            values = np.where(
+                np.asarray(concepts) >= 0.5, self.value_one, self.value_zero
+            )
             full = np.where(intervention_mask, values, full)
         return self.predict(full)
 
@@ -79,31 +90,56 @@ def select_concepts(predict, base, probs, budget, value_one, value_zero) -> np.n
     # as in scripts/robot_pipeline.py: k = max corrects every concept of the images selected
     strategy = KFlipInterventionStrategy(use_exact_k=budget >= n_concepts)
     config = InterventionConfig(
-        per_instance_budget=int(min(budget, n_concepts)), score_threshold=SCORE_THRESHOLD, random_state=0
+        per_instance_budget=int(min(budget, n_concepts)),
+        score_threshold=SCORE_THRESHOLD,
+        random_state=0,
     )
     for i in range(n_images):
-        model = ConceptBasedModel(label_predictor=_RowPredictor(predict, base[i].astype(float), value_one, value_zero))
+        model = ConceptBasedModel(
+            label_predictor=_RowPredictor(
+                predict, base[i].astype(float), value_one, value_zero
+            )
+        )
         batch = InterventionBatch(
-            C_pred=probs[i][None, :].astype(np.float32), C_true=np.zeros((1, n_concepts), dtype=np.float32)
+            C_pred=probs[i][None, :].astype(np.float32),
+            C_true=np.zeros((1, n_concepts), dtype=np.float32),
         )
         mask[i] = strategy.propose(model, batch, config).mask[0]
     return mask
 
 
-def measure_accuracy_per_budget(predict, base, probs, truth, y, budgets, value_one, value_zero) -> list[dict]:
+def measure_accuracy_per_budget(
+    predict, base, probs, truth, y, budgets, value_one, value_zero
+) -> list[dict]:
     """Accuracy before interventions and at each budget; `truth` holds the 0/1 true concepts."""
-    rows = [{"budget": 0, "accuracy": float((predict(base).argmax(1) == y).mean()), "intervened": 0,
-             "concepts_per_image": 0.0, "largest_subset": 0}]
+    rows = [
+        {
+            "budget": 0,
+            "accuracy": float((predict(base).argmax(1) == y).mean()),
+            "intervened": 0,
+            "concepts_per_image": 0.0,
+            "largest_subset": 0,
+        }
+    ]
     revealed = np.where(truth >= 0.5, value_one[None, :], value_zero[None, :])
     for budget in budgets:
         k = base.shape[1] if budget == "max" else int(budget)
         mask = select_concepts(predict, base, probs, k, value_one, value_zero)
         after = predict(np.where(mask, revealed, base)).argmax(1)
         is_selected = mask.any(axis=1)
-        rows.append({"budget": budget, "accuracy": float((after == y).mean()), "intervened": int(is_selected.sum()),
-                     "concepts_per_image": float(mask.sum() / max(1, is_selected.sum())),
-                     "largest_subset": int(mask.sum(axis=1).max())})
-        print(f"    k={budget}: accuracy {rows[-1]['accuracy']:.3f}, images {rows[-1]['intervened']}", flush=True)
+        rows.append(
+            {
+                "budget": budget,
+                "accuracy": float((after == y).mean()),
+                "intervened": int(is_selected.sum()),
+                "concepts_per_image": float(mask.sum() / max(1, is_selected.sum())),
+                "largest_subset": int(mask.sum(axis=1).max()),
+            }
+        )
+        print(
+            f"    k={budget}: accuracy {rows[-1]['accuracy']:.3f}, images {rows[-1]['intervened']}",
+            flush=True,
+        )
     return rows
 
 
@@ -115,7 +151,9 @@ def fit_concept_probes(features_train, concepts_train, features, seed) -> np.nda
         if column.min() == column.max():
             probabilities[:, j] = column[0]
         else:
-            probe = LogisticRegression(max_iter=1000, random_state=seed).fit(features_train, column)
+            probe = LogisticRegression(max_iter=1000, random_state=seed).fit(
+                features_train, column
+            )
             probabilities[:, j] = probe.predict_proba(features)[:, 1]
     return probabilities
 
@@ -126,7 +164,9 @@ def encode_images(paths: list[str], clip: tuple[str, str], cache: Path) -> np.nd
         saved = np.load(cache, allow_pickle=True)
         if list(saved["paths"]) == list(paths):
             return saved["features"]
-    features = _CLIPEncoder(*clip, str(determine_device())).encode_images(paths, batch_size=64)
+    features = _CLIPEncoder(*clip, str(determine_device())).encode_images(
+        paths, batch_size=64
+    )
     cache.parent.mkdir(parents=True, exist_ok=True)
     np.savez(cache, features=features, paths=np.array(paths, dtype=object))
     return features
@@ -161,7 +201,9 @@ def load_derm7pt(root: Path):
             continue
         kept_rows.append(i)
         y.append(int("melanoma" in diagnosis))
-        concepts.append([_encode_derm7pt_concept(name, record[name]) for name in DERM7PT_CONCEPTS])
+        concepts.append(
+            [_encode_derm7pt_concept(name, record[name]) for name in DERM7PT_CONCEPTS]
+        )
         paths.append(str(root / "images" / record["derm"]))
     position = {row: k for k, row in enumerate(kept_rows)}
 
@@ -170,8 +212,14 @@ def load_derm7pt(root: Path):
             rows = [int(r["indexes"]) for r in csv.DictReader(fh)]
         return np.array([position[row] for row in rows if row in position])
 
-    return (np.array(y), np.array(concepts, dtype=int), paths,
-            read_split("train_indexes.csv"), read_split("valid_indexes.csv"), read_split("test_indexes.csv"))
+    return (
+        np.array(y),
+        np.array(concepts, dtype=int),
+        paths,
+        read_split("train_indexes.csv"),
+        read_split("valid_indexes.csv"),
+        read_split("test_indexes.csv"),
+    )
 
 
 def load_cub(root: Path):
@@ -182,19 +230,36 @@ def load_cub(root: Path):
             return [line.split()[:n] for line in fh]
 
     images = {int(i): p for i, p in read_columns(root / "images.txt", 2)}
-    species = {int(i): int(c) for i, c in read_columns(root / "image_class_labels.txt", 2)}
-    is_train_image = {int(i): int(s) for i, s in read_columns(root / "train_test_split.txt", 2)}
-    raw = np.loadtxt(root / "attributes" / "image_attribute_labels.txt", usecols=(0, 1, 2), dtype=int, ndmin=2)
+    species = {
+        int(i): int(c) for i, c in read_columns(root / "image_class_labels.txt", 2)
+    }
+    is_train_image = {
+        int(i): int(s) for i, s in read_columns(root / "train_test_split.txt", 2)
+    }
+    raw = np.loadtxt(
+        root / "attributes" / "image_attribute_labels.txt",
+        usecols=(0, 1, 2),
+        dtype=int,
+        ndmin=2,
+    )
     attributes = np.zeros((raw[:, 0].max() + 1, raw[:, 1].max()), dtype=np.int8)
     attributes[raw[:, 0], raw[:, 1] - 1] = raw[:, 2]
     names_file = root / "attributes.txt"
     if not names_file.exists():  # ships one level up in some copies of the dataset
         names_file = root.parent / "attributes.txt"
-    texts = ["a photo of a bird with " + name.replace("has_", "").replace("::", " ").replace("_", " ")
-             for _, name in read_columns(names_file, 2)]
+    texts = [
+        "a photo of a bird with "
+        + name.replace("has_", "").replace("::", " ").replace("_", " ")
+        for _, name in read_columns(names_file, 2)
+    ]
     ids = [i for i in images if species[i] <= CUB_N_CLASSES]
-    return ([str(root / "images" / images[i]) for i in ids], np.array([species[i] - 1 for i in ids]),
-            attributes[ids], np.array([is_train_image[i] for i in ids], dtype=bool), texts)
+    return (
+        [str(root / "images" / images[i]) for i in ids],
+        np.array([species[i] - 1 for i in ids]),
+        attributes[ids],
+        np.array([is_train_image[i] for i in ids], dtype=bool),
+        texts,
+    )
 
 
 def run_derm7pt(root: Path, out: Path) -> list[dict]:
@@ -205,34 +270,73 @@ def run_derm7pt(root: Path, out: Path) -> list[dict]:
     results = []
     for seed in range(5):  # annotated concepts, bootstrap over the training set
         rng = np.random.default_rng(seed)
-        sample = rng.choice(trainval, size=len(trainval), replace=True) if seed > 0 else trainval
-        probs = fit_concept_probes(features[sample], concepts[sample], features, seed)[test]
-        label_predictor = LogisticRegression(max_iter=1000, random_state=seed).fit(concepts[sample], y[sample])
-        rows = measure_accuracy_per_budget(
-            label_predictor.predict_proba, (probs >= 0.5).astype(float), probs, concepts[test], y[test],
-            DERM7PT_BUDGETS, np.ones(n_concepts), np.zeros(n_concepts),
+        sample = (
+            rng.choice(trainval, size=len(trainval), replace=True)
+            if seed > 0
+            else trainval
         )
-        results += [{"dataset": "derm7pt", "concepts": "clinician", "seed": seed, **row} for row in rows]
+        probs = fit_concept_probes(features[sample], concepts[sample], features, seed)[
+            test
+        ]
+        label_predictor = LogisticRegression(max_iter=1000, random_state=seed).fit(
+            concepts[sample], y[sample]
+        )
+        rows = measure_accuracy_per_budget(
+            label_predictor.predict_proba,
+            (probs >= 0.5).astype(float),
+            probs,
+            concepts[test],
+            y[test],
+            DERM7PT_BUDGETS,
+            np.ones(n_concepts),
+            np.zeros(n_concepts),
+        )
+        results += [
+            {"dataset": "derm7pt", "concepts": "clinician", "seed": seed, **row}
+            for row in rows
+        ]
     texts = list(DERM7PT_CONCEPTS.values())
     concept_set = LFConceptSet(keys=[f"c{i}" for i in range(len(texts))], texts=texts)
     for seed in range(3):  # label-free concepts; each run has its own CLIP cache folder
         rng = np.random.default_rng(seed)
-        sample = rng.choice(trainval, size=len(trainval), replace=True) if seed > 0 else trainval
+        sample = (
+            rng.choice(trainval, size=len(trainval), replace=True)
+            if seed > 0
+            else trainval
+        )
         cut = int(0.8 * len(sample))
         fit, held_out = sample[:cut], sample[cut:]
-        lf = LabelFreeCBM(LFTrainingConfig(
-            device=str(determine_device()), seed=seed, cache_dir=out / f"cache/derm7pt_seed{seed}"
-        ))
-        lf.fit(train_X=[paths[i] for i in fit], train_y=y[fit], valid_X=[paths[i] for i in held_out],
-               valid_y=y[held_out], concept_set=concept_set)
+        lf = LabelFreeCBM(
+            LFTrainingConfig(
+                device=str(determine_device()),
+                seed=seed,
+                cache_dir=out / f"cache/derm7pt_seed{seed}",
+            )
+        )
+        lf.fit(
+            train_X=[paths[i] for i in fit],
+            train_y=y[fit],
+            valid_X=[paths[i] for i in held_out],
+            valid_y=y[held_out],
+            concept_set=concept_set,
+        )
         is_kept = np.asarray(lf.keep_mask, dtype=bool)
         scores_train = lf.concept_proba([paths[i] for i in trainval])
         scores_test = lf.concept_proba([paths[i] for i in test])
         rows = measure_accuracy_per_budget(
-            lf.predict_from_probs, scores_test, scores_test, concepts[test][:, is_kept], y[test], DERM7PT_BUDGETS,
-            np.percentile(scores_train, 95, axis=0), np.percentile(scores_train, 5, axis=0),
+            lf.predict_from_probs,
+            scores_test,
+            scores_test,
+            concepts[test][:, is_kept],
+            y[test],
+            DERM7PT_BUDGETS,
+            np.percentile(scores_train, 95, axis=0),
+            np.percentile(scores_train, 5, axis=0),
         )
-        results += [{"dataset": "derm7pt", "concepts": "label_free", "seed": seed, **row} for row in rows]
+        results += [
+            {"dataset": "derm7pt", "concepts": "label_free", "seed": seed, **row}
+            for row in rows
+        ]
     return results
 
 
@@ -248,34 +352,77 @@ def run_cub(root: Path, out: Path) -> list[dict]:
     name = f"cub{CUB_N_CLASSES}"
     results = []
     # annotated attributes: probes on CLIP features, label predictor trained on the true attributes
-    probs = fit_concept_probes(features[trainval], concepts[trainval], features, CUB_SEED)[test]
-    label_predictor = MLPClassifier(**CUB_LABEL_PREDICTOR).fit(concepts[trainval].astype(float), y[trainval])
-    rows = measure_accuracy_per_budget(
-        label_predictor.predict_proba, (probs >= 0.5).astype(float), probs, concepts[test], y[test], CUB_BUDGETS,
-        np.ones(n_concepts), np.zeros(n_concepts),
+    probs = fit_concept_probes(
+        features[trainval], concepts[trainval], features, CUB_SEED
+    )[test]
+    label_predictor = MLPClassifier(**CUB_LABEL_PREDICTOR).fit(
+        concepts[trainval].astype(float), y[trainval]
     )
-    results += [{"dataset": name, "concepts": "ground_truth", "seed": CUB_SEED, **row} for row in rows]
+    rows = measure_accuracy_per_budget(
+        label_predictor.predict_proba,
+        (probs >= 0.5).astype(float),
+        probs,
+        concepts[test],
+        y[test],
+        CUB_BUDGETS,
+        np.ones(n_concepts),
+        np.zeros(n_concepts),
+    )
+    results += [
+        {"dataset": name, "concepts": "ground_truth", "seed": CUB_SEED, **row}
+        for row in rows
+    ]
     # label-free: LF-CBM concept scores, label predictor trained on the scores
     concept_set = LFConceptSet(keys=[f"a{i}" for i in range(len(texts))], texts=texts)
-    lf = LabelFreeCBM(LFTrainingConfig(device=str(determine_device()), seed=CUB_SEED, cache_dir=out / "cache/cub"))
-    lf.fit(train_X=[paths[i] for i in fit], train_y=y[fit], valid_X=[paths[i] for i in held_out],
-           valid_y=y[held_out], concept_set=concept_set)
+    lf = LabelFreeCBM(
+        LFTrainingConfig(
+            device=str(determine_device()), seed=CUB_SEED, cache_dir=out / "cache/cub"
+        )
+    )
+    lf.fit(
+        train_X=[paths[i] for i in fit],
+        train_y=y[fit],
+        valid_X=[paths[i] for i in held_out],
+        valid_y=y[held_out],
+        concept_set=concept_set,
+    )
     is_kept = np.asarray(lf.keep_mask, dtype=bool)
     scores = lf.concept_proba(paths)
-    label_predictor = MLPClassifier(**CUB_LABEL_PREDICTOR).fit(scores[trainval], y[trainval])
-    rows = measure_accuracy_per_budget(
-        label_predictor.predict_proba, scores[test], scores[test], concepts[test][:, is_kept], y[test], CUB_BUDGETS,
-        np.percentile(scores[trainval], 95, axis=0), np.percentile(scores[trainval], 5, axis=0),
+    label_predictor = MLPClassifier(**CUB_LABEL_PREDICTOR).fit(
+        scores[trainval], y[trainval]
     )
-    results += [{"dataset": name, "concepts": "label_free", "seed": CUB_SEED, **row} for row in rows]
+    rows = measure_accuracy_per_budget(
+        label_predictor.predict_proba,
+        scores[test],
+        scores[test],
+        concepts[test][:, is_kept],
+        y[test],
+        CUB_BUDGETS,
+        np.percentile(scores[trainval], 95, axis=0),
+        np.percentile(scores[trainval], 5, axis=0),
+    )
+    results += [
+        {"dataset": name, "concepts": "label_free", "seed": CUB_SEED, **row}
+        for row in rows
+    ]
     return results
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--derm-root", type=Path, default=None, help="Derm7pt folder holding meta/ and images/")
-    ap.add_argument("--cub-root", type=Path, default=None, help="CUB_200_2011 folder holding images/ and attributes/")
+    ap.add_argument(
+        "--derm-root",
+        type=Path,
+        default=None,
+        help="Derm7pt folder holding meta/ and images/",
+    )
+    ap.add_argument(
+        "--cub-root",
+        type=Path,
+        default=None,
+        help="CUB_200_2011 folder holding images/ and attributes/",
+    )
     args = ap.parse_args()
     if args.derm_root is None and args.cub_root is None:
         ap.error("give --derm-root, --cub-root or both")

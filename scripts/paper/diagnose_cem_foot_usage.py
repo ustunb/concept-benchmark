@@ -28,7 +28,10 @@ SEEDS = (1014, 1015, 1016, 1017)
 
 def split(root: Path, seed: int, preset: str, name: str, images: Path):
     folder = "foot_subtypes" if preset == "subconcept" else "ground_truth"
-    d = load(root / f"final_d030e2/run_d0.30e2_s{seed}_{folder}/results/robot_image_4_{preset}_seed{seed}.data")
+    d = load(
+        root
+        / f"final_d030e2/run_d0.30e2_s{seed}_{folder}/results/robot_image_4_{preset}_seed{seed}.data"
+    )
     s = getattr(d, name)
     s.base_dir = images
     return s
@@ -37,12 +40,16 @@ def split(root: Path, seed: int, preset: str, name: str, images: Path):
 def embeddings(det, data, foot_cols):
     label_probs, concept_probs, cache = det._run_official_model(data)
     p = concept_probs[:, foot_cols]
-    pos, neg = cache.pos_embeddings.numpy()[:, foot_cols], cache.neg_embeddings.numpy()[:, foot_cols]
+    pos, neg = (
+        cache.pos_embeddings.numpy()[:, foot_cols],
+        cache.neg_embeddings.numpy()[:, foot_cols],
+    )
     mixed = pos * p[..., None] + neg * (1 - p[..., None])
     model = det._require_official_model().cpu().eval()
     allp = concept_probs
-    bottleneck = (cache.pos_embeddings * torch.as_tensor(allp).unsqueeze(-1)
-                  + cache.neg_embeddings * (1 - torch.as_tensor(allp).unsqueeze(-1)))
+    bottleneck = cache.pos_embeddings * torch.as_tensor(allp).unsqueeze(
+        -1
+    ) + cache.neg_embeddings * (1 - torch.as_tensor(allp).unsqueeze(-1))
     with torch.no_grad():
         logits = model.c2y_model(torch.flatten(bottleneck, start_dim=1).float()).numpy()
     margin = logits[:, 1] - logits[:, 0] if logits.shape[1] == 2 else logits[:, 0]
@@ -58,28 +65,51 @@ def main() -> None:
     args = ap.parse_args()
     rows = []
     for seed in SEEDS:
-        det = load(next(args.models.glob(f"{BALANCED_TAG}__subconcept_cem_seed{seed}__*"))).concept_detector._owner
+        det = load(
+            next(args.models.glob(f"{BALANCED_TAG}__subconcept_cem_seed{seed}__*"))
+        ).concept_detector._owner
         sets = {}
         for name in ("train", "test"):
             human = split(args.data_root, seed, "subconcept", name, args.images)
             true = split(args.data_root, seed, "ideal", name, args.images)
-            foot_cols = [j for j, n in enumerate(human.concepts) if n.startswith("foot_shape")]
+            foot_cols = [
+                j for j, n in enumerate(human.concepts) if n.startswith("foot_shape")
+            ]
             unlisted = np.asarray(human.C)[:, foot_cols].sum(axis=1) == 0
-            pointy = np.asarray(true.C)[:, list(true.concepts).index("foot_shape")] >= 0.5
+            pointy = (
+                np.asarray(true.C)[:, list(true.concepts).index("foot_shape")] >= 0.5
+            )
             emb, margin = embeddings(det, human, foot_cols)
             sets[name] = (emb, margin, unlisted, pointy)
         emb, margin, u, pointy = sets["test"]
         tr_emb, _, tr_u, tr_pointy = sets["train"]
         probe = LogisticRegression(max_iter=3000).fit(tr_emb, tr_pointy)
-        rows.append({
-            "seed": seed,
-            "train_unlisted_share": round(float(tr_u.mean()), 3),
-            "logit_gap_listed": round(float(margin[~u & pointy].mean() - margin[~u & ~pointy].mean()), 2),
-            "logit_gap_unlisted": round(float(margin[u & pointy].mean() - margin[u & ~pointy].mean()), 2),
-            "probe_from_train_on_unlisted": round(float((probe.predict(emb[u]) == pointy[u]).mean()), 3),
-            "probe_from_train_on_listed": round(float((probe.predict(emb[~u]) == pointy[~u]).mean()), 3),
-            "probe_within_unlisted_cv": round(float(cross_val_score(LogisticRegression(max_iter=3000), emb[u], pointy[u], cv=5).mean()), 3),
-        })
+        rows.append(
+            {
+                "seed": seed,
+                "train_unlisted_share": round(float(tr_u.mean()), 3),
+                "logit_gap_listed": round(
+                    float(margin[~u & pointy].mean() - margin[~u & ~pointy].mean()), 2
+                ),
+                "logit_gap_unlisted": round(
+                    float(margin[u & pointy].mean() - margin[u & ~pointy].mean()), 2
+                ),
+                "probe_from_train_on_unlisted": round(
+                    float((probe.predict(emb[u]) == pointy[u]).mean()), 3
+                ),
+                "probe_from_train_on_listed": round(
+                    float((probe.predict(emb[~u]) == pointy[~u]).mean()), 3
+                ),
+                "probe_within_unlisted_cv": round(
+                    float(
+                        cross_val_score(
+                            LogisticRegression(max_iter=3000), emb[u], pointy[u], cv=5
+                        ).mean()
+                    ),
+                    3,
+                ),
+            }
+        )
         print(rows[-1], flush=True)
     with args.out.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=list(rows[0]))

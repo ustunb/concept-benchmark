@@ -7,6 +7,7 @@ point to it. Adapted to this benchmark: the image encoder is the shared backbone
 ProbCBM (instead of an ImageNet ResNet-101), hidden size is `ecbm_hid_size`, and training uses Adam with early
 stopping on the validation loss (instead of SGD for 300 epochs).
 """
+
 from __future__ import annotations
 
 import copy
@@ -56,6 +57,7 @@ CY_SAMPLE_FLIP_SHARE = 0.2
 # ECBM network (networks/EBM.py: EBM_GL)
 # ---------------------------------------------------------------------------
 
+
 class _ECBMNet(nn.Module):
     def __init__(
         self,
@@ -80,8 +82,12 @@ class _ECBMNet(nn.Module):
 
         self.backbone = c_extractor_arch(self.feature_dim)
         self.y_embedding = nn.Parameter(torch.randn((self.num_classes, self.hid_size)))
-        self.c_embedding = nn.Parameter(torch.randn((self.n_concepts * 2, self.hid_size)))
-        self.classifier_xc = nn.ModuleList([nn.Linear(self.hid_size, 1) for _ in range(self.n_concepts)])
+        self.c_embedding = nn.Parameter(
+            torch.randn((self.n_concepts * 2, self.hid_size))
+        )
+        self.classifier_xc = nn.ModuleList(
+            [nn.Linear(self.hid_size, 1) for _ in range(self.n_concepts)]
+        )
         self.concept_proj = nn.Linear(self.n_concepts * self.hid_size, self.hid_size)
         self.xy_fc1 = nn.Linear(self.feature_dim, self.hid_size)
         self.xc_fc1 = nn.Linear(self.feature_dim, self.hid_size)
@@ -92,10 +98,14 @@ class _ECBMNet(nn.Module):
     def extract_features(self, x: torch.Tensor) -> torch.Tensor:
         return self.backbone(x.float())
 
-    def _concept_code(self, present: torch.Tensor, c_embed_cy: torch.Tensor) -> torch.Tensor:
+    def _concept_code(
+        self, present: torch.Tensor, c_embed_cy: torch.Tensor
+    ) -> torch.Tensor:
         """Concept -> label code: the first embedding block if a concept is present, else the second (EBM.py:173-180, 190-196)."""
         n = self.n_concepts
-        chosen = torch.where(present.unsqueeze(-1), c_embed_cy[:, :n, :], c_embed_cy[:, n:, :])
+        chosen = torch.where(
+            present.unsqueeze(-1), c_embed_cy[:, :n, :], c_embed_cy[:, n:, :]
+        )
         return self.concept_proj(chosen.reshape(chosen.shape[0], -1))
 
     def training_energies(
@@ -106,7 +116,9 @@ class _ECBMNet(nn.Module):
         Returns xy [bs, n_classes], cy [bs, n_classes], xc [bs, n_concepts, 2]; lower energy = more likely.
         """
         bs, n = features.shape[0], self.n_concepts
-        y_embed = F.normalize(self.y_embedding.unsqueeze(0).repeat(bs, 1, 1), p=2, dim=-1)
+        y_embed = F.normalize(
+            self.y_embedding.unsqueeze(0).repeat(bs, 1, 1), p=2, dim=-1
+        )
         x_embed = self.dropout(self.xy_fc1(features))[:, None, :].expand_as(y_embed)
         xy_energy = self.classifier_xy(F.relu(x_embed + x_embed * y_embed)).view(bs, -1)
 
@@ -117,7 +129,9 @@ class _ECBMNet(nn.Module):
         for i in range(n):
             pos = F.relu(x_embed[:, i] + x_embed[:, i] * c_embed[:, i])
             neg = F.relu(x_embed[:, i + n] + x_embed[:, i + n] * c_embed[:, i + n])
-            xc_energy.append(self.classifier_xc[i](torch.stack([pos, neg], dim=1)).view(bs, 1, 2))
+            xc_energy.append(
+                self.classifier_xc[i](torch.stack([pos, neg], dim=1)).view(bs, 1, 2)
+            )
         xc_energy = torch.cat(xc_energy, dim=1)
 
         present = concepts >= 0.5
@@ -144,11 +158,19 @@ class _ECBMNet(nn.Module):
 
         c_prob = torch.softmax(c_logits, dim=-1)
         c_embed_cy = self.c_embedding.unsqueeze(0).repeat(bs, 1, 1)
-        c_embed = c_embed_cy[:, :n] * c_prob[:, :, 0:1] + c_embed_cy[:, n:] * c_prob[:, :, 1:2]
+        c_embed = (
+            c_embed_cy[:, :n] * c_prob[:, :, 0:1]
+            + c_embed_cy[:, n:] * c_prob[:, :, 1:2]
+        )
         c_embed = F.normalize(c_embed, p=2, dim=-1)
         x_embed = self.dropout(self.xc_fc1(features))[:, None, :].expand_as(c_embed)
         xc_energy = torch.cat(
-            [self.classifier_xc[i](F.relu(x_embed[:, i] + x_embed[:, i] * c_embed[:, i])) for i in range(n)],
+            [
+                self.classifier_xc[i](
+                    F.relu(x_embed[:, i] + x_embed[:, i] * c_embed[:, i])
+                )
+                for i in range(n)
+            ],
             dim=1,
         )
 
@@ -174,6 +196,7 @@ def _flip_concepts(present: torch.Tensor) -> torch.Tensor:
 # ECBM losses (loss.py) and gradient inference (GradientInference.py)
 # ---------------------------------------------------------------------------
 
+
 def _energy_nll(energy: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     """E(target) + logsumexp(-E): the authors' EBMLoss (= cross-entropy on -energy)."""
     return F.cross_entropy(-energy, target)
@@ -190,8 +213,14 @@ def _ecbm_losses(
     loss_xy = _energy_nll(xy_energy, labels)
     loss_cy = _energy_nll(cy_energy, labels)
     target_c = (concepts >= 0.5).long()
-    loss_xc = sum(_energy_nll(xc_energy[:, i], target_c[:, i]) for i in range(model.n_concepts))
-    total = model.lambda_xc * loss_xc + model.lambda_xy * loss_xy + model.lambda_cy * loss_cy
+    loss_xc = sum(
+        _energy_nll(xc_energy[:, i], target_c[:, i]) for i in range(model.n_concepts)
+    )
+    total = (
+        model.lambda_xc * loss_xc
+        + model.lambda_xy * loss_xy
+        + model.lambda_cy * loss_cy
+    )
     metrics = {
         "loss_xy": float(loss_xy.detach().cpu()),
         "loss_xc": float(loss_xc.detach().cpu()),
@@ -222,17 +251,27 @@ def _run_gradient_inference(
     lambda_xy, lambda_xc, lambda_cy = weights
     n = features.shape[0]
     size = n if batch_size is None else int(batch_size)
-    group = torch.div(torch.arange(n, device=features.device), size, rounding_mode="floor")
+    group = torch.div(
+        torch.arange(n, device=features.device), size, rounding_mode="floor"
+    )
     n_groups = int(group[-1]) + 1
     counts = torch.bincount(group, minlength=n_groups).to(features.dtype)
 
     def batch_mean(values: torch.Tensor) -> torch.Tensor:
-        return torch.zeros(n_groups, device=values.device, dtype=values.dtype).index_add_(0, group, values) / counts
+        return (
+            torch.zeros(n_groups, device=values.device, dtype=values.dtype).index_add_(
+                0, group, values
+            )
+            / counts
+        )
 
     y_logits = nn.Parameter(y_logits.detach().clone())
     c_logits = nn.Parameter(c_logits.detach().clone())
     optimizer = torch.optim.Adam(
-        [{"params": [c_logits], "lr": INFERENCE_LR}, {"params": [y_logits], "lr": INFERENCE_LR}]
+        [
+            {"params": [c_logits], "lr": INFERENCE_LR},
+            {"params": [y_logits], "lr": INFERENCE_LR},
+        ]
     )
     requires_grad = [p.requires_grad for p in model.parameters()]
     for p in model.parameters():
@@ -244,7 +283,9 @@ def _run_gradient_inference(
         with torch.enable_grad():
             for _ in range(INFERENCE_MAX_STEPS):
                 optimizer.zero_grad()
-                xy_en, cy_en, xc_en = model.inference_energies(features, y_logits, c_logits)
+                xy_en, cy_en, xc_en = model.inference_energies(
+                    features, y_logits, c_logits
+                )
                 xy_mean = batch_mean(xy_en)
                 loss = (
                     lambda_xy * xy_mean
@@ -256,7 +297,9 @@ def _run_gradient_inference(
                 improved = ~first & (score > best + INFERENCE_DELTA)
                 stalled = ~first & ~improved
                 best = torch.where(first | improved, score, best)
-                counter = torch.where(improved, torch.zeros_like(counter), counter + stalled.long())
+                counter = torch.where(
+                    improved, torch.zeros_like(counter), counter + stalled.long()
+                )
                 frozen_y = y_logits.detach().clone()
                 frozen_c = c_logits.detach().clone()
                 loss[active].sum().backward()
@@ -281,7 +324,9 @@ def _infer_labels_and_concepts(
     bs = features.shape[0]
     y0 = torch.zeros(bs, model.num_classes, device=features.device)
     c0 = torch.zeros(bs, model.n_concepts, 2, device=features.device)
-    return _run_gradient_inference(model, features, y0, c0, INFERENCE_WEIGHTS, batch_size)
+    return _run_gradient_inference(
+        model, features, y0, c0, INFERENCE_WEIGHTS, batch_size
+    )
 
 
 def _intervene(
@@ -301,7 +346,9 @@ def _intervene(
     forced = (target - 0.5) * (2 * INTERVENTION_LOGIT)
     c_start = torch.where(mask.unsqueeze(-1), forced, c_logits)
     y0 = torch.zeros(features.shape[0], model.num_classes, device=features.device)
-    y_logits, _ = _run_gradient_inference(model, features, y0, c_start, INTERVENTION_WEIGHTS, batch_size)
+    y_logits, _ = _run_gradient_inference(
+        model, features, y0, c_start, INTERVENTION_WEIGHTS, batch_size
+    )
     return y_logits
 
 
@@ -323,7 +370,9 @@ def _run_ecbm_epoch(
         if is_train:
             optimizer.zero_grad()
         with torch.set_grad_enabled(is_train):
-            loss, metrics = _ecbm_losses(model, model.extract_features(batch_x), batch_c, batch_y)
+            loss, metrics = _ecbm_losses(
+                model, model.extract_features(batch_x), batch_c, batch_y
+            )
             if is_train:
                 loss.backward()
                 optimizer.step()
@@ -337,6 +386,7 @@ def _run_ecbm_epoch(
 # ---------------------------------------------------------------------------
 # ECBM benchmark model
 # ---------------------------------------------------------------------------
+
 
 class ECBMBenchmarkModel(_OfficialBenchmarkModelBase):
     family = "ecbm"
@@ -361,11 +411,15 @@ class ECBMBenchmarkModel(_OfficialBenchmarkModelBase):
                 feature_chunks.append(model.extract_features(batch_x))
         features = torch.cat(feature_chunks, dim=0)
         # the loader's batches, run side by side (see _run_gradient_inference)
-        y_logits, c_logits = _infer_labels_and_concepts(model, features, self._inference_batch_size())
+        y_logits, c_logits = _infer_labels_and_concepts(
+            model, features, self._inference_batch_size()
+        )
         model.cpu()
 
         label_probs = torch.softmax(y_logits, dim=-1).cpu().numpy().astype(np.float32)
-        concept_probs = torch.softmax(c_logits, dim=-1)[..., 1].cpu().numpy().astype(np.float32)
+        concept_probs = (
+            torch.softmax(c_logits, dim=-1)[..., 1].cpu().numpy().astype(np.float32)
+        )
         cache = _PredictionCache(
             dataset_id=id(dataset),
             concept_probs=concept_probs,
@@ -387,7 +441,9 @@ class ECBMBenchmarkModel(_OfficialBenchmarkModelBase):
         if cache.ecbm_features is None or cache.ecbm_concept_logits is None:
             raise RuntimeError("Missing cached ECBM features for intervention replay.")
         if intervention_mask is None:
-            intervention_mask = ~np.isclose(concepts, baseline_concepts, atol=1e-6, rtol=1e-6)
+            intervention_mask = ~np.isclose(
+                concepts, baseline_concepts, atol=1e-6, rtol=1e-6
+            )
         intervention_mask = np.asarray(intervention_mask, dtype=bool)
         out = cache.label_probs.copy()
         rows = np.flatnonzero(intervention_mask.any(axis=1))
@@ -433,6 +489,7 @@ class ECBMBenchmarkModel(_OfficialBenchmarkModelBase):
 # ECBM interpretation
 # ---------------------------------------------------------------------------
 
+
 def compute_ecbm_interpretation_summary(
     model: ECBMBenchmarkModel,
     dataset: ConceptDatasetSample,
@@ -472,7 +529,9 @@ def compute_ecbm_interpretation_summary(
                 "oracle_conditional_prob": float(oracle_mean[int(idx)]),
                 "predicted_lift": float(lift[int(idx)]),
                 "oracle_lift": float(oracle_lift[int(idx)]),
-                "absolute_error": float(abs(pred_mean[int(idx)] - oracle_mean[int(idx)])),
+                "absolute_error": float(
+                    abs(pred_mean[int(idx)] - oracle_mean[int(idx)])
+                ),
             }
             for idx in order[: max(1, int(top_k))]
         ]
@@ -497,10 +556,12 @@ def compute_ecbm_interpretation_summary(
         "family": "ecbm",
         "n_examples": int(dataset.n),
         "overall_predicted_concept_mean": {
-            name: float(overall_pred[idx]) for idx, name in enumerate(model.concept_names)
+            name: float(overall_pred[idx])
+            for idx, name in enumerate(model.concept_names)
         },
         "overall_oracle_concept_mean": {
-            name: float(overall_true[idx]) for idx, name in enumerate(model.concept_names)
+            name: float(overall_true[idx])
+            for idx, name in enumerate(model.concept_names)
         },
         "top_concepts_by_class": top_concepts,
         "rows": rows,
@@ -510,6 +571,7 @@ def compute_ecbm_interpretation_summary(
 # ---------------------------------------------------------------------------
 # Training
 # ---------------------------------------------------------------------------
+
 
 def train_ecbm_model(
     *,
@@ -534,7 +596,9 @@ def train_ecbm_model(
     train_loader = train_dataset.loader(shuffle=True, **loader_kwargs)
     valid_loader = valid_dataset.loader(shuffle=False, **loader_kwargs)
 
-    backbone_spec = _infer_backbone_spec(train_dataset, benchmark=benchmark, config=config)
+    backbone_spec = _infer_backbone_spec(
+        train_dataset, benchmark=benchmark, config=config
+    )
     feature_dim = int(backbone_spec.get("default_output_dim", 128))
     model_init_kwargs = {
         "n_concepts": train_dataset.n_concepts,
@@ -561,8 +625,12 @@ def train_ecbm_model(
     best_epoch = 0
     for epoch in range(max_epochs):
         _run_ecbm_epoch(model, train_loader, optimizer=optimizer, device=device)
-        valid_metrics = _run_ecbm_epoch(model, valid_loader, optimizer=None, device=device)
-        current_val = float(valid_metrics["loss_unweighted"])  # the authors monitor the unweighted sum
+        valid_metrics = _run_ecbm_epoch(
+            model, valid_loader, optimizer=None, device=device
+        )
+        current_val = float(
+            valid_metrics["loss_unweighted"]
+        )  # the authors monitor the unweighted sum
         if current_val < best_val_loss - _EARLY_STOP_EPS:
             best_val_loss = current_val
             best_state = copy.deepcopy(model.state_dict())

@@ -17,7 +17,13 @@ import statistics as st
 from collections import defaultdict
 from pathlib import Path
 
-from _common import BALANCED_RULE, SPARSE_RULE, filename_fields, latex_cell, read_budget_rows
+from _common import (
+    BALANCED_RULE,
+    SPARSE_RULE,
+    filename_fields,
+    latex_cell,
+    read_budget_rows,
+)
 
 RULES = {  # rule -> (results folder, seeds per cell, table label, caption suffix)
     "balanced": (BALANCED_RULE, 10, "Table::BigTable", ""),
@@ -31,7 +37,12 @@ CONCEPT_SETS = [
     ("llm_concepts", "llm\\_concepts", 12),
     ("clip_concepts", "clip\\_concepts", 12),
 ]
-ARCHS = [("cbm", "\\CBM{}"), ("cem", "\\CEM{}"), ("probcbm", "\\ProbCBM{}"), ("ecbm", "\\ECBM{}")]
+ARCHS = [
+    ("cbm", "\\CBM{}"),
+    ("cem", "\\CEM{}"),
+    ("probcbm", "\\ProbCBM{}"),
+    ("ecbm", "\\ECBM{}"),
+]
 SOURCES = ["perfect", "expert", "llm"]
 
 
@@ -45,8 +56,17 @@ def read_grid(rule: str) -> dict[tuple, list[list[float]]]:
         if fields.get("isrc") == "llm" and fields.get("img") != "224px":
             continue  # other LLM caches (such as 32 px) are kept apart
         rows = read_budget_rows(f)
-        key = (rows[0]["concept_source"], rows[0]["intervention_source"], rows[0]["model_family"])
-        if rule == "balanced" and key[2] == "cbm" and key[0] in AUTOMATED and fields.get("enc") != "koh595":
+        key = (
+            rows[0]["concept_source"],
+            rows[0]["intervention_source"],
+            rows[0]["model_family"],
+        )
+        if (
+            rule == "balanced"
+            and key[2] == "cbm"
+            and key[0] in AUTOMATED
+            and fields.get("enc") != "koh595"
+        ):
             continue  # label-free CBM: 5th/95th-percentile interventions, not hard 0/1
         cells[key].append([100 * float(r["accuracy"]) for r in rows])
     return cells
@@ -76,24 +96,42 @@ def main() -> None:
     ]
     for i, (source, name, m) in enumerate(CONCEPT_SETS):
         lines.append(r"\midrule")
-        lines.append(rf"\multirow{{4}}{{*}}{{\cell{{l}}{{\textds{{{name}}}\\$m{{=}}{m}$}}}}")
+        lines.append(
+            rf"\multirow{{4}}{{*}}{{\cell{{l}}{{\textds{{{name}}}\\$m{{=}}{m}$}}}}"
+        )
         runs = {}
         for family, _ in ARCHS:
             for isrc in SOURCES:
                 runs[family, isrc] = cells.get((source, isrc, family)) or []
                 if len(runs[family, isrc]) != n_seeds:
-                    raise SystemExit(f"cell {source} x {isrc} x {family}: {len(runs[family, isrc])} seeds, expected {n_seeds}")
+                    raise SystemExit(
+                        f"cell {source} x {isrc} x {family}: {len(runs[family, isrc])} seeds, expected {n_seeds}"
+                    )
         # bold the highest mean (as printed) in each concept set x intervention source block, once per row
         best = {
-            isrc: max(round(st.mean([r[k] for r in runs[family, isrc]]), 1) for family, _ in ARCHS for k in range(4))
+            isrc: max(
+                round(st.mean([r[k] for r in runs[family, isrc]]), 1)
+                for family, _ in ARCHS
+                for k in range(4)
+            )
             for isrc in SOURCES
         }
         for family, macro in ARCHS:
             row = []
             for isrc in SOURCES:
-                means = [round(st.mean([r[k] for r in runs[family, isrc]]), 1) for k in range(4)]
-                first_best = means.index(best[isrc]) if best[isrc] in means else None  # earliest budget only
-                row += [latex_cell([r[k] for r in runs[family, isrc]], is_best=k == first_best) for k in range(4)]
+                means = [
+                    round(st.mean([r[k] for r in runs[family, isrc]]), 1)
+                    for k in range(4)
+                ]
+                first_best = (
+                    means.index(best[isrc]) if best[isrc] in means else None
+                )  # earliest budget only
+                row += [
+                    latex_cell(
+                        [r[k] for r in runs[family, isrc]], is_best=k == first_best
+                    )
+                    for k in range(4)
+                ]
             lines.append(f" & {macro:<11}& " + " & ".join(row) + r" \\")
     lines += [
         r"\bottomrule",
@@ -102,8 +140,13 @@ def main() -> None:
         r"\caption{Accuracy of concept-based models in the decision-support benchmark under each concept set and "
         r"intervention regime with $k$ interventions"
         rf"{suffix}{' (mean $' + chr(92) + 'pm$ SE, $n{=}4$ seeds)' if args.rule == 'sparse' else ''}."
-        + (r" With \textds{human\_concepts}, every architecture is less accurate after all interventions than with "
-           r"\textds{true\_concepts}." if args.rule == "sparse" else "") + "}",
+        + (
+            r" With \textds{human\_concepts}, every architecture is less accurate after all interventions than with "
+            r"\textds{true\_concepts}."
+            if args.rule == "sparse"
+            else ""
+        )
+        + "}",
         rf"\label{{{label}}}",
         r"\end{table*}",
     ]

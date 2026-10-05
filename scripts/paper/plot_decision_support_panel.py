@@ -63,29 +63,54 @@ def read_run(run_dir: Path, variant: str) -> tuple[float, list[float]]:
     """DNN accuracy and CBM accuracy at k = 0, 1, 3, max (perfect interventions), in percent."""
     results = run_dir / "results"
     collect = next(results.glob(f"robot_{variant}_seed*_results.csv"))
-    dnn = next(float(r["accuracy"]) for r in csv.DictReader(collect.open()) if r["model"] == "dnn")
+    dnn = next(
+        float(r["accuracy"])
+        for r in csv.DictReader(collect.open())
+        if r["model"] == "dnn"
+    )
     cell = next(results.glob(f"robot_image_stochastic_{variant}_cbm_seed*_results.csv"))
     rows = sorted(
-        (r for r in csv.DictReader(cell.open()) if r["intervention_source"] == "perfect"),
+        (
+            r
+            for r in csv.DictReader(cell.open())
+            if r["intervention_source"] == "perfect"
+        ),
         key=lambda r: int(r["budget"]),
     )
     if len(rows) != len(BUDGET_LABELS):
-        raise ValueError(f"{cell}: expected {len(BUDGET_LABELS)} budgets, got {len(rows)}")
+        raise ValueError(
+            f"{cell}: expected {len(BUDGET_LABELS)} budgets, got {len(rows)}"
+        )
     return 100 * dnn, [100 * float(r["accuracy"]) for r in rows]
 
 
-def read_installed(root: Path, prefix: str, seed: int, concepts: str) -> tuple[float, list[float]]:
+def read_installed(
+    root: Path, prefix: str, seed: int, concepts: str
+) -> tuple[float, list[float]]:
     """Same as `read_run`, from the installed results tree (results/paper/robot/balanced_rule)."""
     base = f"{prefix}__concepts-{concepts}"
     summary = root / f"{base}__arch-cbm-and-dnn__seed-{seed}__results.csv"
-    dnn = next(float(r["accuracy"]) for r in csv.DictReader(summary.open()) if r["model"] == "dnn")
-    cell = root / f"{base}__arch-cbm__isrc-perfect__strategy-upto__seed-{seed}__results.csv"
+    dnn = next(
+        float(r["accuracy"])
+        for r in csv.DictReader(summary.open())
+        if r["model"] == "dnn"
+    )
+    cell = (
+        root
+        / f"{base}__arch-cbm__isrc-perfect__strategy-upto__seed-{seed}__results.csv"
+    )
     rows = sorted(
-        (r for r in csv.DictReader(cell.open()) if r["intervention_source"] == "perfect"),
+        (
+            r
+            for r in csv.DictReader(cell.open())
+            if r["intervention_source"] == "perfect"
+        ),
         key=lambda r: int(r["budget"]),
     )
     if len(rows) != len(BUDGET_LABELS):
-        raise ValueError(f"{cell}: expected {len(BUDGET_LABELS)} budgets, got {len(rows)}")
+        raise ValueError(
+            f"{cell}: expected {len(BUDGET_LABELS)} budgets, got {len(rows)}"
+        )
     return 100 * dnn, [100 * float(r["accuracy"]) for r in rows]
 
 
@@ -113,7 +138,9 @@ def build_tex(true_runs, human_runs, dnn_runs, gains, band_kind: str) -> str:
     top = max(true_hi[3], true_mean[3])
     ymin = 5 * int(min(human_lo) // 5) - 1
     ymax = top + 4.0
-    return PREAMBLE + rf"""
+    return (
+        PREAMBLE
+        + rf"""
 \begin{{axis}}[bbvalue, at={{(0cm,0cm)}}, anchor=south west,
   xlabel={{Intervention budget $k$}}, ylabel={{Accuracy}},
   ymin={ymin:.0f}, ymax={ymax:.1f},
@@ -146,31 +173,59 @@ def build_tex(true_runs, human_runs, dnn_runs, gains, band_kind: str) -> str:
 \end{{tikzpicture}}
 \end{{document}}
 """
+    )
 
 
 def parse_seeds(text: str) -> list[int]:
     lo, _, hi = text.partition("-")
-    return list(range(int(lo), int(hi) + 1)) if hi else [int(s) for s in text.split(",")]
+    return (
+        list(range(int(lo), int(hi) + 1)) if hi else [int(s) for s in text.split(",")]
+    )
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", type=Path, default=BALANCED_RULE,
-                    help="Installed balanced_rule folder, or a folder of raw run_{tag}_s{seed}_{preset} runs.")
-    ap.add_argument("--prefix", default=BALANCED_TAG,
-                    help="File-name prefix of the installed runs.")
-    ap.add_argument("--tag", default=None, help="Read raw run folders with this tag (e.g. duniforme3) instead.")
-    ap.add_argument("--seeds", default="1014-1023", help="Seed range 'a-b' or list 'a,b,c'.")
-    ap.add_argument("--band", choices=["se", "range"], default="se", help="Shading: mean ± SE (default) or range over runs.")
-    ap.add_argument("--out", type=Path, required=True, help="Output path without extension (.tex and .pdf).")
+    ap.add_argument(
+        "--root",
+        type=Path,
+        default=BALANCED_RULE,
+        help="Installed balanced_rule folder, or a folder of raw run_{tag}_s{seed}_{preset} runs.",
+    )
+    ap.add_argument(
+        "--prefix", default=BALANCED_TAG, help="File-name prefix of the installed runs."
+    )
+    ap.add_argument(
+        "--tag",
+        default=None,
+        help="Read raw run folders with this tag (e.g. duniforme3) instead.",
+    )
+    ap.add_argument(
+        "--seeds", default="1014-1023", help="Seed range 'a-b' or list 'a,b,c'."
+    )
+    ap.add_argument(
+        "--band",
+        choices=["se", "range"],
+        default="se",
+        help="Shading: mean ± SE (default) or range over runs.",
+    )
+    ap.add_argument(
+        "--out",
+        type=Path,
+        required=True,
+        help="Output path without extension (.tex and .pdf).",
+    )
     args = ap.parse_args()
 
     seeds = parse_seeds(args.seeds)
     true_runs, human_runs, dnn_runs, gains = [], [], [], []
     for seed in seeds:
         if args.tag:
-            dnn, true_acc = read_run(args.root / f"run_{args.tag}_s{seed}_ground_truth", "ideal")
-            _, human_acc = read_run(args.root / f"run_{args.tag}_s{seed}_foot_subtypes", "subconcept")
+            dnn, true_acc = read_run(
+                args.root / f"run_{args.tag}_s{seed}_ground_truth", "ideal"
+            )
+            _, human_acc = read_run(
+                args.root / f"run_{args.tag}_s{seed}_foot_subtypes", "subconcept"
+            )
         else:
             dnn, true_acc = read_installed(args.root, args.prefix, seed, "true")
             _, human_acc = read_installed(args.root, args.prefix, seed, "human")
@@ -183,7 +238,9 @@ def main() -> None:
     tex_path = args.out.with_suffix(".tex")
     tex_path.write_text(build_tex(true_runs, human_runs, dnn_runs, gains, args.band))
     compile_tex(tex_path)
-    print(f"wrote {tex_path.with_suffix('.pdf')}  (n={len(seeds)}, Gain {st.mean(gains):.1f}, band {args.band})")
+    print(
+        f"wrote {tex_path.with_suffix('.pdf')}  (n={len(seeds)}, Gain {st.mean(gains):.1f}, band {args.band})"
+    )
 
 
 if __name__ == "__main__":

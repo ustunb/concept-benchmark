@@ -31,7 +31,9 @@ def main() -> None:
     args = ap.parse_args()
     rows = []
     for seed in map(int, args.seeds.split(",")):
-        model_file, data_file = model_and_data_files("probcbm", "true", seed, args.pipeline_root)
+        model_file, data_file = model_and_data_files(
+            "probcbm", "true", seed, args.pipeline_root
+        )
         data = load(data_file)
         model = load(model_file)
         set_cpu(model)
@@ -42,11 +44,24 @@ def main() -> None:
             truth = np.asarray(sample.C) >= 0.5
             for j, name in enumerate(sample.concepts):
                 if name in CONCEPTS:
-                    rows.append({"seed": seed, "split": split, "concept": name,
-                                 "accuracy": round(float(((probs[:, j] >= 0.5) == truth[:, j]).mean()), 4),
-                                 "auc": round(float(roc_auc_score(truth[:, j], probs[:, j])), 4)})
-        for r in rows[-2 * len(CONCEPTS):]:
-            print(f"seed {seed} {r['split']:5} {r['concept']:11} acc {r['accuracy']:.3f}  AUC {r['auc']:.3f}", flush=True)
+                    rows.append(
+                        {
+                            "seed": seed,
+                            "split": split,
+                            "concept": name,
+                            "accuracy": round(
+                                float(((probs[:, j] >= 0.5) == truth[:, j]).mean()), 4
+                            ),
+                            "auc": round(
+                                float(roc_auc_score(truth[:, j], probs[:, j])), 4
+                            ),
+                        }
+                    )
+        for r in rows[-2 * len(CONCEPTS) :]:
+            print(
+                f"seed {seed} {r['split']:5} {r['concept']:11} acc {r['accuracy']:.3f}  AUC {r['auc']:.3f}",
+                flush=True,
+            )
     with args.out.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=list(rows[0]))
         w.writeheader()

@@ -33,13 +33,22 @@ def main() -> None:
     args = ap.parse_args()
     out = {}
     for s in args.seeds:
-        true = load(ROBOT_DATASETS / f"{BALANCED_TAG}__concepts-true__seed-{s}__dataset.data").test
-        human = load(ROBOT_DATASETS / f"{BALANCED_TAG}__concepts-human__seed-{s}__dataset.data").test
+        true = load(
+            ROBOT_DATASETS / f"{BALANCED_TAG}__concepts-true__seed-{s}__dataset.data"
+        ).test
+        human = load(
+            ROBOT_DATASETS / f"{BALANCED_TAG}__concepts-human__seed-{s}__dataset.data"
+        ).test
         if list(map(str, true.inputs)) != list(map(str, human.inputs)):
             raise SystemExit(f"seed {s}: true and human datasets differ in test robots")
-        out[str(s)] = {"inputs": [str(x) for x in true.inputs], "dsig": signature(true.inputs),
-                       "true_names": list(true.concepts), "human_names": list(human.concepts),
-                       "true_C": [list(map(int, r)) for r in true.C], "human_C": [list(map(int, r)) for r in human.C]}
+        out[str(s)] = {
+            "inputs": [str(x) for x in true.inputs],
+            "dsig": signature(true.inputs),
+            "true_names": list(true.concepts),
+            "human_names": list(human.concepts),
+            "true_C": [list(map(int, r)) for r in true.C],
+            "human_C": [list(map(int, r)) for r in human.C],
+        }
         print(s, "dsig", out[str(s)]["dsig"][:12], "robots", len(true.inputs))
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(out))

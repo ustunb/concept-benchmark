@@ -1,4 +1,5 @@
 """Shared utilities, backbones, base classes, and data adapters for CEM-family baselines."""
+
 from __future__ import annotations
 
 import copy
@@ -28,6 +29,7 @@ _LOCAL_CEM_CHECKOUT = _REPO_ROOT / "third_party" / "cem"
 # ---------------------------------------------------------------------------
 # Dependency management
 # ---------------------------------------------------------------------------
+
 
 class CEMDependencyError(ImportError):
     """Raised when the optional official CEM dependencies are unavailable."""
@@ -119,6 +121,7 @@ def require_cem_dependencies(
 # Prediction cache
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _PredictionCache:
     dataset_id: int | None
@@ -143,10 +146,14 @@ def _slice_prediction_cache(
         concept_probs=cache.concept_probs[row_indices],
         label_probs=cache.label_probs[row_indices],
         pos_embeddings=(
-            None if cache.pos_embeddings is None else cache.pos_embeddings.index_select(0, tensor_index)
+            None
+            if cache.pos_embeddings is None
+            else cache.pos_embeddings.index_select(0, tensor_index)
         ),
         neg_embeddings=(
-            None if cache.neg_embeddings is None else cache.neg_embeddings.index_select(0, tensor_index)
+            None
+            if cache.neg_embeddings is None
+            else cache.neg_embeddings.index_select(0, tensor_index)
         ),
         probcbm_pred_embeddings=(
             None
@@ -179,6 +186,7 @@ def _slice_prediction_cache(
 # ---------------------------------------------------------------------------
 # Tensor helpers
 # ---------------------------------------------------------------------------
+
 
 def _to_float_tensor(value: Any) -> torch.Tensor:
     if isinstance(value, torch.Tensor):
@@ -269,6 +277,7 @@ def _prepare_batch_labels(batch_y: Any, *, device: torch.device) -> torch.Tensor
 # Data adapter
 # ---------------------------------------------------------------------------
 
+
 class CEMSampleAdapterDataset(Dataset):
     """Thin wrapper that reorders benchmark samples from `(x, c, y)` to `(x, y, c)`."""
 
@@ -313,6 +322,7 @@ def make_cem_loader(
 # Backbones
 # ---------------------------------------------------------------------------
 
+
 class ViTImageBackbone(nn.Module):
     """Pretrained ViT backbone for image-based concept benchmarks."""
 
@@ -323,7 +333,11 @@ class ViTImageBackbone(nn.Module):
         self.vit = ViTModel.from_pretrained("google/vit-base-patch16-224")
         if freeze_backbone:
             for name, p in self.vit.named_parameters():
-                if "encoder.layer.10" not in name and "encoder.layer.11" not in name and "layernorm" not in name:
+                if (
+                    "encoder.layer.10" not in name
+                    and "encoder.layer.11" not in name
+                    and "layernorm" not in name
+                ):
                     p.requires_grad = False
         self.proj = nn.Linear(768, output_dim)
 
@@ -391,7 +405,9 @@ class SudokuTabularBackbone(nn.Module):
     _NUM_DIGITS = 10
     _N_GROUPS = 27
 
-    def __init__(self, *, output_dim: int, embedding_dim: int = 16, hidden_dim: int = 64) -> None:
+    def __init__(
+        self, *, output_dim: int, embedding_dim: int = 16, hidden_dim: int = 64
+    ) -> None:
         super().__init__()
         self.embedding = nn.Linear(self._NUM_DIGITS, embedding_dim, bias=False)
         self.group_head = nn.Sequential(
@@ -429,6 +445,7 @@ class SudokuTabularBackbone(nn.Module):
 # Backbone inference
 # ---------------------------------------------------------------------------
 
+
 def _default_cem_output_dim(config: Any | None) -> int:
     emb_size = int(getattr(config, "cem_emb_size", 16))
     return max(64, emb_size * 8)
@@ -445,13 +462,22 @@ def _infer_backbone_spec(
     if benchmark == "sudoku":
         use_vit = getattr(config, "use_vit_backbone", False) if config else False
         if use_vit or data_type == "image":
-            return {"kind": "vit_image", "default_output_dim": _default_cem_output_dim(config)}
-        return {"kind": "sudoku_tabular", "default_output_dim": _default_cem_output_dim(config)}
+            return {
+                "kind": "vit_image",
+                "default_output_dim": _default_cem_output_dim(config),
+            }
+        return {
+            "kind": "sudoku_tabular",
+            "default_output_dim": _default_cem_output_dim(config),
+        }
 
     if data_type == "image":
         use_vit = getattr(config, "use_vit_backbone", False) if config else False
         if use_vit:
-            return {"kind": "vit_image", "default_output_dim": _default_cem_output_dim(config)}
+            return {
+                "kind": "vit_image",
+                "default_output_dim": _default_cem_output_dim(config),
+            }
         input_size = int(sample.meta.get("resolution", 32))
         try:
             x0, _, _ = sample[0]
@@ -504,6 +530,7 @@ def _make_backbone_factory(backbone_spec: dict[str, Any]):
 # PyTorch Lightning helpers
 # ---------------------------------------------------------------------------
 
+
 def _device_to_pl_args(device: torch.device) -> dict[str, Any]:
     if device.type == "cuda":
         return {"accelerator": "gpu", "devices": 1}
@@ -549,6 +576,7 @@ def _build_trainer(
 # Config resolution helpers
 # ---------------------------------------------------------------------------
 
+
 def _resolve_loader_config(
     *,
     batch_size: int,
@@ -559,10 +587,10 @@ def _resolve_loader_config(
     defaults = get_loader_config()
     return {
         "batch_size": int(batch_size),
-        "num_workers": int(defaults["num_workers"] if num_workers is None else num_workers),
-        "pin_memory": bool(
-            defaults["pin_memory"] if pin_memory is None else pin_memory
-        )
+        "num_workers": int(
+            defaults["num_workers"] if num_workers is None else num_workers
+        ),
+        "pin_memory": bool(defaults["pin_memory"] if pin_memory is None else pin_memory)
         and device.type == "cuda",
         "device": str(device),
     }
@@ -591,6 +619,7 @@ def _resolve_learning_rate(config: Any) -> float:
 # ---------------------------------------------------------------------------
 # Base class and adapters
 # ---------------------------------------------------------------------------
+
 
 class _OfficialConceptDetectorAdapter(ConceptDetector):
     def __init__(self, owner: _OfficialBenchmarkModelBase) -> None:
@@ -685,7 +714,9 @@ class _OfficialBenchmarkModelBase(ConceptBasedModel):
     def _loader_kwargs(self) -> dict[str, Any]:
         defaults = get_loader_config()
         return {
-            "batch_size": int(self.eval_config.get("batch_size", defaults["batch_size"])),
+            "batch_size": int(
+                self.eval_config.get("batch_size", defaults["batch_size"])
+            ),
             "num_workers": int(
                 self.eval_config.get("num_workers", defaults["num_workers"])
             ),
@@ -774,7 +805,9 @@ class _OfficialBenchmarkModelBase(ConceptBasedModel):
                         f"shape, got {baseline_candidate.shape} and expected "
                         f"{cache.concept_probs.shape}."
                     )
-                if not np.allclose(baseline_candidate, cache.concept_probs, atol=1e-6, rtol=1e-6):
+                if not np.allclose(
+                    baseline_candidate, cache.concept_probs, atol=1e-6, rtol=1e-6
+                ):
                     raise ValueError(
                         "baseline_concepts must align with the cached dataset rows in their "
                         "original order. Pass dataset=... to refresh the cache or pass explicit "
@@ -845,8 +878,7 @@ class _OfficialBenchmarkModelBase(ConceptBasedModel):
     def _serialize_common_state(self) -> dict[str, Any]:
         model = self._require_official_model()
         state_dict = {
-            key: value.detach().cpu()
-            for key, value in model.state_dict().items()
+            key: value.detach().cpu() for key, value in model.state_dict().items()
         }
         return {
             "version": 1,
@@ -906,17 +938,25 @@ class _OfficialBenchmarkModelBase(ConceptBasedModel):
         )
 
     def _run_official_model(
-        self, dataset: ConceptDatasetSample,
+        self,
+        dataset: ConceptDatasetSample,
     ) -> tuple[np.ndarray, np.ndarray, _PredictionCache]:
         raise NotImplementedError
 
     def _predict_from_cached_concepts(
-        self, concepts: np.ndarray, cache: _PredictionCache, *,
-        baseline_concepts: np.ndarray, intervention_mask: np.ndarray | None,
+        self,
+        concepts: np.ndarray,
+        cache: _PredictionCache,
+        *,
+        baseline_concepts: np.ndarray,
+        intervention_mask: np.ndarray | None,
     ) -> np.ndarray:
         raise NotImplementedError
 
     def _rebuild_model(
-        self, *, model_init_kwargs: dict[str, Any], backbone_spec: dict[str, Any],
+        self,
+        *,
+        model_init_kwargs: dict[str, Any],
+        backbone_spec: dict[str, Any],
     ) -> Any:
         raise NotImplementedError

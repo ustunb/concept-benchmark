@@ -144,7 +144,7 @@ for k in [1, 3]:
     result = runner.run(
         strategy=KFlipInterventionStrategy(),
         config=InterventionConfig(
-            max_concepts_per_instance=k,
+            per_instance_budget=k,
             score_threshold=0.2,
         ),
         dataset=test,
@@ -161,7 +161,7 @@ my_concept_probs = my_model.predict_concepts(test.X)  # your own call
 
 result = runner.run(
     strategy=KFlipInterventionStrategy(),
-    config=InterventionConfig(max_concepts_per_instance=3, score_threshold=0.2),
+    config=InterventionConfig(per_instance_budget=3, score_threshold=0.2),
     dataset=test,
     concept_proba=my_concept_probs,  # bypasses the concept detector
 )
@@ -173,7 +173,7 @@ The runner uses `dataset.base_concepts` (clean concepts before noise) for ground
 ```python
 result = runner.run(
     strategy=KFlipInterventionStrategy(),
-    config=InterventionConfig(max_concepts_per_instance=3, score_threshold=0.2),
+    config=InterventionConfig(per_instance_budget=3, score_threshold=0.2),
     dataset=test,
     concept_true=my_ground_truth_concepts,  # override ground truth
 )

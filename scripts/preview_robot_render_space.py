@@ -16,7 +16,10 @@ if str(REPO_ROOT) not in sys.path:
 
 from concept_benchmark.config import ROBOT_CONCEPTS
 from concept_benchmark.synthetic.robot.catalog import build_robot_instance_catalog
-from concept_benchmark.synthetic.robot.draw import draw_robot, render_state_from_metadata
+from concept_benchmark.synthetic.robot.draw import (
+    draw_robot,
+    render_state_from_metadata,
+)
 
 
 SINGLE_SEMANTIC = {k: v[:1] for k, v in ROBOT_CONCEPTS.items()}
@@ -175,7 +178,11 @@ def main() -> None:
         title="Legacy vs. continuous render state",
         resolution=args.resolution,
         cols=2,
-        caption_fields=("render_space_mode", "accepted_render_space_mode", "pose_descriptor"),
+        caption_fields=(
+            "render_space_mode",
+            "accepted_render_space_mode",
+            "pose_descriptor",
+        ),
     )
     compare_path = args.output_dir / "legacy_vs_continuous.png"
     compare.save(compare_path)

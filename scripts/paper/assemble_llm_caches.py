@@ -57,9 +57,15 @@ def main() -> None:
         for s in SOURCE_SEEDS:
             t = tests[s]
             n = len(build_concept_lists(t["true_names"], t["human_names"])[cache])
-            rows = read_rows(INSTALLED / f"robot__concepts-{tag}__{VARIANT}__seed-{s}__llm-votes.jsonl", n)
+            rows = read_rows(
+                INSTALLED
+                / f"robot__concepts-{tag}__{VARIANT}__seed-{s}__llm-votes.jsonl",
+                n,
+            )
             if len(rows) != len(t["inputs"]):
-                raise SystemExit(f"{cache} seed {s}: installed cache has {len(rows)} rows, expected {len(t['inputs'])}")
+                raise SystemExit(
+                    f"{cache} seed {s}: installed cache has {len(rows)} rows, expected {len(t['inputs'])}"
+                )
             for i, votes in rows.items():
                 img = t["inputs"][i]
                 if img in answers:
@@ -67,24 +73,44 @@ def main() -> None:
                     disagree += answers[img] != votes
                 else:
                     answers[img] = votes
-        print(f"{cache:5}: {len(answers)} images answered in seeds 1014-1017; same image answered twice: {overlap}, "
-              f"of which differently: {disagree}", flush=True)
+        print(
+            f"{cache:5}: {len(answers)} images answered in seeds 1014-1017; same image answered twice: {overlap}, "
+            f"of which differently: {disagree}",
+            flush=True,
+        )
         for s in args.seeds:
             t = tests[s]
             concepts = build_concept_lists(t["true_names"], t["human_names"])[cache]
-            path = args.out_dir / f"llm_interventions_{sha1_names([c for c, _ in concepts])}_{t['dsig']}.jsonl"
-            fresh = read_rows(path, len(concepts))  # rows from the stopped build, used only where nothing else exists
+            path = (
+                args.out_dir
+                / f"llm_interventions_{sha1_names([c for c, _ in concepts])}_{t['dsig']}.jsonl"
+            )
+            fresh = read_rows(
+                path, len(concepts)
+            )  # rows from the stopped build, used only where nothing else exists
             out, reused, kept = [], 0, 0
             for i, img in enumerate(t["inputs"]):
                 if img in answers:
-                    out.append((i, answers[img])); reused += 1
+                    out.append((i, answers[img]))
+                    reused += 1
                 elif i in fresh:
-                    out.append((i, fresh[i])); kept += 1
+                    out.append((i, fresh[i]))
+                    kept += 1
             with path.open("w") as fh:
                 for i, votes in out:
-                    fh.write(json.dumps({"i": i, "votes_idx": {str(j): v for j, v in enumerate(votes)}}) + "\n")
-            print(f"  seed {s}: reused {reused}, kept {kept} new answers, still to ask {len(t['inputs']) - len(out)}",
-                  flush=True)
+                    fh.write(
+                        json.dumps(
+                            {
+                                "i": i,
+                                "votes_idx": {str(j): v for j, v in enumerate(votes)},
+                            }
+                        )
+                        + "\n"
+                    )
+            print(
+                f"  seed {s}: reused {reused}, kept {kept} new answers, still to ask {len(t['inputs']) - len(out)}",
+                flush=True,
+            )
 
 
 if __name__ == "__main__":

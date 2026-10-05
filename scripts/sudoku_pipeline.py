@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import math
 import platform
 from pathlib import Path
 
@@ -31,7 +32,11 @@ from concept_benchmark.utils import (
 )
 from concept_benchmark.config import SudokuBenchmarkConfig
 from concept_benchmark.ext.fileutils import load, save
-from experiments.cem_integration import train_cem_model, train_ecbm_model, train_probcbm_model
+from experiments.cem_integration import (
+    train_cem_model,
+    train_ecbm_model,
+    train_probcbm_model,
+)
 from experiments.models import (
     ConceptBasedModel,
     ConceptDetector,
@@ -123,7 +128,11 @@ def train_cs(
     model_key = _selected_cs_key(config)
     if model_key != "cs":
         loader_config = get_loader_config()
-        trainer_fn = {"cem": train_cem_model, "probcbm": train_probcbm_model, "ecbm": train_ecbm_model}[model_key]
+        trainer_fn = {
+            "cem": train_cem_model,
+            "probcbm": train_probcbm_model,
+            "ecbm": train_ecbm_model,
+        }[model_key]
         model = trainer_fn(
             train_dataset=data.train,
             valid_dataset=data.validation,
@@ -135,7 +144,9 @@ def train_cs(
         )
         test_pred = model.predict(data.test)
         logger.info("Test Accuracy: %s", np.mean(test_pred == data.test.y))
-        save(model, config.get_model_path(model_key, data_type="tabular"), overwrite=True)
+        save(
+            model, config.get_model_path(model_key, data_type="tabular"), overwrite=True
+        )
         return model
 
     if data is None:
@@ -155,6 +166,7 @@ def train_cs(
     use_vit = getattr(config, "use_vit_backbone", False)
     if use_vit:
         from experiments.models import RobotViTConceptClassifier
+
         n_concepts = data.train.n_concepts
         concept_model = RobotViTConceptClassifier(num_concepts=n_concepts)
         cd = ConceptDetector(model=concept_model)
@@ -176,6 +188,7 @@ def train_cs(
         from experiments.models import (
             GroupPoolingConceptSudokuCNN as SudokuConceptModel,
         )
+
         model = SudokuConceptModel()
         cd = ConceptDetector(model=model)
         cbm = ConceptBasedModel(concept_detector=cd, should_propagate=True)
@@ -226,21 +239,33 @@ def train_dnn(
     use_vit = getattr(config, "use_vit_backbone", False)
     if use_vit:
         from transformers import ViTModel
+
         class ViTDNN(nn.Module):
             def __init__(self):
                 super().__init__()
                 self.vit = ViTModel.from_pretrained("google/vit-base-patch16-224")
                 for name, p in self.vit.named_parameters():
-                    if "encoder.layer.10" not in name and "encoder.layer.11" not in name and "layernorm" not in name:
+                    if (
+                        "encoder.layer.10" not in name
+                        and "encoder.layer.11" not in name
+                        and "layernorm" not in name
+                    ):
                         p.requires_grad = False
                 self.head = nn.Sequential(nn.Linear(768, 1))
+
             def forward(self, x):
-                return torch.sigmoid(self.head(self.vit(pixel_values=x).last_hidden_state[:, 0, :]))
+                return torch.sigmoid(
+                    self.head(self.vit(pixel_values=x).last_hidden_state[:, 0, :])
+                )
+
         model = ViTDNN()
         criterion = nn.BCELoss()
-        optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=5e-5)
+        optimizer = torch.optim.AdamW(
+            filter(lambda p: p.requires_grad, model.parameters()), lr=5e-5
+        )
     else:
         from experiments.models import SudokuValidatorCNN as DNNSudokuModel
+
         model = DNNSudokuModel()
         criterion = nn.BCELoss()
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
@@ -310,7 +335,9 @@ def train_dnn(
 # ── Stage: diagnose ───────────────────────────────────────────────────
 
 
-def diagnose_confidence(config: SudokuBenchmarkConfig, cs_model: ConceptBasedModel | None = None, data=None) -> Path:
+def diagnose_confidence(
+    config: SudokuBenchmarkConfig, cs_model: ConceptBasedModel | None = None, data=None
+) -> Path:
     """Save what a model's confidence looks like, for diagnostics of selective classification.
 
     Writes ``<results>/sudoku_<model>_confidence_..._seed<seed>.npz`` with, for the validation and test boards:
@@ -321,12 +348,19 @@ def diagnose_confidence(config: SudokuBenchmarkConfig, cs_model: ConceptBasedMod
     """
     if data is None:
         if config.data_type == "image":
-            data = load(config.get_dataset_path(data_type="image") / "ocr_inferred_full_dataset.pkl")
+            data = load(
+                config.get_dataset_path(data_type="image")
+                / "ocr_inferred_full_dataset.pkl"
+            )
         else:
-            data = load(config.get_dataset_path(data_type="tabular") / "sudoku_dataset.pkl")
+            data = load(
+                config.get_dataset_path(data_type="tabular") / "sudoku_dataset.pkl"
+            )
         data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
     if cs_model is None:
-        cs_model = load(config.get_model_path(_selected_cs_key(config), data_type="tabular"))
+        cs_model = load(
+            config.get_model_path(_selected_cs_key(config), data_type="tabular")
+        )
         cs_model._random_state = config.seed
 
     saved = {}
@@ -335,18 +369,37 @@ def diagnose_confidence(config: SudokuBenchmarkConfig, cs_model: ConceptBasedMod
         saved[f"p_{name}"] = np.asarray(prob_pos, dtype=np.float64)
         saved[f"y_{name}"] = np.asarray(y_true).astype(int)
         saved[f"C_{name}"] = np.asarray(split.C).astype(int)
-        saved[f"Cp_{name}"] = np.asarray(cs_model.concept_detector.predict_proba(split), dtype=np.float32)
+        saved[f"Cp_{name}"] = np.asarray(
+            cs_model.concept_detector.predict_proba(split), dtype=np.float32
+        )
 
-    runner, strategy = ConceptInterventionRunner(cs_model), ConceptualSafeguardsStrategy()
-    everything = dict(abstention_threshold=0.0, random_state=config.seed)  # band [0, 1]: every board is deferred
-    before = runner.run(strategy, InterventionConfig(per_instance_budget=0, **everything), data.test)
-    after = runner.run(strategy, InterventionConfig(per_instance_budget=data.n_concepts, **everything), data.test,
-                       y_prob_baseline=before.y_prob_after)
+    runner, strategy = (
+        ConceptInterventionRunner(cs_model),
+        ConceptualSafeguardsStrategy(),
+    )
+    everything = dict(
+        abstention_threshold=0.0, random_state=config.seed
+    )  # band [0, 1]: every board is deferred
+    before = runner.run(
+        strategy, InterventionConfig(per_instance_budget=0, **everything), data.test
+    )
+    after = runner.run(
+        strategy,
+        InterventionConfig(per_instance_budget=data.n_concepts, **everything),
+        data.test,
+        y_prob_baseline=before.y_prob_after,
+    )
     if not np.asarray(after.mask, dtype=bool).all():
-        raise RuntimeError("expected every concept of every test board to be intervened on")
-    saved["p_test_true_concepts"] = np.asarray(after.y_prob_after[:, 1], dtype=np.float64)
+        raise RuntimeError(
+            "expected every concept of every test board to be intervened on"
+        )
+    saved["p_test_true_concepts"] = np.asarray(
+        after.y_prob_after[:, 1], dtype=np.float64
+    )
 
-    path = config.get_results_path(f"{_selected_cs_key(config)}_confidence", data_type="tabular").with_suffix(".npz")
+    path = config.get_results_path(
+        f"{_selected_cs_key(config)}_confidence", data_type="tabular"
+    ).with_suffix(".npz")
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(path, **saved)
     logger.info("Saved confidence diagnostics to %s", path)
@@ -378,7 +431,9 @@ def run_interventions(
         data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
     if cs_model is None:
-        cs_model = load(config.get_model_path(_selected_cs_key(config), data_type="tabular"))
+        cs_model = load(
+            config.get_model_path(_selected_cs_key(config), data_type="tabular")
+        )
         cs_model._random_state = config.seed
 
     # Find selective accuracy threshold on validation set
@@ -392,22 +447,44 @@ def run_interventions(
         logger.warning(
             "Model %s cannot reach target selective accuracy %.2f; "
             "reporting raw accuracy with no interventions.",
-            _selected_cs_key(config), config.target_accuracy,
+            _selected_cs_key(config),
+            config.target_accuracy,
         )
         cs_test_probs, cs_test_y = _cs_val_probs(cs_model, data.test)
-        raw_acc = float((cs_test_y.astype(int) == (cs_test_probs >= decision_threshold).astype(int)).mean())
+        raw_acc = float(
+            (
+                cs_test_y.astype(int)
+                == (cs_test_probs >= decision_threshold).astype(int)
+            ).mean()
+        )
         logger.info("  Raw test accuracy: %.4f", raw_acc)
-        budgets = [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
-        rows = [{"budget": b, "accuracy": raw_acc, "predictions_intervened_on": 0,
-                 "total_concept_checks": 0, "row_checks": 0, "col_checks": 0, "block_checks": 0, "total_concept_edits_made": 0,
-                 "selective_accuracy_after": float("nan"), "coverage_after": 0.0}
-                for b in [0] + budgets]
+        budgets = [
+            data.n_concepts if b == -1 else b for b in config.intervention_budgets
+        ]
+        rows = [
+            {
+                "budget": b,
+                "accuracy": raw_acc,
+                "predictions_intervened_on": 0,
+                "total_concept_checks": 0,
+                "row_checks": 0,
+                "col_checks": 0,
+                "block_checks": 0,
+                "total_concept_edits_made": 0,
+                "selective_accuracy_after": float("nan"),
+                "coverage_after": 0.0,
+            }
+            for b in [0] + budgets
+        ]
         cs_intervention_df = pd.DataFrame(rows)
         results_key = (
             f"{_selected_cs_key(config)}_interventions"
-            if _selected_cs_key(config) != "cs" else "interventions"
+            if _selected_cs_key(config) != "cs"
+            else "interventions"
         )
-        csv_path = config.get_results_path(results_key, data_type="tabular").with_suffix(".csv")
+        csv_path = config.get_results_path(
+            results_key, data_type="tabular"
+        ).with_suffix(".csv")
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         cs_intervention_df.to_csv(csv_path, index=False)
         return cs_intervention_df
@@ -445,7 +522,10 @@ def run_interventions(
         "budget": 0,
         "accuracy": float((result_k0.y_pred_after == data.test.y).mean()),
         "predictions_intervened_on": 0,
-        "total_concept_checks": 0, "row_checks": 0, "col_checks": 0, "block_checks": 0,
+        "total_concept_checks": 0,
+        "row_checks": 0,
+        "col_checks": 0,
+        "block_checks": 0,
         "total_concept_edits_made": 0,
         "selective_accuracy_after": k0_sel_acc,
         "coverage_after": k0_cov,
@@ -462,11 +542,15 @@ def run_interventions(
             random_state=config.seed,
         )
         val_result = cs_runner.run(
-            cs_strategy, interv_cfg, data.validation,
+            cs_strategy,
+            interv_cfg,
+            data.validation,
             y_prob_baseline=y_prob_baseline_val,
         )
         dt_k, _ = _decision_threshold_sweep(val_y, val_result.y_prob_after[:, 1])
-        result = cs_runner.run(cs_strategy, interv_cfg, data.test, y_prob_baseline=y_prob_baseline)
+        result = cs_runner.run(
+            cs_strategy, interv_cfg, data.test, y_prob_baseline=y_prob_baseline
+        )
         acc_intervened = float((result.y_pred_after == data.test.y).mean())
         predictions_intervened_on = int(np.sum(np.any(result.mask, axis=1)))
         total_concept_checks = int(np.sum(result.mask))
@@ -539,7 +623,9 @@ def align(
         data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
     if cs_model is None:
-        cs_model = load(config.get_model_path(_selected_cs_key(config), data_type="tabular"))
+        cs_model = load(
+            config.get_model_path(_selected_cs_key(config), data_type="tabular")
+        )
 
     from experiments.alignment import test_alignment
 
@@ -610,26 +696,25 @@ def collect_results(
             model_df = sel_df[
                 (sel_df["model"] == "dnn") & (sel_df["target_accuracy"] == target)
             ]
-            if model_df.empty:
-                continue
-            r = model_df.iloc[0]
-            sel_acc = r["selective_acc"]
-            rows.append(
-                {
-                    "dataset": label,
-                    "model": "dnn",
-                    "budget": "",
-                    "target_accuracy": target,
-                    "raw_test_acc": round(float(r["raw_test_acc"]), 4),
-                    "selective_acc": round(float(sel_acc), 4)
-                    if pd.notna(sel_acc)
-                    else "",
-                    "selective_cov": round(float(r["selective_cov"]), 4),
-                    "predictions_intervened_on": "",
-                    "avg_concepts_per_sample": "",
-                    "predictions_changed": "",
-                }
-            )
+            if not model_df.empty:
+                r = model_df.iloc[0]
+                sel_acc = r["selective_acc"]
+                rows.append(
+                    {
+                        "dataset": label,
+                        "model": "dnn",
+                        "budget": "",
+                        "target_accuracy": target,
+                        "raw_test_acc": round(float(r["raw_test_acc"]), 4),
+                        "selective_acc": round(float(sel_acc), 4)
+                        if pd.notna(sel_acc)
+                        else "",
+                        "selective_cov": round(float(r["selective_cov"]), 4),
+                        "predictions_intervened_on": "",
+                        "avg_concepts_per_sample": "",
+                        "predictions_changed": "",
+                    }
+                )
 
         # ── Intervention CSV: CS at k > 0 ────────────────────────────
         interv_csv = cfg.get_results_path(
@@ -727,7 +812,15 @@ def run(
         ]
 
     # Early validation: check that dataset directory exists if we need it
-    _needs_data = {"cs", "dnn", "intervene", "diagnose", "selective", "align", "collect"}
+    _needs_data = {
+        "cs",
+        "dnn",
+        "intervene",
+        "diagnose",
+        "selective",
+        "align",
+        "collect",
+    }
     if _needs_data & set(stages) and "setup" not in stages:
         tab_dir = config.get_dataset_path(data_type="tabular")
         ds_path = tab_dir / "sudoku_dataset.pkl"
@@ -936,8 +1029,11 @@ def _classwise_accuracy_thresholds(
         return best
 
     t_pos = fit(prob_pos[positive], y_true[positive] == 1) if positive.any() else None
-    conf_neg = fit(1.0 - prob_pos[~positive], y_true[~positive] == 0) if (~positive).any() else None
-    return t_pos, (None if conf_neg is None else 1.0 - conf_neg)
+    # negatives are fitted on -p, so that the threshold is one of the probabilities themselves
+    t_neg = (
+        fit(-prob_pos[~positive], y_true[~positive] == 0) if (~positive).any() else None
+    )
+    return t_pos, (None if t_neg is None else -t_neg)
 
 
 def _selective_at_classwise_thresholds(y_true, prob_pos, t_pos, t_neg, decision_t):
@@ -952,7 +1048,9 @@ def _selective_at_classwise_thresholds(y_true, prob_pos, t_pos, t_neg, decision_
         covered |= ~positive & (prob_pos <= t_neg)
     if not covered.any():
         return float("nan"), 0.0
-    return float((positive[covered].astype(int) == y_true[covered]).mean()), float(covered.mean())
+    return float((positive[covered].astype(int) == y_true[covered]).mean()), float(
+        covered.mean()
+    )
 
 
 def _decision_threshold_sweep(
@@ -1131,7 +1229,9 @@ def compute_selective_results(
 
     # ---- CS selective metrics ----
     if cs_model is None:
-        cs_model = load(config.get_model_path(_selected_cs_key(config), data_type="tabular"))
+        cs_model = load(
+            config.get_model_path(_selected_cs_key(config), data_type="tabular")
+        )
         cs_model._random_state = config.seed
 
     cs_val_probs, cs_val_y = _cs_val_probs(cs_model, data.validation)
@@ -1178,7 +1278,11 @@ def _plot_results(config) -> None:
     """Generate figures from collected results."""
     import matplotlib.pyplot as plt
 
-    from concept_benchmark.evaluation.plots import plot_automation, plot_confidence, plot_selective_classification
+    from concept_benchmark.evaluation.plots import (
+        plot_automation,
+        plot_confidence,
+        plot_selective_classification,
+    )
     from concept_benchmark.paths import results_dir
 
     out_dir = results_dir / "figures"
@@ -1190,7 +1294,9 @@ def _plot_results(config) -> None:
         logger.info("Saved %s", out_dir / name)
 
     dnn_coverage = None
-    collect_candidates = sorted(results_dir.glob(f"sudoku_seed{config.seed}_*_results.csv"))
+    collect_candidates = sorted(
+        results_dir.glob(f"sudoku_seed{config.seed}_*_results.csv")
+    )
     if collect_candidates:
         df = pd.read_csv(collect_candidates[-1])
         dnn_row = df[df["model"] == "dnn"]
@@ -1211,19 +1317,34 @@ def _plot_results(config) -> None:
     key = _selected_cs_key(config)
     side = config.block_size**2
     results_key = f"{key}_interventions" if key != "cs" else "interventions"
-    interventions_path = config.get_results_path(results_key, data_type="tabular").with_suffix(".csv")
-    interventions = pd.read_csv(interventions_path) if interventions_path.exists() else None
+    interventions_path = config.get_results_path(
+        results_key, data_type="tabular"
+    ).with_suffix(".csv")
+    interventions = (
+        pd.read_csv(interventions_path) if interventions_path.exists() else None
+    )
     if interventions is not None and "coverage_after" in interventions.columns:
-        n_test = int(config.n_boards * 0.2)
+        n_test = math.ceil(config.n_boards * 0.2)
         fig, _ = plot_automation(
-            interventions, n_instances=n_test, n_concepts=3 * side, baseline_coverage=dnn_coverage
+            interventions,
+            n_instances=n_test,
+            n_concepts=3 * side,
+            baseline_coverage=dnn_coverage,
         )
         save(fig, f"sudoku_{key}_automation.png")
 
-    confidence_path = config.get_results_path(f"{key}_confidence", data_type="tabular").with_suffix(".npz")
-    if confidence_path.exists() and interventions is not None and "abstention_threshold" in interventions.columns:
+    confidence_path = config.get_results_path(
+        f"{key}_confidence", data_type="tabular"
+    ).with_suffix(".npz")
+    if (
+        confidence_path.exists()
+        and interventions is not None
+        and "abstention_threshold" in interventions.columns
+    ):
         saved = np.load(confidence_path)
-        threshold = float(interventions.sort_values("budget")["abstention_threshold"].iloc[0])
+        threshold = float(
+            interventions.sort_values("budget")["abstention_threshold"].iloc[0]
+        )
         fig, _ = plot_confidence(saved["p_test"], saved["y_test"], threshold)
         save(fig, f"sudoku_{key}_confidence.png")
 
@@ -1269,15 +1390,24 @@ def _parse_args(argv=None):
         "--data-type", type=str, default=None, choices=["tabular", "image"]
     )
     parser.add_argument(
-        "--cbm-family", type=str, default="cbm",
+        "--cbm-family",
+        type=str,
+        default="cbm",
         choices=["cbm", "cem", "probcbm", "ecbm"],
     )
-    parser.add_argument("--direct-image", action="store_true",
-                        help="Use ViT backbone directly on board images (no OCR)")
+    parser.add_argument(
+        "--direct-image",
+        action="store_true",
+        help="Use ViT backbone directly on board images (no OCR)",
+    )
     parser.add_argument("--handwriting", action="store_true", default=None)
     parser.add_argument("--no-handwriting", action="store_true")
-    parser.add_argument("--cell-px", type=int, default=None,
-                        help="Pixels per cell for OCR rendering (default: 50)")
+    parser.add_argument(
+        "--cell-px",
+        type=int,
+        default=None,
+        help="Pixels per cell for OCR rendering (default: 50)",
+    )
     parser.add_argument("--force-setup", action="store_true")
     return parser.parse_args(argv)
 

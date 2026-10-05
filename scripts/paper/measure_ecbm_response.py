@@ -43,7 +43,9 @@ def find_ecbm(obj, seen=None):
 def measure(seed: int, root: Path) -> list[dict]:
     res = root / f"run_ecbm_s{seed}" / "results"
     data = load(res / f"robot_image_4_ideal_seed{seed}.data")
-    model = load(res / f"robot_image_stochastic_4_ideal_ecbm_seed{seed}_labels12345.model")
+    model = load(
+        res / f"robot_image_stochastic_4_ideal_ecbm_seed{seed}_labels12345.model"
+    )
     model = find_ecbm(model)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.eval_config["device"] = str(device)
@@ -57,23 +59,62 @@ def measure(seed: int, root: Path) -> list[dict]:
     logits = cache.ecbm_concept_logits.to(device)
     bs = model._inference_batch_size()
     acc = lambda p: round(float((p == y).mean()), 4)
-    rows = [{"seed": seed, "measure": "usual_prediction", "m": 0, "value": acc(proba.argmax(1))}]
+    rows = [
+        {
+            "seed": seed,
+            "measure": "usual_prediction",
+            "m": 0,
+            "value": acc(proba.argmax(1)),
+        }
+    ]
     with torch.no_grad():
-        xy, _, _ = net.training_energies(feats, torch.as_tensor(truth, device=device), augment=False)
-    rows.append({"seed": seed, "measure": "image_to_label_only", "m": 0, "value": acc(xy.argmin(1).cpu().numpy())})
+        xy, _, _ = net.training_energies(
+            feats, torch.as_tensor(truth, device=device), augment=False
+        )
+    rows.append(
+        {
+            "seed": seed,
+            "measure": "image_to_label_only",
+            "m": 0,
+            "value": acc(xy.argmin(1).cpu().numpy()),
+        }
+    )
     for j, name in enumerate(test.concepts):
         t = truth[:, j] >= 0.5
-        rows.append({"seed": seed, "measure": f"detection_acc:{name}", "m": "", "value": round(float(((c_prob[:, j] >= 0.5) == t).mean()), 4)})
-        rows.append({"seed": seed, "measure": f"detection_auc:{name}", "m": "", "value": round(float(roc_auc_score(t, c_prob[:, j])), 4)})
+        rows.append(
+            {
+                "seed": seed,
+                "measure": f"detection_acc:{name}",
+                "m": "",
+                "value": round(float(((c_prob[:, j] >= 0.5) == t).mean()), 4),
+            }
+        )
+        rows.append(
+            {
+                "seed": seed,
+                "measure": f"detection_auc:{name}",
+                "m": "",
+                "value": round(float(roc_auc_score(t, c_prob[:, j])), 4),
+            }
+        )
     n, c = truth.shape
     order = np.argsort(np.random.default_rng(0).random((n, c)), axis=1)
     t_truth = torch.as_tensor(truth, device=device)
     for m in range(c + 1):
         mask = np.zeros((n, c), dtype=bool)
         np.put_along_axis(mask, order[:, :m], True, axis=1)
-        y_logits = e._intervene(net, feats, logits, t_truth, torch.as_tensor(mask, device=device), bs)
+        y_logits = e._intervene(
+            net, feats, logits, t_truth, torch.as_tensor(mask, device=device), bs
+        )
         name = "switch_only" if m == 0 else "intervene_random"
-        rows.append({"seed": seed, "measure": name, "m": m, "value": acc(y_logits.argmax(1).cpu().numpy())})
+        rows.append(
+            {
+                "seed": seed,
+                "measure": name,
+                "m": m,
+                "value": acc(y_logits.argmax(1).cpu().numpy()),
+            }
+        )
     return rows
 
 
@@ -88,7 +129,10 @@ def main() -> None:
         r = measure(seed, args.root)
         rows += r
         for x in r:
-            print(f"seed {seed}  {x['measure']:28} m={x['m']!s:2}  {x['value']}", flush=True)
+            print(
+                f"seed {seed}  {x['measure']:28} m={x['m']!s:2}  {x['value']}",
+                flush=True,
+            )
     with args.out.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=list(rows[0]))
         w.writeheader()

@@ -54,8 +54,12 @@ def read_budget_rows(path: Path) -> list[dict[str, str]]:
 def compile_tex(tex_path: Path, passes: int = 1) -> Path:
     """Compile a standalone .tex file with pdflatex, remove its .aux and .log files and return the PDF path."""
     for _ in range(passes):
-        result = subprocess.run(["pdflatex", "-interaction=nonstopmode", "-halt-on-error", tex_path.name],
-                                cwd=tex_path.parent, capture_output=True, text=True)
+        result = subprocess.run(
+            ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", tex_path.name],
+            cwd=tex_path.parent,
+            capture_output=True,
+            text=True,
+        )
         if result.returncode != 0:
             raise SystemExit(result.stdout[-2500:])
     for ext in (".aux", ".log"):

@@ -79,3 +79,31 @@ def test_classwise_thresholds_return_none_for_a_side_that_cannot_reach_the_targe
         sudoku_pipeline._selective_at_classwise_thresholds(y, p, t_pos, t_neg, 0.5)[1]
         == 0.0
     )
+
+
+def test_classwise_threshold_keeps_the_predictions_it_was_fitted_on():
+    # 1 - (1 - 0.1) is not 0.1 in floating point: the threshold must be the probability itself
+    y = np.array([0, 0, 0, 0, 0, 1])
+    p = np.array([0.1, 0.1, 0.1, 0.1, 0.1, 0.4])
+    t_pos, t_neg = sudoku_pipeline._classwise_accuracy_thresholds(y, p, target_acc=1.0)
+    accuracy, coverage = sudoku_pipeline._selective_at_classwise_thresholds(
+        y, p, t_pos, t_neg, 0.5
+    )
+    assert t_neg == 0.1
+    assert accuracy == 1.0
+    assert coverage == pytest.approx(5 / 6)
+
+
+def test_classwise_fit_and_evaluation_agree_on_random_probabilities():
+    rng = np.random.default_rng(0)
+    for _ in range(200):
+        y = rng.integers(0, 2, size=40)
+        p = np.round(rng.random(40), 2)
+        t_pos, t_neg = sudoku_pipeline._classwise_accuracy_thresholds(
+            y, p, target_acc=0.9
+        )
+        accuracy, coverage = sudoku_pipeline._selective_at_classwise_thresholds(
+            y, p, t_pos, t_neg, 0.5
+        )
+        if coverage > 0:
+            assert accuracy >= 0.9 - 1e-12

@@ -22,18 +22,46 @@ import argparse
 import statistics as st
 from pathlib import Path
 
-from _common import BALANCED_RULE, BALANCED_TAG, SPARSE_RULE, compile_tex, mean_se, read_budget_rows
+from _common import (
+    BALANCED_RULE,
+    BALANCED_TAG,
+    SPARSE_RULE,
+    compile_tex,
+    mean_se,
+    read_budget_rows,
+)
 from plot_architecture_response import ARCHS
 
-SOURCE = {"sparse": (SPARSE_RULE, "robot__rule-sparse"), "balanced": (BALANCED_RULE, BALANCED_TAG)}
+SOURCE = {
+    "sparse": (SPARSE_RULE, "robot__rule-sparse"),
+    "balanced": (BALANCED_RULE, BALANCED_TAG),
+}
 RULE = "sparse"  # set from --rule in main()
-SEEDS_BY_RULE = {"sparse": (1014, 1015, 1016, 1017), "balanced": tuple(range(1014, 1024))}
-CONCEPTS = [("true", r"\texttt{true\_concepts}"), ("human", r"\texttt{human\_concepts}"),
-            ("machine", r"\texttt{machine\_annotation}"), ("llm", r"\texttt{llm\_concepts}"),
-            ("clip", r"\texttt{clip\_concepts}")]
-ISRC = [("perfect", "isrc-perfect", "perfect"), ("expert", "isrc-expert", "expert"), ("llm", "isrc-llm", "LLM")]
-PIPELINES_A = [("human", "perfect"), ("human", "expert"), ("human", "llm"), ("machine", "expert"),
-               ("machine", "llm"), ("llm", "llm"), ("clip", "llm")]
+SEEDS_BY_RULE = {
+    "sparse": (1014, 1015, 1016, 1017),
+    "balanced": tuple(range(1014, 1024)),
+}
+CONCEPTS = [
+    ("true", r"\texttt{true\_concepts}"),
+    ("human", r"\texttt{human\_concepts}"),
+    ("machine", r"\texttt{machine\_annotation}"),
+    ("llm", r"\texttt{llm\_concepts}"),
+    ("clip", r"\texttt{clip\_concepts}"),
+]
+ISRC = [
+    ("perfect", "isrc-perfect", "perfect"),
+    ("expert", "isrc-expert", "expert"),
+    ("llm", "isrc-llm", "LLM"),
+]
+PIPELINES_A = [
+    ("human", "perfect"),
+    ("human", "expert"),
+    ("human", "llm"),
+    ("machine", "expert"),
+    ("machine", "llm"),
+    ("llm", "llm"),
+    ("clip", "llm"),
+]
 ZOOM = (-12, 14)
 
 PREAMBLE = r"""\documentclass[border=2pt]{standalone}
@@ -70,11 +98,19 @@ def delta(family: str, concepts: str, isrc_tag: str) -> list[float]:
     """Per-seed Delta Accuracy (points) for one cell."""
     out = []
     folder, tag = SOURCE[RULE]
-    for f in sorted(folder.glob(f"{tag}__concepts-{concepts}__arch-{family}__*{isrc_tag}*__results.csv")):
+    for f in sorted(
+        folder.glob(
+            f"{tag}__concepts-{concepts}__arch-{family}__*{isrc_tag}*__results.csv"
+        )
+    ):
         if isrc_tag == "isrc-llm" and "img-224px" not in f.name:
             continue
         # under the balanced rule, the label-free CBM's interventions use the 5th/95th percentile of its training scores
-        if family == "cbm" and RULE == "balanced" and concepts in ("machine", "llm", "clip"):
+        if (
+            family == "cbm"
+            and RULE == "balanced"
+            and concepts in ("machine", "llm", "clip")
+        ):
             if "enc-koh595" not in f.name:
                 continue
         elif "enc-koh595" in f.name:
@@ -118,23 +154,31 @@ def lines_body(pipelines, zoom: bool, x0: float = 0.0) -> tuple[str, list[str]]:
             v, lo, hi, off = clipped(m, m - se, m + se, zoom)
             if off is not None:
                 y = ZOOM[0] if off < ZOOM[0] else ZOOM[1]
-                offscale.append(rf"\draw[c{family}, -latex, line width=0.8pt] (axis cs:{x0 + i:.2f},{y + (3 if y < 0 else -3)}) -- (axis cs:{x0 + i:.2f},{y});"
-                                rf"\node[c{family}, font=\fontsize{{6.5}}{{7}}\selectfont, anchor={'south' if y < 0 else 'north'}] at (axis cs:{x0 + i:.2f},{y + (3 if y < 0 else -3)}) {{${off:+.0f}$}};")
+                offscale.append(
+                    rf"\draw[c{family}, -latex, line width=0.8pt] (axis cs:{x0 + i:.2f},{y + (3 if y < 0 else -3)}) -- (axis cs:{x0 + i:.2f},{y});"
+                    rf"\node[c{family}, font=\fontsize{{6.5}}{{7}}\selectfont, anchor={'south' if y < 0 else 'north'}] at (axis cs:{x0 + i:.2f},{y + (3 if y < 0 else -3)}) {{${off:+.0f}$}};"
+                )
                 continue
-            pts.append((x0 + i, v)); los.append((x0 + i, lo)); his.append((x0 + i, hi))
+            pts.append((x0 + i, v))
+            los.append((x0 + i, lo))
+            his.append((x0 + i, hi))
         c = lambda xs: " ".join(f"({x:.2f},{y:.2f})" for x, y in xs)
         if pts:
-            body.append(rf"\addplot[bandonly, name path={family}lo] coordinates {{{c(los)}}};"
-                        rf"\addplot[bandonly, name path={family}hi] coordinates {{{c(his)}}};"
-                        rf"\addplot[c{family}!20, forget plot] fill between[of={family}lo and {family}hi];")
-        body.append(rf"\addplot[c{family}, line width=1.1pt, mark={mark}, mark size=1.8pt, mark options={{fill=c{family}, draw=c{family}}}] coordinates {{{c(pts)}}};"
-                    rf"\addlegendentry{{\textsf{{{legend}}}}}")
+            body.append(
+                rf"\addplot[bandonly, name path={family}lo] coordinates {{{c(los)}}};"
+                rf"\addplot[bandonly, name path={family}hi] coordinates {{{c(his)}}};"
+                rf"\addplot[c{family}!20, forget plot] fill between[of={family}lo and {family}hi];"
+            )
+        body.append(
+            rf"\addplot[c{family}, line width=1.1pt, mark={mark}, mark size=1.8pt, mark options={{fill=c{family}, draw=c{family}}}] coordinates {{{c(pts)}}};"
+            rf"\addlegendentry{{\textsf{{{legend}}}}}"
+        )
     return "\n".join(body), offscale
 
 
 def points_body(concepts, isrc, zoom: bool) -> tuple[str, list[str]]:
     body, offscale = [], []
-    offsets = {f: (k - 1.5) * 0.12 for k, (f, *_ ) in enumerate(ARCHS)}
+    offsets = {f: (k - 1.5) * 0.12 for k, (f, *_) in enumerate(ARCHS)}
     for family, legend, _, mark in ARCHS:
         rows = []
         for i, c in enumerate(concepts):
@@ -146,19 +190,27 @@ def points_body(concepts, isrc, zoom: bool) -> tuple[str, list[str]]:
             x = i + offsets[family]
             if off is not None:
                 y = ZOOM[0] if off < ZOOM[0] else ZOOM[1]
-                offscale.append(rf"\draw[c{family}, -latex, line width=0.8pt] (axis cs:{x:.2f},{y + 3}) -- (axis cs:{x:.2f},{y});"
-                                rf"\node[c{family}, font=\fontsize{{6}}{{7}}\selectfont, anchor=south] at (axis cs:{x:.2f},{y + 3}) {{${off:+.0f}$}};")
+                offscale.append(
+                    rf"\draw[c{family}, -latex, line width=0.8pt] (axis cs:{x:.2f},{y + 3}) -- (axis cs:{x:.2f},{y});"
+                    rf"\node[c{family}, font=\fontsize{{6}}{{7}}\selectfont, anchor=south] at (axis cs:{x:.2f},{y + 3}) {{${off:+.0f}$}};"
+                )
                 continue
             rows.append(f"({x:.2f},{v:.2f}) +- (0,{min(se, hi - v):.2f})")
-        body.append(rf"\addplot[c{family}, only marks, mark={mark}, mark size=1.8pt, mark options={{fill=c{family}, draw=c{family}}}, error bars/.cd, y dir=both, y explicit] coordinates {{{' '.join(rows)}}};"
-                    rf"\addlegendentry{{\textsf{{{legend}}}}}")
+        body.append(
+            rf"\addplot[c{family}, only marks, mark={mark}, mark size=1.8pt, mark options={{fill=c{family}, draw=c{family}}}, error bars/.cd, y dir=both, y explicit] coordinates {{{' '.join(rows)}}};"
+            rf"\addlegendentry{{\textsf{{{legend}}}}}"
+        )
     return "\n".join(body), offscale
 
 
 def build(layout: str, yaxis: str) -> str:
     zoom = yaxis == "zoom"
     colours = "\n".join(rf"\definecolor{{c{f}}}{{HTML}}{{{h}}}" for f, _, h, _ in ARCHS)
-    yrange = f"ymin={ZOOM[0]}, ymax={ZOOM[1]}," if zoom else ("ymin=-60, ymax=20," if layout in "CD" else "")
+    yrange = (
+        f"ymin={ZOOM[0]}, ymax={ZOOM[1]},"
+        if zoom
+        else ("ymin=-60, ymax=20," if layout in "CD" else "")
+    )
     zero = r"\addplot[annot, dashed, line width=0.8pt, forget plot] coordinates {(-0.5,0) (%s,0)};"
     if layout in "AB":
         pipelines = ([("true", "perfect")] if layout == "B" else []) + PIPELINES_A
@@ -183,7 +235,9 @@ def build(layout: str, yaxis: str) -> str:
                 body, off = lines_body([(c, isrc) for c in concepts], zoom)
             else:
                 body, off = points_body(concepts, isrc, zoom)
-            labels = ",".join(next(l for n, l in CONCEPTS if n == c) for c in concepts)
+            labels = ",".join(
+                next(label for n, label in CONCEPTS if n == c) for c in concepts
+            )
             legend = "" if k == 1 else r"legend to name=dummy,"
             ylabel = r", ylabel={$\Delta$ Accuracy (points)}" if k == 0 else ""
             panels.append(rf"""\nextgroupplot[title={{{title} interventions}}, {legend} xtick={{{",".join(str(i) for i in range(len(concepts)))}}},
@@ -198,7 +252,12 @@ def build(layout: str, yaxis: str) -> str:
 {chr(10).join(panels)}
 \end{{groupplot}}"""
     else:  # E: heatmap
-        cols = [(c, s) for c, _ in CONCEPTS for s, _, _ in ISRC if delta("cbm", c, isrc_tag(s))]  # grouped by concept source
+        cols = [
+            (c, s)
+            for c, _ in CONCEPTS
+            for s, _, _ in ISRC
+            if delta("cbm", c, isrc_tag(s))
+        ]  # grouped by concept source
         cells = []
         for r, (family, legend, _, _) in enumerate(ARCHS):
             for j, (c, s) in enumerate(cols):
@@ -206,19 +265,31 @@ def build(layout: str, yaxis: str) -> str:
                 m, se = stats(vals) if vals else (float("nan"), float("nan"))
                 cells.append((j, len(ARCHS) - 1 - r, m, se))
         coords = " ".join(f"({j},{r}) [{m:.2f}]" for j, r, m, _ in cells)
-        text = "\n".join(rf"\node[font=\fontsize{{6}}{{7}}\selectfont, align=center, color={'white' if abs(m) > 20 else 'black'}] at (axis cs:{j},{r}) {{{m:.1f}\%\\[-1pt]{{\fontsize{{4.5}}{{5}}\selectfont $\pm${se:.1f}}}}};"
-                         for j, r, m, se in cells)
+        text = "\n".join(
+            rf"\node[font=\fontsize{{6}}{{7}}\selectfont, align=center, color={'white' if abs(m) > 20 else 'black'}] at (axis cs:{j},{r}) {{{m:.1f}\%\\[-1pt]{{\fontsize{{4.5}}{{5}}\selectfont $\pm${se:.1f}}}}};"
+            for j, r, m, se in cells
+        )
         # one intervention source per column; each concept source named once, centred under its columns
-        ticks = ",".join(rf"\texttt{{{s}}}" for _, s in cols)  # the robot table's names: perfect, expert, llm
+        ticks = ",".join(
+            rf"\texttt{{{s}}}" for _, s in cols
+        )  # the robot table's names: perfect, expert, llm
         groups = {}
         for j, (c, _) in enumerate(cols):
             groups.setdefault(c, []).append(j)
         text += "\n" + "\n".join(
             rf"\node[font=\fontsize{{6.5}}{{7}}\selectfont, anchor=north] at (axis cs:{sum(js) / len(js)},-1.25) "
-            rf"{{{next(lbl for n, lbl in CONCEPTS if n == c)}}};" for c, js in groups.items())
-        text += ("\n" + rf"\node[font=\fontsize{{6.5}}{{7}}\selectfont\bfseries, anchor=east] at (axis cs:-0.55,-0.8) {{Intervention}};"
-                 + "\n" + rf"\node[font=\fontsize{{6.5}}{{7}}\selectfont\bfseries, anchor=north east] at (axis cs:-0.55,-1.25) {{Dataset}};")
-        arch_labels = ",".join(rf"\textsf{{{l}}}" for _, l, _, _ in reversed(ARCHS))
+            rf"{{{next(lbl for n, lbl in CONCEPTS if n == c)}}};"
+            for c, js in groups.items()
+        )
+        text += (
+            "\n"
+            + r"\node[font=\fontsize{6.5}{7}\selectfont\bfseries, anchor=east] at (axis cs:-0.55,-0.8) {Intervention};"
+            + "\n"
+            + r"\node[font=\fontsize{6.5}{7}\selectfont\bfseries, anchor=north east] at (axis cs:-0.55,-1.25) {Dataset};"
+        )
+        arch_labels = ",".join(
+            rf"\textsf{{{label}}}" for _, label, _, _ in reversed(ARCHS)
+        )
         tex = rf"""
 \begin{{axis}}[bbvalue, width={0.95 * len(cols):.1f}cm, height=3.2cm, axis line style={{draw=none}}, ymajorgrids=false,
   colormap={{rdbu}}{{rgb255=(178,24,43) rgb255=(244,165,130) rgb255=(247,247,247) rgb255=(146,197,222) rgb255=(33,102,172)}},
@@ -230,7 +301,11 @@ def build(layout: str, yaxis: str) -> str:
 \addplot[matrix plot*, mesh/cols={len(cols)}, point meta=explicit] coordinates {{{coords}}};
 {text}
 \end{{axis}}"""
-    return PREAMBLE.replace("%COLOURS%", colours) + tex + "\n\\end{tikzpicture}\n\\end{document}\n"
+    return (
+        PREAMBLE.replace("%COLOURS%", colours)
+        + tex
+        + "\n\\end{tikzpicture}\n\\end{document}\n"
+    )
 
 
 def main() -> None:
@@ -238,7 +313,12 @@ def main() -> None:
     ap.add_argument("--layout", choices=list("ABCDE"), required=True)
     ap.add_argument("--yaxis", choices=["linear", "zoom"], default="linear")
     ap.add_argument("--rule", choices=["sparse", "balanced"], default="sparse")
-    ap.add_argument("--out", type=Path, required=True, help="Output path without extension (.tex and .pdf).")
+    ap.add_argument(
+        "--out",
+        type=Path,
+        required=True,
+        help="Output path without extension (.tex and .pdf).",
+    )
     args = ap.parse_args()
     global RULE
     RULE = args.rule

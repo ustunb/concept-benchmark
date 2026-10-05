@@ -1,4 +1,5 @@
 """ProbCBM (Probabilistic Concept Bottleneck Model) wrapper and training."""
+
 from __future__ import annotations
 
 import copy
@@ -71,7 +72,9 @@ class ProbCBMBenchmarkModel(_OfficialBenchmarkModelBase):
                 pred_embedding_chunks.append(pred_embeddings.detach().cpu())
                 pred_mean_chunks.append(latent_dict["pred_mean"].detach().cpu())
                 if latent_dict.get("pred_logsigma") is not None:
-                    pred_logsigma_chunks.append(latent_dict["pred_logsigma"].detach().cpu())
+                    pred_logsigma_chunks.append(
+                        latent_dict["pred_logsigma"].detach().cpu()
+                    )
         model.cpu()
 
         concept_probs = _stack_numpy(concept_chunks, cols=self.n_concepts)
@@ -82,7 +85,9 @@ class ProbCBMBenchmarkModel(_OfficialBenchmarkModelBase):
             label_probs=label_probs,
             probcbm_pred_embeddings=_stack_tensors(pred_embedding_chunks),
             probcbm_pred_mean=_stack_tensors(pred_mean_chunks),
-            probcbm_pred_logsigma=_stack_tensors(pred_logsigma_chunks) if pred_logsigma_chunks else None,
+            probcbm_pred_logsigma=_stack_tensors(pred_logsigma_chunks)
+            if pred_logsigma_chunks
+            else None,
         )
         return label_probs, concept_probs, cache
 
@@ -113,10 +118,16 @@ class ProbCBMBenchmarkModel(_OfficialBenchmarkModelBase):
             mu = pred_mean.to(device)
             logsigma = pred_logsigma.to(device)
             eps = torch.randn(
-                mu.size(0), mu.size(1), n_samples, mu.size(2),
-                dtype=mu.dtype, device=device,
+                mu.size(0),
+                mu.size(1),
+                n_samples,
+                mu.size(2),
+                dtype=mu.dtype,
+                device=device,
             )
-            pred_embeddings = eps.mul(torch.exp(logsigma.unsqueeze(2) * 0.5)).add_(mu.unsqueeze(2))
+            pred_embeddings = eps.mul(torch.exp(logsigma.unsqueeze(2) * 0.5)).add_(
+                mu.unsqueeze(2)
+            )
         else:
             # Fallback: use cached embeddings (mean only, n_samples=1)
             pred_embeddings = cache.probcbm_pred_embeddings
@@ -133,28 +144,35 @@ class ProbCBMBenchmarkModel(_OfficialBenchmarkModelBase):
         pos_proto = concept_mean[1] if concept_mean.shape[0] > 1 else concept_mean[0]
 
         # Deterministic prototype replacement for intervened concepts (zero variance)
-        replacement = (
-            concept_tensor.unsqueeze(-1).unsqueeze(-1)
-            * pos_proto.unsqueeze(0).unsqueeze(2)
-            + (1.0 - concept_tensor).unsqueeze(-1).unsqueeze(-1)
-            * neg_proto.unsqueeze(0).unsqueeze(2)
-        )
+        replacement = concept_tensor.unsqueeze(-1).unsqueeze(-1) * pos_proto.unsqueeze(
+            0
+        ).unsqueeze(2) + (1.0 - concept_tensor).unsqueeze(-1).unsqueeze(
+            -1
+        ) * neg_proto.unsqueeze(0).unsqueeze(2)
         if intervention_mask is not None:
-            changed = torch.as_tensor(
-                intervention_mask, dtype=torch.bool, device=device
-            ).unsqueeze(-1).unsqueeze(-1)
+            changed = (
+                torch.as_tensor(intervention_mask, dtype=torch.bool, device=device)
+                .unsqueeze(-1)
+                .unsqueeze(-1)
+            )
         else:
             changed = (
-                ~torch.isclose(concept_tensor, baseline_probs, atol=1e-6, rtol=1e-6)
-            ).unsqueeze(-1).unsqueeze(-1)
-        concept_embeddings_for_class = torch.where(changed, replacement, pred_embeddings)
+                (~torch.isclose(concept_tensor, baseline_probs, atol=1e-6, rtol=1e-6))
+                .unsqueeze(-1)
+                .unsqueeze(-1)
+            )
+        concept_embeddings_for_class = torch.where(
+            changed, replacement, pred_embeddings
+        )
 
         # Expected shape: (batch, n_concepts, n_classes, emb_size)
         assert concept_embeddings_for_class.ndim == 4, (
             f"Expected 4-D concept embeddings, got shape {concept_embeddings_for_class.shape}"
         )
         concept_embeddings_for_class = (
-            concept_embeddings_for_class.permute(0, 2, 1, 3).contiguous().view(
+            concept_embeddings_for_class.permute(0, 2, 1, 3)
+            .contiguous()
+            .view(
                 concept_embeddings_for_class.shape[0],
                 concept_embeddings_for_class.shape[2],
                 -1,
@@ -165,10 +183,7 @@ class ProbCBMBenchmarkModel(_OfficialBenchmarkModelBase):
             class_embeddings = model.head(concept_embeddings_for_class)
             class_mean = model.class_mean.unsqueeze(1).unsqueeze(0)
             distance = torch.sqrt(
-                (
-                    (class_embeddings.unsqueeze(1) - class_mean) ** 2
-                ).mean(-1)
-                + 1e-10
+                ((class_embeddings.unsqueeze(1) - class_mean) ** 2).mean(-1) + 1e-10
             )
             if getattr(model, "use_scale", False):
                 distance = model.class_negative_scale * distance
@@ -211,24 +226,20 @@ def train_probcbm_model(
     train_loader = make_cem_loader(train_dataset, shuffle=True, **loader_kwargs)
     valid_loader = make_cem_loader(valid_dataset, shuffle=False, **loader_kwargs)
 
-    backbone_spec = _infer_backbone_spec(train_dataset, benchmark=benchmark, config=config)
+    backbone_spec = _infer_backbone_spec(
+        train_dataset, benchmark=benchmark, config=config
+    )
     model_init_kwargs = {
         "n_concepts": train_dataset.n_concepts,
         "n_tasks": train_dataset.n_classes,
-        "concept_loss_weight": float(
-            getattr(config, "cem_concept_loss_weight", 1.0)
-        ),
+        "concept_loss_weight": float(getattr(config, "cem_concept_loss_weight", 1.0)),
         "task_loss_weight": float(getattr(config, "cem_task_loss_weight", 1.0)),
         "hidden_dim": int(getattr(config, "probcbm_hidden_dim", 8)),
         "class_hidden_dim": int(getattr(config, "probcbm_class_hidden_dim", 64)),
-        "intervention_prob": float(
-            getattr(config, "probcbm_intervention_prob", 0.25)
-        ),
+        "intervention_prob": float(getattr(config, "probcbm_intervention_prob", 0.25)),
         "c_extractor_arch": _make_backbone_factory(backbone_spec),
         "pretrained": False,
-        "n_samples_inference": int(
-            getattr(config, "probcbm_n_samples_inference", 1)
-        ),
+        "n_samples_inference": int(getattr(config, "probcbm_n_samples_inference", 1)),
         "use_neg_concept": True,
         "pred_class": True,
         "use_scale": True,
@@ -263,7 +274,9 @@ def train_probcbm_model(
                 enable_checkpointing=False,
                 **_device_to_pl_args(device),
             )
-        trainer_epochs = int(helper_metrics.get("num_epochs", helper_config["max_epochs"]))
+        trainer_epochs = int(
+            helper_metrics.get("num_epochs", helper_config["max_epochs"])
+        )
     else:
         # Fallback for environments where the upstream helper cannot be imported
         # because optional helper-only deps (for example TensorFlow) are absent.
@@ -275,8 +288,7 @@ def train_probcbm_model(
             model.stage = "concept"
             classify_params = set(model.params_to_classify())
             trainable_before = {
-                name: param.requires_grad
-                for name, param in model.named_parameters()
+                name: param.requires_grad for name, param in model.named_parameters()
             }
             for name, param in model.named_parameters():
                 if name in classify_params:
@@ -285,7 +297,9 @@ def train_probcbm_model(
             try:
                 concept_trainer = _build_trainer(
                     pl_module=deps.pl,
-                    max_epochs=_resolve_epochs(config, benchmark=benchmark, family="probcbm"),
+                    max_epochs=_resolve_epochs(
+                        config, benchmark=benchmark, family="probcbm"
+                    ),
                     patience=patience,
                     device=device,
                 )
@@ -315,7 +329,9 @@ def train_probcbm_model(
             # Joint mode: single training pass
             trainer = _build_trainer(
                 pl_module=deps.pl,
-                max_epochs=_resolve_epochs(config, benchmark=benchmark, family="probcbm"),
+                max_epochs=_resolve_epochs(
+                    config, benchmark=benchmark, family="probcbm"
+                ),
                 patience=patience,
                 device=device,
             )
