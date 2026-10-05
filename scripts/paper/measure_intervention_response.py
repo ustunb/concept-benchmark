@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
-from _common import PAPER_RESULTS, ROBOT_DATASETS, SPARSE_RULE, filename_fields
+from _common import PAPER, add_results_root, filename_fields, use_results_root
 from concept_benchmark.ext.fileutils import load
 from experiments.intervention import predict_label_proba_from_concepts
 
@@ -90,11 +90,11 @@ def model_and_data_files(
     """Installed-tree names by default; the pipeline's own names under `pipeline_root/run_s<seed>/results`."""
     if pipeline_root is None:
         data = (
-            ROBOT_DATASETS
+            PAPER.robot_datasets
             / f"robot__rule-sparse__concepts-{concepts_name}__seed-{seed}__dataset.data"
         )
         model = next(
-            (PAPER_RESULTS / "models/robot/grid").glob(
+            (PAPER.models_sparse).glob(
                 f"robot__rule-sparse__concepts-{concepts_name}__arch-{arch}__*seed-{seed}__model.pt"
             )
         )
@@ -102,8 +102,8 @@ def model_and_data_files(
     preset = "ideal" if concepts_name == "true" else "subconcept"
     results = pipeline_root / f"run_s{seed}" / "results"
     return (
-        results / f"robot_image_stochastic_4_{preset}_{arch}_seed{seed}.model",
-        results / f"robot_image_4_{preset}_seed{seed}.data",
+        results / f"robot_image_stochastic_4_{preset}_sparse_{arch}_seed{seed}.model",
+        results / f"robot_image_4_{preset}_sparse_seed{seed}.data",
     )
 
 
@@ -187,7 +187,8 @@ def main() -> None:
     ap.add_argument(
         "--out",
         type=Path,
-        default=PAPER_RESULTS / "robot/diagnostics/intervention_response.csv",
+        default=None,
+        help="Default: robot/diagnostics/intervention_response.csv under the results root.",
     )
     ap.add_argument("--seeds", default="1014,1015,1016,1017")
     ap.add_argument("--archs", default="cbm,cem,probcbm,ecbm")
@@ -200,12 +201,15 @@ def main() -> None:
     ap.add_argument(
         "--grid-dir",
         type=Path,
-        default=SPARSE_RULE,
-        help="Installed grid CSVs (k=0 check).",
+        default=None,
+        help="Sparse-rule result CSVs for the k=0 check (default: robot/grid under the results root).",
     )
+    add_results_root(ap)
     args = ap.parse_args()
-    read_grid_k0(args.grid_dir)
+    use_results_root(args)
+    read_grid_k0(args.grid_dir or PAPER.sparse_rule)
 
+    args.out = args.out or PAPER.root / "robot/diagnostics/intervention_response.csv"
     args.out.parent.mkdir(parents=True, exist_ok=True)
     all_rows = []
     writer = None

@@ -23,19 +23,16 @@ import statistics as st
 from pathlib import Path
 
 from _common import (
-    BALANCED_RULE,
     BALANCED_TAG,
-    SPARSE_RULE,
+    PAPER,
+    add_results_root,
     compile_tex,
     mean_se,
     read_budget_rows,
+    use_results_root,
 )
 from plot_architecture_response import ARCHS
 
-SOURCE = {
-    "sparse": (SPARSE_RULE, "robot__rule-sparse"),
-    "balanced": (BALANCED_RULE, BALANCED_TAG),
-}
 RULE = "sparse"  # set from --rule in main()
 SEEDS_BY_RULE = {
     "sparse": (1014, 1015, 1016, 1017),
@@ -97,7 +94,11 @@ PREAMBLE = r"""\documentclass[border=2pt]{standalone}
 def delta(family: str, concepts: str, isrc_tag: str) -> list[float]:
     """Per-seed Delta Accuracy (points) for one cell."""
     out = []
-    folder, tag = SOURCE[RULE]
+    folder, tag = (
+        (PAPER.sparse_rule, "robot__rule-sparse")
+        if RULE == "sparse"
+        else (PAPER.balanced_rule, BALANCED_TAG)
+    )
     for f in sorted(
         folder.glob(
             f"{tag}__concepts-{concepts}__arch-{family}__*{isrc_tag}*__results.csv"
@@ -319,7 +320,9 @@ def main() -> None:
         required=True,
         help="Output path without extension (.tex and .pdf).",
     )
+    add_results_root(ap)
     args = ap.parse_args()
+    use_results_root(args)
     global RULE
     RULE = args.rule
     args.out.parent.mkdir(parents=True, exist_ok=True)

@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-from _common import BALANCED_TAG, PAPER_RESULTS, ROBOT_DATASETS
+from _common import BALANCED_TAG, PAPER, add_results_root, use_results_root
 from concept_benchmark.ext.fileutils import load
 
 SEEDS = range(1014, 1024)
@@ -43,11 +43,11 @@ def accuracy_by_subtype(
     concepts: str, seed: int, listed_subtypes: set[str]
 ) -> tuple[float, float, float]:
     data = load(
-        ROBOT_DATASETS
+        PAPER.robot_datasets
         / f"{BALANCED_TAG}__concepts-{concepts}__seed-{seed}__dataset.data"
     )
     model = load(
-        PAPER_RESULTS
+        PAPER.root
         / f"models/robot/balanced/{BALANCED_TAG}__concepts-{concepts}__arch-cbm__seed-{seed}__model.pt"
     )
     allow_old_sklearn(model, set())
@@ -80,10 +80,11 @@ def detector_on_unlisted(
     """Share of unlisted-subtype robots with any FootShape detector firing, share of those firing on the correct
     Pointy/Flat side, and k=0 accuracy on unlisted vs listed robots (human_concepts CBM)."""
     data = load(
-        ROBOT_DATASETS / f"{BALANCED_TAG}__concepts-human__seed-{seed}__dataset.data"
+        PAPER.robot_datasets
+        / f"{BALANCED_TAG}__concepts-human__seed-{seed}__dataset.data"
     )
     model = load(
-        PAPER_RESULTS
+        PAPER.root
         / f"models/robot/balanced/{BALANCED_TAG}__concepts-human__arch-cbm__seed-{seed}__model.pt"
     )
     allow_old_sklearn(model, set())
@@ -132,9 +133,11 @@ def main() -> None:
         default=None,
         help="Robot images; enables the detector check.",
     )
+    add_results_root(ap)
     args = ap.parse_args()
+    use_results_root(args)
     human = load(
-        ROBOT_DATASETS
+        PAPER.robot_datasets
         / f"{BALANCED_TAG}__concepts-human__seed-{SEEDS[0]}__dataset.data"
     )
     listed = {

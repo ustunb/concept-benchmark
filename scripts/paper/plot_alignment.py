@@ -16,19 +16,23 @@ import csv
 import statistics as st
 from pathlib import Path
 
-from _common import BALANCED_TAG, PAPER_RESULTS, compile_tex, mean_se
-
-RESULTS = (
-    PAPER_RESULTS
-    / f"robot/alignment/{BALANCED_TAG}__arch-cbm__isrc-perfect__alignment.csv"
+from _common import (
+    BALANCED_TAG,
+    PAPER,
+    add_results_root,
+    compile_tex,
+    mean_se,
+    use_results_root,
 )
+
+RESULTS_NAME = f"{BALANCED_TAG}__arch-cbm__isrc-perfect__alignment.csv"
 SETS = (("true", 0), ("human", 1))  # concept set, row (bottom to top)
 
 
 def per_seed() -> dict[tuple[str, str, str], list[float]]:
     """(metric, concept set, before|after) -> per-seed values in percent / points."""
     out: dict = {}
-    for r in csv.DictReader(RESULTS.open()):
+    for r in csv.DictReader((PAPER.alignment / RESULTS_NAME).open()):
         for which in ("before", "after"):
             k0 = float(r[f"k0_{which}"])
             after = st.mean(float(r[f"k{k}_{which}"]) for k in ("1", "3", "max"))
@@ -48,7 +52,9 @@ def main() -> None:
         required=True,
         help="Output path without extension (.tex and .pdf).",
     )
+    add_results_root(ap)
     args = ap.parse_args()
+    use_results_root(args)
     values = per_seed()
     stat = {k: mean_se(v) for k, v in values.items()}
     for (metric, c, which), (m, se) in sorted(stat.items()):

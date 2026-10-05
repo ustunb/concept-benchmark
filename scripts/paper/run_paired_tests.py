@@ -8,12 +8,20 @@ label-free CBM cells use the 5th/95th-percentile interventions.
 
 from __future__ import annotations
 
+import argparse
 import csv
 import statistics as st
 
 from scipy import stats
 
-from _common import BALANCED_RULE, BALANCED_TAG, mean_se, read_budget_rows
+from _common import (
+    BALANCED_TAG,
+    PAPER,
+    add_results_root,
+    mean_se,
+    read_budget_rows,
+    use_results_root,
+)
 
 SEEDS = tuple(range(1014, 1024))
 ARCHS = {
@@ -32,7 +40,7 @@ def accuracy(arch: str, concepts: str, isrc: str) -> list[list[float]]:
     for seed in SEEDS:
         files = [
             f
-            for f in BALANCED_RULE.glob(
+            for f in PAPER.balanced_rule.glob(
                 f"{BALANCED_TAG}__concepts-{concepts}__{ARCHS[arch]}__isrc-{isrc}*__seed-{seed}__results.csv"
             )
             if (isrc != "llm" or "img-224px" in f.name)
@@ -54,7 +62,7 @@ def dnn() -> list[float]:
     out = []
     for seed in SEEDS:
         path = (
-            BALANCED_RULE
+            PAPER.balanced_rule
             / f"{BALANCED_TAG}__concepts-human__arch-cbm-and-dnn__seed-{seed}__results.csv"
         )
         out += [
@@ -78,6 +86,9 @@ def gain(runs: list[list[float]]) -> list[float]:
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    add_results_root(ap)
+    use_results_root(ap.parse_args())
     d = dnn()
     print("DNN {:.2f} ± {:.2f}".format(*mean_se(d)))
 

@@ -6,7 +6,9 @@ Importing this module also puts the repository root and `scripts/` on the import
 
 from __future__ import annotations
 
+import argparse
 import csv
+import os
 import statistics as st
 import subprocess
 import sys
@@ -14,13 +16,98 @@ from collections.abc import Sequence
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-PAPER_RESULTS = REPO / "results/paper"
-BALANCED_RULE = PAPER_RESULTS / "robot/balanced_rule"
-SPARSE_RULE = PAPER_RESULTS / "robot/grid"
-INTERVENTION_RECORDS = BALANCED_RULE / "intervention_records"
-ROBOT_DATASETS = PAPER_RESULTS / "robot/datasets"
-SUDOKU_CELLS = PAPER_RESULTS / "sudoku/cells"
 BALANCED_TAG = "robot__rule-balanced__sampling-skew0.30__elbows-weight2"
+RESULTS_ROOT_VARIABLE = "CONCEPT_BENCHMARK_PAPER_RESULTS"
+RESULTS_DOWNLOAD = "https://github.com/ustunb/concept-benchmark/releases"
+
+
+class PaperResults:
+    """Folders of the paper's results under one root (see `scripts/paper/README.md` for the layout)."""
+
+    def __init__(self, root: Path):
+        self.root = Path(root)
+
+    @property
+    def balanced_rule(self) -> Path:
+        return self.root / "robot/balanced_rule"
+
+    @property
+    def sparse_rule(self) -> Path:
+        return self.root / "robot/grid"
+
+    @property
+    def intervention_records(self) -> Path:
+        return self.balanced_rule / "intervention_records"
+
+    @property
+    def detector_outputs(self) -> Path:
+        return self.balanced_rule / "detector_outputs"
+
+    @property
+    def alignment(self) -> Path:
+        return self.root / "robot/alignment"
+
+    @property
+    def robot_datasets(self) -> Path:
+        return self.root / "robot/datasets"
+
+    @property
+    def llm_caches(self) -> Path:
+        return self.root / "robot/llm_caches"
+
+    @property
+    def sudoku_cells(self) -> Path:
+        return self.root / "sudoku/cells"
+
+    @property
+    def sudoku_selective(self) -> Path:
+        return self.root / "sudoku/selective"
+
+    @property
+    def sudoku_confidence(self) -> Path:
+        return self.root / "sudoku/confidence"
+
+    @property
+    def real_datasets(self) -> Path:
+        return self.root / "real_datasets"
+
+    @property
+    def models_balanced(self) -> Path:
+        return self.root / "models/robot/balanced"
+
+    @property
+    def models_sparse(self) -> Path:
+        return self.root / "models/robot/grid"
+
+    @property
+    def images_224px(self) -> Path:
+        return self.root / "images/robot_224px"
+
+
+# The scripts read their inputs from here; `use_results_root` points it at the folder given on the command line.
+PAPER = PaperResults(os.environ.get(RESULTS_ROOT_VARIABLE, REPO / "results/paper"))
+
+
+def add_results_root(parser: argparse.ArgumentParser) -> None:
+    """Add `--results-root`, the folder that holds the paper's results."""
+    parser.add_argument(
+        "--results-root",
+        type=Path,
+        default=PAPER.root,
+        help=f"Folder with the paper's results (default: ${RESULTS_ROOT_VARIABLE} or results/paper; "
+        f"download from {RESULTS_DOWNLOAD}, or build one from your own runs with collect_pipeline_runs.py).",
+    )
+
+
+def use_results_root(args: argparse.Namespace) -> None:
+    """Read the paper's results from `args.results_root`; exit with the download link if the folder is missing."""
+    if not args.results_root.is_dir():
+        sys.exit(
+            f"No results folder at {args.results_root}. Download the paper's results from {RESULTS_DOWNLOAD} "
+            "and pass the unpacked folder as --results-root, or build one with collect_pipeline_runs.py."
+        )
+    PAPER.root = args.results_root
+
 
 for _path in (str(REPO), str(REPO / "scripts")):
     if _path not in sys.path:

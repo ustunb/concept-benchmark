@@ -26,7 +26,13 @@ from pathlib import Path
 
 from scipy import stats
 
-from _common import SUDOKU_CELLS, latex_cell, read_budget_rows
+from _common import (
+    PAPER,
+    add_results_root,
+    latex_cell,
+    read_budget_rows,
+    use_results_root,
+)
 from make_sudoku_table import ARCHS, N_CONCEPTS, N_TEST_BOARDS, RESOLUTIONS
 
 TAUS = ("0.90", "0.95", "0.99")
@@ -46,7 +52,7 @@ def read_cells(
     """seed -> (net work automated, coverage) in percent at k = 0, 1, 3, max."""
     runs = {}
     pattern = f"sudoku__arch-{arch}__res-{res}px__tau-{tau}__threshold-per-budget__seed-*__interventions.csv"
-    for f in sorted(SUDOKU_CELLS.glob(pattern)):
+    for f in sorted(PAPER.sudoku_cells.glob(pattern)):
         rows = read_budget_rows(f)
         if len(rows) != 4 or any(not r.get("coverage_after") for r in rows):
             raise SystemExit(f"{f.name}: expected 4 budgets with selective columns")
@@ -132,7 +138,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tau-out", type=Path, required=True)
     ap.add_argument("--cost-out", type=Path, required=True)
+    add_results_root(ap)
     args = ap.parse_args()
+    use_results_root(args)
     args.tau_out.write_text(
         "\n".join(
             table([(f"${tau}$", tau, COST_MODELS[0][1]) for tau in TAUS], r"$\tau$")

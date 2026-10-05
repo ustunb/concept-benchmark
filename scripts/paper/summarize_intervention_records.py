@@ -21,7 +21,7 @@ from collections import defaultdict
 
 import numpy as np
 
-from _common import BALANCED_TAG, INTERVENTION_RECORDS
+from _common import BALANCED_TAG, PAPER, add_results_root, use_results_root
 
 ARCH_TAG = {
     "cbm": "arch-cbm",
@@ -43,7 +43,7 @@ def load(arch: str, concepts: str, who: str, seed: int) -> dict[str, dict]:
     out = {}
     for budget in ("1", "3", "max"):
         path = (
-            INTERVENTION_RECORDS
+            PAPER.intervention_records
             / f"{BALANCED_TAG}__concepts-{concepts}__{ARCH_TAG[arch]}__isrc-{who}__budget-{budget}__seed-{seed}__records.npz"
         )
         out[budget] = np.load(path)
@@ -80,7 +80,9 @@ def main() -> None:
         action="store_true",
         help="also list the asked concepts and per-concept accuracies at k=1",
     )
+    add_results_root(ap)
     args = ap.parse_args()
+    use_results_root(args)
     cols = (
         "asked",
         "det",

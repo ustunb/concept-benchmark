@@ -14,18 +14,23 @@ import importlib
 import os
 import runpy
 import sys
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
 
+from experiments.baselines._common import require_cem_dependencies
+
+PIPELINE = Path(__file__).resolve().parents[1] / "robot_pipeline.py"
 FIXED_PROTOTYPES = os.environ.get("PROBCBM_FIXED_PROTOTYPES") == "1"
 VIB_BETA = os.environ.get("PROBCBM_VIB_BETA")
-if FIXED_PROTOTYPES or VIB_BETA is not None:
-    try:  # the pipeline puts its cem checkout on the import path when loading the dependencies
-        from experiments.baselines._common import require_cem_dependencies
-    except ImportError:
-        from experiments.cem_integration import require_cem_dependencies
-    require_cem_dependencies()
+
+
+def patch_probcbm() -> None:
+    """Fix the concept prototypes and/or set vib_beta on the cem package's ProbCBM, as the environment asks."""
+    if not FIXED_PROTOTYPES and VIB_BETA is None:
+        return
+    require_cem_dependencies()  # puts the cem checkout on the import path
     module = importlib.import_module("cem.models.probcbm")
     assert require_cem_dependencies().ProbCBM is module.ProbCBM
     original_init = module.ProbCBM.__init__
@@ -47,5 +52,8 @@ if FIXED_PROTOTYPES or VIB_BETA is not None:
         flush=True,
     )
 
-sys.argv = ["scripts/robot_pipeline.py", *sys.argv[1:]]
-runpy.run_path("scripts/robot_pipeline.py", run_name="__main__")
+
+if __name__ == "__main__":
+    patch_probcbm()
+    sys.argv = [str(PIPELINE), *sys.argv[1:]]
+    runpy.run_path(str(PIPELINE), run_name="__main__")

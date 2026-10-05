@@ -11,13 +11,14 @@ averaged over seeds:
 
 from __future__ import annotations
 
+import argparse
 import statistics as st
 
 import numpy as np
 import pandas as pd
 from scipy.special import expit
 
-from _common import BALANCED_TAG, ROBOT_DATASETS
+from _common import BALANCED_TAG, PAPER, add_results_root, use_results_root
 from concept_benchmark.ext.fileutils import load
 
 SEEDS = (1014, 1015, 1016, 1017)
@@ -25,7 +26,8 @@ SEEDS = (1014, 1015, 1016, 1017)
 
 def ceilings(seed: int) -> tuple[float, float]:
     data = load(
-        ROBOT_DATASETS / f"{BALANCED_TAG}__concepts-true__seed-{seed}__dataset.data"
+        PAPER.robot_datasets
+        / f"{BALANCED_TAG}__concepts-true__seed-{seed}__dataset.data"
     )
     formula, catalog = data.meta["labeling_function"], data.meta["catalog_df"]
     test = catalog.iloc[catalog.index.get_indexer(data.test.meta["df_indices"])]
@@ -43,6 +45,9 @@ def ceilings(seed: int) -> tuple[float, float]:
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    add_results_root(ap)
+    use_results_root(ap.parse_args())
     values = [ceilings(seed) for seed in SEEDS]
     for seed, (rule, concepts) in zip(SEEDS, values):
         print(

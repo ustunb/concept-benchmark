@@ -14,7 +14,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from _common import BALANCED_TAG, ROBOT_DATASETS
+from _common import BALANCED_TAG, PAPER, add_results_root, use_results_root
 from concept_benchmark.ext.fileutils import load
 
 
@@ -30,14 +30,18 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", nargs="+", type=int, required=True)
     ap.add_argument("--out", type=Path, required=True)
+    add_results_root(ap)
     args = ap.parse_args()
+    use_results_root(args)
     out = {}
     for s in args.seeds:
         true = load(
-            ROBOT_DATASETS / f"{BALANCED_TAG}__concepts-true__seed-{s}__dataset.data"
+            PAPER.robot_datasets
+            / f"{BALANCED_TAG}__concepts-true__seed-{s}__dataset.data"
         ).test
         human = load(
-            ROBOT_DATASETS / f"{BALANCED_TAG}__concepts-human__seed-{s}__dataset.data"
+            PAPER.robot_datasets
+            / f"{BALANCED_TAG}__concepts-human__seed-{s}__dataset.data"
         ).test
         if list(map(str, true.inputs)) != list(map(str, human.inputs)):
             raise SystemExit(f"seed {s}: true and human datasets differ in test robots")

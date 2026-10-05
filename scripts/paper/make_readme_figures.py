@@ -3,10 +3,13 @@
 Uses the general plotting functions of `concept_benchmark.evaluation`, so the same calls work on the results of
 any model run through the pipelines.
 
-    python scripts/paper/make_readme_figures.py
+    python scripts/paper/make_readme_figures.py [--out docs/assets]
 """
 
 from __future__ import annotations
+
+import argparse
+from pathlib import Path
 
 import matplotlib
 
@@ -15,16 +18,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from _common import (
-    BALANCED_RULE,
-    INTERVENTION_RECORDS,
-    PAPER_RESULTS,
-    REPO,
-    SUDOKU_CELLS,
-    filename_fields,
-)
+from _common import PAPER, REPO, add_results_root, filename_fields, use_results_root
 
-ASSETS_DIR = REPO / "docs/assets"
 CONCEPT_SETS = {
     "true": "true_concepts",
     "human": "human_concepts",
@@ -37,7 +32,7 @@ CONCEPT_SETS = {
 def _read_robot_runs() -> pd.DataFrame:
     """Every installed balanced-rule run as one table (one row per run and budget)."""
     frames = []
-    for path in sorted(BALANCED_RULE.glob("*__isrc-*__results.csv")):
+    for path in sorted(PAPER.balanced_rule.glob("*__isrc-*__results.csv")):
         fields = filename_fields(path)
         is_label_free_cbm = (
             fields["concepts"] in ("machine", "llm", "clip") and fields["arch"] == "cbm"
@@ -67,17 +62,26 @@ def main() -> None:
         plot_intervention_heatmap,
     )
 
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument(
+        "--out", type=Path, default=REPO / "docs/assets", help="Folder for the PNGs."
+    )
+    add_results_root(ap)
+    args = ap.parse_args()
+    use_results_root(args)
+    args.out.mkdir(parents=True, exist_ok=True)
+
     def save(fig, name: str) -> None:
-        fig.savefig(ASSETS_DIR / name, dpi=150, bbox_inches="tight")
+        fig.savefig(args.out / name, dpi=150, bbox_inches="tight")
         plt.close(fig)
-        print(f"Saved {ASSETS_DIR / name}")
+        print(f"Saved {args.out / name}")
 
     runs = _read_robot_runs()
     dnn = [
         float(frame.loc[frame["model"] == "dnn", "accuracy"].iloc[0])
         for frame in map(
             pd.read_csv,
-            sorted(BALANCED_RULE.glob("*concepts-human__arch-cbm-and-dnn__*")),
+            sorted(PAPER.balanced_rule.glob("*concepts-human__arch-cbm-and-dnn__*")),
         )
     ]
     is_human_perfect = (runs["concept_source"] == "human_concepts") & (
@@ -99,7 +103,7 @@ def main() -> None:
     save(fig, "answer_reliance.png")
 
     alignment = pd.read_csv(
-        next((PAPER_RESULTS / "robot/alignment").glob("*__alignment.csv"))
+        next((PAPER.root / "robot/alignment").glob("*__alignment.csv"))
     )
     rows = [
         {
@@ -117,7 +121,7 @@ def main() -> None:
 
     records = np.load(
         next(
-            INTERVENTION_RECORDS.glob(
+            PAPER.intervention_records.glob(
                 "*concepts-human__arch-cbm__isrc-llm*__budget-1__seed-1014__records.npz"
             )
         )
@@ -132,7 +136,9 @@ def main() -> None:
     save(fig, "concept_report.png")
 
     cells = sorted(
-        SUDOKU_CELLS.glob("sudoku__arch-cbm__res-18px__tau-0.95__*__interventions.csv")
+        PAPER.sudoku_cells.glob(
+            "sudoku__arch-cbm__res-18px__tau-0.95__*__interventions.csv"
+        )
     )
     sudoku = pd.concat(
         [pd.read_csv(c).assign(seed=i) for i, c in enumerate(cells)], ignore_index=True
@@ -142,7 +148,7 @@ def main() -> None:
 
     seed = 171
     confidence = np.load(
-        PAPER_RESULTS
+        PAPER.root
         / f"sudoku/confidence/sudoku__arch-cbm__res-18px__seed-{seed}__confidence.npz"
     )
     cell = pd.read_csv(next(c for c in cells if f"seed-{seed}" in c.name))

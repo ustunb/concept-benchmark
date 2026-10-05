@@ -17,7 +17,14 @@ import csv
 import statistics as st
 from pathlib import Path
 
-from _common import BALANCED_RULE, BALANCED_TAG, SPARSE_RULE, compile_tex, mean_se
+from _common import (
+    BALANCED_TAG,
+    PAPER,
+    add_results_root,
+    compile_tex,
+    mean_se,
+    use_results_root,
+)
 from plot_decision_support_panel import band, coords
 
 SEEDS_BY_RULE = {
@@ -81,9 +88,9 @@ def read_cell(path: Path) -> list[float]:
 
 def grid_cell(family: str, seed: int, concepts: str, rule: str = "sparse") -> Path:
     folder, tag = (
-        (SPARSE_RULE, "robot__rule-sparse")
+        (PAPER.sparse_rule, "robot__rule-sparse")
         if rule == "sparse"
-        else (BALANCED_RULE, BALANCED_TAG)
+        else (PAPER.balanced_rule, BALANCED_TAG)
     )
     matches = sorted(
         folder.glob(
@@ -102,7 +109,7 @@ def dnn_accuracies(concepts: str) -> list[float]:
     accs = []
     for seed in SEEDS_BY_RULE["balanced"]:
         path = (
-            BALANCED_RULE
+            PAPER.balanced_rule
             / f"{BALANCED_TAG}__concepts-{concepts}__arch-cbm-and-dnn__seed-{seed}__results.csv"
         )
         accs += [
@@ -131,7 +138,9 @@ def main() -> None:
     )
     ap.add_argument("--concepts", choices=["true", "human"], default="true")
     ap.add_argument("--rule", choices=["sparse", "balanced"], default="sparse")
+    add_results_root(ap)
     args = ap.parse_args()
+    use_results_root(args)
     if args.rule == "sparse":
         ref, ref_label, ref_band = MAJORITY, "majority class", ""
     else:  # DNN mean as the dashed line, mean ± SE over the same seeds as a grey band under everything

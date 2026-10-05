@@ -18,7 +18,7 @@
 - Robot pipeline: `--label-rule`, `--intervention-encoding`, `--intervention-sources self`, `--dump-interventions`, the `noisy_human_concepts` concept source, and all four architectures on every concept source.
 - Sudoku pipeline: ECBM, the optional `diagnose` stage, and abstention thresholds fitted with the rule that applies them.
 - `experiments/real_data.py`: interventions on Derm7pt and CUB.
-- `scripts/paper/`: the scripts behind every table, figure and test of the paper.
+- `scripts/paper/`: the scripts behind every table, figure and test of the paper. They read one results folder (`--results-root`): the paper's results, a separate download on the releases page, or your own runs copied with `collect_pipeline_runs.py`.
 - `LICENSE`, `concept_benchmark.__version__`.
 
 ### Removed

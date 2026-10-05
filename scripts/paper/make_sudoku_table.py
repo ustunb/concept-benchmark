@@ -16,9 +16,15 @@ import csv
 import statistics as st
 from pathlib import Path
 
-from _common import PAPER_RESULTS, SUDOKU_CELLS, latex_cell, mean_se, read_budget_rows
+from _common import (
+    PAPER,
+    add_results_root,
+    latex_cell,
+    mean_se,
+    read_budget_rows,
+    use_results_root,
+)
 
-SELECTIVE = PAPER_RESULTS / "sudoku/selective"
 ARCHS = [
     ("cbm", "\\CBM{}"),
     ("cem", "\\CEM{}"),
@@ -34,7 +40,7 @@ def read_cells(res: int, arch: str) -> tuple[list[list[float]], list[list[float]
     """Per-seed net work automated and coverage (percent) at k = 0, 1, 3, max."""
     net, coverage = [], []
     for f in sorted(
-        SUDOKU_CELLS.glob(
+        PAPER.sudoku_cells.glob(
             f"sudoku__arch-{arch}__res-{res}px__tau-{TAU}__threshold-per-budget__seed-*__interventions.csv"
         )
     ):
@@ -57,7 +63,7 @@ def dnn_coverage(res: int) -> list[float]:
     """Per-seed coverage of the DNN at the selective-accuracy target (percent)."""
     values = []
     for f in sorted(
-        SELECTIVE.glob(
+        PAPER.sudoku_selective.glob(
             f"sudoku__*__res-{res}px__threshold-per-budget__seed-*__selective-all-tau.csv"
         )
     ):
@@ -74,7 +80,9 @@ def dnn_coverage(res: int) -> list[float]:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, required=True)
+    add_results_root(ap)
     args = ap.parse_args()
+    use_results_root(args)
     lines = [
         r"\renewcommand{\arraystretch}{1.05}",
         r"\setlength{\tabcolsep}{3pt}",

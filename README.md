@@ -458,7 +458,7 @@ print(f"CS model: selective_acc={sel_acc:.3f}, coverage={cov:.3f}")  # ~0.98, ~1
 ```
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/selective_classification.png" width="500" alt="Selective classification: DNN vs CBM">
+  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/automation.png" width="500" alt="Coverage and net work automated against concept checks">
 </p>
 
 For a complete walkthrough including selective classification and interventions, see [`examples/sudoku_quickstart.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/sudoku_quickstart.py).

@@ -5,9 +5,18 @@ Everything in this folder is specific to the paper: it builds the paper's tables
 entry points are one level up (`scripts/robot_pipeline.py`, `scripts/sudoku_pipeline.py`,
 `scripts/robot_text_pipeline.py`, and the data generators).
 
-Every table, figure and test in the results section is produced by a script from the files in `results/paper/`.
-This folder holds the authors' archived runs and is not part of the repository; the pipelines write their results in a
-different layout, so the scripts document how each number was computed and do not run on fresh pipeline output. Run from the repository
+Every table, figure and test in the results section is produced by a script from one results folder. The folder is
+not part of the repository. Get one in either way:
+
+- **The paper's results.** Download `paper-results.zip` from the
+  [releases page](https://github.com/ustunb/concept-benchmark/releases) and unpack it. It holds every file the tables,
+  figures and tests read. `paper-results-large.zip` adds the intervention records, datasets, models, LLM answers and
+  224 px images that the answer-exchange table, the alignment evaluation and the diagnostics read.
+- **Your own runs.** Run the pipelines (see [`EXPERIMENTS.md`](../../EXPERIMENTS.md)), then copy their output into the
+  same layout: `python scripts/paper/collect_pipeline_runs.py --runs results --results-root my_results`.
+
+Pass the folder to any script as `--results-root <folder>`, or set `CONCEPT_BENCHMARK_PAPER_RESULTS` once. Without
+either, the scripts read `results/paper/`. The "Reads" columns below are paths inside that folder. Run from the repository
 root with `PYTHONPATH=.` and the project's Python. `_common.py` holds the paths and helpers the scripts share
 (result folders, mean ± SE, table cells, pdflatex) and puts the repository root and `scripts/` on the import path.
 
@@ -33,7 +42,7 @@ The `plot_*` scripts write `<out>.tex` and compile `<out>.pdf` with pdflatex.
 | Architectures figure | `python scripts/paper/plot_architecture_response.py --rule balanced --concepts human --out results/paper/figures/fig_architecture_response_balanced_human` | `robot/balanced_rule/` |
 | Concept-source heatmap | `python scripts/paper/plot_delta_accuracy_pipelines.py --layout E --rule balanced --out results/paper/figures/fig_delta_accuracy_balanced_E` | `robot/balanced_rule/` |
 | Alignment figure | `python scripts/paper/plot_alignment.py --out results/paper/figures/fig_alignment` | `robot/alignment/` |
-| Example plots of the documentation (`docs/assets/*.png`, drawn with `concept_benchmark.evaluation`) | `python scripts/paper/make_readme_figures.py` | `robot/balanced_rule/`, `robot/alignment/`, `sudoku/cells/`, `sudoku/confidence/` |
+| Example plots of the documentation (`docs/assets/*.png`, drawn with `concept_benchmark.evaluation`) | `python scripts/paper/make_readme_figures.py [--out <dir>]` | `robot/balanced_rule/`, `robot/alignment/`, `sudoku/cells/`, `sudoku/confidence/` |
 
 ## Tests
 
@@ -44,7 +53,7 @@ The `plot_*` scripts write `<out>.tex` and compile `<out>.pdf` with pdflatex.
 
 ## Diagnostics
 
-The first two rows read `results/paper/` only. The others load models (and most of them the robot images), so they run
+The first two rows read the results folder only. The others load models (and most of them the robot images), so they run
 where the models were trained; each docstring gives the checkout and arguments.
 
 | Question | Command | Reads |
@@ -72,9 +81,9 @@ Run in this order for new seeds; the pipeline then reads the caches with `--llm-
 | Step | Command | Reads |
 |---|---|---|
 | Export each seed's test robots and concept names | `python scripts/paper/export_seed_tests.py --seeds 1018 1019 --out <dir>/seed_tests.json` | `robot/datasets/` |
-| Render the test robots that lack a 224 px image | `python scripts/paper/render_robots_224.py --seed-tests <dir>/seed_tests.json` | `images/robot_224px/`, `data/robot_images/` |
+| Render the test robots that lack a 224 px image | `python scripts/paper/render_robots_224.py --seed-tests <dir>/seed_tests.json` | `images/robot_224px/`, the 32 px dataset images (`--small-images`) |
 | Fill the new seeds' caches with answers already given for the same image and questions | `python scripts/paper/assemble_llm_caches.py --seed-tests <dir>/seed_tests.json --out-dir <dir> --seeds 1018 1019` | `robot/llm_caches/` |
-| Ask Gemini about the robots still missing (resumable; needs `GEMINI_API_KEY`) | `python scripts/paper/build_llm_caches.py --seed-tests <dir>/seed_tests.json --image-dir results/paper/images/robot_224px --out-dir <dir> --seeds 1018 1019` | 224 px images, caches in `<dir>` |
+| Ask Gemini about the robots still missing (resumable; needs `GEMINI_API_KEY`) | `python scripts/paper/build_llm_caches.py --seed-tests <dir>/seed_tests.json --image-dir <results folder>/images/robot_224px --out-dir <dir> --seeds 1018 1019` | 224 px images, caches in `<dir>` |
 
 ## Pipeline options behind the diagnostics
 

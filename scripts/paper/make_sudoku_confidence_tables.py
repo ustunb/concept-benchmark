@@ -25,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
-from _common import PAPER_RESULTS, SUDOKU_CELLS, read_budget_rows
+from _common import PAPER, add_results_root, read_budget_rows, use_results_root
 from sudoku_pipeline import (
     _classwise_accuracy_thresholds,
     _decision_threshold_sweep,
@@ -34,7 +34,6 @@ from sudoku_pipeline import (
     _selective_at_thresholds,
 )
 
-CONFIDENCE = PAPER_RESULTS / "sudoku/confidence"
 ARCHS = [
     ("cbm", "\\CBM{}"),
     ("cem", "\\CEM{}"),
@@ -47,7 +46,7 @@ RESOLUTIONS = (50, 18)
 def seeds(res: int) -> list[int]:
     return sorted(
         int(f.name.split("seed-")[1].split("__")[0])
-        for f in CONFIDENCE.glob(
+        for f in PAPER.sudoku_confidence.glob(
             f"sudoku__arch-cbm__res-{res}px__seed-*__confidence.npz"
         )
     )
@@ -55,13 +54,14 @@ def seeds(res: int) -> list[int]:
 
 def confidence(arch: str, res: int, seed: int):
     return np.load(
-        CONFIDENCE / f"sudoku__arch-{arch}__res-{res}px__seed-{seed}__confidence.npz"
+        PAPER.sudoku_confidence
+        / f"sudoku__arch-{arch}__res-{res}px__seed-{seed}__confidence.npz"
     )
 
 
 def cell(arch: str, res: int, seed: int, tau: str) -> list[dict]:
     path = (
-        SUDOKU_CELLS
+        PAPER.sudoku_cells
         / f"sudoku__arch-{arch}__res-{res}px__tau-{tau}__threshold-per-budget__seed-{seed}__interventions.csv"
     )
     return read_budget_rows(path)
@@ -158,7 +158,9 @@ def main() -> None:
     ap.add_argument("--tau", default="0.95")
     ap.add_argument("--classwise-out", type=Path, default=None)
     ap.add_argument("--confirmed-out", type=Path, default=None)
+    add_results_root(ap)
     args = ap.parse_args()
+    use_results_root(args)
 
     kept = classwise(float(args.tau))
     print(

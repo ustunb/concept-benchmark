@@ -18,16 +18,17 @@ from collections import defaultdict
 from pathlib import Path
 
 from _common import (
-    BALANCED_RULE,
-    SPARSE_RULE,
+    PAPER,
+    add_results_root,
     filename_fields,
     latex_cell,
     read_budget_rows,
+    use_results_root,
 )
 
-RULES = {  # rule -> (results folder, seeds per cell, table label, caption suffix)
-    "balanced": (BALANCED_RULE, 10, "Table::BigTable", ""),
-    "sparse": (SPARSE_RULE, 4, "Table::BigTableSparse", " under the sparse rule"),
+RULES = {  # rule -> (seeds per cell, table label, caption suffix)
+    "balanced": (10, "Table::BigTable", ""),
+    "sparse": (4, "Table::BigTableSparse", " under the sparse rule"),
 }
 AUTOMATED = {"machine_annotation", "llm_concepts", "clip_concepts"}
 CONCEPT_SETS = [
@@ -49,7 +50,8 @@ SOURCES = ["perfect", "expert", "llm"]
 def read_grid(rule: str) -> dict[tuple, list[list[float]]]:
     """(concept source, intervention source, family) -> per-seed accuracies at k = 0, 1, 3, max."""
     cells = defaultdict(list)
-    for f in sorted(RULES[rule][0].glob("*.csv")):
+    folder = PAPER.balanced_rule if rule == "balanced" else PAPER.sparse_rule
+    for f in sorted(folder.glob("*.csv")):
         fields = filename_fields(f)
         if "isrc" not in fields:
             continue  # the CBM-and-DNN summary files
@@ -76,8 +78,10 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rule", choices=sorted(RULES), default="balanced")
     ap.add_argument("--out", type=Path, required=True)
+    add_results_root(ap)
     args = ap.parse_args()
-    _, n_seeds, label, suffix = RULES[args.rule]
+    use_results_root(args)
+    n_seeds, label, suffix = RULES[args.rule]
     cells = read_grid(args.rule)
 
     lines = [

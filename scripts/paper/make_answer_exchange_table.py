@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from _common import BALANCED_TAG, INTERVENTION_RECORDS, PAPER_RESULTS
+from _common import BALANCED_TAG, PAPER, add_results_root, use_results_root
 
 warnings.filterwarnings("ignore")
 from concept_benchmark.ext.fileutils import load  # noqa: E402
@@ -41,7 +41,7 @@ CONCEPT_MACRO = {
 
 def record(concepts: str, isrc: str, budget: str, seed: int):
     return np.load(
-        INTERVENTION_RECORDS
+        PAPER.intervention_records
         / f"{BALANCED_TAG}__concepts-{concepts}__arch-cbm__isrc-{isrc}__budget-{budget}__seed-{seed}__records.npz"
     )
 
@@ -50,7 +50,7 @@ def label_predictor(concepts: str, seed: int):
     """The CBM's label predictor as a function of concept values (it reads thresholded concepts)."""
     model = load(
         next(
-            (PAPER_RESULTS / "models/robot/balanced").glob(
+            (PAPER.models_balanced).glob(
                 f"{BALANCED_TAG}__{MODEL_TAG[concepts]}_cbm_seed{seed}__*"
             )
         )
@@ -129,7 +129,9 @@ def main() -> None:
         default=None,
         help="write the LaTeX table here (default: print only)",
     )
+    add_results_root(ap)
     args = ap.parse_args()
+    use_results_root(args)
     first, second = NAMES[args.first], NAMES[args.second]
     results = {
         c: exchange(c, args.first, args.second, args.concept) for c in args.concept_sets

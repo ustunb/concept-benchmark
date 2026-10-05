@@ -29,13 +29,11 @@ import numpy as np
 from scipy import stats
 
 from _common import (
-    BALANCED_RULE,
     BALANCED_TAG,
-    INTERVENTION_RECORDS,
-    PAPER_RESULTS,
-    REPO,
-    ROBOT_DATASETS,
+    PAPER,
+    add_results_root,
     read_budget_rows,
+    use_results_root,
 )
 
 warnings.filterwarnings("ignore")
@@ -47,23 +45,21 @@ from robot_pipeline import InterventionSettings, _test_interventions  # noqa: E4
 
 SEEDS = tuple(range(1014, 1024))
 CONCEPT_SETS = {"true": "ideal", "human": "subconcept"}  # concept set -> model tag
-DETECTOR = BALANCED_RULE / "detector_outputs"
-RESULTS = (
-    PAPER_RESULTS
-    / f"robot/alignment/{BALANCED_TAG}__arch-cbm__isrc-perfect__alignment.csv"
-)
+RESULTS_NAME = f"{BALANCED_TAG}__arch-cbm__isrc-perfect__alignment.csv"
 BUDGETS = ("1", "3", "max")
 
 
 def detector_file(concepts: str, seed: int) -> Path:
     return (
-        DETECTOR
+        PAPER.detector_outputs
         / f"{BALANCED_TAG}__concepts-{concepts}__arch-cbm__seed-{seed}__test-concept-probabilities.npz"
     )
 
 
 def update_index(entries: list[dict]) -> None:
-    index = PAPER_RESULTS / "INDEX.csv"
+    index = PAPER.root / "INDEX.csv"
+    if not index.exists():  # only the authors' full archive keeps an index of its files
+        return
     with index.open() as fh:
         reader = csv.DictReader(fh)
         fields, rows = reader.fieldnames, {r["path"]: r for r in reader}
@@ -77,7 +73,7 @@ def update_index(entries: list[dict]) -> None:
 
 def entry(path: Path, role: str, source: str, note: str) -> dict:
     return {
-        "path": str(path.relative_to(PAPER_RESULTS)),
+        "path": str(path.relative_to(PAPER.root)),
         "role": role,
         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         "source": source,
@@ -87,17 +83,17 @@ def entry(path: Path, role: str, source: str, note: str) -> dict:
 
 def install_detector_outputs() -> None:
     """Extract the CBM detector's test probabilities of the paper's runs from the installed intervention records."""
-    DETECTOR.mkdir(parents=True, exist_ok=True)
+    PAPER.detector_outputs.mkdir(parents=True, exist_ok=True)
     entries = []
     for concepts in CONCEPT_SETS:
         for seed in SEEDS:
             src = (
-                INTERVENTION_RECORDS
+                PAPER.intervention_records
                 / f"{BALANCED_TAG}__concepts-{concepts}__arch-cbm__isrc-perfect__budget-1__seed-{seed}__records.npz"
             )
             d = np.load(src)
             test = load(
-                ROBOT_DATASETS
+                PAPER.robot_datasets
                 / f"{BALANCED_TAG}__concepts-{concepts}__seed-{seed}__dataset.data"
             ).test
             if not (
@@ -115,14 +111,12 @@ def install_detector_outputs() -> None:
                 entry(
                     dest,
                     "diagnostic",
-                    str(src.relative_to(REPO / "results")),
+                    f"paper/{src.relative_to(PAPER.root)}",
                     "CBM concept probabilities on the test robots, from the paper's run",
                 )
             )
     update_index(entries)
-    print(
-        f"installed {len(entries)} detector-output files in {DETECTOR.relative_to(REPO)}"
-    )
+    print(f"installed {len(entries)} detector-output files in {PAPER.detector_outputs}")
 
 
 class _SavedDetector:
@@ -140,7 +134,7 @@ class _SavedDetector:
 
 def installed_accuracies(concepts: str, seed: int) -> list[float]:
     path = (
-        BALANCED_RULE
+        PAPER.balanced_rule
         / f"{BALANCED_TAG}__concepts-{concepts}__arch-cbm__isrc-perfect__strategy-upto__seed-{seed}__results.csv"
     )
     rows = read_budget_rows(path)
@@ -165,12 +159,12 @@ def evaluate() -> list[dict]:
     for concepts, model_tag in CONCEPT_SETS.items():
         for seed in SEEDS:
             data = load(
-                ROBOT_DATASETS
+                PAPER.robot_datasets
                 / f"{BALANCED_TAG}__concepts-{concepts}__seed-{seed}__dataset.data"
             )
             model = load(
                 next(
-                    (PAPER_RESULTS / "models/robot/balanced").glob(
+                    (PAPER.models_balanced).glob(
                         f"{BALANCED_TAG}__{model_tag}_cbm_seed{seed}__*"
                     )
                 )
@@ -301,20 +295,23 @@ def main() -> None:
         action="store_true",
         help="copy the detector outputs from the intervention dumps and exit",
     )
+    add_results_root(ap)
     args = ap.parse_args()
+    use_results_root(args)
     if args.install:
         install_detector_outputs()
         return
     rows = evaluate()
-    RESULTS.parent.mkdir(parents=True, exist_ok=True)
-    with RESULTS.open("w", newline="") as fh:
+    results = PAPER.alignment / RESULTS_NAME
+    results.parent.mkdir(parents=True, exist_ok=True)
+    with results.open("w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
     update_index(
         [
             entry(
-                RESULTS,
+                results,
                 "cited",
                 "scripts/paper/evaluate_alignment_balanced.py",
                 "alignment under the balanced rule: CBM with and without the HasKnees constraint, perfect interventions",
@@ -322,7 +319,7 @@ def main() -> None:
         ]
     )
     print(
-        f"\nwrote {RESULTS.relative_to(REPO)}; the unconstrained model reproduces the installed runs exactly on all {len(rows)} cases"
+        f"\nwrote {results}; the unconstrained model reproduces the installed runs exactly on all {len(rows)} cases"
     )
     report(rows)
 

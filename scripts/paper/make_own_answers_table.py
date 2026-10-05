@@ -15,7 +15,13 @@ import argparse
 import statistics as st
 from pathlib import Path
 
-from _common import BALANCED_RULE, BALANCED_TAG, read_budget_rows
+from _common import (
+    BALANCED_TAG,
+    PAPER,
+    add_results_root,
+    read_budget_rows,
+    use_results_root,
+)
 
 SEEDS = tuple(range(1014, 1024))
 ARCHS = [
@@ -42,7 +48,7 @@ def read_cell(
 ) -> list[dict]:
     files = [
         f
-        for f in BALANCED_RULE.glob(
+        for f in PAPER.balanced_rule.glob(
             f"{BALANCED_TAG}__concepts-{concepts}__{arch_tag}__isrc-{isrc}__strategy-upto*__seed-{seed}__results.csv"
         )
         if "enc-" not in f.name or ("enc-koh595" in f.name) == is_label_free
@@ -110,7 +116,9 @@ def signed(value: float) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, required=True)
+    add_results_root(ap)
     args = ap.parse_args()
+    use_results_root(args)
     summary = summarize()
     lines = [
         r"\begin{tabular}{@{}llrr@{}}",

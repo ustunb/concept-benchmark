@@ -16,7 +16,14 @@ import csv
 import statistics as st
 from pathlib import Path
 
-from _common import BALANCED_RULE, BALANCED_TAG, compile_tex, mean_se
+from _common import (
+    BALANCED_TAG,
+    PAPER,
+    add_results_root,
+    compile_tex,
+    mean_se,
+    use_results_root,
+)
 
 BUDGET_LABELS = ["0", "1", "3", "max"]
 
@@ -188,8 +195,8 @@ def main() -> None:
     ap.add_argument(
         "--root",
         type=Path,
-        default=BALANCED_RULE,
-        help="Installed balanced_rule folder, or a folder of raw run_{tag}_s{seed}_{preset} runs.",
+        default=None,
+        help="Folder of raw run_{tag}_s{seed}_{preset} runs, with --tag (default: the results root's balanced_rule folder).",
     )
     ap.add_argument(
         "--prefix", default=BALANCED_TAG, help="File-name prefix of the installed runs."
@@ -214,7 +221,10 @@ def main() -> None:
         required=True,
         help="Output path without extension (.tex and .pdf).",
     )
+    add_results_root(ap)
     args = ap.parse_args()
+    use_results_root(args)
+    args.root = args.root or PAPER.balanced_rule
 
     seeds = parse_seeds(args.seeds)
     true_runs, human_runs, dnn_runs, gains = [], [], [], []

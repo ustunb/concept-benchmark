@@ -14,9 +14,8 @@ import csv
 import statistics as st
 from pathlib import Path
 
-from _common import PAPER_RESULTS
+from _common import PAPER, add_results_root, use_results_root
 
-RESULTS = PAPER_RESULTS / "real_datasets"
 DATASETS = [("derm7pt", r"\textds{Derm7pt}"), ("cub", r"\textds{CUB}")]
 CONCEPTS = [
     (("clinician", "ground_truth"), "human-annotated"),
@@ -25,7 +24,7 @@ CONCEPTS = [
 
 
 def tabular(name: str, title: str) -> list[str]:
-    rows = list(csv.DictReader((RESULTS / f"{name}.csv").open()))
+    rows = list(csv.DictReader((PAPER.real_datasets / f"{name}.csv").open()))
     budgets = list(dict.fromkeys(r["budget"] for r in rows))
     head = " & ".join(
         r"$k{=}\text{max}$" if b == "max" else f"$k{{=}}{b}$" for b in budgets
@@ -59,7 +58,9 @@ def tabular(name: str, title: str) -> list[str]:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, required=True)
+    add_results_root(ap)
     args = ap.parse_args()
+    use_results_root(args)
     blocks = ["\n".join(tabular(name, title)) for name, title in DATASETS]
     args.out.write_text("\n\\quad\n".join(blocks) + "\n")
     print(f"wrote {args.out}")

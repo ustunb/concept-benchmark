@@ -17,10 +17,9 @@ import hashlib
 import json
 from pathlib import Path
 
-from _common import PAPER_RESULTS
+from _common import PAPER, add_results_root, use_results_root
 from build_llm_caches import build_concept_lists
 
-INSTALLED = PAPER_RESULTS / "robot/llm_caches"
 SOURCE_SEEDS = ("1014", "1015", "1016", "1017")
 LIST_TAG = {"true": "true", "human": "human-and-machine", "llm": "llm", "clip": "clip"}
 VARIANT = "llm-gemini-2.5-flash-lite__img-224px__questions-v2-value-explicit"
@@ -49,7 +48,9 @@ def main() -> None:
     ap.add_argument("--seed-tests", type=Path, required=True)
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--seeds", nargs="+", required=True)
+    add_results_root(ap)
     args = ap.parse_args()
+    use_results_root(args)
     tests = json.loads(args.seed_tests.read_text())
     for cache, tag in LIST_TAG.items():
         answers: dict[str, list[int]] = {}
@@ -58,7 +59,7 @@ def main() -> None:
             t = tests[s]
             n = len(build_concept_lists(t["true_names"], t["human_names"])[cache])
             rows = read_rows(
-                INSTALLED
+                PAPER.llm_caches
                 / f"robot__concepts-{tag}__{VARIANT}__seed-{s}__llm-votes.jsonl",
                 n,
             )

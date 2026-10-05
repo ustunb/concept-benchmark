@@ -4,7 +4,14 @@ All commands assume `uv sync` has been run from the repo root (and `./scripts/in
 
 The paper reports every result as mean ± SE over 10 seeds: `1014`–`1023` for robots and `171`–`180` for sudoku. The commands below run one seed; loop over the seeds to reproduce a table. Numbers differ slightly across hardware, so expect to match the paper's means within their standard errors, not digit for digit.
 
-[`scripts/paper/README.md`](scripts/paper/README.md) maps every table, figure and test of the paper to the script that computed it from the authors' archived runs.
+[`scripts/paper/README.md`](scripts/paper/README.md) maps every table, figure and test of the paper to the script that builds it, from the paper's results (a download) or from your own runs:
+
+```bash
+python scripts/paper/collect_pipeline_runs.py --runs results --results-root my_results
+python scripts/paper/make_robot_big_table.py --results-root my_results --out robot_table.tex
+```
+
+`collect_pipeline_runs.py` names the files after the settings of the runs; pass `--encoding percentile` for the runs of "Automated concepts and interventions" and `--target-accuracy 0.95` for the sudoku runs.
 
 ## Robot Benchmark
 

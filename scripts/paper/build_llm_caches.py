@@ -16,7 +16,6 @@ import hashlib
 import json
 import os
 import random
-import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -52,14 +51,7 @@ def sha1_of(items) -> str:
 
 
 def read_descriptions(name: str) -> list[dict]:
-    raw = subprocess.check_output(
-        [
-            "git",
-            "show",
-            f"origin/balanced-baseline:concept_benchmark/concept_descriptions/{name}.jsonl",
-        ],
-        cwd=REPO,
-    ).decode()
+    raw = (REPO / f"concept_benchmark/concept_descriptions/{name}.jsonl").read_text()
     return [json.loads(line) for line in raw.splitlines() if line.strip()]
 
 
