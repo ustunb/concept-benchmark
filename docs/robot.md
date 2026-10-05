@@ -173,7 +173,7 @@ python scripts/robot_pipeline.py --seed 1014 --stages setup cbm dnn intervene al
 | `--concept-preset` | `ground_truth` (7 true concepts) or `foot_subtypes` (12 human concepts) |
 | `--label-rule` | `balanced` (default) or `sparse` |
 | `--cbm-family` | `cbm`, `cem`, `probcbm` or `ecbm` |
-| `--concept-sources` | Who annotates the concepts: `ground_truth`, `human_concepts`, `machine_annotation`, `llm_concepts`, `clip_concepts` |
+| `--concept-sources` | Who annotates the concepts: `ground_truth`, `human_concepts`, `noisy_human_concepts`, `machine_annotation`, `llm_concepts`, `clip_concepts` |
 | `--intervention-sources` | Who answers at test time: `perfect`, `expert`, `llm`, or `self` (the model's own predictions) |
 | `--budgets` | Intervention budgets, e.g. `1 3 max` |
 | `--intervention-encoding` | What a label-free CBM reads after an intervention: `binary` (default), `percentile` or `binary_revealed` |

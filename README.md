@@ -313,7 +313,7 @@ python scripts/robot_pipeline.py --seed 1014 --stages setup cbm dnn intervene al
 | `--concept-preset` | `ground_truth` (7 true concepts) or `foot_subtypes` (12 human concepts) |
 | `--label-rule` | `balanced` (default) or `sparse` |
 | `--cbm-family` | `cbm`, `cem`, `probcbm` or `ecbm` |
-| `--concept-sources` | Who annotates the concepts: `ground_truth`, `human_concepts`, `machine_annotation`, `llm_concepts`, `clip_concepts` |
+| `--concept-sources` | Who annotates the concepts: `ground_truth`, `human_concepts`, `noisy_human_concepts`, `machine_annotation`, `llm_concepts`, `clip_concepts` |
 | `--intervention-sources` | Who answers at test time: `perfect`, `expert`, `llm`, or `self` (the model's own predictions) |
 | `--budgets` | Intervention budgets, e.g. `1 3 max` |
 | `--intervention-encoding` | What a label-free CBM reads after an intervention: `binary` (default), `percentile` or `binary_revealed` |
@@ -900,6 +900,7 @@ The robot pipeline varies two things independently: who annotates the concepts a
 |----------------|----------|
 | **ground_truth** | The 7 true concepts |
 | **human_concepts** | 12 concepts as a human annotator would list them (six foot subtypes) |
+| **noisy_human_concepts** | The same concepts, annotated with 20% label noise (annotators who disagree) |
 | **machine_annotation** | The human concepts, scored by CLIP (label-free CBM) |
 | **llm_concepts** | Concepts written by an LLM, scored by CLIP |
 | **clip_concepts** | Single words chosen by CLIP, scored by CLIP |
@@ -932,9 +933,10 @@ A regime names one pairing of concept source and intervention source, as in the 
 | **llm** | Concepts written by an LLM | LLM | Fully automated with an LLM |
 | **clip** | Single words chosen by CLIP | LLM | Fully automated with CLIP |
 
-The robot pipeline accepts `--regimes baseline expert machine llm clip` as shorthand for the matching sources. The `subjective` regime runs in the text pipeline:
+Both robot pipelines accept `--regimes` as shorthand for the matching sources:
 
 ```bash
+python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes --regimes baseline expert subjective
 python scripts/robot_text_pipeline.py --seed 1337 --regimes baseline expert subjective
 ```
 

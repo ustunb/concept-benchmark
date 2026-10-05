@@ -45,6 +45,7 @@ from concept_benchmark.config import (
     RobotBenchmarkConfig,
 )
 from concept_benchmark.generators import DatasetGenerator
+from concept_benchmark.types import CBMTrainingMode
 from concept_benchmark.ext.fileutils import load, save
 from experiments.cem_integration import (
     compute_ecbm_interpretation_summary,
@@ -2587,9 +2588,7 @@ def _cells_from_regimes(args, config) -> list[tuple[str, str]]:
 def _apply_cli_args(config: RobotBenchmarkConfig, args) -> None:
     """Copy the command-line options that set model, intervention and LLM settings onto `config`."""
     if getattr(args, "training_mode", None):
-        from concept_benchmark.types import CBMTrainingMode as _TM
-
-        config.training_mode = _TM(args.training_mode)
+        config.training_mode = CBMTrainingMode(args.training_mode)
     if getattr(args, "probcbm_intervention_prob", None) is not None:
         config.probcbm_intervention_prob = args.probcbm_intervention_prob
 

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import importlib.util
+import itertools
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -305,8 +309,6 @@ class TestKFlip:
 
 def _flip_probability(model, p, subset):
     """Brute-force flip probability of `subset` for one robot with concept probabilities `p` (hard mode)."""
-    import itertools
-
     base = (p >= 0.5).astype(np.float32)
     base_label = model.label_predictor.predict_proba(base[None])[0].argmax()
     total = 0.0
@@ -344,9 +346,6 @@ def _mixed_batch(n, k, seed):
 
 
 def _load_reference(name):
-    import importlib.util
-    from pathlib import Path
-
     spec = importlib.util.spec_from_file_location(
         name, Path(__file__).with_name(f"{name}.py")
     )

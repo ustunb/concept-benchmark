@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -103,8 +104,6 @@ def test_percentile_encoding_sets_revealed_concepts_to_training_percentiles():
 
 
 def test_intervention_records_of_different_runs_get_different_names(tmp_path):
-    from types import SimpleNamespace
-
     result = SimpleNamespace(
         mask=np.zeros((2, 2), dtype=bool),
         C_pred=np.zeros((2, 2)),
