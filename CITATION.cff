@@ -2,13 +2,22 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 title: "Measuring What Matters: Synthetic Benchmarks for Concept Bottleneck Models"
 type: software
-version: 0.3.0
-date-released: 2026-01-01
-url: "https://anonymous.4open.science/r/concept-benchmark-84D2"
-repository-code: "https://anonymous.4open.science/r/concept-benchmark-84D2"
+version: 0.4.0
+date-released: 2026-10-05
+url: "https://github.com/ustunb/concept-benchmark"
+repository-code: "https://github.com/ustunb/concept-benchmark"
 license: MIT
 authors:
-  - name: "Anonymous Authors"
+  - family-names: "Skirzyński"
+    given-names: "Julian"
+  - family-names: "Cheon"
+    given-names: "Harry"
+  - family-names: "Kadekodi"
+    given-names: "Shreyas"
+  - family-names: "Stewart"
+    given-names: "Meredith"
+  - family-names: "Ustun"
+    given-names: "Berk"
 keywords:
   - Concept Bottleneck Models
   - Safety

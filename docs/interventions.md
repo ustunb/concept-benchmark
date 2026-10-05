@@ -197,4 +197,4 @@ Custom automated concept sets (`custom`, `placeholder3`) are not yet wired into 
 
 For details on each regime, see the [Robot benchmark documentation](robot.md).
 
-For a complete end-to-end example using `ConceptInterventionRunner` with training, interventions, and alignment, see [`examples/robot_pipeline_example.py`](https://anonymous.4open.science/r/concept-benchmark-84D2/blob/main/examples/robot_pipeline_example.py).
+For a complete end-to-end example using `ConceptInterventionRunner` with training, interventions, and alignment, see [`examples/robot_pipeline_example.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/robot_pipeline_example.py).

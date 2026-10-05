@@ -47,7 +47,7 @@ pip install concept-benchmark
 **Dataset generation** works out of the box with `pip install`. **Model training, interventions, and evaluation** (`experiments/` package) require cloning the repo:
 
 ```bash
-git clone https://anonymous.4open.science/r/concept-benchmark-84D2.git
+git clone https://github.com/ustunb/concept-benchmark.git
 cd concept-benchmark
 uv sync
 ```
@@ -926,9 +926,10 @@ For a complete end-to-end example with training, interventions, and alignment, s
 If you use this package in your research, please cite:
 
 ```bibtex
-@article{anonymous2026concept,
+@inproceedings{skirzynski2026measuring,
   title={Measuring What Matters: Synthetic Benchmarks for Concept Bottleneck Models},
-  author={Anonymous Authors},
+  author={Skirzy{\'n}ski, Julian and Cheon, Harry and Kadekodi, Shreyas and Stewart, Meredith and Ustun, Berk},
+  booktitle={Advances in Neural Information Processing Systems},
   year={2026},
 }
 ```

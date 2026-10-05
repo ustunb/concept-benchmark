@@ -17,10 +17,17 @@ Quick start::
     print(dataset)
 """
 
+from importlib.metadata import PackageNotFoundError, version
+
 from . import config, evaluation, robots, sudoku, synthetic, transforms, utils
 from .data import ConceptDataset, ConceptDatasetSample
 from .formula import F, LabelFormula
 from .generators import DatasetGenerator
+
+try:
+    __version__ = version("concept-benchmark")
+except PackageNotFoundError:  # running from a source tree that is not installed
+    __version__ = "0.0.0"
 
 utils.patch_macos_dataloader()
 
