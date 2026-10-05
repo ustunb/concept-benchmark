@@ -7,33 +7,13 @@ A concept bottleneck model (CBM) first predicts interpretable *concepts* from in
 The robot benchmark classifies fictional robots — **Glorps** vs. **Drents** — from their body features:
 
 ```python
-from concept_benchmark.robots import DatasetGenerator, LabelFormula, F
-from concept_benchmark.transforms import ConceptDropGenerator
+from concept_benchmark.robots import DatasetGenerator
 
 dataset = DatasetGenerator(
-    seed=1014,                       # reproducibility
+    seed=1014,
     concept_preset="foot_subtypes",  # expand foot_shape into subtypes (default: "ground_truth")
-    image_size="medium",             # "small" (8px), "medium" (32px, default), or "large" (600px)
-    render_images=True,              # set False to skip image rendering for quick exploration
-    label_formula=LabelFormula(      # scoring rule for class assignment
-        score=(                      #   score = 5·[mouth=closed] + 8·[foot=pointy] - 5·[knees=true] + 2
-            5 * F("mouth_type").closed
-            + 8 * F("foot_shape").pointy
-            - 5 * F("has_knees").true
-            + 2
-        ),
-        temperature=4.2,             # P(Glorp) = σ(4.2 × score)
-        stochastic=True,
-    ),
-).generate()
-
-# Drop some concepts to get a 12-concept setup
-dataset = ConceptDropGenerator(dataset, [
-    "has_elbows", "hand_shape", "foot_shape",
-    "foot_shape_flat_rounded", "foot_shape_flat_lshaped",
-    "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
-]).generate()
-dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
+    render_images=True,              # set False to skip rendering for quick exploration
+).generate_splits()                  # the train/val/test split of the paper
 
 print(dataset.train.C.shape)   # (3800, 12) — concept annotations
 print(dataset.train.concepts)
@@ -42,6 +22,8 @@ print(dataset.train.concepts)
 #  'foot_shape_flat_5sided', 'foot_shape_pointy_rounded',
 #  'foot_shape_pointy_square', 'foot_shape_pointy_4sided']
 ```
+
+`generate()` returns the unsplit dataset with every concept, for you to drop concepts and split as you choose. Robots are labeled with the `balanced` rule by default; pass `label_rule="sparse"` for the rare-class rule (see [Robot Classification](robot.md)).
 
 Inspect the data:
 
@@ -69,7 +51,6 @@ Train a CBM — concept detector (images → concepts) and label predictor (conc
 ```python
 import numpy as np
 from concept_benchmark.robots import DatasetGenerator
-from concept_benchmark.transforms import ConceptDropGenerator
 from concept_benchmark.utils import set_deterministic_seed
 from experiments.models import (
     ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier,
@@ -78,13 +59,7 @@ from experiments.models import (
 set_deterministic_seed(1014)
 
 dataset = DatasetGenerator(
-    seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
-dataset = ConceptDropGenerator(dataset, [
-    "has_elbows", "hand_shape", "foot_shape",
-    "foot_shape_flat_rounded", "foot_shape_flat_lshaped",
-    "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
-]).generate()
-dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
+    seed=1014, concept_preset="foot_subtypes", render_images=True).generate_splits()
 
 # Step 1: train concept detector (images → concepts)
 n_concepts = dataset.train.n_concepts
@@ -101,8 +76,10 @@ cbm = ConceptBasedModel(concept_detector=cd, label_predictor=fe)
 predictions = cbm.predict(dataset.test)
 accuracy = np.mean(predictions == dataset.test.y)
 print(f"CBM accuracy: {accuracy:.4f}")
-# CBM accuracy: 0.7812
+# about 0.78
 ```
+
+Over the 10 seeds of the paper, the CBM reaches 84.5% with the true concepts and 77.6% with the human concepts before interventions, and 92.0% and 85.7% once every concept is corrected; the DNN reaches 88%. A single run differs from these means by a point or two, and across hardware.
 
 For a complete walkthrough including interventions and alignment, see `examples/robot_pipeline_example.py`.
 
@@ -110,19 +87,23 @@ Visualize intervention results:
 
 ```python
 # Plot accuracy vs intervention budget
-from concept_benchmark.evaluation import plot_intervention_curve
 import pandas as pd
+from concept_benchmark.evaluation import plot_intervention_curve
 
-results = pd.DataFrame({
-    "budget": [0, 1, 3, 7],
-    "accuracy": [0.8673, 0.9734, 0.9767, 0.9767],
-})
-fig, ax = plot_intervention_curve(results, baseline_accuracy=0.8746)
+# one results file per seed, as written by scripts/robot_pipeline.py
+results = pd.concat(
+    pd.read_csv(path).assign(seed=seed) for seed, path in results_by_seed.items()
+)
+fig, ax = plot_intervention_curve(results, group="model_family", baseline_accuracy=dnn_accuracies)
 ```
 
-<p align="center">
-  <img src="docs/assets/intervention_curve.png" width="500" alt="Intervention curve example">
-</p>
+```{image} assets/intervention_curve.png
+:width: 500px
+:align: center
+:alt: Accuracy against the intervention budget for four architectures
+```
+
+See [Evaluation Metrics and Plots](evaluation.md) for the other plots.
 
 ## Sudoku Validation
 
@@ -136,10 +117,8 @@ dataset = DatasetGenerator(
     n_boards=1000,        # number of boards
     max_cell_swaps=9,     # cells swapped in invalid boards (higher = subtler errors)
     valid_board_ratio=0.5,  # fraction of valid boards
-).generate()
-
-# Stratified split — preserves valid/invalid ratio in each split
-dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=171)
+    render_images=False,  # set True to generate board images (slower)
+).generate_splits()       # 60/20/20, stratified on the label
 
 print(dataset.train.C.shape)   # (600, 27) — 27 concept annotations
 print(dataset.train.concepts)  # ['row_valid_1', 'row_valid_2', ..., 'block_valid_9']
@@ -167,7 +146,7 @@ For a complete walkthrough including selective classification and interventions,
 
 ## Full Experiment Pipelines
 
-To reproduce the paper results — including all intervention regimes, alignment constraints, and selective classification — use the pipeline scripts (requires cloning the repo):
+To run the full experiments — including concept and intervention sources, alignment constraints, and selective classification — use the pipeline scripts (requires cloning the repo):
 
 ```bash
 python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes   # see --help for all flags
@@ -176,3 +155,7 @@ python scripts/sudoku_pipeline.py --seed 171
 # Add plot to generate figures from results
 python scripts/robot_pipeline.py --seed 1014 --stages setup cbm dnn intervene align collect plot
 ```
+
+The paper reports every result as a mean over 10 seeds (robots `1014`–`1023`, sudoku `171`–`180`); [`EXPERIMENTS.md`](https://github.com/ustunb/concept-benchmark/blob/main/EXPERIMENTS.md) lists the commands behind each experiment.
+
+The datasets of the paper are also on the Hugging Face Hub ([`robots-true-concepts`](https://huggingface.co/datasets/juliannski/robots-true-concepts), [`robots-human-concepts`](https://huggingface.co/datasets/juliannski/robots-human-concepts), [`sudoku`](https://huggingface.co/datasets/juliannski/sudoku)).

@@ -33,7 +33,7 @@ Accuracy gain over a baseline model (e.g. a DNN): `accuracy(predictions) - basel
 ```python
 from concept_benchmark.evaluation import gain
 
-g = gain(y_pred, y_true, baseline_accuracy=0.8746)
+g = gain(y_pred, y_true, baseline_accuracy=0.88)
 ```
 
 ### selective_accuracy
@@ -74,73 +74,204 @@ nwa = net_work_automated(
 
 ## Plots
 
+Plots take the results tables that the pipelines write (or your own, with the same columns). Rows from several runs are averaged and drawn with a standard-error band, so pass the concatenated results of all your seeds. The pipelines' `plot` stage draws the ones that apply to a run. The figures below use the 10-seed results of the paper.
+
+Outcome plots show *what* happens:
+
+| Function | Shows |
+|----------|-------|
+| `plot_intervention_curve(results, group=..., baseline_accuracy=...)` | Accuracy against the intervention budget *k*, one line per model or concept set, with the DNN as a dashed line |
+| `plot_intervention_heatmap(results)` | Change in accuracy from interventions for each model, concept set and intervention source |
+| `plot_alignment_comparison(results)` | Constrained against unconstrained model, before and after interventions |
+| `plot_automation(results, n_instances, n_concepts)` | Coverage and net work automated against the number of concept checks |
+| `plot_selective_classification(dnn_metrics, cbm_metrics)` | DNN against CBM on selective accuracy and coverage |
+| `plot_concept_discovery(ideal_df, subconcept_df, dnn_accuracy)` | True against human concepts at each budget |
+| `plot_model_comparison(results, dnn_accuracy)` | Models × concept sets at each budget |
+
+Diagnostic plots show *why*:
+
+| Function | Shows | Read it as |
+|----------|-------|------------|
+| `plot_concept_report(mask, concept_proba, concept_answers, concepts_true, concept_names)` | Per concept: detector accuracy, share of interventions, intervener accuracy | An intervener helps only if it is accurate on the concepts the model asks about |
+| `plot_answer_reliance(results)` | Change in accuracy when interventions supply the model's own answers against the true values | Similar bars mean the model does not rely on its concept values |
+| `plot_confidence(prob_positive, y_true, abstention_threshold)` | Predicted probabilities by class, with the band where the model abstains | Instances inside the band are deferred no matter how many concepts are checked |
+
 ### plot_intervention_curve
 
-Line plot of a metric (default: accuracy) vs intervention budget *k*. Optionally draws a horizontal dashed line for the DNN baseline.
+Line plot of a metric (default: accuracy) against the intervention budget *k*. `results` needs the columns `budget` and `accuracy`; rows that share a budget are averaged and drawn with a standard-error band. `group=` names a column that splits the rows into one line each (e.g. `"model_family"` or `"concept_source"`), and `baseline_accuracy` (one value, or one per run) draws the DNN as a dashed line.
 
 ```python
-from concept_benchmark.evaluation import plot_intervention_curve
 import pandas as pd
+from concept_benchmark.evaluation import plot_intervention_curve
 
-results = pd.DataFrame({
-    "budget": [0, 1, 3, 7],
-    "accuracy": [0.8673, 0.9734, 0.9767, 0.9767],
-})
-fig, ax = plot_intervention_curve(results, baseline_accuracy=0.8746)
+# one results file per seed, as written by scripts/robot_pipeline.py
+results = pd.concat(
+    pd.read_csv(path).assign(seed=seed) for seed, path in results_by_seed.items()
+)
+fig, ax = plot_intervention_curve(results, group="model_family", baseline_accuracy=dnn_accuracies)
 fig.savefig("intervention_curve.png")
 ```
 
-### plot_regime_comparison
-
-Horizontal bar chart of mean delta-accuracy per intervention regime, with min/max error bars across budgets. Compares how different annotation sources (expert, subjective, machine, etc.) affect intervention benefit.
-
-```python
-from concept_benchmark.evaluation import plot_regime_comparison
-import pandas as pd
-
-regime_df = pd.DataFrame({
-    "regime": ["baseline"] * 4 + ["expert"] * 4,
-    "budget": [0, 1, 2, 5, 0, 1, 2, 5],
-    "accuracy": [0.78, 0.92, 0.94, 0.94, 0.78, 0.88, 0.90, 0.89],
-})
-fig, ax = plot_regime_comparison(regime_df, budgets=[1, 2, 5])
+```{image} assets/intervention_curve.png
+:width: 500px
+:align: center
+:alt: Accuracy against the intervention budget for four architectures
 ```
 
-### plot_concept_discovery
+### plot_intervention_heatmap
 
-Clustered bar chart comparing ideal (ground-truth) vs subconcept accuracy across intervention budgets, with a DNN baseline line.
+Heatmap of the change in accuracy that interventions bring: each cell is the mean over runs of the accuracy at the budgets above zero minus the accuracy at budget zero. Rows are the values of `rows` (default `"model_family"`) and columns the combinations of `columns` (default `("concept_source", "intervention_source")`); a `seed` column separates runs.
 
 ```python
-from concept_benchmark.evaluation import plot_concept_discovery
-import pandas as pd
+from concept_benchmark.evaluation import plot_intervention_heatmap
 
-ideal = pd.DataFrame({"budget": [0, 1, 3], "accuracy": [0.8673, 0.9734, 0.9767]})
-subconcept = pd.DataFrame({"budget": [0, 1, 3], "accuracy": [0.7812, 0.9212, 0.9439]})
-fig, ax = plot_concept_discovery(ideal, subconcept, dnn_accuracy=0.8746)
+fig, ax = plot_intervention_heatmap(results)
 ```
 
-### plot_selective_classification
-
-Grouped bar chart comparing DNN vs CBM on selective classification metrics (selective accuracy, coverage, net work automated).
-
-```python
-from concept_benchmark.evaluation import plot_selective_classification
-
-dnn_metrics = {"selective_accuracy": 0.833, "coverage": 0.12}
-cbm_metrics = {"selective_accuracy": 0.938, "coverage": 0.975}
-fig, ax = plot_selective_classification(dnn_metrics, cbm_metrics)
+```{image} assets/intervention_heatmap.png
+:width: 800px
+:align: center
+:alt: Change in accuracy from interventions per model, concept set and intervention source
 ```
 
 ### plot_alignment_comparison
 
-Horizontal bar chart comparing CBM vs aligned CBM gain at a given intervention budget. Shows how alignment constraints affect intervention benefit.
+Bar chart of a constrained against an unconstrained model. `results` is a DataFrame with one row per run and the columns `concepts` (concept set), `model` and `accuracy_before`; an optional `accuracy_after` column adds a second panel with the accuracy after interventions. Several rows per concept set and model (e.g. one per `seed`) are averaged and drawn with standard-error bars.
 
 ```python
+import pandas as pd
 from concept_benchmark.evaluation import plot_alignment_comparison
 
-results = {
-    "ideal": {"cbm_gain": 0.102, "aligned_gain": -0.004},
-    "subconcept": {"cbm_gain": 0.069, "aligned_gain": -0.080},
+results = pd.DataFrame({
+    "concepts": ["true", "true", "human", "human"],
+    "model": ["CBM", "Constrained CBM", "CBM", "Constrained CBM"],
+    "accuracy_before": [0.845, 0.898, 0.776, 0.810],
+    "accuracy_after": [0.920, 0.907, 0.857, 0.832],
+})
+fig, axes = plot_alignment_comparison(results)
+```
+
+```{image} assets/alignment.png
+:width: 700px
+:align: center
+:alt: Constrained against unconstrained CBM before and after interventions
+```
+
+### plot_automation
+
+Line plot of coverage and net work automated against the number of concept checks allowed. `results` needs the columns `budget`, `coverage_after` and `total_concept_checks`, as written by the sudoku pipeline; `baseline_coverage` optionally draws a model without interventions (e.g. the DNN) as a dashed line.
+
+```python
+from concept_benchmark.evaluation import plot_automation
+
+fig, ax = plot_automation(results, n_instances=len(test), n_concepts=27)
+```
+
+```{image} assets/automation.png
+:width: 400px
+:align: center
+:alt: Coverage and net work automated against concept checks
+```
+
+### plot_selective_classification
+
+Grouped bar chart comparing DNN vs CBM on selective classification metrics (selective accuracy, coverage, net work automated). Each argument maps a metric name to its value.
+
+```python
+from concept_benchmark.evaluation import coverage, plot_selective_classification, selective_accuracy
+
+dnn_metrics = {
+    "selective_accuracy": selective_accuracy(y_pred_dnn, y_true, confidence_dnn, threshold_dnn),
+    "coverage": coverage(confidence_dnn, threshold_dnn),
 }
-fig, ax = plot_alignment_comparison(results)
+cbm_metrics = {
+    "selective_accuracy": selective_accuracy(y_pred_cbm, y_true, confidence_cbm, threshold_cbm),
+    "coverage": coverage(confidence_cbm, threshold_cbm),
+}
+fig, ax = plot_selective_classification(dnn_metrics, cbm_metrics)
+```
+
+### plot_concept_discovery
+
+Clustered bar chart comparing true against human concepts across intervention budgets, with a DNN baseline line. Both DataFrames need the columns `budget` and `accuracy`; `budgets` selects which budgets to show (default `[0, 1, 3]`).
+
+```python
+from concept_benchmark.evaluation import plot_concept_discovery
+
+fig, ax = plot_concept_discovery(ideal_df, subconcept_df, dnn_accuracy=0.88)
+```
+
+### plot_model_comparison
+
+Grouped bar chart comparing models × concept sets across budgets. `results` maps `(model_name, concept_set)` tuples, e.g. `("CBM", "true_concepts")`, to DataFrames with the columns `budget` and `accuracy`.
+
+```python
+from concept_benchmark.evaluation import plot_model_comparison
+
+fig, ax = plot_model_comparison(
+    {("CBM", "true_concepts"): ideal_df, ("CBM", "human_concepts"): subconcept_df},
+    dnn_accuracy=0.88,
+)
+```
+
+### plot_concept_report
+
+Per concept: how accurate the detector is, how often the concept is intervened on, and how accurate the intervener is. A concept with a high share of interventions and a low intervener accuracy explains interventions that do not help. The inputs are the intervention records of the robot pipeline (`--dump-interventions DIR`), one `.npz` file per budget.
+
+```python
+import numpy as np
+from concept_benchmark.evaluation import plot_concept_report
+
+records = np.load(record_path)  # a file in the --dump-interventions directory
+fig, ax = plot_concept_report(
+    mask=records["mask"],                 # concepts intervened on
+    concept_proba=records["C_pred"],      # predicted probabilities before interventions
+    concept_answers=records["C_answer"],  # concept values after interventions
+    concepts_true=records["C_true"],
+    concept_names=list(records["concept_names"]),
+)
+```
+
+```{image} assets/concept_report.png
+:width: 420px
+:align: center
+:alt: Per-concept detector accuracy, share of interventions and intervener accuracy
+```
+
+### plot_answer_reliance
+
+Change in accuracy when interventions supply the model's own answers against the true values. Interventions with the model's own answers change no concept value, so any change in accuracy comes from the intervention mechanism. `results` holds the rows of a robot pipeline run with `--intervention-sources self perfect` (columns `budget`, `accuracy`, `intervention_source` and the `group` column, default `"model_family"`).
+
+```python
+from concept_benchmark.evaluation import plot_answer_reliance
+
+fig, ax = plot_answer_reliance(results, group="model_family")
+```
+
+```{image} assets/answer_reliance.png
+:width: 380px
+:align: center
+:alt: Change in accuracy with the model's own answers against the true values
+```
+
+### plot_confidence
+
+Histogram of the predicted probability of the positive class, with the band where the model abstains: a selective classifier abstains when the probability lies in `[t, 1 - t]`. The inputs are saved by the sudoku pipeline's optional `diagnose` stage.
+
+```python
+import numpy as np
+from concept_benchmark.evaluation import plot_confidence
+
+saved = np.load(confidence_path)  # the .npz file written by the diagnose stage
+fig, ax = plot_confidence(
+    prob_positive=saved["p_test"],
+    y_true=saved["y_test"],
+    abstention_threshold=threshold,  # the threshold t fitted on the validation set
+)
+```
+
+```{image} assets/confidence.png
+:width: 400px
+:align: center
+:alt: Predicted probability of a valid board with the abstention band
 ```

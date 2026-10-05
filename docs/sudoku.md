@@ -33,12 +33,27 @@ dataset = DatasetGenerator(
 ).generate()
 ```
 
+`generate()` returns the unsplit dataset; `generate_splits()` returns the train/val/test split of the paper (60/20/20, stratified on the label).
+
 ## Pipeline
 
 To train models and run the full evaluation (selective classification, interventions, alignment) without writing Python, use the pipeline script:
 
 ```bash
 python scripts/sudoku_pipeline.py --seed 171
+python scripts/sudoku_pipeline.py --seed 171 --cbm-family cem
+
+# Harder concept detection: 18 pixels per cell instead of 50
+python scripts/sudoku_pipeline.py --seed 171 --cell-px 18
+
+# Save each model's confidence for plot_confidence (optional stage)
+python scripts/sudoku_pipeline.py --seed 171 --stages cs intervene selective diagnose plot
 ```
 
-Run `python scripts/sudoku_pipeline.py --help` for the full list of options.
+| Option | Description |
+|--------|-------------|
+| `--cbm-family` | `cbm`, `cem`, `probcbm` or `ecbm` |
+| `--cell-px` | Pixels per cell (50 by default; 18 blurs the handwritten digits) |
+| `--stages` | `setup ocr cs dnn intervene selective align collect plot`, plus the optional `diagnose` |
+
+Run `python scripts/sudoku_pipeline.py --help` for the full list of options (including training, intervention, and evaluation parameters).
