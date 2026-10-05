@@ -54,6 +54,7 @@ python scripts/sudoku_pipeline.py --seed 171 --stages cs intervene selective dia
 |--------|-------------|
 | `--cbm-family` | `cbm`, `cem`, `probcbm` or `ecbm` |
 | `--cell-px` | Pixels per cell (50 by default; 18 blurs the handwritten digits) |
+| `--target-accuracy` | Selective accuracy that kept predictions must reach (0.90 by default; the paper uses 0.95) |
 | `--stages` | `setup ocr cs dnn intervene selective align collect plot`, plus the optional `diagnose` |
 
 Run `python scripts/sudoku_pipeline.py --help` for the full list of options (including training, intervention, and evaluation parameters).

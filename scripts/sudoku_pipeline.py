@@ -1403,6 +1403,12 @@ def _parse_args(argv=None):
     parser.add_argument("--handwriting", action="store_true", default=None)
     parser.add_argument("--no-handwriting", action="store_true")
     parser.add_argument(
+        "--target-accuracy",
+        type=float,
+        default=None,
+        help="Selective accuracy that kept predictions must reach when interventions are scored (default: 0.9)",
+    )
+    parser.add_argument(
         "--cell-px",
         type=int,
         default=None,
@@ -1437,6 +1443,8 @@ def main(argv=None):
     config.cbm_family = args.cbm_family
     if args.cell_px is not None:
         config.cell_px = args.cell_px
+    if args.target_accuracy is not None:
+        config.target_accuracy = args.target_accuracy
     if args.direct_image:
         config.use_vit_backbone = True
         config.data_type = "image"

@@ -79,15 +79,15 @@ python experiments/real_data.py --out results/paper/real_datasets \
 ```bash
 for px in 50 18; do
     for family in cbm cem probcbm ecbm; do
-        python scripts/sudoku_pipeline.py --seed 171 --cell-px $px --cbm-family $family
+        python scripts/sudoku_pipeline.py --seed 171 --cell-px $px --cbm-family $family --target-accuracy 0.95
     done
 done
 ```
 
-The `selective` stage scores every model at the selective-accuracy targets 0.90 to 0.99; the paper reports 0.95. Add the optional `diagnose` stage to save each model's confidence:
+The paper reports a selective-accuracy target of 0.95 (`--target-accuracy`; the default is 0.90). The `selective` stage also scores every model without interventions at the targets 0.90 to 0.99. Add the optional `diagnose` stage to save each model's confidence:
 
 ```bash
-python scripts/sudoku_pipeline.py --seed 171 --cell-px 18 --stages cs intervene selective diagnose
+python scripts/sudoku_pipeline.py --seed 171 --cell-px 18 --target-accuracy 0.95 --stages cs intervene selective diagnose
 ```
 
 Data generation (`setup`, `ocr`) takes about five minutes per seed; skip it on later runs with `--stages cs dnn intervene selective collect`.
