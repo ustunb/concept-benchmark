@@ -3,7 +3,7 @@
 Concept detection accuracy and AUC on the training and test robots, true_concepts, for each seed's ProbCBM.
 Good on training and chance on test = memorized; chance on both = never learned.
 
-    cd <checkout> && PYTHONPATH=. python <repo>/scripts/measure_probcbm_detection.py --pipeline-root <root> \
+    cd <checkout> && PYTHONPATH=. python <repo>/scripts/paper/measure_probcbm_detection.py --pipeline-root <root> \
         --images <robot_images> --out <csv> [--seeds 1014,...]
 """
 

@@ -14,7 +14,7 @@ values, should climb steadily. For each seed and concept set this script reports
     the concept set vs not.
 
 Run from a code checkout of `grid-seeded-lfcbm` (the models are pickled with that code):
-    cd <checkout> && PYTHONPATH=. python <repo>/scripts/measure_probcbm_response.py --images <robot_images> \
+    cd <checkout> && PYTHONPATH=. python <repo>/scripts/paper/measure_probcbm_response.py --images <robot_images> \
         --pipeline-root <root with run_s<seed>/results> --out <csv>
 """
 

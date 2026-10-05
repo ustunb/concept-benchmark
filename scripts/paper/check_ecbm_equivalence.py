@@ -7,7 +7,7 @@ into our `_ECBMNet` (backbone = identity, so both see the same features), and co
   3. the label after gradient inference without interventions (weights 1/1/0.01) and after an intervention
      (weights 0/0/3), running the authors' `run_optim` loop (GradientInference.py:39-71) on their module.
 
-    PYTHONPATH=. python scripts/check_ecbm_equivalence.py --original /tmp/ecbm_orig
+    PYTHONPATH=. python scripts/paper/check_ecbm_equivalence.py --original /tmp/ecbm_orig
 """
 
 from __future__ import annotations

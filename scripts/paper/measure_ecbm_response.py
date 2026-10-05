@@ -8,7 +8,7 @@ intervened concepts plus the model's own predictions for the rest. For each seed
   * "switch only": the intervention procedure with no concept changed (concept->label on the model's own concepts);
   * accuracy after intervening on m random concepts per robot, m = 0..all.
 
-    cd <ecbm-original checkout> && PYTHONPATH=. python scripts/measure_ecbm_response.py --root <dir with run_ecbm_s<seed>> --out <csv>
+    cd <ecbm-original checkout> && PYTHONPATH=. python scripts/paper/measure_ecbm_response.py --root <dir with run_ecbm_s<seed>> --out <csv>
 """
 
 from __future__ import annotations

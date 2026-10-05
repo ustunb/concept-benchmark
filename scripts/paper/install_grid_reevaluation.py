@@ -4,7 +4,7 @@ The re-evaluation (commit 6f83a214 on `grid-seeded-lfcbm`: k=max uses the same K
 machine-annotated concepts reveal the human ground truth, ProbCBM sampling seeded) wrote one CSV per run
 under `<new>/s<seed>/results/`. Every installed cell keeps its file name; its old version moves to
 `robot/archive/<archive_name>/` and INDEX.csv is updated for both. Refuses to run unless
-scripts/diff_grid_versions.py reports no unexpected differences.
+scripts/paper/diff_grid_versions.py reports no unexpected differences.
 """
 
 from __future__ import annotations
@@ -18,11 +18,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parents[2]
 
 
 def load_diff_module():
-    spec = importlib.util.spec_from_file_location("diff_grid_versions", REPO / "scripts/diff_grid_versions.py")
+    spec = importlib.util.spec_from_file_location("diff_grid_versions", REPO / "scripts/paper/diff_grid_versions.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -56,7 +56,7 @@ def main() -> None:
     args = ap.parse_args()
 
     gate = subprocess.run(
-        [sys.executable, str(REPO / "scripts/diff_grid_versions.py"), str(args.paper / "robot/grid"), str(args.new)],
+        [sys.executable, str(REPO / "scripts/paper/diff_grid_versions.py"), str(args.paper / "robot/grid"), str(args.new)],
         capture_output=True, text=True,
     )
     print(gate.stdout.strip())

@@ -6,7 +6,7 @@ Implements three leakage measures from the literature:
 3. Conditional MI — Schoen et al., 2025
 
 Usage::
-    PYTHONPATH=. python scripts/diagnose_leakage.py
+    PYTHONPATH=. python scripts/paper/diagnose_leakage.py
 """
 
 from __future__ import annotations

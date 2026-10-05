@@ -10,7 +10,7 @@ reports, on the test robots with every concept set to its true value:
   * spread of the predicted Glorp probability, the learned distance scale, and the distance between class means.
 
 Run from a code checkout of `grid-seeded-lfcbm` with the cem package (Bridges run dirs):
-    cd <checkout> && PYTHONPATH=. python <repo>/scripts/measure_probcbm_heads.py --pipeline-root <root> --out <csv>
+    cd <checkout> && PYTHONPATH=. python <repo>/scripts/paper/measure_probcbm_heads.py --pipeline-root <root> --out <csv>
 """
 
 from __future__ import annotations

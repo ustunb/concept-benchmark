@@ -1,13 +1,13 @@
 """Run the robot pipeline with ProbCBM's concept prototypes held fixed and opposite (causal test).
 
 In the trained grid models, the learned "present" and "absent" prototypes of MouthType and HasKnees end up nearly
-identical, and runs whose label head misses one of them ignore interventions (scripts/measure_probcbm_heads.py).
+identical, and runs whose label head misses one of them ignore interventions (scripts/paper/measure_probcbm_heads.py).
 With PROBCBM_FIXED_PROTOTYPES=1, every concept's absent prototype is set to minus its present prototype at
 initialization and both are frozen; everything else is the official ProbCBM. With PROBCBM_VIB_BETA=0 the
 penalty pulling concept embeddings toward the prior (vib_beta, default 5e-5) is switched off. Without either
 variable this is the unmodified pipeline (control). Arguments are passed to scripts/robot_pipeline.py.
 
-    PROBCBM_FIXED_PROTOTYPES=1 PYTHONPATH=. python scripts/train_probcbm_fixed_prototypes.py --seed 1014 ...
+    PROBCBM_FIXED_PROTOTYPES=1 PYTHONPATH=. python scripts/paper/train_probcbm_fixed_prototypes.py --seed 1014 ...
 """
 
 import importlib

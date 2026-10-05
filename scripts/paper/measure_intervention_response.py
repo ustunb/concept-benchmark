@@ -11,7 +11,7 @@ calls as the pipeline's intervention code:
 Writes one CSV row per (arch, concepts, seed, concept) to --out and prints a summary.
 
 Run from a code checkout of `grid-seeded-lfcbm` (the models are pickled with that code):
-    cd <checkout> && PYTHONPATH=. python <repo>/scripts/measure_intervention_response.py --images <robot_images>
+    cd <checkout> && PYTHONPATH=. python <repo>/scripts/paper/measure_intervention_response.py --images <robot_images>
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ import numpy as np
 from concept_benchmark.ext.fileutils import load
 from experiments.intervention import predict_label_proba_from_concepts
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parents[2]
 PAPER = REPO / "results/paper"
 GRID_K0 = {}  # (concepts, arch, seed) -> accuracy at k=0 from the installed grid
 

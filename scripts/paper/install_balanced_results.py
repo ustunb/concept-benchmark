@@ -15,7 +15,7 @@ import hashlib
 import shutil
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parents[2]
 CITED_TAG = "duniforme3"
 CITED_PREFIX = "robot__rule-balanced__sampling-uniform__elbows-concept"
 PRESETS = {"ground_truth": ("ideal", "true"), "foot_subtypes": ("subconcept", "human")}

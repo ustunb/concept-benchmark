@@ -10,7 +10,7 @@ an unlisted subtype, how often any FootShape detector fires (a wrong prediction,
 how often the firing subtype is on the correct Pointy/Flat side, plus accuracy before interventions.
 
 Run from a code checkout of `grid-seeded-lfcbm` (models are pickled with that code):
-    cd <checkout> && PYTHONPATH=. python <repo>/scripts/check_unlisted_subtypes.py [--images <robot_images>]
+    cd <checkout> && PYTHONPATH=. python <repo>/scripts/paper/check_unlisted_subtypes.py [--images <robot_images>]
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import numpy as np
 
 from concept_benchmark.ext.fileutils import load
 
-PAPER = Path(__file__).resolve().parent.parent / "results/paper"
+PAPER = Path(__file__).resolve().parents[2] / "results/paper"
 PREFIX = "robot__rule-balanced__sampling-skew0.30__elbows-weight2"
 SEEDS = range(1014, 1024)
 

@@ -6,7 +6,7 @@ writes a standalone TikZ panel in the paper's style: CBM accuracy under perfect 
 `true_concepts` and `human_concepts` against the DNN, shaded mean ± SE (or the range over runs), with the
 Gain at k=max (CBM on true concepts minus DNN, paired per seed). Compiles the PDF with pdflatex.
 
-    python scripts/plot_decision_support_panel.py --out results/paper/figures/fig_decision_support
+    python scripts/paper/plot_decision_support_panel.py --out results/paper/figures/fig_decision_support
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import statistics as st
 import subprocess
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parents[2]
 BUDGET_LABELS = ["0", "1", "3", "max"]
 
 PREAMBLE = r"""\documentclass[border=2pt]{standalone}
@@ -25,7 +25,7 @@ PREAMBLE = r"""\documentclass[border=2pt]{standalone}
 \usepackage{amsmath}
 \renewcommand{\sfdefault}{phv}
 \definecolor{ours}{HTML}{3B6FB6}
-\definecolor{human}{HTML}{D9822B}
+\definecolor{human}{HTML}{C44E52}
 \definecolor{annot}{HTML}{4D4D4D}
 \definecolor{gridc}{HTML}{DFE4E9}
 \definecolor{titlec}{HTML}{8C8C8C}
@@ -51,9 +51,9 @@ PREAMBLE = r"""\documentclass[border=2pt]{standalone}
   },
   bbline/.style={ours, line width=1.1pt, mark=*, mark size=1.7pt,
                  mark options={fill=ours, draw=ours}},
-  bbhuman/.style={human, line width=1.1pt, dashed, mark=triangle*, mark size=2pt,
-                  mark options={fill=human, draw=human, solid}},
-  bbdnn/.style={annot, line width=0.9pt},
+  bbhuman/.style={human, line width=1.1pt, mark=triangle*, mark size=2pt,
+                  mark options={fill=human, draw=human}},
+  bbdnn/.style={annot, line width=0.9pt, dashed},
   bandonly/.style={draw=none, forget plot},
 }
 """
@@ -141,6 +141,9 @@ def build_tex(true_runs, human_runs, dnn_runs, gains, band_kind: str) -> str:
 \node[anchor=east, font=\fontsize{{8}}{{9}}\selectfont, color=black]
   at (axis cs:3.35,{top + 1.3:.2f}) {{\textsf{{Gain}}\,$={gain:.1f}\pm{gain_se:.1f}\%$}};
 \end{{axis}}
+% same frame in every panel of this family, so that panels placed side by side line up
+\pgfresetboundingbox
+\path[use as bounding box] (-1.8cm,-0.92cm) rectangle (6.45cm,5.06cm);
 \end{{tikzpicture}}
 \end{{document}}
 """

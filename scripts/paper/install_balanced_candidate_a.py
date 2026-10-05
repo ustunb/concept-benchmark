@@ -17,7 +17,7 @@ import hashlib
 import shutil
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parents[2]
 PAPER = REPO / "results/paper"
 INCOMING = REPO / "results/_incoming/final_d030e2"
 A_TAG = "d0.30e2"
