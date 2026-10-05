@@ -306,6 +306,52 @@ def train_dnn(
     return weights
 
 
+# ── Stage: diagnose ───────────────────────────────────────────────────
+
+
+def diagnose_confidence(config: SudokuBenchmarkConfig, cs_model: ConceptBasedModel | None = None, data=None) -> Path:
+    """Save what a model's confidence looks like, for diagnostics of selective classification.
+
+    Writes ``<results>/sudoku_<model>_confidence_..._seed<seed>.npz`` with, for the validation and test boards:
+    ``p_*`` the predicted probability of a valid board, ``y_*`` the labels, ``C_*`` the true concepts and ``Cp_*`` the
+    detector's concept probabilities; and for the test boards ``p_test_true_concepts``, the probability after all
+    concepts are set to their true values through the model's own intervention mechanism (every board treated as
+    deferred, budget = all concepts).
+    """
+    if data is None:
+        if config.data_type == "image":
+            data = load(config.get_dataset_path(data_type="image") / "ocr_inferred_full_dataset.pkl")
+        else:
+            data = load(config.get_dataset_path(data_type="tabular") / "sudoku_dataset.pkl")
+        data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
+    if cs_model is None:
+        cs_model = load(config.get_model_path(_selected_cs_key(config), data_type="tabular"))
+        cs_model._random_state = config.seed
+
+    saved = {}
+    for name, split in (("val", data.validation), ("test", data.test)):
+        prob_pos, y_true = _cs_val_probs(cs_model, split)
+        saved[f"p_{name}"] = np.asarray(prob_pos, dtype=np.float64)
+        saved[f"y_{name}"] = np.asarray(y_true).astype(int)
+        saved[f"C_{name}"] = np.asarray(split.C).astype(int)
+        saved[f"Cp_{name}"] = np.asarray(cs_model.concept_detector.predict_proba(split), dtype=np.float32)
+
+    runner, strategy = ConceptInterventionRunner(cs_model), ConceptualSafeguardsStrategy()
+    everything = dict(abstention_threshold=0.0, random_state=config.seed)  # band [0, 1]: every board is deferred
+    before = runner.run(strategy, InterventionConfig(per_instance_budget=0, **everything), data.test)
+    after = runner.run(strategy, InterventionConfig(per_instance_budget=data.n_concepts, **everything), data.test,
+                       y_prob_baseline=before.y_prob_after)
+    if not np.asarray(after.mask, dtype=bool).all():
+        raise RuntimeError("expected every concept of every test board to be intervened on")
+    saved["p_test_true_concepts"] = np.asarray(after.y_prob_after[:, 1], dtype=np.float64)
+
+    path = config.get_results_path(f"{_selected_cs_key(config)}_confidence", data_type="tabular").with_suffix(".npz")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(path, **saved)
+    logger.info("Saved confidence diagnostics to %s", path)
+    return path
+
+
 # ── Stage: run_interventions ──────────────────────────────────────────
 
 
@@ -680,7 +726,7 @@ def run(
         ]
 
     # Early validation: check that dataset directory exists if we need it
-    _needs_data = {"cs", "dnn", "intervene", "selective", "align", "collect"}
+    _needs_data = {"cs", "dnn", "intervene", "diagnose", "selective", "align", "collect"}
     if _needs_data & set(stages) and "setup" not in stages:
         tab_dir = config.get_dataset_path(data_type="tabular")
         ds_path = tab_dir / "sudoku_dataset.pkl"
@@ -804,6 +850,10 @@ def run(
         df = run_interventions(config, cs_model=_shared_cs, data=_shared_data)
         logger.info("=== Intervention Results ===\n%s", df.to_string(index=False))
 
+    if "diagnose" in stages:
+        logger.info("=== [%d/%d] Diagnose confidence ===", _si["diagnose"], n_stages)
+        diagnose_confidence(config, cs_model=_shared_cs, data=_shared_data)
+
     if "selective" in stages:
         logger.info("=== [%d/%d] Selective ===", _si["selective"], n_stages)
         sel_df = compute_selective_results(
@@ -829,6 +879,9 @@ def run(
 # ── Helper functions ──────────────────────────────────────────────────
 
 
+_TIE_MARGIN = 1e-6  # see _selective_accuracy_threshold
+
+
 def _selective_accuracy_threshold(
     y_true: np.ndarray,
     prob_pos: np.ndarray,
@@ -849,8 +902,56 @@ def _selective_accuracy_threshold(
         acc = float((preds == y_true[mask]).mean())
         if acc >= target_acc:
             coverage = float(mask.mean())
-            return float(t), coverage
+            # Predictions exactly at confidence t are kept here, so the returned threshold must keep them
+            # too under the abstention rule t <= p <= 1 - t used at test time and by the strategies:
+            # move it just above t, but never past the next confidence level that this fit dropped.
+            dropped = candidates[candidates > t]
+            gap = (float(dropped.min()) if dropped.size else 0.5) - float(t)
+            return float(t) + min(_TIE_MARGIN, 0.5 * gap), coverage
     return None, None
+
+
+def _classwise_accuracy_thresholds(
+    y_true: np.ndarray,
+    prob_pos: np.ndarray,
+    target_acc: float,
+    decision_threshold: float = 0.5,
+) -> tuple[float | None, float | None]:
+    """One confidence threshold per predicted class (alternative to `_selective_accuracy_threshold`).
+
+    Returns ``(t_pos, t_neg)``: keep a positive prediction if ``p >= t_pos`` and a negative prediction if
+    ``p <= t_neg``, each chosen as the largest set of predictions of that class with accuracy >= target_acc.
+    A side is ``None`` when no set of its predictions reaches the target.
+    """
+    y_true = np.asarray(y_true).astype(int)
+    prob_pos = np.asarray(prob_pos, dtype=float).reshape(-1)
+    positive = prob_pos >= decision_threshold
+
+    def fit(confidence: np.ndarray, correct: np.ndarray) -> float | None:
+        best = None
+        for c in np.unique(confidence):
+            if correct[confidence >= c].mean() >= target_acc:
+                best = float(c) if best is None else min(best, float(c))
+        return best
+
+    t_pos = fit(prob_pos[positive], y_true[positive] == 1) if positive.any() else None
+    conf_neg = fit(1.0 - prob_pos[~positive], y_true[~positive] == 0) if (~positive).any() else None
+    return t_pos, (None if conf_neg is None else 1.0 - conf_neg)
+
+
+def _selective_at_classwise_thresholds(y_true, prob_pos, t_pos, t_neg, decision_t):
+    """Selective accuracy and coverage under one threshold per predicted class."""
+    y_true = np.asarray(y_true).astype(int)
+    prob_pos = np.asarray(prob_pos, dtype=float).reshape(-1)
+    positive = prob_pos >= decision_t
+    covered = np.zeros_like(positive)
+    if t_pos is not None:
+        covered |= positive & (prob_pos >= t_pos)
+    if t_neg is not None:
+        covered |= ~positive & (prob_pos <= t_neg)
+    if not covered.any():
+        return float("nan"), 0.0
+    return float((positive[covered].astype(int) == y_true[covered]).mean()), float(covered.mean())
 
 
 def _decision_threshold_sweep(
@@ -1114,11 +1215,13 @@ SUDOKU_STAGES = (
     "cs",
     "dnn",
     "intervene",
+    "diagnose",
     "selective",
     "align",
     "collect",
     "plot",
 )
+OPTIONAL_STAGES = ("diagnose",)  # run only when named in --stages
 
 
 def _parse_args(argv=None):
@@ -1131,7 +1234,7 @@ def _parse_args(argv=None):
     parser.add_argument(
         "--stages",
         nargs="+",
-        default=list(SUDOKU_STAGES),
+        default=[stage for stage in SUDOKU_STAGES if stage not in OPTIONAL_STAGES],
         help=f"Pipeline stages to run (default: all). Valid: {' -> '.join(SUDOKU_STAGES)}",
     )
     parser.add_argument(

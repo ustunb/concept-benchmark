@@ -11,6 +11,8 @@ Usage:
 
 from __future__ import annotations
 
+import os
+
 import concurrent.futures as cf
 import copy
 import logging
@@ -144,7 +146,7 @@ CONCEPT_SOURCES = [
     "llm_concepts",       # LLM descriptions, CLIP-labeled
     "clip_concepts",      # CLIP-Dissect keywords, CLIP-labeled
 ]
-INTERVENTION_SOURCES = ["perfect", "expert", "llm"]
+INTERVENTION_SOURCES = ["perfect", "expert", "llm", "self"]  # self: the model's own thresholded predictions
 
 # Map concept source names to LFCBM regime keys (for auto-discovered sources)
 _CONCEPT_SOURCE_TO_LFCBM = {
@@ -871,8 +873,8 @@ def _test_interventions(
             or int(budget) >= n_concepts,
         )
 
-        if settings.intervention_expert.lower() == "llm" and cache_only:
-            # ── LLM cache-only path: load LLM votes as GT, use standard KFlip ──
+        if settings.intervention_expert.lower() in ("llm", "self") and cache_only:
+            # ── Answers from a file (LLM votes) or from the model itself ("self"); standard KFlip ──
             import hashlib
             import json
             from pathlib import Path
@@ -898,10 +900,12 @@ def _test_interventions(
                 cache_dir
                 / f"llm_interventions_{_concepts_sig()}_{_dataset_sig()}.jsonl"
             )
-            if cache_path.exists():
-                # Load LLM votes into a GT-like concept matrix
+            is_self = settings.intervention_expert.lower() == "self"
+            if is_self or cache_path.exists():
+                # Load LLM votes into a GT-like concept matrix ("self": no votes, so every answer below
+                # is the model's own thresholded prediction)
                 C_llm = np.full_like(prob_test, np.nan, dtype=np.float32)
-                with open(cache_path, "r", encoding="utf-8") as f:
+                with open(os.devnull if is_self else cache_path, "r", encoding="utf-8") as f:
                     for line in f:
                         try:
                             rec = json.loads(line)
@@ -938,6 +942,9 @@ def _test_interventions(
                         baseline_concepts=result.C_pred,
                         intervention_mask=result.mask,
                     )
+                elif _intervention_encoding() == "koh595" and pct5 is not None:
+                    result.y_prob_after = fe.predict_proba(
+                        _calibrate_revealed(result.C_intervened, result.mask, pct5, pct95))
                 else:
                     C_final_binary = (result.C_intervened >= 0.5).astype(int)
                     result.y_prob_after = fe.predict_proba(C_final_binary)
@@ -958,7 +965,6 @@ def _test_interventions(
             model_name = str(llm_cfg.get("model", "gemini-3-flash-preview"))
             api_key_env = str(llm_cfg.get("api_key_env", "GEMINI_API_KEY"))
 
-            import os
 
             api_key = str(llm_cfg.get("api_key", "")) or os.environ.get(api_key_env, "")
 
@@ -1539,6 +1545,26 @@ def _test_interventions(
         y_pred_before = np.argmax(result.y_prob_before, axis=1)
         num_preds_change = int(np.sum(result.y_pred_after != y_pred_before))
 
+        _dump_dir = os.environ.get("INTERVENTION_DUMP_DIR")  # set by --dump-interventions
+        if _dump_dir:  # diagnostics only: which concepts were asked, what was answered, labels before/after
+            import hashlib as _hashlib
+            from pathlib import Path as _Path
+
+            _sig = _hashlib.sha1("\x00".join(map(str, concept_names)).encode()).hexdigest()[:8]
+            _Path(_dump_dir).mkdir(parents=True, exist_ok=True)
+            _who = settings.intervention_expert.lower() or "sim"
+            np.savez_compressed(
+                _Path(_dump_dir) / f"m{len(concept_names)}_{_sig}__{_who}{int(human_acc * 100)}__k{budget}.npz",
+                mask=np.asarray(result.mask, dtype=bool),
+                C_pred=np.asarray(result.C_pred, dtype=np.float32),
+                C_answer=np.asarray(result.C_intervened, dtype=np.float32),
+                C_true=np.asarray(test.C, dtype=np.int8),
+                y=np.asarray(test.y, dtype=np.int8),
+                y_pred_before=np.asarray(y_pred_before, dtype=np.int8),
+                y_pred_after=np.asarray(result.y_pred_after, dtype=np.int8),
+                concept_names=np.asarray(list(map(str, concept_names))),
+            )
+
         concept_intervention_counts = {
             c: f"{int(np.sum(result.mask[:, i]))} ({int(np.sum(actual_edits_mask[:, i]))})"
             for i, c in enumerate(concept_names)
@@ -1826,6 +1852,11 @@ def _run_cell(config, concept_source, intervention_source, family, data,
     elif intervention_source == "llm":
         human_acc = config.expert_intervention_accuracy
         expert_type = "llm"
+    elif intervention_source == "self":
+        # Every selected concept is set to the value the model already predicts: no answer changes and no
+        # information is added, so any change in accuracy comes from the intervention mechanism itself.
+        human_acc = config.expert_intervention_accuracy
+        expert_type = "self"
     else:
         raise ValueError(f"Unknown intervention_source: {intervention_source!r}")
 
@@ -1862,6 +1893,8 @@ def _run_cell(config, concept_source, intervention_source, family, data,
             isettings.intervention_expert = "llm"
             isettings.intervention_llm = _automated_intervention_llm_settings(config)
             isettings.run_dir = str(results_dir)
+        elif expert_type == "self":
+            isettings.intervention_expert = "self"
 
         _, _, r = _test_interventions(
             prob_test=c_preds,
@@ -1874,7 +1907,8 @@ def _run_cell(config, concept_source, intervention_source, family, data,
             pct95=getattr(model, "_koh_pct95", None),
             model=model if supports_aligned else None,
             cache_only=bool(
-                expert_type == "llm" and getattr(config, "llm_cache_only", False)
+                expert_type == "self"
+                or (expert_type == "llm" and getattr(config, "llm_cache_only", False))
             ),
         )
         df_lst.append(
@@ -2790,6 +2824,11 @@ def _parse_args(argv=None):
     parser.add_argument("--llm-model", type=str, default=None)
     parser.add_argument("--llm-reasoning-effort", type=str, default=None)
     parser.add_argument("--llm-cache-only", action="store_true")
+    parser.add_argument(
+        "--dump-interventions", type=str, default=None, metavar="DIR",
+        help="Save, per cell and budget, the concepts intervened on, the answers given, the true values and the "
+             "labels before/after as .npz files in DIR (for diagnostics).",
+    )
     parser.add_argument("--llm-cache-all-concepts", action="store_true")
     parser.add_argument("--llm-workers", type=int, default=None)
     parser.add_argument("--llm-batch-size", type=int, default=None)
@@ -2891,6 +2930,8 @@ def _apply_cli_args(config: RobotBenchmarkConfig, args) -> None:
         config.llm_reasoning_effort = args.llm_reasoning_effort
     if args.llm_cache_only:
         config.llm_cache_only = True
+    if args.dump_interventions:
+        os.environ["INTERVENTION_DUMP_DIR"] = args.dump_interventions
     if args.llm_cache_all_concepts:
         config.llm_cache_all_concepts = True
     if args.llm_workers is not None:

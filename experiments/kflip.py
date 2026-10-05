@@ -21,13 +21,29 @@ from experiments.intervention import (
 class KFlipInterventionStrategy(InterventionStrategy):
     """Intervention strategy based on concept-flip probability.
 
-    For each instance the strategy enumerates candidate subsets of up to
-    *k* concepts (from ``config.per_instance_budget``).  For every
-    subset it computes the probability that replacing those concepts with
-    their ground-truth values would change the downstream label.  The
-    subset with the highest flip probability is selected, and instances
-    whose best flip probability exceeds ``config.score_threshold`` become
-    intervention candidates.
+    For each instance the strategy looks for the subset S of at most *k* concepts (``config.per_instance_budget``)
+    with the highest flip probability: the probability, under the model's own concept probabilities, that setting
+    the concepts in S to their true values changes the predicted label (ties go to the smaller subset). Instances
+    whose chosen subset has a flip probability of at least ``config.score_threshold`` become intervention
+    candidates. Adding a concept rarely lowers the flip probability, so in practice the subset uses the whole
+    budget; this is the policy behind the paper's results.
+
+    Optional refinements (off by default). ``concept_cost`` > 0 maximizes ``flip probability - concept_cost * |S|``
+    instead, so a concept is requested only if it raises the flip probability by more than its cost.
+    ``uncertainty_band`` restricts the candidates to concepts whose predicted probability lies strictly inside
+    the band.
+
+    Search. For an instance with at most ``greedy_above`` candidate concepts, every subset of up to
+    ``exhaustive_size`` concepts is searched (every size up to *k* by default). If ``exhaustive_size`` is smaller
+    than *k*, the best subset then grows greedily: the concept with the largest gain is added while the gain
+    exceeds ``concept_cost`` (instances with at most ``exhaustive_candidates`` candidates are still searched at
+    every size). An instance with more than ``greedy_above`` candidates, where the subsets cannot be enumerated,
+    grows its subset greedily from the first concept.
+
+    Flip probability. It sums over all 2^|S| value combinations of the subset's concepts while there are at most
+    ``n_samples`` of them (|S| <= 12 by default) and is otherwise estimated from ``n_samples`` combinations drawn
+    from the concept probabilities. The same draws serve every subset, and a subset is re-estimated from them
+    before it is compared with its extensions, so a concept's gain compares like with like.
 
     Parameters
     ----------
@@ -39,8 +55,20 @@ class KFlipInterventionStrategy(InterventionStrategy):
         instance.  Subsets are ranked by a heuristic that weights concept
         closeness to 0.5 by the absolute logistic-regression coefficient.
     use_exact_k : bool
-        If ``True``, only evaluate subsets of exactly size *k*.  If
-        ``False`` (default), evaluate all subsets of sizes 1 through *k*.
+        If ``True``, only evaluate subsets of exactly size *k* over all concepts, with no cost per concept.
+        If ``False`` (default), use the policy above.
+    concept_cost : float
+        Flip probability a concept must add to be requested.
+    uncertainty_band : tuple of float
+        Open interval of predicted probabilities for which a concept is a candidate.
+    exhaustive_size : int, optional
+        Largest subset size searched exhaustively for every instance; ``None`` searches all sizes up to *k*.
+    exhaustive_candidates : int
+        Instances with at most this many candidate concepts are searched exhaustively at every size.
+    greedy_above : int
+        Instances with more candidate concepts than this are searched greedily from the first concept.
+    n_samples : int
+        Value combinations enumerated (subsets with at most this many) or drawn (larger subsets).
 
     Config mapping
     --------------
@@ -61,11 +89,23 @@ class KFlipInterventionStrategy(InterventionStrategy):
         batch_size: int = 8192,
         limit_subsets: int | None = None,
         use_exact_k: bool = False,
+        concept_cost: float = 0.0,
+        uncertainty_band: tuple[float, float] | None = None,
+        exhaustive_size: int | None = None,
+        exhaustive_candidates: int = 7,
+        greedy_above: int = 12,
+        n_samples: int = 4096,
     ) -> None:
         super().__init__(name="kflip")
         self.batch_size = int(batch_size)
         self.limit_subsets = limit_subsets
         self.use_exact_k = use_exact_k
+        self.concept_cost = float(concept_cost)
+        self.uncertainty_band = uncertainty_band
+        self.exhaustive_size = exhaustive_size
+        self.exhaustive_candidates = int(exhaustive_candidates)
+        self.greedy_above = int(greedy_above)
+        self.n_samples = int(n_samples)
 
     def propose(
         self,
@@ -111,13 +151,30 @@ class KFlipInterventionStrategy(InterventionStrategy):
         base_lbl = base_probs.argmax(axis=1)
         n_classes = int(base_probs.shape[1])
 
+        # exactly-k keeps every concept as a candidate and charges nothing per concept
+        cost = 0.0 if self.use_exact_k else self.concept_cost
+        if self.use_exact_k or self.uncertainty_band is None:
+            is_candidate = np.ones((n_samples, n_concepts), dtype=bool)
+        else:
+            lo, hi = self.uncertainty_band
+            raw_p = batch.C_pred.astype(np.float64)
+            is_candidate = (raw_p > lo) & (raw_p < hi)  # concepts the model is unsure about
+        exhaustive = k if self.use_exact_k or self.exhaustive_size is None else int(min(k, self.exhaustive_size))
+
         # enumerate candidate subsets
         if self.use_exact_k:
             all_subsets = list(itertools.combinations(range(n_concepts), k))
         else:
-            all_subsets = []
-            for j in range(1, k + 1):
-                all_subsets.extend(itertools.combinations(range(n_concepts), j))
+            # sizes above `exhaustive` are only searched for instances with few candidate concepts
+            n_candidates = is_candidate.sum(axis=1)
+            is_small = n_candidates <= self.exhaustive_candidates
+            is_many = n_candidates > self.greedy_above  # searched greedily from the first concept
+            largest = max(exhaustive, min(k, int(n_candidates[is_small].max()) if is_small.any() else 0))
+            # subsets of two or more concepts are only searched for instances that are not `is_many`
+            pool = [int(c) for c in np.nonzero(is_candidate[~is_many].any(axis=0))[0]]
+            all_subsets = [(c,) for c in range(n_concepts)]
+            for j in range(2, largest + 1):
+                all_subsets.extend(itertools.combinations(pool, j))
         if self.limit_subsets is not None and self.limit_subsets < len(all_subsets):
             # simple heuristic: closeness to 0.5 weighted by |coef|
             try:
@@ -146,12 +203,18 @@ class KFlipInterventionStrategy(InterventionStrategy):
             subset_scores.sort(key=lambda x: x[0], reverse=True)
             all_subsets = [subset for _, subset in subset_scores[: self.limit_subsets]]
 
-        flip_prob = np.zeros(n_samples, dtype=np.float64)
+        flip_prob = np.zeros(n_samples, dtype=np.float64)  # flip probability of the chosen subset
+        best_score = np.zeros(n_samples, dtype=np.float64)  # flip probability minus the cost of its concepts
         best_subset: list[tuple[int, ...]] = [tuple() for _ in range(n_samples)]
         best_label = np.full(n_samples, -1, dtype=int)
 
         # Cache assignment grids by subset size (reused across subsets)
         _assign_cache: dict[int, np.ndarray] = {}
+
+        def assignments(size: int) -> np.ndarray:
+            if size not in _assign_cache:
+                _assign_cache[size] = np.array(list(itertools.product([0.0, 1.0], repeat=size)), dtype=np.float64)
+            return _assign_cache[size]
 
         # Try to extract logistic regression weights for the fast path.
         # Instead of building (N*A, C) arrays and calling predict_proba,
@@ -179,109 +242,78 @@ class KFlipInterventionStrategy(InterventionStrategy):
             pass
 
         if _fast_w is not None:
-            # Memory: O(N * 2^|S|) per subset, where |S| <= k.
-            # Fast path: exploit logistic regression linearity.
-            # logit = Z @ w + b, label = (logit >= 0)
-            # For a subset S with assignment a:
-            #   logit_new = (base_logit - base_Z[:,S] @ w[S]) + a @ w[S]
-            # This replaces N*A*C matmuls with N*|S| + A*|S| + N*A broadcasting.
             base_Z_f64 = base_Z.astype(np.float64)
             base_logit = base_Z_f64 @ _fast_w + _fast_b  # (N,)
 
-            for subset in tqdm(all_subsets):
-                subset_arr = np.asarray(subset, dtype=int)
-                ss = len(subset_arr)
+        _draws: list[np.ndarray] = []
 
-                if ss not in _assign_cache:
-                    _assign_cache[ss] = np.array(
-                        list(itertools.product([0.0, 1.0], repeat=ss)),
-                        dtype=np.float64,
-                    )
-                assign = _assign_cache[ss]  # (A, ss)
+        def draws() -> np.ndarray:
+            """Uniform draws shared by every subset: sample t sets concept j to 1 for row i if draws[t, j] < P[i, j]."""
+            if not _draws:
+                seed = getattr(config, "random_state", None)
+                _draws.append(np.random.default_rng(0 if seed is None else seed).random((self.n_samples, n_concepts)))
+            return _draws[0]
 
-                w_sub = _fast_w[subset_arr]  # (ss,)
-                remaining = base_logit - base_Z_f64[:, subset_arr] @ w_sub  # (N,)
-                assign_logit = assign @ w_sub  # (A,)
-                all_logit = remaining[:, None] + assign_logit[None, :]  # (N, A)
+        def is_sampled(size: int) -> bool:
+            return 2**size > self.n_samples
 
-                all_lbl = (all_logit >= 0).astype(int)  # (N, A)
-                flip_mask = all_lbl != base_lbl[:, None]  # (N, A)
+        def subset_mass(
+            rows: np.ndarray, subset: tuple[int, ...], sampled: bool = False
+        ) -> tuple[np.ndarray, np.ndarray]:
+            """Flip probability of intervening on `subset`, and the likelier new label, for the given rows.
 
-                # Probability weights: P(assignment | concept probs)
-                pS = P[:, subset_arr]  # (N, ss)
-                w_assign = np.prod(
-                    np.where(
-                        assign[None, :, :] == 1.0, pS[:, None, :], 1.0 - pS[:, None, :]
-                    ),
-                    axis=2,
-                )  # (N, A)
-
-                mass = (w_assign * flip_mask).sum(axis=1)  # (N,)
-
-                # Destination label mass
-                all_prob1 = 1.0 / (1.0 + np.exp(-all_logit))  # (N, A)
-                weighted = w_assign * flip_mask
-                cls1 = (all_prob1 * weighted).sum(axis=1)  # (N,)
-                cls0 = ((1.0 - all_prob1) * weighted).sum(axis=1)  # (N,)
-                lbl_star = (cls1 >= cls0).astype(int)  # (N,)
-
-                improve = mass > flip_prob
-                if np.any(improve):
-                    flip_prob[improve] = mass[improve]
-                    best_label[improve] = lbl_star[improve]
-                    for rel in np.nonzero(improve)[0]:
-                        best_subset[rel] = tuple(int(x) for x in subset_arr.tolist())
-        else:
-            # General path: call predict_proba on expanded arrays.
-            # Memory: O(batch_size * C) per chunk, chunked to stay within batch_size.
-            rows_per_eval = max(1, self.batch_size)
-
-            for subset in tqdm(all_subsets):
-                subset = np.asarray(subset, dtype=int)
-                subset_size = len(subset)
-
-                if subset_size not in _assign_cache:
-                    _assign_cache[subset_size] = np.array(
-                        list(itertools.product([0.0, 1.0], repeat=subset_size)),
-                        dtype=np.float32,
-                    )
-                assign = _assign_cache[subset_size]
+            Exact (all value combinations, weighted by their probability) unless `sampled`.
+            """
+            subset_arr = np.asarray(subset, dtype=int)
+            if sampled:
+                A = self.n_samples
+            else:
+                assign = assignments(len(subset_arr))  # (A, ss)
                 A = int(assign.shape[0])
-                samples_per_chunk = max(1, rows_per_eval // A)
-
-                for s in range(0, n_samples, samples_per_chunk):
-                    m = min(samples_per_chunk, n_samples - s)
-
-                    pS = P[s : s + m][:, subset]  # (m, subset_size)
+            mass = np.empty(len(rows), dtype=np.float64)
+            lbl_star = np.empty(len(rows), dtype=int)
+            if _fast_w is not None:
+                # Fast path: exploit logistic regression linearity.
+                # logit = Z @ w + b, label = (logit >= 0). For a subset S with assignment a:
+                #   logit_new = (base_logit - base_Z[:,S] @ w[S]) + a @ w[S]
+                w_sub = _fast_w[subset_arr]  # (ss,)
+                step = max(1, (1 << 21) // (A * len(subset_arr)))
+            else:
+                # General path: call predict_proba on expanded arrays, chunked to stay within batch_size.
+                step = max(1, max(1, self.batch_size) // A)
+            for s in range(0, len(rows), step):
+                r = rows[s : s + step]
+                m = len(r)
+                pS = P[r][:, subset_arr]  # (m, ss)
+                if sampled:
+                    values = (draws()[None, :, subset_arr] < pS[:, None, :]).astype(np.float64)  # (m, A, ss)
+                    w_assign = np.full((m, A), 1.0 / A)
+                else:
+                    values = np.broadcast_to(assign[None, :, :], (m, A, len(subset_arr)))
+                    # Probability weights: P(assignment | concept probs)
                     w_assign = np.prod(
-                        np.where(
-                            assign[None, :, :] == 1.0,
-                            pS[:, None, :],
-                            1.0 - pS[:, None, :],
-                        ),
+                        np.where(assign[None, :, :] == 1.0, pS[:, None, :], 1.0 - pS[:, None, :]),
                         axis=2,
                     )  # (m, A)
-
-                    base_chunk = base_cont[s : s + m] if supports_aligned else base_Z[s : s + m]
+                if _fast_w is not None:
+                    remaining = base_logit[r] - base_Z_f64[r][:, subset_arr] @ w_sub  # (m,)
+                    all_logit = remaining[:, None] + values @ w_sub  # (m, A)
+                    flip_mask = (all_logit >= 0).astype(int) != base_lbl[r][:, None]  # (m, A)
+                    weighted = w_assign * flip_mask
+                    all_prob1 = 1.0 / (1.0 + np.exp(-all_logit))  # (m, A)
+                    cls1 = (all_prob1 * weighted).sum(axis=1)
+                    cls0 = ((1.0 - all_prob1) * weighted).sum(axis=1)
+                    lbl_star[s : s + m] = (cls1 >= cls0).astype(int)
+                else:
+                    base_chunk = base_cont[r] if supports_aligned else base_Z[r]
                     Z_chunk = np.repeat(base_chunk, A, axis=0)  # (m*A, C)
-                    AS = np.tile(assign, (m, 1))  # (m*A, subset_size)
-                    Z_chunk[:, subset] = AS
-
-                    repeated_rows = (
-                        np.repeat(source_rows[s : s + m], A)
-                        if supports_aligned
-                        else None
-                    )
-                    repeated_baseline = (
-                        np.repeat(base_cont[s : s + m], A, axis=0)
-                        if supports_aligned
-                        else None
-                    )
+                    Z_chunk[:, subset_arr] = values.reshape(m * A, len(subset_arr)).astype(np.float32)
+                    repeated_rows = np.repeat(source_rows[r], A) if supports_aligned else None
+                    repeated_baseline = np.repeat(base_cont[r], A, axis=0) if supports_aligned else None
                     intervention_mask = None
                     if supports_aligned:
                         intervention_mask = np.zeros_like(Z_chunk, dtype=bool)
-                        intervention_mask[:, subset] = True
-
+                        intervention_mask[:, subset_arr] = True
                     Y = predict_label_proba_from_concepts(
                         model,
                         Z_chunk,
@@ -289,25 +321,83 @@ class KFlipInterventionStrategy(InterventionStrategy):
                         baseline_concepts=repeated_baseline,
                         intervention_mask=intervention_mask,
                     )  # (m*A, j)
-                    Y_lbl = Y.argmax(axis=1).reshape(m, A)  # (m, A)
+                    flip_mask = Y.argmax(axis=1).reshape(m, A) != base_lbl[r][:, None]  # (m, A)
+                    weighted = w_assign * flip_mask
+                    cls_mass = (Y.reshape(m, A, n_classes) * weighted[:, :, None]).sum(axis=1)
+                    lbl_star[s : s + m] = cls_mass.argmax(axis=1)
+                mass[s : s + m] = weighted.sum(axis=1)
+            return mass, lbl_star
 
-                    flip_mask = Y_lbl != base_lbl[s : s + m][:, None]  # (m, A)
-                    mass = (w_assign * flip_mask).sum(axis=1)  # (m,)
+        # exhaustive search over subsets of the candidate concepts, smaller subsets first
+        for subset in tqdm(all_subsets):
+            eligible_rows = is_candidate[:, list(subset)].all(axis=1)
+            if not self.use_exact_k and len(subset) > exhaustive:
+                eligible_rows &= is_small
+            if not self.use_exact_k and len(subset) > 1:
+                eligible_rows &= ~is_many
+            rows = np.nonzero(eligible_rows)[0]
+            if rows.size == 0:
+                continue
+            mass, lbl_star = subset_mass(rows, subset)
+            score = mass - cost * len(subset)
+            improve = score > best_score[rows]
+            if np.any(improve):
+                hit = rows[improve]
+                flip_prob[hit] = mass[improve]
+                best_score[hit] = score[improve]
+                best_label[hit] = lbl_star[improve]
+                for idx in hit:
+                    best_subset[int(idx)] = tuple(int(x) for x in subset)
 
-                    cls_mass = (
-                        Y.reshape(m, A, n_classes) * (w_assign * flip_mask)[:, :, None]
-                    ).sum(axis=1)
-                    lbl_star = cls_mass.argmax(axis=1)
-
-                    cur = flip_prob[s : s + m]
-                    improve = mass > cur
-                    if np.any(improve):
-                        flip_prob[s : s + m][improve] = mass[improve]
-                        best_label[s : s + m][improve] = lbl_star[improve]
-                        for rel in np.nonzero(improve)[0]:
-                            best_subset[s + rel] = tuple(
-                                int(x) for x in subset.tolist()
-                            )
+        # greedy growth: add the concept with the largest gain while the gain exceeds the cost. Instances with
+        # many candidates start from their best single concept, the others from their best subset of `exhaustive`
+        # concepts (unless every size was already searched for them).
+        if self.use_exact_k:
+            active = []
+        else:
+            active = [
+                i
+                for i in range(n_samples)
+                if len(best_subset[i]) < k
+                and (
+                    (is_many[i] and len(best_subset[i]) == 1)
+                    or (not is_many[i] and not is_small[i] and len(best_subset[i]) == exhaustive)
+                )
+            ]
+        while active:
+            groups: dict[tuple[int, ...], list[int]] = {}
+            for i in active:
+                groups.setdefault(best_subset[i], []).append(i)
+            active = []
+            for subset, members in groups.items():
+                rows = np.asarray(members, dtype=int)
+                sampled = is_sampled(len(subset) + 1)
+                # with sampling, the current subset is re-estimated from the same draws as its extensions
+                current = subset_mass(rows, subset, sampled=True)[0] if sampled else flip_prob[rows]
+                grown_mass = np.full(len(rows), -np.inf)
+                grown_label = np.full(len(rows), -1, dtype=int)
+                grown_concept = np.full(len(rows), -1, dtype=int)
+                for j in range(n_concepts):
+                    if j in subset:
+                        continue
+                    eligible = is_candidate[rows, j]
+                    if not eligible.any():
+                        continue
+                    mass, lbl_star = subset_mass(rows[eligible], tuple(sorted(subset + (j,))), sampled=sampled)
+                    better = mass > grown_mass[eligible]
+                    where = np.nonzero(eligible)[0][better]
+                    grown_mass[where] = mass[better]
+                    grown_label[where] = lbl_star[better]
+                    grown_concept[where] = j
+                accept = (grown_concept >= 0) & (grown_mass - current > cost)
+                for pos in np.nonzero(accept)[0]:
+                    i = int(rows[pos])
+                    best_subset[i] = tuple(sorted(subset + (int(grown_concept[pos]),)))
+                    flip_prob[i] = grown_mass[pos]
+                    best_score[i] = grown_mass[pos] - cost * len(best_subset[i])
+                    best_label[i] = grown_label[pos]
+                    if len(best_subset[i]) < k:
+                        active.append(i)
 
         # candidate instances: exceed threshold (+ optional abstention filter)
         y_prob_now = base_probs
