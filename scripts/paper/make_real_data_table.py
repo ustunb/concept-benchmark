@@ -1,7 +1,7 @@
 """Write the real-dataset table (Derm7pt and CUB-25: accuracy by concept set and intervention budget).
 
 Reads `results/paper/real_datasets/{derm7pt,cub}.csv`, written by
-`experiments/real_data_up_to_k.py --policy paper`, and writes two tabulars side by side: mean accuracy over runs at each
+`experiments/real_data.py`, and writes two tabulars side by side: mean accuracy over runs at each
 budget, and the change in accuracy at k = max.
 
     python scripts/paper/make_real_data_table.py --out ../concept-benchmark-paper/tables/real_datasets.tex

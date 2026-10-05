@@ -331,13 +331,6 @@ def _mixed_batch(n, k, seed):
     )
 
 
-def _cost_policy(**kwargs):
-    """The optional cost-per-concept policy: unsure concepts only, each must add more than 0.01."""
-    params = dict(concept_cost=0.01, uncertainty_band=(0.01, 0.99), exhaustive_size=3)
-    params.update(kwargs)
-    return KFlipInterventionStrategy(**params)
-
-
 def _load_reference(name):
     import importlib.util
     from pathlib import Path
@@ -375,97 +368,6 @@ class TestKFlipDefaultIsThePaperPolicy:
                 np.testing.assert_array_equal(new.mask, old.mask)
 
 
-class TestKFlipPolicy:
-    """The policy asks about a concept only if it raises the flip probability by more than its cost."""
-
-    def test_skipping_sure_concepts_changes_nothing(self):
-        # with a cost of 0.01, a concept the model is >= 99% sure about can never be chosen:
-        # searching only the unsure concepts gives the same subsets as searching all of them
-        for seed in range(50):
-            model = _make_model(k=6, seed=seed)
-            batch = _mixed_batch(n=40, k=6, seed=seed)
-            config = InterventionConfig(per_instance_budget=3, score_threshold=0.2)
-            pruned = _cost_policy().propose(model, batch, config)
-            full = _cost_policy(uncertainty_band=None).propose(model, batch, config)
-            assert pruned.details["best_subset"] == full.details["best_subset"]
-            np.testing.assert_array_equal(pruned.mask, full.mask)
-
-    def test_sure_concepts_are_never_picked(self):
-        model = _make_model(k=6, seed=1)
-        batch = _mixed_batch(n=200, k=6, seed=1)
-        mask = _cost_policy().propose(
-            model, batch, InterventionConfig(per_instance_budget=6, score_threshold=0.0)
-        ).mask
-        sure = (batch.C_pred <= 0.01) | (batch.C_pred >= 0.99)
-        assert mask.any() and not (mask & sure).any()
-
-    def test_every_picked_concept_adds_more_than_its_cost(self):
-        model = _make_model(k=5, seed=3)
-        batch = _make_batch(n=60, k=5, seed=3)
-        proposal = _cost_policy().propose(
-            model, batch, InterventionConfig(per_instance_budget=3, score_threshold=0.2)
-        )
-        checked = 0
-        for i in np.nonzero(proposal.mask.any(axis=1))[0]:
-            subset = proposal.details["best_subset"][i]
-            p = batch.C_pred[i].astype(np.float64)
-            full = _flip_probability(model, p, subset)
-            for j in subset:
-                rest = tuple(c for c in subset if c != j)
-                assert full - _flip_probability(model, p, rest) > 0.01
-                checked += 1
-        assert checked > 0
-
-    def test_budget_one_matches_plain_argmax(self):
-        # at k = 1 the policy picks the same concepts as maximizing the flip probability alone
-        for seed in range(20):
-            model = _make_model(k=6, seed=seed)
-            batch = _mixed_batch(n=40, k=6, seed=100 + seed)
-            config = InterventionConfig(per_instance_budget=1, score_threshold=0.2)
-            new = _cost_policy().propose(model, batch, config)
-            plain = KFlipInterventionStrategy().propose(model, batch, config)
-            np.testing.assert_array_equal(new.mask, plain.mask)
-
-    def test_subsets_can_be_smaller_than_the_budget(self):
-        model = _make_model(k=6, seed=5)
-        batch = _mixed_batch(n=300, k=6, seed=5)
-        mask = _cost_policy().propose(
-            model, batch, InterventionConfig(per_instance_budget=6, score_threshold=0.2)
-        ).mask
-        sizes = mask.sum(axis=1)
-        assert sizes.max() <= 6 and (sizes[sizes > 0] < 6).any()
-
-    def test_greedy_growth_agrees_with_exhaustive_search(self):
-        # beyond three concepts the subset grows greedily; on small problems it should rarely differ from
-        # searching every subset
-        same = total = 0
-        for seed in range(40):
-            model = _make_model(k=6, seed=seed)
-            batch = _make_batch(n=40, k=6, seed=200 + seed)
-            config = InterventionConfig(per_instance_budget=6, score_threshold=0.2)
-            greedy = _cost_policy(exhaustive_candidates=0).propose(model, batch, config)
-            exhaustive = _cost_policy(exhaustive_size=None).propose(model, batch, config)
-            rows = np.nonzero(greedy.mask.any(axis=1) | exhaustive.mask.any(axis=1))[0]
-            same += int((greedy.mask[rows] == exhaustive.mask[rows]).all(axis=1).sum())
-            total += len(rows)
-        assert total > 0 and same / total >= 0.9, f"greedy matches exhaustive on {same}/{total} robots"
-
-    def test_few_candidates_are_searched_exhaustively(self):
-        # robots with at most seven unsure concepts get the exact best subset at every budget
-        for seed in range(30):
-            model = _make_model(k=7, seed=seed)
-            batch = _mixed_batch(n=40, k=7, seed=300 + seed)
-            config = InterventionConfig(per_instance_budget=7, score_threshold=0.2)
-            default = _cost_policy().propose(model, batch, config)
-            exhaustive = _cost_policy(exhaustive_size=None).propose(model, batch, config)
-            np.testing.assert_array_equal(default.mask, exhaustive.mask)
-
-
-def _load_v2():
-    """The cost-per-concept policy code of the October 2026 intervention reruns (frozen copy; its defaults)."""
-    return _load_reference("kflip_v2_reference")
-
-
 class _EmbeddingStyleFrontEnd(FrontEndModel):
     """Label predictor that reads continuous concepts and is replayed row by row (no fast path)."""
 
@@ -484,31 +386,8 @@ class _EmbeddingStyleFrontEnd(FrontEndModel):
         return np.column_stack([1.0 - prob1, prob1]).astype(np.float32)
 
 
-class TestKFlipMatchesRerunPolicy:
-    """With up to 12 concepts the cost-per-concept policy must choose exactly what the rerun code (v2) chose."""
-
-    @pytest.mark.parametrize("n_concepts", [1, 2, 3, 5, 7, 8, 10, 12])
-    def test_same_choices_as_v2(self, n_concepts):
-        v2 = _load_v2()
-        for seed in range(12):
-            rng = np.random.default_rng(1000 * n_concepts + seed)
-            batch = _mixed_batch(n=30, k=n_concepts, seed=seed) if seed % 2 else _make_batch(n=30, k=n_concepts, seed=seed)
-            models = [
-                _make_model(k=n_concepts, seed=seed),
-                ConceptBasedModel(label_predictor=_EmbeddingStyleFrontEnd(rng.normal(size=n_concepts) * 2, float(rng.normal()))),
-            ]
-            for model in models:
-                for budget in sorted({1, min(3, n_concepts), n_concepts}):
-                    config = InterventionConfig(per_instance_budget=budget, score_threshold=0.2, random_state=seed)
-                    new = _cost_policy().propose(model, batch, config)
-                    old = v2().propose(model, batch, config)
-                    np.testing.assert_array_equal(new.mask, old.mask)
-                    assert new.details["best_subset"] == old.details["best_subset"]
-                    np.testing.assert_array_equal(new.details["flip_prob"], old.details["flip_prob"])
-
-
 class TestKFlipManyConcepts:
-    """More than 12 candidate concepts: greedy search over every candidate, sampled flip probability for big subsets."""
+    """More than 12 concepts: greedy search from the best single concept, sampled flip probability for big subsets."""
 
     def test_any_candidate_and_any_size_can_be_chosen(self):
         # the label flips as soon as one concept turns out absent, so every concept adds (1 - p) x what is left:
@@ -523,7 +402,7 @@ class TestKFlipManyConcepts:
         p = rng.uniform(0.85, 0.95, size=(6, n)).astype(np.float32)
         model = ConceptBasedModel(label_predictor=_AnyAbsent(np.zeros(n), 0.0))
         batch = InterventionBatch(C_pred=p, C_true=np.ones((6, n), dtype=np.float32), y_true=np.ones(6, dtype=np.int32))
-        mask = _cost_policy().propose(
+        mask = KFlipInterventionStrategy().propose(
             model, batch, InterventionConfig(per_instance_budget=n, score_threshold=0.0)
         ).mask
         assert mask.sum(axis=1).min() > 12  # subsets grow past twelve concepts
@@ -544,12 +423,12 @@ class TestKFlipManyConcepts:
             model = ConceptBasedModel(label_predictor=_AnyAbsent(np.zeros(n), 0.0))
             batch = InterventionBatch(C_pred=p, C_true=np.ones((8, n), dtype=np.float32), y_true=np.ones(8, dtype=np.int32))
             config = InterventionConfig(per_instance_budget=n, score_threshold=0.0, random_state=seed)
-            sampled = _cost_policy().propose(model, batch, config)
-            exact = _cost_policy(n_samples=2**16).propose(model, batch, config)
+            sampled = KFlipInterventionStrategy().propose(model, batch, config)
+            exact = KFlipInterventionStrategy(n_samples=2**16).propose(model, batch, config)
             assert sampled.mask.sum(axis=1).min() > 12  # sampling was used
             truth = 1.0 - np.prod(np.where(sampled.mask, p.astype(np.float64), 1.0), axis=1)  # exact flip probability
             np.testing.assert_allclose(sampled.details["flip_prob"], truth, atol=0.03)
-            # sampling may differ from exact search only over a concept whose gain is close to the cost
+            # sampling may differ from exact search only over a concept whose gain is close to zero
             assert np.abs(sampled.mask.sum(axis=1) - exact.mask.sum(axis=1)).max() <= 1
             truth_exact = 1.0 - np.prod(np.where(exact.mask, p.astype(np.float64), 1.0), axis=1)
             np.testing.assert_allclose(truth, truth_exact, atol=0.02)

@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import logging
 import platform
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -469,9 +470,10 @@ def run_interventions(
         acc_intervened = float((result.y_pred_after == data.test.y).mean())
         predictions_intervened_on = int(np.sum(np.any(result.mask, axis=1)))
         total_concept_checks = int(np.sum(result.mask))
-        row_checks = int(result.mask[:, 0:9].sum())
-        col_checks = int(result.mask[:, 9:18].sum())
-        block_checks = int(result.mask[:, 18:27].sum())
+        side = config.block_size**2  # concepts are ordered rows, columns, blocks
+        row_checks = int(result.mask[:, :side].sum())
+        col_checks = int(result.mask[:, side : 2 * side].sum())
+        block_checks = int(result.mask[:, 2 * side :].sum())
         pred_binary = (result.C_pred >= 0.5).astype(int)
         final_binary = (result.C_intervened >= 0.5).astype(int)
         total_concept_edits_made = int(np.sum(pred_binary != final_binary))
@@ -605,30 +607,29 @@ def collect_results(
             if "tau" in sel_df.columns:
                 sel_df = sel_df.rename(columns={"tau": "target_accuracy"})
 
-            for model in ["dnn"]:
-                model_df = sel_df[
-                    (sel_df["model"] == model) & (sel_df["target_accuracy"] == target)
-                ]
-                if model_df.empty:
-                    continue
-                r = model_df.iloc[0]
-                sel_acc = r["selective_acc"]
-                rows.append(
-                    {
-                        "dataset": label,
-                        "model": model,
-                        "budget": "",
-                        "target_accuracy": target,
-                        "raw_test_acc": round(float(r["raw_test_acc"]), 4),
-                        "selective_acc": round(float(sel_acc), 4)
-                        if pd.notna(sel_acc)
-                        else "",
-                        "selective_cov": round(float(r["selective_cov"]), 4),
-                        "predictions_intervened_on": "",
-                        "avg_concepts_per_sample": "",
-                        "predictions_changed": "",
-                    }
-                )
+            model_df = sel_df[
+                (sel_df["model"] == "dnn") & (sel_df["target_accuracy"] == target)
+            ]
+            if model_df.empty:
+                continue
+            r = model_df.iloc[0]
+            sel_acc = r["selective_acc"]
+            rows.append(
+                {
+                    "dataset": label,
+                    "model": "dnn",
+                    "budget": "",
+                    "target_accuracy": target,
+                    "raw_test_acc": round(float(r["raw_test_acc"]), 4),
+                    "selective_acc": round(float(sel_acc), 4)
+                    if pd.notna(sel_acc)
+                    else "",
+                    "selective_cov": round(float(r["selective_cov"]), 4),
+                    "predictions_intervened_on": "",
+                    "avg_concepts_per_sample": "",
+                    "predictions_changed": "",
+                }
+            )
 
         # ── Intervention CSV: CS at k > 0 ────────────────────────────
         interv_csv = cfg.get_results_path(
