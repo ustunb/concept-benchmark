@@ -61,7 +61,7 @@ from concept_benchmark.paths import data_dir, results_dir
 
 @dataclass
 class InterventionSettings:
-    """Typed config for _test_interventions, replacing the old ``sttngs`` dict."""
+    """Settings of one call to ``_test_interventions``."""
 
     seed: int
     budgets: list[int]
@@ -909,7 +909,7 @@ def _test_interventions(
                         except Exception:
                             continue
 
-                # Replace test.C with LLM votes for the standard path
+                # the standard path reads the answers from the dataset's concepts
                 test_llm = copy.copy(test)
                 # Fill NaN with original predictions (concepts LLM didn't judge)
                 C_llm_filled = np.where(np.isnan(C_llm), (prob_test >= 0.5).astype(np.float32), C_llm)
@@ -936,7 +936,7 @@ def _test_interventions(
                 raise FileNotFoundError(f"LLM cache not found at {cache_path}")
 
         elif settings.intervention_expert.lower() == "llm":
-            # ── Live LLM path (original robot_concept_regimes.py) ──
+            # ── Answers from live LLM calls ──
             from experiments.llm_client import (
                 is_local_exec_provider,
                 is_retryable_llm_error,

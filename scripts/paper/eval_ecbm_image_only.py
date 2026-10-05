@@ -1,21 +1,19 @@
 """Image-only vs joint label accuracy of one ECBM model on listed vs unlisted foot subtypes (balanced rule test set).
 
-    PYTHONPATH=. python scripts/paper/eval_ecbm_image_only.py --model <file> --seed 1015 --data-root <cb-sec3> --images <dir>
+    PYTHONPATH=. python scripts/paper/eval_ecbm_image_only.py --model <file> --seed 1015 --data-root <runs> --images <dir>
 """
 
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 import numpy as np
 import torch
 
 from concept_benchmark.ext.fileutils import load
+from diagnose_incomplete_concepts import dataset
 from experiments.baselines.ecbm import _infer_labels_and_concepts
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from diagnose_incomplete_concepts import dataset  # noqa: E402
 
 
 def main() -> None:

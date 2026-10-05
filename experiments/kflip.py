@@ -26,7 +26,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
     the concepts in S to their true values changes the predicted label (ties go to the smaller subset). Instances
     whose chosen subset has a flip probability of at least ``config.score_threshold`` become intervention
     candidates. Adding a concept rarely lowers the flip probability, so in practice the subset uses the whole
-    budget; this is the policy behind the paper's results.
+    budget.
 
     Search. With at most ``greedy_above`` concepts, every subset of up to *k* concepts is searched. With more,
     the subsets cannot be enumerated: each instance starts from its best single concept and adds the concept
@@ -88,7 +88,6 @@ class KFlipInterventionStrategy(InterventionStrategy):
         batch: InterventionBatch,
         config: InterventionConfig,
     ) -> StrategyProposal:
-        # --- inputs and guards
         n_samples, n_concepts = batch.C_pred.shape
         k = config.per_instance_budget
         if k is None or int(k) <= 0:
@@ -116,7 +115,6 @@ class KFlipInterventionStrategy(InterventionStrategy):
         base_cont = batch.C_pred.astype(np.float32)
         base_Z = (P >= 0.5).astype(np.float32)  # 'hard' mode
 
-        # baseline labels
         base_probs = predict_label_proba_from_concepts(
             model,
             base_cont if supports_aligned else base_Z,
@@ -158,7 +156,6 @@ class KFlipInterventionStrategy(InterventionStrategy):
                 avg_score = np.mean([feat_score[i] for i in subset])
                 subset_scores.append((avg_score, subset))
 
-            # Take top scoring subsets
             subset_scores.sort(key=lambda x: x[0], reverse=True)
             all_subsets = [subset for _, subset in subset_scores[: self.limit_subsets]]
 
@@ -343,7 +340,6 @@ class KFlipInterventionStrategy(InterventionStrategy):
 
         selected = self._select_instances(candidate_ids, config, rng=config.rng)
 
-        # build mask and enforce budgets via helper
         mask = np.zeros_like(batch.C_pred, dtype=bool)
         total_applied = 0
         for idx in selected:

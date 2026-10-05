@@ -1,7 +1,8 @@
-"""Build the section 3 figure: change in accuracy from interventions across concept and intervention sources.
+"""Build the concept-source figure: change in accuracy from interventions across concept and intervention sources.
 
 Reads the installed results: sparse rule (results/paper/robot/grid, default) or balanced rule
-(results/paper/robot/balanced_rule, `--rule balanced`; label-free CBM interventions with hard 0/1 values). For each architecture, concept source and
+(results/paper/robot/balanced_rule, `--rule balanced`; interventions on the label-free CBM set a concept to its
+5th/95th-percentile score). For each architecture, concept source and
 intervention source, Delta Accuracy = mean accuracy over k in {1, 3, max} minus accuracy at k = 0, computed per seed
 and shown as mean +/- SE over seeds (LLM interventions: Gemini 2.5 Flash-Lite at 224 px, seeds 1015-1017).
 Layouts (same pgfplots style and colours as scripts/paper/plot_architecture_response.py):
@@ -18,17 +19,13 @@ Layouts (same pgfplots style and colours as scripts/paper/plot_architecture_resp
 from __future__ import annotations
 
 import argparse
-import csv
 import statistics as st
-import subprocess
 from pathlib import Path
 
+from _common import BALANCED_RULE, BALANCED_TAG, SPARSE_RULE, compile_tex, mean_se, read_budget_rows
 from plot_architecture_response import ARCHS
 
-REPO = Path(__file__).resolve().parents[2]
-GRID = REPO / "results/paper/robot/grid"
-BALANCED = REPO / "results/paper/robot/balanced_rule"
-SOURCE = {"sparse": (GRID, "rule-sparse"), "balanced": (BALANCED, "rule-balanced__sampling-skew0.30__elbows-weight2")}
+SOURCE = {"sparse": (SPARSE_RULE, "robot__rule-sparse"), "balanced": (BALANCED_RULE, BALANCED_TAG)}
 RULE = "sparse"  # set from --rule in main()
 SEEDS_BY_RULE = {"sparse": (1014, 1015, 1016, 1017), "balanced": tuple(range(1014, 1024))}
 CONCEPTS = [("true", r"\texttt{true\_concepts}"), ("human", r"\texttt{human\_concepts}"),
@@ -73,7 +70,7 @@ def delta(family: str, concepts: str, isrc_tag: str) -> list[float]:
     """Per-seed Delta Accuracy (points) for one cell."""
     out = []
     folder, tag = SOURCE[RULE]
-    for f in sorted(folder.glob(f"robot__{tag}__concepts-{concepts}__arch-{family}__*{isrc_tag}*__results.csv")):
+    for f in sorted(folder.glob(f"{tag}__concepts-{concepts}__arch-{family}__*{isrc_tag}*__results.csv")):
         if isrc_tag == "isrc-llm" and "img-224px" not in f.name:
             continue
         # under the balanced rule, the label-free CBM's interventions use the 5th/95th percentile of its training scores
@@ -84,13 +81,13 @@ def delta(family: str, concepts: str, isrc_tag: str) -> list[float]:
             continue
         if int(f.name.split("__seed-")[1].split("__")[0]) not in SEEDS_BY_RULE[RULE]:
             continue
-        acc = [100 * float(r["accuracy"]) for r in sorted(csv.DictReader(f.open()), key=lambda r: int(r["budget"]))]
+        acc = [100 * float(r["accuracy"]) for r in read_budget_rows(f)]
         out.append(st.mean(acc[1:]) - acc[0])
     return out
 
 
 def stats(values: list[float]) -> tuple[float, float]:
-    return st.mean(values), (st.stdev(values) / len(values) ** 0.5 if len(values) > 1 else 0.0)
+    return mean_se(values) if len(values) > 1 else (st.mean(values), 0.0)
 
 
 def isrc_tag(name: str) -> str:
@@ -188,8 +185,9 @@ def build(layout: str, yaxis: str) -> str:
                 body, off = points_body(concepts, isrc, zoom)
             labels = ",".join(next(l for n, l in CONCEPTS if n == c) for c in concepts)
             legend = "" if k == 1 else r"legend to name=dummy,"
+            ylabel = r", ylabel={$\Delta$ Accuracy (points)}" if k == 0 else ""
             panels.append(rf"""\nextgroupplot[title={{{title} interventions}}, {legend} xtick={{{",".join(str(i) for i in range(len(concepts)))}}},
-  xticklabels={{{labels}}}, xmin=-0.5, xmax={len(concepts) - 0.5}{', ylabel={$\\Delta$ Accuracy (points)}' if k == 0 else ''}]
+  xticklabels={{{labels}}}, xmin=-0.5, xmax={len(concepts) - 0.5}{ylabel}]
 {zero % (len(concepts) - 0.5)}
 {body}
 {chr(10).join(off)}""")
@@ -211,7 +209,7 @@ def build(layout: str, yaxis: str) -> str:
         text = "\n".join(rf"\node[font=\fontsize{{6}}{{7}}\selectfont, align=center, color={'white' if abs(m) > 20 else 'black'}] at (axis cs:{j},{r}) {{{m:.1f}\%\\[-1pt]{{\fontsize{{4.5}}{{5}}\selectfont $\pm${se:.1f}}}}};"
                          for j, r, m, se in cells)
         # one intervention source per column; each concept source named once, centred under its columns
-        ticks = ",".join(rf"\texttt{{{s}}}" for _, s in cols)  # Table 3's names: perfect, expert, llm
+        ticks = ",".join(rf"\texttt{{{s}}}" for _, s in cols)  # the robot table's names: perfect, expert, llm
         groups = {}
         for j, (c, _) in enumerate(cols):
             groups.setdefault(c, []).append(j)
@@ -220,13 +218,14 @@ def build(layout: str, yaxis: str) -> str:
             rf"{{{next(lbl for n, lbl in CONCEPTS if n == c)}}};" for c, js in groups.items())
         text += ("\n" + rf"\node[font=\fontsize{{6.5}}{{7}}\selectfont\bfseries, anchor=east] at (axis cs:-0.55,-0.8) {{Intervention}};"
                  + "\n" + rf"\node[font=\fontsize{{6.5}}{{7}}\selectfont\bfseries, anchor=north east] at (axis cs:-0.55,-1.25) {{Dataset}};")
+        arch_labels = ",".join(rf"\textsf{{{l}}}" for _, l, _, _ in reversed(ARCHS))
         tex = rf"""
 \begin{{axis}}[bbvalue, width={0.95 * len(cols):.1f}cm, height=3.2cm, axis line style={{draw=none}}, ymajorgrids=false,
   colormap={{rdbu}}{{rgb255=(178,24,43) rgb255=(244,165,130) rgb255=(247,247,247) rgb255=(146,197,222) rgb255=(33,102,172)}},
   point meta min=-30, point meta max=30, colorbar, colorbar style={{width=0.25cm, ylabel={{$\Delta$ Accuracy}}, ytick={{-30,0,30}},
   yticklabel style={{font=\fontsize{{6.5}}{{7}}\selectfont}}}},
   xtick={{{",".join(str(i) for i in range(len(cols)))}}}, xticklabels={{{ticks}}}, xticklabel style={{font=\fontsize{{6.5}}{{7}}\selectfont, align=center}},
-  ytick={{0,1,2,3}}, yticklabels={{{",".join(rf"\textsf{{{l}}}" for _, l, _, _ in reversed(ARCHS))}}},
+  ytick={{0,1,2,3}}, yticklabels={{{arch_labels}}},
   enlargelimits=false, clip=false, xmin=-0.5, xmax={len(cols) - 0.5}, ymin=-0.5, ymax=3.5]
 \addplot[matrix plot*, mesh/cols={len(cols)}, point meta=explicit] coordinates {{{coords}}};
 {text}
@@ -246,12 +245,7 @@ def main() -> None:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     tex_path = args.out.with_suffix(".tex")
     tex_path.write_text(build(args.layout, args.yaxis))
-    result = subprocess.run(["pdflatex", "-interaction=nonstopmode", "-halt-on-error", tex_path.name],
-                            cwd=tex_path.parent, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise SystemExit(result.stdout[-2500:])
-    for ext in (".aux", ".log"):
-        tex_path.with_suffix(ext).unlink(missing_ok=True)
+    compile_tex(tex_path)
     print(f"wrote {tex_path.with_suffix('.pdf')}")
 
 

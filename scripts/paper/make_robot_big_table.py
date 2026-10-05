@@ -13,15 +13,15 @@ the balanced rule, interventions on the label-free CBM set a concept to its 5th/
 from __future__ import annotations
 
 import argparse
-import csv
 import statistics as st
 from collections import defaultdict
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
+from _common import BALANCED_RULE, SPARSE_RULE, filename_fields, latex_cell, read_budget_rows
+
 RULES = {  # rule -> (results folder, seeds per cell, table label, caption suffix)
-    "balanced": (REPO / "results/paper/robot/balanced_rule", 10, "Table::BigTable", ""),
-    "sparse": (REPO / "results/paper/robot/grid", 4, "Table::BigTableSparse", " under the sparse rule"),
+    "balanced": (BALANCED_RULE, 10, "Table::BigTable", ""),
+    "sparse": (SPARSE_RULE, 4, "Table::BigTableSparse", " under the sparse rule"),
 }
 AUTOMATED = {"machine_annotation", "llm_concepts", "clip_concepts"}
 CONCEPT_SETS = [
@@ -39,25 +39,17 @@ def read_grid(rule: str) -> dict[tuple, list[list[float]]]:
     """(concept source, intervention source, family) -> per-seed accuracies at k = 0, 1, 3, max."""
     cells = defaultdict(list)
     for f in sorted(RULES[rule][0].glob("*.csv")):
-        fields = dict(kv.split("-", 1) for kv in f.stem.split("__")[1:-1])
+        fields = filename_fields(f)
         if "isrc" not in fields:
-            continue  # section 1's CBM-and-DNN files
+            continue  # the CBM-and-DNN summary files
         if fields.get("isrc") == "llm" and fields.get("img") != "224px":
-            continue  # 32 px caches and seed 1014's April caches are kept apart
-        rows = sorted(csv.DictReader(f.open()), key=lambda r: int(r["budget"]))
+            continue  # other LLM caches (such as 32 px) are kept apart
+        rows = read_budget_rows(f)
         key = (rows[0]["concept_source"], rows[0]["intervention_source"], rows[0]["model_family"])
         if rule == "balanced" and key[2] == "cbm" and key[0] in AUTOMATED and fields.get("enc") != "koh595":
             continue  # label-free CBM: 5th/95th-percentile interventions, not hard 0/1
         cells[key].append([100 * float(r["accuracy"]) for r in rows])
     return cells
-
-
-def cell(values: list[float], is_best: bool = False) -> str:
-    mean = st.mean(values)
-    se = st.stdev(values) / len(values) ** 0.5
-    if is_best:
-        return f"\\textbf{{{mean:.1f}\\%}}{{\\scriptsize$\\boldsymbol{{\\pm}}$\\textbf{{{se:.1f}}}}}"
-    return f"{mean:.1f}\\%{{\\scriptsize$\\pm${se:.1f}}}"
 
 
 def main() -> None:
@@ -101,7 +93,7 @@ def main() -> None:
             for isrc in SOURCES:
                 means = [round(st.mean([r[k] for r in runs[family, isrc]]), 1) for k in range(4)]
                 first_best = means.index(best[isrc]) if best[isrc] in means else None  # earliest budget only
-                row += [cell([r[k] for r in runs[family, isrc]], is_best=k == first_best) for k in range(4)]
+                row += [latex_cell([r[k] for r in runs[family, isrc]], is_best=k == first_best) for k in range(4)]
             lines.append(f" & {macro:<11}& " + " & ".join(row) + r" \\")
     lines += [
         r"\bottomrule",

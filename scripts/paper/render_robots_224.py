@@ -13,20 +13,18 @@ import argparse
 import copy
 import hashlib
 import json
-import sys
 import tempfile
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
-REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO))
-from concept_benchmark.config import RobotBenchmarkConfig  # noqa: E402
-from concept_benchmark.synthetic.robot import catalog as cat  # noqa: E402
-from concept_benchmark.synthetic.robot.draw import draw_robot  # noqa: E402
+from _common import PAPER_RESULTS, REPO
+from concept_benchmark.config import RobotBenchmarkConfig
+from concept_benchmark.synthetic.robot import catalog as cat
+from concept_benchmark.synthetic.robot.draw import draw_robot
 
-OUT = REPO / "results/paper/images/robot_224px"
+OUT = PAPER_RESULTS / "images/robot_224px"
 SMALL = REPO / "data/robot_images"
 
 

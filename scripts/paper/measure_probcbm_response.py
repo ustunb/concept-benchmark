@@ -22,16 +22,13 @@ from __future__ import annotations
 
 import argparse
 import csv
-import sys
 from pathlib import Path
 
 import numpy as np
 from sklearn.metrics import roc_auc_score
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from measure_intervention_response import label_proba, model_and_data_files, set_cpu  # noqa: E402
-
-from concept_benchmark.ext.fileutils import load  # noqa: E402
+from concept_benchmark.ext.fileutils import load
+from measure_intervention_response import label_proba, model_and_data_files, set_cpu
 
 RULE_CONCEPTS = ("mouth_type", "has_knees", "foot_shape")
 

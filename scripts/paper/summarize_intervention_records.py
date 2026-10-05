@@ -18,26 +18,24 @@ from __future__ import annotations
 import argparse
 import statistics as st
 from collections import defaultdict
-from pathlib import Path
 
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[2]
-RECORDS = REPO / "results/paper/robot/balanced_rule/intervention_records"
-TAG = "robot__rule-balanced__sampling-skew0.30__elbows-weight2"
+from _common import BALANCED_TAG, INTERVENTION_RECORDS
+
 ARCH_TAG = {"cbm": "arch-cbm", "cem": "arch-cem", "probcbm": "arch-probcbm__mode-joint", "ecbm": "arch-ecbm"}
 SEEDS = tuple(range(1014, 1024))
 ARCHS = ("cbm", "cem", "probcbm", "ecbm")
 SETS = ("true", "human")
 WHO = ("perfect", "expert", "llm")
-SKIP = {("probcbm", "true", 1014)}  # record of the replaced model; the paper uses the retrain (install_probcbm_1014_retrain.py)
+SKIP = {("probcbm", "true", 1014)}  # record of the replaced model; the paper uses the retrained one
 
 
 def load(arch: str, concepts: str, who: str, seed: int) -> dict[str, dict]:
     """Budget label ("1", "3", "max") -> record of one installed intervention cell."""
     out = {}
     for budget in ("1", "3", "max"):
-        path = RECORDS / f"{TAG}__concepts-{concepts}__{ARCH_TAG[arch]}__isrc-{who}__budget-{budget}__seed-{seed}__records.npz"
+        path = INTERVENTION_RECORDS / f"{BALANCED_TAG}__concepts-{concepts}__{ARCH_TAG[arch]}__isrc-{who}__budget-{budget}__seed-{seed}__records.npz"
         out[budget] = np.load(path)
     return out
 

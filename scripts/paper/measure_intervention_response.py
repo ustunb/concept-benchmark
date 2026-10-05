@@ -22,17 +22,16 @@ from pathlib import Path
 
 import numpy as np
 
+from _common import PAPER_RESULTS, ROBOT_DATASETS, SPARSE_RULE, filename_fields
 from concept_benchmark.ext.fileutils import load
 from experiments.intervention import predict_label_proba_from_concepts
 
-REPO = Path(__file__).resolve().parents[2]
-PAPER = REPO / "results/paper"
 GRID_K0 = {}  # (concepts, arch, seed) -> accuracy at k=0 from the installed grid
 
 
 def read_grid_k0(grid_dir: Path) -> None:
     for f in grid_dir.glob("*isrc-perfect*.csv"):
-        fields = dict(kv.split("-", 1) for kv in f.stem.split("__")[1:-1])
+        fields = filename_fields(f)
         rows = list(csv.DictReader(f.open()))
         k0 = next(r for r in rows if r["budget"] == "0")
         GRID_K0[(fields["concepts"], fields["arch"], fields["seed"])] = float(k0["accuracy"])
@@ -72,8 +71,8 @@ def label_proba(model, arch: str, concepts: np.ndarray, baseline: np.ndarray, ma
 def model_and_data_files(arch: str, concepts_name: str, seed: int, pipeline_root: Path | None) -> tuple[Path, Path]:
     """Installed-tree names by default; the pipeline's own names under `pipeline_root/run_s<seed>/results`."""
     if pipeline_root is None:
-        data = PAPER / f"robot/datasets/robot__rule-sparse__concepts-{concepts_name}__seed-{seed}__dataset.data"
-        model = next((PAPER / "models/robot/grid").glob(
+        data = ROBOT_DATASETS / f"robot__rule-sparse__concepts-{concepts_name}__seed-{seed}__dataset.data"
+        model = next((PAPER_RESULTS / "models/robot/grid").glob(
             f"robot__rule-sparse__concepts-{concepts_name}__arch-{arch}__*seed-{seed}__model.pt"))
         return model, data
     preset = "ideal" if concepts_name == "true" else "subconcept"
@@ -132,12 +131,12 @@ def diagnose(arch: str, concepts_name: str, seed: int, images: Path, pipeline_ro
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--images", type=Path, required=True, help="Folder with the 32px robot images.")
-    ap.add_argument("--out", type=Path, default=PAPER / "robot/diagnostics/intervention_response.csv")
+    ap.add_argument("--out", type=Path, default=PAPER_RESULTS / "robot/diagnostics/intervention_response.csv")
     ap.add_argument("--seeds", default="1014,1015,1016,1017")
     ap.add_argument("--archs", default="cbm,cem,probcbm,ecbm")
     ap.add_argument("--pipeline-root", type=Path, default=None,
                     help="Read models/datasets with pipeline names from <root>/run_s<seed>/results instead of results/paper.")
-    ap.add_argument("--grid-dir", type=Path, default=PAPER / "robot/grid", help="Installed grid CSVs (k=0 check).")
+    ap.add_argument("--grid-dir", type=Path, default=SPARSE_RULE, help="Installed grid CSVs (k=0 check).")
     args = ap.parse_args()
     read_grid_k0(args.grid_dir)
 

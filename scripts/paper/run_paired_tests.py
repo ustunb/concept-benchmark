@@ -10,13 +10,11 @@ from __future__ import annotations
 
 import csv
 import statistics as st
-from pathlib import Path
 
 from scipy import stats
 
-REPO = Path(__file__).resolve().parents[2]
-BALANCED = REPO / "results/paper/robot/balanced_rule"
-TAG = "rule-balanced__sampling-skew0.30__elbows-weight2"
+from _common import BALANCED_RULE, BALANCED_TAG, mean_se, read_budget_rows
+
 SEEDS = tuple(range(1014, 1024))
 ARCHS = {"cbm": "arch-cbm", "cem": "arch-cem", "probcbm": "arch-probcbm__mode-joint", "ecbm": "arch-ecbm"}
 AUTOMATED = ("machine", "llm", "clip")
@@ -27,12 +25,12 @@ def accuracy(arch: str, concepts: str, isrc: str) -> list[list[float]]:
     """Per-seed accuracies (%) at k = 0, 1, 3, max."""
     out = []
     for seed in SEEDS:
-        files = [f for f in BALANCED.glob(f"robot__{TAG}__concepts-{concepts}__{ARCHS[arch]}__isrc-{isrc}*__seed-{seed}__results.csv")
+        files = [f for f in BALANCED_RULE.glob(f"{BALANCED_TAG}__concepts-{concepts}__{ARCHS[arch]}__isrc-{isrc}*__seed-{seed}__results.csv")
                  if (isrc != "llm" or "img-224px" in f.name)
                  and (("enc-koh595" in f.name) == (arch == "cbm" and concepts in AUTOMATED) or "enc-" not in f.name)]
         if len(files) != 1:
             raise SystemExit(f"{arch} {concepts} {isrc} seed {seed}: {[f.name for f in files]}")
-        rows = sorted(csv.DictReader(files[0].open()), key=lambda r: int(r["budget"]))
+        rows = read_budget_rows(files[0])
         out.append([100 * float(r["accuracy"]) for r in rows])
     return out
 
@@ -40,7 +38,7 @@ def accuracy(arch: str, concepts: str, isrc: str) -> list[list[float]]:
 def dnn() -> list[float]:
     out = []
     for seed in SEEDS:
-        path = BALANCED / f"robot__{TAG}__concepts-human__arch-cbm-and-dnn__seed-{seed}__results.csv"
+        path = BALANCED_RULE / f"{BALANCED_TAG}__concepts-human__arch-cbm-and-dnn__seed-{seed}__results.csv"
         out += [100 * float(r["accuracy"]) for r in csv.DictReader(path.open()) if "dnn" in r["model"].lower()]
     return out
 
@@ -57,7 +55,7 @@ def gain(runs: list[list[float]]) -> list[float]:
 
 def main() -> None:
     d = dnn()
-    print(f"DNN {st.mean(d):.2f} ± {st.stdev(d) / len(d) ** 0.5:.2f}")
+    print("DNN {:.2f} ± {:.2f}".format(*mean_se(d)))
 
     print("\nArchitectures on human_concepts, perfect interventions: architecture − DNN")
     human = {a: accuracy(a, "human", "perfect") for a in ARCHS}

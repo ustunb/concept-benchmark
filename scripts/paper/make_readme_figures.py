@@ -8,8 +8,6 @@ any model run through the pipelines.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import matplotlib
 
 matplotlib.use("Agg")
@@ -17,8 +15,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-REPO = Path(__file__).resolve().parents[2]
-PAPER_RESULTS = REPO / "results/paper"
+from _common import BALANCED_RULE, INTERVENTION_RECORDS, PAPER_RESULTS, REPO, SUDOKU_CELLS, filename_fields
+
 ASSETS_DIR = REPO / "docs/assets"
 CONCEPT_SETS = {"true": "true_concepts", "human": "human_concepts", "machine": "machine_annotation",
                 "llm": "llm_concepts", "clip": "clip_concepts"}
@@ -27,8 +25,8 @@ CONCEPT_SETS = {"true": "true_concepts", "human": "human_concepts", "machine": "
 def _read_robot_runs() -> pd.DataFrame:
     """Every installed balanced-rule run as one table (one row per run and budget)."""
     frames = []
-    for path in sorted((PAPER_RESULTS / "robot/balanced_rule").glob("*__isrc-*__results.csv")):
-        fields = dict(part.split("-", 1) for part in path.stem.split("__")[1:-1])
+    for path in sorted(BALANCED_RULE.glob("*__isrc-*__results.csv")):
+        fields = filename_fields(path)
         is_label_free_cbm = fields["concepts"] in ("machine", "llm", "clip") and fields["arch"] == "cbm"
         if is_label_free_cbm and fields.get("enc") != "koh595":
             continue  # label-free CBMs are scored with the percentile encoding
@@ -59,7 +57,7 @@ def main() -> None:
     runs = _read_robot_runs()
     dnn = [
         float(frame.loc[frame["model"] == "dnn", "accuracy"].iloc[0])
-        for frame in map(pd.read_csv, sorted((PAPER_RESULTS / "robot/balanced_rule").glob("*concepts-human__arch-cbm-and-dnn__*")))
+        for frame in map(pd.read_csv, sorted(BALANCED_RULE.glob("*concepts-human__arch-cbm-and-dnn__*")))
     ]
     is_human_perfect = (runs["concept_source"] == "human_concepts") & (runs["intervention_source"] == "perfect")
     fig, _ = plot_intervention_curve(runs[is_human_perfect], group="model_family", baseline_accuracy=dnn)
@@ -82,14 +80,14 @@ def main() -> None:
     fig, _ = plot_alignment_comparison(pd.DataFrame(rows))
     save(fig, "alignment.png")
 
-    records = np.load(next((PAPER_RESULTS / "robot/balanced_rule/intervention_records").glob(
+    records = np.load(next(INTERVENTION_RECORDS.glob(
         "*concepts-human__arch-cbm__isrc-llm*__budget-1__seed-1014__records.npz")))
     fig, _ = plot_concept_report(
         records["mask"], records["C_pred"], records["C_answer"], records["C_true"], list(records["concept_names"])
     )
     save(fig, "concept_report.png")
 
-    cells = sorted((PAPER_RESULTS / "sudoku/cells").glob("sudoku__arch-cbm__res-18px__tau-0.95__*__interventions.csv"))
+    cells = sorted(SUDOKU_CELLS.glob("sudoku__arch-cbm__res-18px__tau-0.95__*__interventions.csv"))
     sudoku = pd.concat([pd.read_csv(c).assign(seed=i) for i, c in enumerate(cells)], ignore_index=True)
     fig, _ = plot_automation(sudoku, n_instances=200, n_concepts=27)
     save(fig, "automation.png")

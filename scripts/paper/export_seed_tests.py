@@ -12,15 +12,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO))
-from concept_benchmark.ext.fileutils import load  # noqa: E402
-
-DATASETS = REPO / "results/paper/robot/datasets"
-TAG = "rule-balanced__sampling-skew0.30__elbows-weight2"
+from _common import BALANCED_TAG, ROBOT_DATASETS
+from concept_benchmark.ext.fileutils import load
 
 
 def signature(items) -> str:
@@ -38,8 +33,8 @@ def main() -> None:
     args = ap.parse_args()
     out = {}
     for s in args.seeds:
-        true = load(DATASETS / f"robot__{TAG}__concepts-true__seed-{s}__dataset.data").test
-        human = load(DATASETS / f"robot__{TAG}__concepts-human__seed-{s}__dataset.data").test
+        true = load(ROBOT_DATASETS / f"{BALANCED_TAG}__concepts-true__seed-{s}__dataset.data").test
+        human = load(ROBOT_DATASETS / f"{BALANCED_TAG}__concepts-human__seed-{s}__dataset.data").test
         if list(map(str, true.inputs)) != list(map(str, human.inputs)):
             raise SystemExit(f"seed {s}: true and human datasets differ in test robots")
         out[str(s)] = {"inputs": [str(x) for x in true.inputs], "dsig": signature(true.inputs),

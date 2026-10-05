@@ -20,14 +20,14 @@ k = 0 at 18 px.
 from __future__ import annotations
 
 import argparse
-import csv
 import random
 import re
 from pathlib import Path
 
 from scipy import stats
 
-from make_sudoku_table import ARCHS, CELLS, N_CONCEPTS, N_TEST_BOARDS, RESOLUTIONS, cell
+from _common import SUDOKU_CELLS, latex_cell, read_budget_rows
+from make_sudoku_table import ARCHS, N_CONCEPTS, N_TEST_BOARDS, RESOLUTIONS
 
 TAUS = ("0.90", "0.95", "0.99")
 COST_TAU = "0.95"
@@ -44,8 +44,8 @@ def read_cells(res: int, arch: str, tau: str, costs: tuple[float, float, float])
     """seed -> (net work automated, coverage) in percent at k = 0, 1, 3, max."""
     runs = {}
     pattern = f"sudoku__arch-{arch}__res-{res}px__tau-{tau}__threshold-per-budget__seed-*__interventions.csv"
-    for f in sorted(CELLS.glob(pattern)):
-        rows = sorted(csv.DictReader(f.open()), key=lambda r: int(r["budget"]))
+    for f in sorted(SUDOKU_CELLS.glob(pattern)):
+        rows = read_budget_rows(f)
         if len(rows) != 4 or any(not r.get("coverage_after") for r in rows):
             raise SystemExit(f"{f.name}: expected 4 budgets with selective columns")
         coverage = [100 * float(r["coverage_after"]) for r in rows]
@@ -79,7 +79,7 @@ def table(settings: list[tuple[str, str, tuple[float, float, float]]], first_hea
             for j, (arch, macro) in enumerate(ARCHS):
                 seeds = sorted(runs[res, arch])
                 net, coverage = ([runs[res, arch][s][m] for s in seeds] for m in (0, 1))
-                cells = [cell([r[k] for r in metric]) for metric in (net, coverage) for k in range(4)]
+                cells = [latex_cell([r[k] for r in metric]) for metric in (net, coverage) for k in range(4)]
                 head = (rf"\multirow{{8}}{{*}}{{{label}}}" if i == j == 0 else "") + " & "
                 head += rf"\multirow{{4}}{{*}}{{\textds{{{res}\,px}}}}" if j == 0 else ""
                 lines.append(f"{head} & {macro:<11}& " + " & ".join(cells) + r" \\")

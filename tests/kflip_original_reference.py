@@ -1,4 +1,4 @@
-"""Frozen copy of experiments/kflip.py at commit 10ece6a5: the policy behind the paper's results.
+"""Frozen reference implementation of the intervention policy behind the paper's results.
 
 Reference for tests/test_kflip.py: the default KFlipInterventionStrategy must make the same choices.
 """

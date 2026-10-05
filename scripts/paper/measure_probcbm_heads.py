@@ -9,7 +9,7 @@ reports, on the test robots with every concept set to its true value:
   * per concept: share of predictions that change when that one concept is flipped (sensitivity of the head);
   * spread of the predicted Glorp probability, the learned distance scale, and the distance between class means.
 
-Run from a code checkout of `grid-seeded-lfcbm` with the cem package (Bridges run dirs):
+Run from a code checkout of `grid-seeded-lfcbm` with the cem package:
     cd <checkout> && PYTHONPATH=. python <repo>/scripts/paper/measure_probcbm_heads.py --pipeline-root <root> --out <csv>
 """
 
@@ -17,18 +17,15 @@ from __future__ import annotations
 
 import argparse
 import csv
-import sys
 from pathlib import Path
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from measure_intervention_response import model_and_data_files, set_cpu  # noqa: E402
-from measure_probcbm_response import find_official  # noqa: E402
-
-from concept_benchmark.ext.fileutils import load  # noqa: E402
+from concept_benchmark.ext.fileutils import load
+from measure_intervention_response import model_and_data_files, set_cpu
+from measure_probcbm_response import find_official
 
 
 def class_proba(official, concepts: torch.Tensor) -> torch.Tensor:

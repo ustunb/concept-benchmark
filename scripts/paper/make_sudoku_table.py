@@ -16,9 +16,9 @@ import csv
 import statistics as st
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
-CELLS = REPO / "results/paper/sudoku/cells"
-SELECTIVE = REPO / "results/paper/sudoku/selective"
+from _common import PAPER_RESULTS, SUDOKU_CELLS, latex_cell, mean_se, read_budget_rows
+
+SELECTIVE = PAPER_RESULTS / "sudoku/selective"
 ARCHS = [("cbm", "\\CBM{}"), ("cem", "\\CEM{}"), ("probcbm", "\\ProbCBM{}"), ("ecbm", "\\ECBM{}")]
 RESOLUTIONS = (50, 18)
 N_TEST_BOARDS, N_CONCEPTS = 200, 27
@@ -28,18 +28,14 @@ TAU = "0.95"
 def read_cells(res: int, arch: str) -> tuple[list[list[float]], list[list[float]]]:
     """Per-seed net work automated and coverage (percent) at k = 0, 1, 3, max."""
     net, coverage = [], []
-    for f in sorted(CELLS.glob(f"sudoku__arch-{arch}__res-{res}px__tau-{TAU}__threshold-per-budget__seed-*__interventions.csv")):
-        rows = sorted(csv.DictReader(f.open()), key=lambda r: int(r["budget"]))
+    for f in sorted(SUDOKU_CELLS.glob(f"sudoku__arch-{arch}__res-{res}px__tau-{TAU}__threshold-per-budget__seed-*__interventions.csv")):
+        rows = read_budget_rows(f)
         if len(rows) != 4 or any(not r.get("coverage_after") for r in rows):
             raise SystemExit(f"{f.name}: expected 4 budgets with selective columns")
         cov = [100 * float(r["coverage_after"]) for r in rows]
         coverage.append(cov)
         net.append([c - 100 * float(r["total_concept_checks"]) / (N_TEST_BOARDS * N_CONCEPTS) for c, r in zip(cov, rows)])
     return net, coverage
-
-
-def mean_se(values: list[float]) -> tuple[float, float]:
-    return st.mean(values), st.stdev(values) / len(values) ** 0.5
 
 
 def dnn_coverage(res: int) -> list[float]:
@@ -49,13 +45,6 @@ def dnn_coverage(res: int) -> list[float]:
         values += [100 * float(r["selective_cov"]) for r in csv.DictReader(f.open())
                    if r["model"] == "dnn" and r["selective_cov"] and abs(float(r["target_accuracy"]) - float(TAU)) < 1e-9]
     return values
-
-
-def cell(values: list[float], is_best: bool = False) -> str:
-    mean, se = mean_se(values)
-    if is_best:
-        return f"\\textbf{{{mean:.1f}\\%}}{{\\scriptsize$\\boldsymbol{{\\pm}}$\\textbf{{{se:.1f}}}}}"
-    return f"{mean:.1f}\\%{{\\scriptsize$\\pm${se:.1f}}}"
 
 
 def main() -> None:
@@ -85,14 +74,15 @@ def main() -> None:
             raise SystemExit(f"{res}px: {len(dnn)} DNN seeds, {n} for the architectures")
         lines.append(r"\midrule")
         lines.append(rf"\multirow{{5}}{{*}}{{\textds{{{res}\,px}}}}")
-        lines.append(f" & {'\\DNN{}':<11}& " + " & ".join([cell(dnn), "--", "--", "--"] * 2) + r" \\")
+        dnn_macro = "\\DNN{}"
+        lines.append(f" & {dnn_macro:<11}& " + " & ".join([latex_cell(dnn), "--", "--", "--"] * 2) + r" \\")
         print(f"{res}px dnn      n={n}  coverage {mean_se(dnn)[0]:5.1f}±{mean_se(dnn)[1]:4.1f}")
         for arch, macro in ARCHS:
             net, coverage = data[arch]
             row = []
             for m, runs in enumerate((net, coverage)):
                 first = means[arch][m].index(best[m]) if best[m] in means[arch][m] else None
-                row += [cell([r[k] for r in runs], is_best=k == first) for k in range(4)]
+                row += [latex_cell([r[k] for r in runs], is_best=k == first) for k in range(4)]
             lines.append(f" & {macro:<11}& " + " & ".join(row) + r" \\")
             print(f"{res}px {arch:8s} n={n}  net " + " ".join(f"{mean_se([r[k] for r in net])[0]:5.1f}±{mean_se([r[k] for r in net])[1]:4.1f}" for k in range(4))
                   + "  | coverage " + " ".join(f"{mean_se([r[k] for r in coverage])[0]:5.1f}±{mean_se([r[k] for r in coverage])[1]:4.1f}" for k in range(4)))

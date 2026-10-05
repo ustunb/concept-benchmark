@@ -14,10 +14,10 @@ from __future__ import annotations
 import argparse
 import csv
 import statistics as st
-import subprocess
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
+from _common import BALANCED_RULE, BALANCED_TAG, compile_tex, mean_se
+
 BUDGET_LABELS = ["0", "1", "3", "max"]
 
 PREAMBLE = r"""\documentclass[border=2pt]{standalone}
@@ -92,7 +92,7 @@ def read_installed(root: Path, prefix: str, seed: int, concepts: str) -> tuple[f
 def band(values: list[float], kind: str) -> tuple[float, float]:
     if kind == "range":
         return min(values), max(values)
-    mean, se = st.mean(values), st.stdev(values) / len(values) ** 0.5
+    mean, se = mean_se(values)
     return mean - se, mean + se
 
 
@@ -107,8 +107,7 @@ def build_tex(true_runs, human_runs, dnn_runs, gains, band_kind: str) -> str:
     human_mean = [st.mean(v) for v in human_k]
     dnn_mean = st.mean(dnn_runs)
     dnn_lo, dnn_hi = band(dnn_runs, band_kind)
-    gain = st.mean(gains)
-    gain_se = st.stdev(gains) / len(gains) ** 0.5
+    gain, gain_se = mean_se(gains)
     true_lo, true_hi = zip(*[band(list(v), band_kind) for v in true_k])
     human_lo, human_hi = zip(*[band(list(v), band_kind) for v in human_k])
     top = max(true_hi[3], true_mean[3])
@@ -156,9 +155,9 @@ def parse_seeds(text: str) -> list[int]:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", type=Path, default=REPO / "results/paper/robot/balanced_rule",
+    ap.add_argument("--root", type=Path, default=BALANCED_RULE,
                     help="Installed balanced_rule folder, or a folder of raw run_{tag}_s{seed}_{preset} runs.")
-    ap.add_argument("--prefix", default="robot__rule-balanced__sampling-skew0.30__elbows-weight2",
+    ap.add_argument("--prefix", default=BALANCED_TAG,
                     help="File-name prefix of the installed runs.")
     ap.add_argument("--tag", default=None, help="Read raw run folders with this tag (e.g. duniforme3) instead.")
     ap.add_argument("--seeds", default="1014-1023", help="Seed range 'a-b' or list 'a,b,c'.")
@@ -183,12 +182,7 @@ def main() -> None:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     tex_path = args.out.with_suffix(".tex")
     tex_path.write_text(build_tex(true_runs, human_runs, dnn_runs, gains, args.band))
-    subprocess.run(
-        ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", tex_path.name],
-        cwd=tex_path.parent, check=True, stdout=subprocess.DEVNULL,
-    )
-    for ext in (".aux", ".log"):
-        tex_path.with_suffix(ext).unlink(missing_ok=True)
+    compile_tex(tex_path)
     print(f"wrote {tex_path.with_suffix('.pdf')}  (n={len(seeds)}, Gain {st.mean(gains):.1f}, band {args.band})")
 
 

@@ -12,23 +12,19 @@ averaged over seeds:
 from __future__ import annotations
 
 import statistics as st
-import sys
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from scipy.special import expit
 
-REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO))
-from concept_benchmark.ext.fileutils import load  # noqa: E402
+from _common import BALANCED_TAG, ROBOT_DATASETS
+from concept_benchmark.ext.fileutils import load
 
-DATASETS = REPO / "results/paper/robot/datasets"
 SEEDS = (1014, 1015, 1016, 1017)
 
 
 def ceilings(seed: int) -> tuple[float, float]:
-    data = load(DATASETS / f"robot__rule-balanced__sampling-skew0.30__elbows-weight2__concepts-true__seed-{seed}__dataset.data")
+    data = load(ROBOT_DATASETS / f"{BALANCED_TAG}__concepts-true__seed-{seed}__dataset.data")
     formula, catalog = data.meta["labeling_function"], data.meta["catalog_df"]
     test = catalog.iloc[catalog.index.get_indexer(data.test.meta["df_indices"])]
     p = expit(formula.temperature * test.apply(formula.score, axis=1).to_numpy(float))

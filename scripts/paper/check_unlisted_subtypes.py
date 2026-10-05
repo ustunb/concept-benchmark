@@ -21,10 +21,9 @@ from pathlib import Path
 
 import numpy as np
 
+from _common import BALANCED_TAG, PAPER_RESULTS, ROBOT_DATASETS
 from concept_benchmark.ext.fileutils import load
 
-PAPER = Path(__file__).resolve().parents[2] / "results/paper"
-PREFIX = "robot__rule-balanced__sampling-skew0.30__elbows-weight2"
 SEEDS = range(1014, 1024)
 
 
@@ -41,8 +40,8 @@ def allow_old_sklearn(obj, seen: set) -> None:
 
 
 def accuracy_by_subtype(concepts: str, seed: int, listed_subtypes: set[str]) -> tuple[float, float, float]:
-    data = load(PAPER / f"robot/datasets/{PREFIX}__concepts-{concepts}__seed-{seed}__dataset.data")
-    model = load(PAPER / f"models/robot/balanced/{PREFIX}__concepts-{concepts}__arch-cbm__seed-{seed}__model.pt")
+    data = load(ROBOT_DATASETS / f"{BALANCED_TAG}__concepts-{concepts}__seed-{seed}__dataset.data")
+    model = load(PAPER_RESULTS / f"models/robot/balanced/{BALANCED_TAG}__concepts-{concepts}__arch-cbm__seed-{seed}__model.pt")
     allow_old_sklearn(model, set())
     test = data.test
     C = np.asarray(test.C).astype(int)
@@ -60,8 +59,8 @@ def accuracy_by_subtype(concepts: str, seed: int, listed_subtypes: set[str]) -> 
 def detector_on_unlisted(seed: int, listed_subtypes: set[str], images: Path) -> tuple[float, float, float, float]:
     """Share of unlisted-subtype robots with any FootShape detector firing, share of those firing on the correct
     Pointy/Flat side, and k=0 accuracy on unlisted vs listed robots (human_concepts CBM)."""
-    data = load(PAPER / f"robot/datasets/{PREFIX}__concepts-human__seed-{seed}__dataset.data")
-    model = load(PAPER / f"models/robot/balanced/{PREFIX}__concepts-human__arch-cbm__seed-{seed}__model.pt")
+    data = load(ROBOT_DATASETS / f"{BALANCED_TAG}__concepts-human__seed-{seed}__dataset.data")
+    model = load(PAPER_RESULTS / f"models/robot/balanced/{BALANCED_TAG}__concepts-human__arch-cbm__seed-{seed}__model.pt")
     allow_old_sklearn(model, set())
     for cfg_name in ("_eval_config", "eval_config"):
         cfg = getattr(model.concept_detector, cfg_name, None)
@@ -92,7 +91,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--images", type=Path, default=None, help="Robot images; enables the detector check.")
     args = ap.parse_args()
-    human = load(PAPER / f"robot/datasets/{PREFIX}__concepts-human__seed-{SEEDS[0]}__dataset.data")
+    human = load(ROBOT_DATASETS / f"{BALANCED_TAG}__concepts-human__seed-{SEEDS[0]}__dataset.data")
     listed = {c.removeprefix("foot_shape_") for c in human.train.concepts if c.startswith("foot_shape_")}
     print("FootShape subtypes in human_concepts:", ", ".join(sorted(listed)))
     ms = lambda v: f"{100 * st.mean(v):.1f} ± {100 * st.stdev(v) / len(v) ** 0.5:.1f}"

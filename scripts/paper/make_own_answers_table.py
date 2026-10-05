@@ -12,30 +12,28 @@ and seeds. The label-free CBM uses the 5th/95th-percentile encoding in both cell
 from __future__ import annotations
 
 import argparse
-import csv
 import statistics as st
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
-BALANCED = REPO / "results/paper/robot/balanced_rule"
-TAG = "rule-balanced__sampling-skew0.30__elbows-weight2"
+from _common import BALANCED_RULE, BALANCED_TAG, read_budget_rows
+
 SEEDS = tuple(range(1014, 1024))
 ARCHS = [("cbm", "arch-cbm", "\\CBM{}"), ("cem", "arch-cem", "\\CEM{}"),
          ("probcbm", "arch-probcbm__mode-joint", "\\ProbCBM{}"), ("ecbm", "arch-ecbm", "\\ECBM{}")]
 CONCEPT_SETS = [("true", "true\\_concepts"), ("human", "human\\_concepts"), ("machine", "machine\\_annotation"),
                 ("llm", "llm\\_concepts"), ("clip", "clip\\_concepts")]
 AUTOMATED = {"machine", "llm", "clip"}
-# the installed perfect cell of this run comes from a retrained model (install_probcbm_1014_retrain.py); its
-# own-answer cell was run on the replaced model, so the pair is left out
+# the installed perfect cell of this run comes from a retrained model; its own-answer cell was run on the replaced
+# model, so the pair is left out
 EXCLUDED = {("probcbm", "true", 1014)}
 
 
 def read_cell(arch_tag: str, concepts: str, isrc: str, seed: int, is_label_free: bool) -> list[dict]:
-    files = [f for f in BALANCED.glob(f"robot__{TAG}__concepts-{concepts}__{arch_tag}__isrc-{isrc}__strategy-upto*__seed-{seed}__results.csv")
+    files = [f for f in BALANCED_RULE.glob(f"{BALANCED_TAG}__concepts-{concepts}__{arch_tag}__isrc-{isrc}__strategy-upto*__seed-{seed}__results.csv")
              if "enc-" not in f.name or ("enc-koh595" in f.name) == is_label_free]
     if len(files) != 1:
         raise SystemExit(f"{concepts} {arch_tag} {isrc} seed {seed}: expected one cell, found {[f.name for f in files]}")
-    rows = sorted(csv.DictReader(files[0].open()), key=lambda r: int(r["budget"]))
+    rows = read_budget_rows(files[0])
     if len(rows) != 4:
         raise SystemExit(f"{files[0].name}: expected budgets 0, 1, 3, max")
     return rows

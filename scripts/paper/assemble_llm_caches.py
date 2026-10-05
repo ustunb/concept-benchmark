@@ -17,10 +17,10 @@ import hashlib
 import json
 from pathlib import Path
 
+from _common import PAPER_RESULTS
 from build_llm_caches import build_concept_lists
 
-REPO = Path(__file__).resolve().parents[2]
-INSTALLED = REPO / "results/paper/robot/llm_caches"
+INSTALLED = PAPER_RESULTS / "robot/llm_caches"
 SOURCE_SEEDS = ("1014", "1015", "1016", "1017")
 LIST_TAG = {"true": "true", "human": "human-and-machine", "llm": "llm", "clip": "clip"}
 VARIANT = "llm-gemini-2.5-flash-lite__img-224px__questions-v2-value-explicit"

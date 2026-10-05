@@ -14,12 +14,11 @@ from __future__ import annotations
 import argparse
 import csv
 import statistics as st
-import subprocess
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
-RESULTS = REPO / ("results/paper/robot/alignment/robot__rule-balanced__sampling-skew0.30__elbows-weight2"
-                  "__arch-cbm__isrc-perfect__alignment.csv")
+from _common import BALANCED_TAG, PAPER_RESULTS, compile_tex, mean_se
+
+RESULTS = PAPER_RESULTS / f"robot/alignment/{BALANCED_TAG}__arch-cbm__isrc-perfect__alignment.csv"
 SETS = (("true", 0), ("human", 1))  # concept set, row (bottom to top)
 
 
@@ -41,7 +40,7 @@ def main() -> None:
     ap.add_argument("--out", type=Path, required=True, help="Output path without extension (.tex and .pdf).")
     args = ap.parse_args()
     values = per_seed()
-    stat = {k: (st.mean(v), st.stdev(v) / len(v) ** 0.5) for k, v in values.items()}
+    stat = {k: mean_se(v) for k, v in values.items()}
     for (metric, c, which), (m, se) in sorted(stat.items()):
         print(f"{metric:6s} {c:6s} {which:6s} {m:6.2f} ± {se:.2f}  (n={len(values[(metric, c, which)])})")
 
@@ -101,13 +100,7 @@ def main() -> None:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     tex_path = args.out.with_suffix(".tex")
     tex_path.write_text(tex)
-    result = subprocess.run(["pdflatex", "-interaction=nonstopmode", "-halt-on-error", tex_path.name],
-                            cwd=tex_path.parent, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise SystemExit(result.stdout[-2500:])
-    subprocess.run(["pdflatex", "-interaction=nonstopmode", "-halt-on-error", tex_path.name], cwd=tex_path.parent, capture_output=True)
-    for ext in (".aux", ".log"):
-        tex_path.with_suffix(ext).unlink(missing_ok=True)
+    compile_tex(tex_path, passes=2)  # the second pass places the legend drawn outside the axes
     print(f"wrote {args.out.with_suffix('.pdf')}")
 
 

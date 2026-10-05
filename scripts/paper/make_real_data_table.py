@@ -14,8 +14,9 @@ import csv
 import statistics as st
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
-RESULTS = REPO / "results/paper/real_datasets"
+from _common import PAPER_RESULTS
+
+RESULTS = PAPER_RESULTS / "real_datasets"
 DATASETS = [("derm7pt", r"\textds{Derm7pt}"), ("cub", r"\textds{CUB}")]
 CONCEPTS = [(("clinician", "ground_truth"), "human-annotated"), (("label_free",), "label-free")]
 

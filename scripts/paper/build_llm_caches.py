@@ -26,7 +26,8 @@ from google import genai
 from google.genai import types
 from PIL import Image
 
-REPO = Path(__file__).resolve().parents[2]
+from _common import REPO
+
 BATCH_SIZE = 10
 MAX_ATTEMPTS = 8
 PRICE_IN, PRICE_OUT = 0.10, 0.40  # USD per 1M tokens, gemini-2.5-flash-lite paid tier

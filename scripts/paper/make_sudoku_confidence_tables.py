@@ -20,17 +20,13 @@ by number of violated constraints.
 from __future__ import annotations
 
 import argparse
-import csv
 import statistics as st
-import sys
 from pathlib import Path
 
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO))
-sys.path[:0] = [str(REPO / "scripts" / "paper"), str(REPO / "scripts")]
-from sudoku_pipeline import (  # noqa: E402
+from _common import PAPER_RESULTS, SUDOKU_CELLS, read_budget_rows
+from sudoku_pipeline import (
     _classwise_accuracy_thresholds,
     _decision_threshold_sweep,
     _selective_accuracy_threshold,
@@ -38,9 +34,7 @@ from sudoku_pipeline import (  # noqa: E402
     _selective_at_thresholds,
 )
 
-PAPER = REPO / "results/paper"
-CONFIDENCE = PAPER / "sudoku/confidence"
-CELLS = PAPER / "sudoku/cells"
+CONFIDENCE = PAPER_RESULTS / "sudoku/confidence"
 ARCHS = [("cbm", "\\CBM{}"), ("cem", "\\CEM{}"), ("probcbm", "\\ProbCBM{}"), ("ecbm", "\\ECBM{}")]
 RESOLUTIONS = (50, 18)
 
@@ -54,8 +48,8 @@ def confidence(arch: str, res: int, seed: int):
 
 
 def cell(arch: str, res: int, seed: int, tau: str) -> list[dict]:
-    path = CELLS / f"sudoku__arch-{arch}__res-{res}px__tau-{tau}__threshold-per-budget__seed-{seed}__interventions.csv"
-    return sorted(csv.DictReader(path.open()), key=lambda r: int(r["budget"]))
+    path = SUDOKU_CELLS / f"sudoku__arch-{arch}__res-{res}px__tau-{tau}__threshold-per-budget__seed-{seed}__interventions.csv"
+    return read_budget_rows(path)
 
 
 def classwise(tau: float) -> dict[tuple[int, str], tuple[float, float]]:

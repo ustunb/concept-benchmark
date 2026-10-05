@@ -1,4 +1,4 @@
-"""Section 2 diagnostics on the balanced rule: how CEM and ECBM handle robots whose foot subtype is not listed.
+"""Diagnostics on the balanced rule: how CEM and ECBM handle robots whose foot subtype is not listed.
 
 Test robots split by whether their foot subtype is listed in human_concepts (unlisted = every FootShape concept 0).
   CEM:  can pointy vs flat be read off what CEM passes to its label predictor on unlisted robots? 5-fold logistic
@@ -7,16 +7,15 @@ Test robots split by whether their foot subtype is listed in human_concepts (unl
         label accuracy on listed vs unlisted robots.
   ECBM: label accuracy of the image-only prediction (lowest x->y energy) vs the joint gradient inference, on listed
         vs unlisted robots, for human_concepts and true_concepts.
-Runs where the CEM/ECBM dependencies and a GPU are available (DSMLP pod); models from models/robot/balanced.
+Runs where the CEM/ECBM dependencies and a GPU are available; models from models/robot/balanced.
 
-    python scripts/paper/diagnose_incomplete_concepts.py --models <dir> --data-root <cb-sec3> --images <dir> --out <csv>
+    python scripts/paper/diagnose_incomplete_concepts.py --models <dir> --data-root <runs> --images <dir> --out <csv>
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -24,13 +23,11 @@ import torch
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_val_score
 
-REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO))
-from concept_benchmark.ext.fileutils import load  # noqa: E402
-from experiments.baselines.ecbm import _infer_labels_and_concepts  # noqa: E402
+from _common import BALANCED_TAG
+from concept_benchmark.ext.fileutils import load
+from experiments.baselines.ecbm import _infer_labels_and_concepts
 
 SEEDS = (1014, 1015, 1016, 1017)
-TAG = "robot__rule-balanced__sampling-skew0.30__elbows-weight2"
 
 
 def dataset(root: Path, seed: int, preset: str, images: Path):
@@ -63,7 +60,7 @@ def main() -> None:
         y = np.asarray(human.y).astype(int)
 
         # CEM
-        model = load(next(args.models.glob(f"{TAG}__subconcept_cem_seed{seed}__*")))
+        model = load(next(args.models.glob(f"{BALANCED_TAG}__subconcept_cem_seed{seed}__*")))
         det = model.concept_detector._owner  # the official CEM/ECBM wrapper behind the adapter
         label_probs, concept_probs, cache = det._run_official_model(human)
         pred = label_probs.argmax(axis=1) if label_probs.ndim == 2 else (label_probs >= 0.5).astype(int)
@@ -84,7 +81,7 @@ def main() -> None:
 
         # ECBM, human and true concepts
         for preset, data in (("subconcept", human), ("ideal", true)):
-            model = load(next(args.models.glob(f"{TAG}__{preset}_ecbm_seed{seed}__*")))
+            model = load(next(args.models.glob(f"{BALANCED_TAG}__{preset}_ecbm_seed{seed}__*")))
             det = model.concept_detector._owner  # the official CEM/ECBM wrapper behind the adapter
             net = det._require_official_model()
             device = det._inference_device()

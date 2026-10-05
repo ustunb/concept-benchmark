@@ -6,14 +6,13 @@ Balanced rule, human_concepts, installed CEM per seed. Test robots are split int
   2. Probe transfer: a logistic probe for pointy vs flat on the six FootShape embeddings, fit on the training robots
      (all listed) and applied to the unlisted test robots; for reference, the 5-fold probe within the unlisted robots.
 
-    python scripts/paper/diagnose_cem_foot_usage.py --models <dir> --data-root <cb-sec3> --images <dir> --out <csv>
+    python scripts/paper/diagnose_cem_foot_usage.py --models <dir> --data-root <runs> --images <dir> --out <csv>
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -21,12 +20,10 @@ import torch
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_val_score
 
-REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO))
-from concept_benchmark.ext.fileutils import load  # noqa: E402
+from _common import BALANCED_TAG
+from concept_benchmark.ext.fileutils import load
 
 SEEDS = (1014, 1015, 1016, 1017)
-TAG = "robot__rule-balanced__sampling-skew0.30__elbows-weight2"
 
 
 def split(root: Path, seed: int, preset: str, name: str, images: Path):
@@ -61,7 +58,7 @@ def main() -> None:
     args = ap.parse_args()
     rows = []
     for seed in SEEDS:
-        det = load(next(args.models.glob(f"{TAG}__subconcept_cem_seed{seed}__*"))).concept_detector._owner
+        det = load(next(args.models.glob(f"{BALANCED_TAG}__subconcept_cem_seed{seed}__*"))).concept_detector._owner
         sets = {}
         for name in ("train", "test"):
             human = split(args.data_root, seed, "subconcept", name, args.images)

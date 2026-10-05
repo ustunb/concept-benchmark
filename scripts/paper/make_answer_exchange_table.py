@@ -14,20 +14,16 @@ from __future__ import annotations
 
 import argparse
 import statistics as st
-import sys
 import warnings
 from pathlib import Path
 
 import numpy as np
 
+from _common import BALANCED_TAG, INTERVENTION_RECORDS, PAPER_RESULTS
+
 warnings.filterwarnings("ignore")
-REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO))
 from concept_benchmark.ext.fileutils import load  # noqa: E402
 
-PAPER = REPO / "results/paper"
-TAG = "robot__rule-balanced__sampling-skew0.30__elbows-weight2"
-RECORDS = PAPER / "robot/balanced_rule/intervention_records"
 SEEDS = tuple(range(1014, 1024))
 MODEL_TAG = {"true": "ideal", "human": "subconcept"}
 BUDGETS = ("1", "3", "max")
@@ -37,12 +33,12 @@ CONCEPT_MACRO = {"has_knees": "HasKnees", "foot_shape": "FootShape", "head_shape
 
 
 def record(concepts: str, isrc: str, budget: str, seed: int):
-    return np.load(RECORDS / f"{TAG}__concepts-{concepts}__arch-cbm__isrc-{isrc}__budget-{budget}__seed-{seed}__records.npz")
+    return np.load(INTERVENTION_RECORDS / f"{BALANCED_TAG}__concepts-{concepts}__arch-cbm__isrc-{isrc}__budget-{budget}__seed-{seed}__records.npz")
 
 
 def label_predictor(concepts: str, seed: int):
     """The CBM's label predictor as a function of concept values (it reads thresholded concepts)."""
-    model = load(next((PAPER / "models/robot/balanced").glob(f"{TAG}__{MODEL_TAG[concepts]}_cbm_seed{seed}__*")))
+    model = load(next((PAPER_RESULTS / "models/robot/balanced").glob(f"{BALANCED_TAG}__{MODEL_TAG[concepts]}_cbm_seed{seed}__*")))
     logistic = model.label_predictor.model
     weights, bias, classes = logistic.coef_.ravel(), float(logistic.intercept_.ravel()[0]), logistic.classes_
     return lambda C: classes[((np.asarray(C) >= 0.5).astype(float) @ weights + bias > 0).astype(int)]

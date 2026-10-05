@@ -5,8 +5,8 @@ Runs the pipeline's own alignment and intervention code on the installed models:
      (`RobotBenchmarkConfig.get_alignment_constraints()`: the weight on HasKnees must be non-negative);
   2. `_test_interventions` runs perfect interventions (k = 1, 3, max; threshold 0.2) on the unconstrained and on the
      constrained label predictor.
-The concept detector's outputs on the test robots are the ones of the paper's runs on Bridges, extracted with `--install`
-from the installed intervention records (the detector gives slightly different probabilities on other hardware). As a positive control,
+The concept detector's outputs on the test robots are the ones of the paper's runs, extracted with `--install` from the
+installed intervention records (the detector gives slightly different probabilities on other hardware). As a positive control,
 the unconstrained model must reproduce the installed accuracies of the paper's runs at every budget, exactly.
 
 Writes one row per concept set and seed to results/paper/robot/alignment/ and prints the paired tests of the paper.
@@ -22,39 +22,34 @@ import copy
 import csv
 import hashlib
 import statistics as st
-import sys
 import warnings
 from pathlib import Path
 
 import numpy as np
 from scipy import stats
 
+from _common import BALANCED_RULE, BALANCED_TAG, INTERVENTION_RECORDS, PAPER_RESULTS, REPO, ROBOT_DATASETS, read_budget_rows
+
 warnings.filterwarnings("ignore")
-REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO))
-sys.path[:0] = [str(REPO / "scripts" / "paper"), str(REPO / "scripts")]
 from concept_benchmark.config import RobotBenchmarkConfig  # noqa: E402
 from concept_benchmark.ext.fileutils import load  # noqa: E402
 from experiments.alignment import align_frontend_weights  # noqa: E402
 from experiments.utils import run_alignment  # noqa: E402
 from robot_pipeline import InterventionSettings, _test_interventions  # noqa: E402
 
-PAPER = REPO / "results/paper"
-TAG = "robot__rule-balanced__sampling-skew0.30__elbows-weight2"
 SEEDS = tuple(range(1014, 1024))
 CONCEPT_SETS = {"true": "ideal", "human": "subconcept"}  # concept set -> model tag
-RECORDS = PAPER / "robot/balanced_rule/intervention_records"
-DETECTOR = PAPER / "robot/balanced_rule/detector_outputs"
-RESULTS = PAPER / f"robot/alignment/{TAG}__arch-cbm__isrc-perfect__alignment.csv"
+DETECTOR = BALANCED_RULE / "detector_outputs"
+RESULTS = PAPER_RESULTS / f"robot/alignment/{BALANCED_TAG}__arch-cbm__isrc-perfect__alignment.csv"
 BUDGETS = ("1", "3", "max")
 
 
 def detector_file(concepts: str, seed: int) -> Path:
-    return DETECTOR / f"{TAG}__concepts-{concepts}__arch-cbm__seed-{seed}__test-concept-probabilities.npz"
+    return DETECTOR / f"{BALANCED_TAG}__concepts-{concepts}__arch-cbm__seed-{seed}__test-concept-probabilities.npz"
 
 
 def update_index(entries: list[dict]) -> None:
-    index = PAPER / "INDEX.csv"
+    index = PAPER_RESULTS / "INDEX.csv"
     with index.open() as fh:
         reader = csv.DictReader(fh)
         fields, rows = reader.fieldnames, {r["path"]: r for r in reader}
@@ -67,7 +62,7 @@ def update_index(entries: list[dict]) -> None:
 
 
 def entry(path: Path, role: str, source: str, note: str) -> dict:
-    return {"path": str(path.relative_to(PAPER)), "role": role, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    return {"path": str(path.relative_to(PAPER_RESULTS)), "role": role, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
             "source": source, "note": note}
 
 
@@ -77,9 +72,9 @@ def install_detector_outputs() -> None:
     entries = []
     for concepts in CONCEPT_SETS:
         for seed in SEEDS:
-            src = RECORDS / f"{TAG}__concepts-{concepts}__arch-cbm__isrc-perfect__budget-1__seed-{seed}__records.npz"
+            src = INTERVENTION_RECORDS / f"{BALANCED_TAG}__concepts-{concepts}__arch-cbm__isrc-perfect__budget-1__seed-{seed}__records.npz"
             d = np.load(src)
-            test = load(PAPER / f"robot/datasets/{TAG}__concepts-{concepts}__seed-{seed}__dataset.data").test
+            test = load(ROBOT_DATASETS / f"{BALANCED_TAG}__concepts-{concepts}__seed-{seed}__dataset.data").test
             if not (np.array_equal(d["C_true"], np.asarray(test.C).astype(np.int8)) and np.array_equal(d["y"], np.asarray(test.y).astype(np.int8))):
                 raise SystemExit(f"{src}: concepts or labels differ from the installed dataset")
             dest = detector_file(concepts, seed)
@@ -104,8 +99,8 @@ class _SavedDetector:
 
 
 def installed_accuracies(concepts: str, seed: int) -> list[float]:
-    path = PAPER / f"robot/balanced_rule/{TAG}__concepts-{concepts}__arch-cbm__isrc-perfect__strategy-upto__seed-{seed}__results.csv"
-    rows = sorted(csv.DictReader(path.open()), key=lambda r: int(r["budget"]))
+    path = BALANCED_RULE / f"{BALANCED_TAG}__concepts-{concepts}__arch-cbm__isrc-perfect__strategy-upto__seed-{seed}__results.csv"
+    rows = read_budget_rows(path)
     return [float(r["accuracy"]) for r in rows]
 
 
@@ -119,8 +114,8 @@ def evaluate() -> list[dict]:
     rows = []
     for concepts, model_tag in CONCEPT_SETS.items():
         for seed in SEEDS:
-            data = load(PAPER / f"robot/datasets/{TAG}__concepts-{concepts}__seed-{seed}__dataset.data")
-            model = load(next((PAPER / "models/robot/balanced").glob(f"{TAG}__{model_tag}_cbm_seed{seed}__*")))
+            data = load(ROBOT_DATASETS / f"{BALANCED_TAG}__concepts-{concepts}__seed-{seed}__dataset.data")
+            model = load(next((PAPER_RESULTS / "models/robot/balanced").glob(f"{BALANCED_TAG}__{model_tag}_cbm_seed{seed}__*")))
             model.label_predictor.model.multi_class = "auto"  # attribute expected by newer scikit-learn
             proba = np.load(detector_file(concepts, seed))["C_pred"]
             model.concept_detector = _SavedDetector(proba)
