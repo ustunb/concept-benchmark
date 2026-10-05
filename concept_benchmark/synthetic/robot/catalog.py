@@ -94,7 +94,11 @@ def _hash_drawing_inputs(catalog_df, resolution, color_mode, blur) -> str:
     """Hash everything that determines the robot images: each robot's features and the render settings."""
     h = hashlib.sha256()
     h.update(catalog_df.to_csv(index=True).encode("utf-8"))
-    h.update(json.dumps([resolution, color_mode, blur], sort_keys=True, default=str).encode("utf-8"))
+    h.update(
+        json.dumps([resolution, color_mode, blur], sort_keys=True, default=str).encode(
+            "utf-8"
+        )
+    )
     return h.hexdigest()
 
 
@@ -165,7 +169,9 @@ def generate_robot_catalog(
     # Images depend only on what is drawn (features per robot, resolution, color mode, blur),
     # never on labels or seeds, so they are kept until the drawing itself changes
     signature_file = output_path / ".drawing_signature"
-    drawing_signature = _hash_drawing_inputs(init_catalog_df, resolution, color_mode, blur)
+    drawing_signature = _hash_drawing_inputs(
+        init_catalog_df, resolution, color_mode, blur
+    )
     if draw:
         is_same_drawing = (
             signature_file.exists() and signature_file.read_text() == drawing_signature

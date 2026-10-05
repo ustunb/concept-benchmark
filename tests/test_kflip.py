@@ -313,8 +313,12 @@ def _flip_probability(model, p, subset):
     for values in itertools.product([0.0, 1.0], repeat=len(subset)):
         z = base.copy()
         z[list(subset)] = values
-        weight = np.prod([p[j] if v == 1.0 else 1.0 - p[j] for j, v in zip(subset, values)])
-        total += weight * (model.label_predictor.predict_proba(z[None])[0].argmax() != base_label)
+        weight = np.prod(
+            [p[j] if v == 1.0 else 1.0 - p[j] for j, v in zip(subset, values)]
+        )
+        total += weight * (
+            model.label_predictor.predict_proba(z[None])[0].argmax() != base_label
+        )
     return total
 
 
@@ -323,7 +327,15 @@ def _mixed_batch(n, k, seed):
     rng = np.random.default_rng(seed)
     p = rng.random((n, k))
     sure = rng.random((n, k)) < 0.5
-    p = np.where(sure, np.where(rng.random((n, k)) < 0.5, rng.uniform(0, 0.009, (n, k)), rng.uniform(0.991, 1, (n, k))), p)
+    p = np.where(
+        sure,
+        np.where(
+            rng.random((n, k)) < 0.5,
+            rng.uniform(0, 0.009, (n, k)),
+            rng.uniform(0.991, 1, (n, k)),
+        ),
+        p,
+    )
     return InterventionBatch(
         C_pred=p.astype(np.float32),
         C_true=rng.integers(0, 2, size=(n, k)).astype(np.float32),
@@ -335,7 +347,9 @@ def _load_reference(name):
     import importlib.util
     from pathlib import Path
 
-    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(f"{name}.py"))
+    spec = importlib.util.spec_from_file_location(
+        name, Path(__file__).with_name(f"{name}.py")
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.KFlipInterventionStrategy
@@ -349,21 +363,47 @@ class TestKFlipDefaultIsThePaperPolicy:
         original = _load_reference("kflip_original_reference")
         for seed in range(10):
             rng = np.random.default_rng(77 * n_concepts + seed)
-            batch = _mixed_batch(n=30, k=n_concepts, seed=seed) if seed % 2 else _make_batch(n=30, k=n_concepts, seed=seed)
+            batch = (
+                _mixed_batch(n=30, k=n_concepts, seed=seed)
+                if seed % 2
+                else _make_batch(n=30, k=n_concepts, seed=seed)
+            )
             weights, bias = rng.normal(size=n_concepts) * 2, float(rng.normal())
-            for make_model in (lambda: _make_model(k=n_concepts, seed=seed),
-                               lambda: ConceptBasedModel(label_predictor=_EmbeddingStyleFrontEnd(weights, bias))):
+            for make_model in (
+                lambda: _make_model(k=n_concepts, seed=seed),
+                lambda: ConceptBasedModel(
+                    label_predictor=_EmbeddingStyleFrontEnd(weights, bias)
+                ),
+            ):
                 for budget in sorted({1, min(3, n_concepts)}):
                     for exact in (False, True):
-                        config = InterventionConfig(per_instance_budget=budget, score_threshold=0.2, random_state=seed)
-                        new = KFlipInterventionStrategy(use_exact_k=exact).propose(make_model(), batch, config)
-                        old = original(use_exact_k=exact).propose(make_model(), batch, config)
+                        config = InterventionConfig(
+                            per_instance_budget=budget,
+                            score_threshold=0.2,
+                            random_state=seed,
+                        )
+                        new = KFlipInterventionStrategy(use_exact_k=exact).propose(
+                            make_model(), batch, config
+                        )
+                        old = original(use_exact_k=exact).propose(
+                            make_model(), batch, config
+                        )
                         np.testing.assert_array_equal(new.mask, old.mask)
                         assert new.details["best_subset"] == old.details["best_subset"]
-                        np.testing.assert_allclose(new.details["flip_prob"], old.details["flip_prob"], atol=1e-12)
+                        np.testing.assert_allclose(
+                            new.details["flip_prob"],
+                            old.details["flip_prob"],
+                            atol=1e-12,
+                        )
                 # k = max in the pipeline: exactly every concept of the selected instances
-                config = InterventionConfig(per_instance_budget=n_concepts, score_threshold=0.2, random_state=seed)
-                new = KFlipInterventionStrategy(use_exact_k=True).propose(make_model(), batch, config)
+                config = InterventionConfig(
+                    per_instance_budget=n_concepts,
+                    score_threshold=0.2,
+                    random_state=seed,
+                )
+                new = KFlipInterventionStrategy(use_exact_k=True).propose(
+                    make_model(), batch, config
+                )
                 old = original(use_exact_k=True).propose(make_model(), batch, config)
                 np.testing.assert_array_equal(new.mask, old.mask)
 
@@ -381,8 +421,20 @@ class _EmbeddingStyleFrontEnd(FrontEndModel):
     def predict_proba(self, C: np.ndarray) -> np.ndarray:
         raise AssertionError("KFlip should use aligned replay for this frontend.")
 
-    def predict_proba_from_concepts(self, concepts, *, row_indices=None, baseline_concepts=None, intervention_mask=None):
-        prob1 = 1.0 / (1.0 + np.exp(-(np.asarray(concepts, dtype=np.float64) @ self.weights + self.bias)))
+    def predict_proba_from_concepts(
+        self,
+        concepts,
+        *,
+        row_indices=None,
+        baseline_concepts=None,
+        intervention_mask=None,
+    ):
+        prob1 = 1.0 / (
+            1.0
+            + np.exp(
+                -(np.asarray(concepts, dtype=np.float64) @ self.weights + self.bias)
+            )
+        )
         return np.column_stack([1.0 - prob1, prob1]).astype(np.float32)
 
 
@@ -401,12 +453,24 @@ class TestKFlipManyConcepts:
         rng = np.random.default_rng(7)
         p = rng.uniform(0.85, 0.95, size=(6, n)).astype(np.float32)
         model = ConceptBasedModel(label_predictor=_AnyAbsent(np.zeros(n), 0.0))
-        batch = InterventionBatch(C_pred=p, C_true=np.ones((6, n), dtype=np.float32), y_true=np.ones(6, dtype=np.int32))
-        mask = KFlipInterventionStrategy().propose(
-            model, batch, InterventionConfig(per_instance_budget=n, score_threshold=0.0)
-        ).mask
+        batch = InterventionBatch(
+            C_pred=p,
+            C_true=np.ones((6, n), dtype=np.float32),
+            y_true=np.ones(6, dtype=np.int32),
+        )
+        mask = (
+            KFlipInterventionStrategy()
+            .propose(
+                model,
+                batch,
+                InterventionConfig(per_instance_budget=n, score_threshold=0.0),
+            )
+            .mask
+        )
         assert mask.sum(axis=1).min() > 12  # subsets grow past twelve concepts
-        for i in range(6):  # the twelve least certain concepts are always among those chosen
+        for i in range(
+            6
+        ):  # the twelve least certain concepts are always among those chosen
             assert mask[i, np.argsort(p[i])[:12]].all()
 
     def test_sampled_flip_probability_agrees_with_exact(self):
@@ -421,14 +485,26 @@ class TestKFlipManyConcepts:
             rng = np.random.default_rng(seed)
             p = rng.uniform(0.85, 0.95, size=(8, n)).astype(np.float32)
             model = ConceptBasedModel(label_predictor=_AnyAbsent(np.zeros(n), 0.0))
-            batch = InterventionBatch(C_pred=p, C_true=np.ones((8, n), dtype=np.float32), y_true=np.ones(8, dtype=np.int32))
-            config = InterventionConfig(per_instance_budget=n, score_threshold=0.0, random_state=seed)
+            batch = InterventionBatch(
+                C_pred=p,
+                C_true=np.ones((8, n), dtype=np.float32),
+                y_true=np.ones(8, dtype=np.int32),
+            )
+            config = InterventionConfig(
+                per_instance_budget=n, score_threshold=0.0, random_state=seed
+            )
             sampled = KFlipInterventionStrategy().propose(model, batch, config)
-            exact = KFlipInterventionStrategy(n_samples=2**16).propose(model, batch, config)
+            exact = KFlipInterventionStrategy(n_samples=2**16).propose(
+                model, batch, config
+            )
             assert sampled.mask.sum(axis=1).min() > 12  # sampling was used
-            truth = 1.0 - np.prod(np.where(sampled.mask, p.astype(np.float64), 1.0), axis=1)  # exact flip probability
+            truth = 1.0 - np.prod(
+                np.where(sampled.mask, p.astype(np.float64), 1.0), axis=1
+            )  # exact flip probability
             np.testing.assert_allclose(sampled.details["flip_prob"], truth, atol=0.03)
             # sampling may differ from exact search only over a concept whose gain is close to zero
             assert np.abs(sampled.mask.sum(axis=1) - exact.mask.sum(axis=1)).max() <= 1
-            truth_exact = 1.0 - np.prod(np.where(exact.mask, p.astype(np.float64), 1.0), axis=1)
+            truth_exact = 1.0 - np.prod(
+                np.where(exact.mask, p.astype(np.float64), 1.0), axis=1
+            )
             np.testing.assert_allclose(truth, truth_exact, atol=0.02)

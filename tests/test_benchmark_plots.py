@@ -25,7 +25,9 @@ from concept_benchmark.evaluation.plots import (
 )
 
 
-def _robot_runs(sources=("perfect",), families=("cbm", "cem"), seeds=(1, 2, 3)) -> pd.DataFrame:
+def _robot_runs(
+    sources=("perfect",), families=("cbm", "cem"), seeds=(1, 2, 3)
+) -> pd.DataFrame:
     """Results rows as the robot pipeline writes them, for several runs."""
     rng = np.random.default_rng(0)
     rows = []
@@ -34,9 +36,16 @@ def _robot_runs(sources=("perfect",), families=("cbm", "cem"), seeds=(1, 2, 3)) 
             for seed in seeds:
                 for budget in (0, 1, 3, 12):
                     gain = 0.02 * budget if source == "perfect" else -0.01 * budget
-                    rows.append({"model_family": family, "concept_source": "human_concepts",
-                                 "intervention_source": source, "seed": seed, "budget": budget,
-                                 "accuracy": 0.78 + gain + rng.normal(0, 0.005)})
+                    rows.append(
+                        {
+                            "model_family": family,
+                            "concept_source": "human_concepts",
+                            "intervention_source": source,
+                            "seed": seed,
+                            "budget": budget,
+                            "accuracy": 0.78 + gain + rng.normal(0, 0.005),
+                        }
+                    )
     return pd.DataFrame(rows)
 
 
@@ -127,7 +136,9 @@ def test_concept_discovery_close_values():
 
 
 def test_intervention_curve_averages_runs_per_group():
-    fig, ax = plot_intervention_curve(_robot_runs(), group="model_family", baseline_accuracy=[0.87, 0.88, 0.89])
+    fig, ax = plot_intervention_curve(
+        _robot_runs(), group="model_family", baseline_accuracy=[0.87, 0.88, 0.89]
+    )
     assert [line.get_label() for line in ax.get_lines()[:2]] == ["cbm", "cem"]
     assert len(ax.collections) == 2  # one standard-error band per model
     assert [tick.get_text() for tick in ax.get_xticklabels()] == ["0", "1", "3", "12"]
@@ -136,7 +147,9 @@ def test_intervention_curve_averages_runs_per_group():
 
 def test_intervention_curve_labels_unequal_largest_budgets_as_max():
     runs = _robot_runs(families=("cbm",))
-    other = runs.assign(concept_source="true_concepts", budget=runs["budget"].replace(12, 7))
+    other = runs.assign(
+        concept_source="true_concepts", budget=runs["budget"].replace(12, 7)
+    )
     fig, ax = plot_intervention_curve(pd.concat([runs, other]), group="concept_source")
     assert [tick.get_text() for tick in ax.get_xticklabels()] == ["0", "1", "3", "max"]
     plt.close(fig)
@@ -153,7 +166,13 @@ def test_intervention_heatmap_shows_the_change_from_no_interventions():
 
 def test_alignment_comparison_draws_one_panel_per_metric():
     rows = [
-        {"concepts": c, "model": m, "seed": s, "accuracy_before": before, "accuracy_after": after}
+        {
+            "concepts": c,
+            "model": m,
+            "seed": s,
+            "accuracy_before": before,
+            "accuracy_after": after,
+        }
         for c in ("true_concepts", "human_concepts")
         for m, before, after in (("CBM", 0.84, 0.92), ("Constrained CBM", 0.90, 0.91))
         for s in (1, 2)
@@ -161,18 +180,27 @@ def test_alignment_comparison_draws_one_panel_per_metric():
     fig, axes = plot_alignment_comparison(pd.DataFrame(rows))
     assert len(axes) == 2
     plt.close(fig)
-    fig, ax = plot_alignment_comparison(pd.DataFrame(rows).drop(columns="accuracy_after"))
+    fig, ax = plot_alignment_comparison(
+        pd.DataFrame(rows).drop(columns="accuracy_after")
+    )
     assert isinstance(ax, plt.Axes)
     plt.close(fig)
 
 
 def test_automation_shows_coverage_and_net_work():
     rows = [
-        {"seed": s, "budget": b, "coverage_after": 0.8 + 0.01 * i, "total_concept_checks": 40 * b}
+        {
+            "seed": s,
+            "budget": b,
+            "coverage_after": 0.8 + 0.01 * i,
+            "total_concept_checks": 40 * b,
+        }
         for s in (1, 2)
         for i, b in enumerate((0, 1, 3, 27))
     ]
-    fig, ax = plot_automation(pd.DataFrame(rows), n_instances=200, n_concepts=27, baseline_coverage=0.03)
+    fig, ax = plot_automation(
+        pd.DataFrame(rows), n_instances=200, n_concepts=27, baseline_coverage=0.03
+    )
     coverage, net_work = ax.get_lines()[0].get_ydata(), ax.get_lines()[1].get_ydata()
     assert coverage[0] == net_work[0]  # no checks, no cost
     assert net_work[-1] < coverage[-1]
@@ -185,14 +213,19 @@ def test_concept_report_handles_concepts_never_asked():
     proba = rng.random((50, 4))
     mask = np.zeros((50, 4), dtype=bool)
     mask[:, 0] = True
-    fig, ax = plot_concept_report(mask, proba, truth.astype(float), truth, ["a", "b", "c", "d"])
+    fig, ax = plot_concept_report(
+        mask, proba, truth.astype(float), truth, ["a", "b", "c", "d"]
+    )
     assert len(ax.patches) == 12  # three bars per concept
     plt.close(fig)
 
 
 def test_answer_reliance_compares_own_answers_with_true_values():
     fig, ax = plot_answer_reliance(_robot_runs(sources=("self", "perfect")))
-    assert [text.get_text() for text in ax.get_legend().get_texts()] == ["Own answers", "True values"]
+    assert [text.get_text() for text in ax.get_legend().get_texts()] == [
+        "Own answers",
+        "True values",
+    ]
     plt.close(fig)
 
 
@@ -200,5 +233,9 @@ def test_confidence_marks_the_abstention_band():
     rng = np.random.default_rng(0)
     y = rng.integers(0, 2, size=200)
     fig, ax = plot_confidence(np.where(y == 1, 0.9, 0.05), y, abstention_threshold=0.2)
-    assert [text.get_text() for text in ax.get_legend().get_texts()] == ["invalid", "valid", "Abstains"]
+    assert [text.get_text() for text in ax.get_legend().get_texts()] == [
+        "invalid",
+        "valid",
+        "Abstains",
+    ]
     plt.close(fig)

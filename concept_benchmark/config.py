@@ -362,7 +362,9 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     intervention_accuracy: float = 1.0
     intervention_strategy: str = "up_to_k"  # "up_to_k" or "exactly_k"
     intervention_encoding: str = "binary"  # see INTERVENTION_ENCODINGS
-    intervention_records_dir: str | None = None  # save what was asked and answered per budget
+    intervention_records_dir: str | None = (
+        None  # save what was asked and answered per budget
+    )
 
     # Intervention regimes
     intervention_regimes: list[str] = field(default_factory=lambda: ["baseline"])
@@ -542,7 +544,9 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     def _preset_suffix(self) -> str:
         """Concept preset, plus the label rule when it is not the default, for filename construction."""
         preset = "_subconcept" if self.concept_preset == "foot_subtypes" else "_ideal"
-        return preset if self.label_rule == "balanced" else f"{preset}_{self.label_rule}"
+        return (
+            preset if self.label_rule == "balanced" else f"{preset}_{self.label_rule}"
+        )
 
     @property
     def pixel_resolution(self) -> int:
@@ -732,9 +736,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         """Return the path where the dataset file is saved."""
         if self.data_type == "text":
             return results_dir / f"robot_text_seed{self.seed}.data"
-        filename = (
-            f"robot_{self.data_type}_{self.renders_per_robot}{self._preset_suffix}{self._seed_tag}"
-        )
+        filename = f"robot_{self.data_type}_{self.renders_per_robot}{self._preset_suffix}{self._seed_tag}"
         return results_dir / f"{filename}.data"
 
     def get_model_path(self, model_class: str) -> Path:

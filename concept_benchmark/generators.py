@@ -338,10 +338,14 @@ class DatasetGenerator:
         """
         data = self.generate()
         if self.benchmark == "sudoku":
-            data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=self.config.seed)
+            data.sample(
+                test_size=0.2, val_size=0.2, stratify=data.y, seed=self.config.seed
+            )
             return data
         if self.config.data_type == "text":
-            raise ValueError("generate_splits() supports image robots and sudoku; use generate() for text.")
+            raise ValueError(
+                "generate_splits() supports image robots and sudoku; use generate() for text."
+            )
         # split before dropping concepts: the constraints name subtypes that the presets drop
         remaining = data.n - ROBOT_TEST_SIZE - ROBOT_TRAIN_SIZE
         data.sample(

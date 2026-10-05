@@ -267,7 +267,9 @@ class KFlipInterventionStrategy(InterventionStrategy):
                         axis=2,
                     )  # (m, A)
 
-                    base_chunk = base_cont[s : s + m] if supports_aligned else base_Z[s : s + m]
+                    base_chunk = (
+                        base_cont[s : s + m] if supports_aligned else base_Z[s : s + m]
+                    )
                     Z_chunk = np.repeat(base_chunk, A, axis=0)  # (m*A, C)
                     AS = np.tile(assign, (m, 1))  # (m*A, subset_size)
                     Z_chunk[:, subset] = AS

@@ -71,7 +71,14 @@ def _summarize_runs(frame: pd.DataFrame, by: list[str], value: str) -> pd.DataFr
     return summary.reset_index()
 
 
-SERIES_COLORS = [style.BLUE, style.VERMILLION, style.GREEN, style.PURPLE, style.BLUE_LIGHT, style.RED]
+SERIES_COLORS = [
+    style.BLUE,
+    style.VERMILLION,
+    style.GREEN,
+    style.PURPLE,
+    style.BLUE_LIGHT,
+    style.RED,
+]
 
 
 # ── Intervention curve ───────────────────────────────────────────────
@@ -113,7 +120,11 @@ def plot_intervention_curve(
     else:
         names = list(dict.fromkeys(results[group]))
         series = [
-            (str(name), results[results[group] == name], SERIES_COLORS[i % len(SERIES_COLORS)])
+            (
+                str(name),
+                results[results[group] == name],
+                SERIES_COLORS[i % len(SERIES_COLORS)],
+            )
             for i, name in enumerate(names)
         ]
 
@@ -121,15 +132,29 @@ def plot_intervention_curve(
     for name, rows, line_color in series:
         summary = _summarize_runs(rows, ["budget"], metric).sort_values("budget")
         budgets = summary["budget"].to_numpy()
-        values, errors = summary["mean"].to_numpy() * 100, summary["se"].to_numpy() * 100
+        values, errors = (
+            summary["mean"].to_numpy() * 100,
+            summary["se"].to_numpy() * 100,
+        )
         x = np.arange(len(budgets))
         ax.plot(x, values, marker="o", color=line_color, linewidth=2, label=name)
         if errors.any():
-            ax.fill_between(x, values - errors, values + errors, color=line_color, alpha=0.2, linewidth=0)
+            ax.fill_between(
+                x,
+                values - errors,
+                values + errors,
+                color=line_color,
+                alpha=0.2,
+                linewidth=0,
+            )
         plotted.append((x, values))
         labels = [str(b) for b in budgets]
         if tick_labels is not None and labels != tick_labels:
-            labels = tick_labels[:-1] + ["max"] if len(labels) == len(tick_labels) else labels
+            labels = (
+                tick_labels[:-1] + ["max"]
+                if len(labels) == len(tick_labels)
+                else labels
+            )
         tick_labels = labels
     ax.set_xticks(np.arange(len(tick_labels)))
     ax.set_xticklabels(tick_labels)
@@ -138,7 +163,11 @@ def plot_intervention_curve(
     if baseline_accuracy is not None:
         baseline = float(np.mean(baseline_accuracy)) * 100
         ax.axhline(
-            baseline, color=style.COLOR_BASELINE, linestyle="--", linewidth=1.5, label="DNN baseline"
+            baseline,
+            color=style.COLOR_BASELINE,
+            linestyle="--",
+            linewidth=1.5,
+            label="DNN baseline",
         )
 
     ax.set_xlabel("Intervention budget (k)", fontsize=style.FONT_SIZE)
@@ -148,7 +177,10 @@ def plot_intervention_curve(
     if group is not None or label or baseline is not None:
         ax.legend(fontsize=style.FONT_SIZE_LEGEND, loc="best", framealpha=0.9)
 
-    all_y = np.concatenate([values for _, values in plotted] + ([[baseline]] if baseline is not None else []))
+    all_y = np.concatenate(
+        [values for _, values in plotted]
+        + ([[baseline]] if baseline is not None else [])
+    )
     margin = max((all_y.max() - all_y.min()) * 0.15, 2)
     ax.set_ylim(all_y.min() - margin * 1.5, all_y.max() + margin * 3)
     ax.set_xlim(-0.3, len(tick_labels) - 0.5)
@@ -162,11 +194,23 @@ def plot_intervention_curve(
                 xytext, ha, va = (0, -12), "center", "top"
             else:
                 xytext, ha, va = (0, 8), "center", "bottom"
-            if baseline is not None and abs(by - baseline) < 2:  # keep clear of the dashed line
-                xytext, ha, va = ((0, -12), "center", "top") if by <= baseline else ((0, 14), "center", "bottom")
+            if (
+                baseline is not None and abs(by - baseline) < 2
+            ):  # keep clear of the dashed line
+                xytext, ha, va = (
+                    ((0, -12), "center", "top")
+                    if by <= baseline
+                    else ((0, 14), "center", "bottom")
+                )
             ax.annotate(
-                f"{by:.1f}%", (bx, by), textcoords="offset points", xytext=xytext,
-                fontsize=style.FONT_SIZE_ANNOT, ha=ha, va=va, color="black",
+                f"{by:.1f}%",
+                (bx, by),
+                textcoords="offset points",
+                xytext=xytext,
+                fontsize=style.FONT_SIZE_ANNOT,
+                ha=ha,
+                va=va,
+                color="black",
             )
 
     return fig, ax
@@ -207,25 +251,45 @@ def plot_intervention_heatmap(
             changes.append((*key, 100 * (after.mean() - before.iloc[0])))
     table = (
         pd.DataFrame(changes, columns=[*run_keys, "change"])
-        .groupby([rows, *columns], sort=False)["change"].mean()
+        .groupby([rows, *columns], sort=False)["change"]
+        .mean()
         .unstack(columns)
     )
-    fig, ax = _ensure_ax(ax, figsize=(1.3 * table.shape[1] + 2.5, 0.7 * table.shape[0] + 1.8))
+    fig, ax = _ensure_ax(
+        ax, figsize=(1.3 * table.shape[1] + 2.5, 0.7 * table.shape[0] + 1.8)
+    )
     limit = max(float(np.nanmax(np.abs(table.to_numpy()))), 1.0)
-    image = ax.imshow(table.to_numpy(), cmap="RdBu", vmin=-limit, vmax=limit, aspect="auto")
+    image = ax.imshow(
+        table.to_numpy(), cmap="RdBu", vmin=-limit, vmax=limit, aspect="auto"
+    )
     for (r, c), value in np.ndenumerate(table.to_numpy()):
         if not np.isnan(value):
-            ax.text(c, r, f"{value:+.1f}%", ha="center", va="center", fontsize=style.FONT_SIZE_ANNOT,
-                    color="white" if abs(value) > 0.6 * limit else "black")
+            ax.text(
+                c,
+                r,
+                f"{value:+.1f}%",
+                ha="center",
+                va="center",
+                fontsize=style.FONT_SIZE_ANNOT,
+                color="white" if abs(value) > 0.6 * limit else "black",
+            )
     ax.set_xticks(np.arange(table.shape[1]))
     ax.set_xticklabels(
-        [" / ".join(map(str, c)) if isinstance(c, tuple) else str(c) for c in table.columns],
-        fontsize=style.FONT_SIZE_TICK, rotation=35, ha="right", rotation_mode="anchor",
+        [
+            " / ".join(map(str, c)) if isinstance(c, tuple) else str(c)
+            for c in table.columns
+        ],
+        fontsize=style.FONT_SIZE_TICK,
+        rotation=35,
+        ha="right",
+        rotation_mode="anchor",
     )
     ax.set_yticks(np.arange(table.shape[0]))
     ax.set_yticklabels([str(r) for r in table.index], fontsize=style.FONT_SIZE)
     ax.grid(False)
-    fig.colorbar(image, ax=ax, label="\u0394 " + metric.replace("_", " ").title() + " (%)")
+    fig.colorbar(
+        image, ax=ax, label="\u0394 " + metric.replace("_", " ").title() + " (%)"
+    )
     return fig, ax
 
 
@@ -339,37 +403,71 @@ def plot_alignment_comparison(
         Existing axes to plot on (single panel only).
     """
     metrics = [m for m in ("accuracy_before", "accuracy_after") if m in results.columns]
-    titles = {"accuracy_before": "Accuracy before interventions", "accuracy_after": "Accuracy after interventions"}
+    titles = {
+        "accuracy_before": "Accuracy before interventions",
+        "accuracy_after": "Accuracy after interventions",
+    }
     style.set_paper_style()
     if ax is not None:
         fig, axes = ax.figure, [ax]
         metrics = metrics[:1]
     else:
-        fig, axes = plt.subplots(1, len(metrics), figsize=(5.5 * len(metrics), 3), sharey=True, squeeze=False)
+        fig, axes = plt.subplots(
+            1, len(metrics), figsize=(5.5 * len(metrics), 3), sharey=True, squeeze=False
+        )
         axes = list(axes[0])
     concept_sets = list(dict.fromkeys(results["concepts"]))
     models = list(dict.fromkeys(results["model"]))
     height = 0.8 / len(models)
     for panel, metric in zip(axes, metrics):
-        summary = _summarize_runs(results, ["concepts", "model"], metric).set_index(["concepts", "model"])
+        summary = _summarize_runs(results, ["concepts", "model"], metric).set_index(
+            ["concepts", "model"]
+        )
         for m, model in enumerate(models):
-            means = np.array([summary.loc[(c, model), "mean"] for c in concept_sets]) * 100
-            errors = np.array([summary.loc[(c, model), "se"] for c in concept_sets]) * 100
-            y = np.arange(len(concept_sets)) + (len(models) - 1) / 2 * height - m * height
-            bars = panel.barh(
-                y, means, height, xerr=errors if errors.any() else None, color=style.COLOR_GAIN,
-                alpha=1.0 if m == 0 else 0.35, edgecolor="white", linewidth=0.5, label=model,
+            means = (
+                np.array([summary.loc[(c, model), "mean"] for c in concept_sets]) * 100
             )
-            panel.bar_label(bars, labels=_pct_labels(means), padding=5, fontsize=style.FONT_SIZE_ANNOT)
+            errors = (
+                np.array([summary.loc[(c, model), "se"] for c in concept_sets]) * 100
+            )
+            y = (
+                np.arange(len(concept_sets))
+                + (len(models) - 1) / 2 * height
+                - m * height
+            )
+            bars = panel.barh(
+                y,
+                means,
+                height,
+                xerr=errors if errors.any() else None,
+                color=style.COLOR_GAIN,
+                alpha=1.0 if m == 0 else 0.35,
+                edgecolor="white",
+                linewidth=0.5,
+                label=model,
+            )
+            panel.bar_label(
+                bars,
+                labels=_pct_labels(means),
+                padding=5,
+                fontsize=style.FONT_SIZE_ANNOT,
+            )
         panel.set_yticks(np.arange(len(concept_sets)))
-        panel.set_yticklabels(concept_sets, fontsize=style.FONT_SIZE, fontfamily="monospace")
+        panel.set_yticklabels(
+            concept_sets, fontsize=style.FONT_SIZE, fontfamily="monospace"
+        )
         panel.set_xlabel(titles[metric], fontsize=style.FONT_SIZE)
         panel.xaxis.set_major_formatter(style.pct_formatter())
         low = float(results[metrics].min().min()) * 100
         panel.set_xlim(max(0.0, low - 10), 100)
         panel.invert_yaxis()
         style.apply_style(panel)
-    axes[0].legend(fontsize=style.FONT_SIZE_LEGEND, loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=len(models))
+    axes[0].legend(
+        fontsize=style.FONT_SIZE_LEGEND,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1.0),
+        ncol=len(models),
+    )
     return fig, (axes[0] if len(axes) == 1 else np.array(axes))
 
 
@@ -647,7 +745,6 @@ def plot_model_comparison(
     return fig, ax
 
 
-
 # ── Automation ───────────────────────────────────────────────────────
 
 
@@ -675,7 +772,8 @@ def plot_automation(
     """
     fig, ax = _ensure_ax(ax)
     runs = results.assign(
-        net_work=results["coverage_after"] - results["total_concept_checks"] / (n_instances * n_concepts)
+        net_work=results["coverage_after"]
+        - results["total_concept_checks"] / (n_instances * n_concepts)
     )
     budgets = sorted(runs["budget"].unique())
     x = np.arange(len(budgets))
@@ -684,14 +782,27 @@ def plot_automation(
         ("net_work", "Net work automated", style.COLOR_NET_WORK, "s"),
     ):
         summary = _summarize_runs(runs, ["budget"], column).sort_values("budget")
-        values, errors = summary["mean"].to_numpy() * 100, summary["se"].to_numpy() * 100
+        values, errors = (
+            summary["mean"].to_numpy() * 100,
+            summary["se"].to_numpy() * 100,
+        )
         ax.plot(x, values, marker=marker, color=line_color, linewidth=2, label=name)
         if errors.any():
-            ax.fill_between(x, values - errors, values + errors, color=line_color, alpha=0.2, linewidth=0)
+            ax.fill_between(
+                x,
+                values - errors,
+                values + errors,
+                color=line_color,
+                alpha=0.2,
+                linewidth=0,
+            )
     if baseline_coverage is not None:
         ax.axhline(
-            float(np.mean(baseline_coverage)) * 100, color=style.COLOR_BASELINE, linestyle="--",
-            linewidth=1.5, label="DNN baseline",
+            float(np.mean(baseline_coverage)) * 100,
+            color=style.COLOR_BASELINE,
+            linestyle="--",
+            linewidth=1.5,
+            label="DNN baseline",
         )
     ax.set_xticks(x)
     ax.set_xticklabels([str(b) for b in budgets[:-1]] + ["max"])
@@ -739,7 +850,12 @@ def plot_concept_report(
     asked = mask.sum(axis=0)
     share = asked / max(1, mask.sum()) * 100
     is_right = (np.asarray(concept_answers) >= 0.5) == truth
-    intervener = np.where(asked > 0, (is_right & mask).sum(axis=0) / np.maximum(asked, 1), np.nan) * 100
+    intervener = (
+        np.where(
+            asked > 0, (is_right & mask).sum(axis=0) / np.maximum(asked, 1), np.nan
+        )
+        * 100
+    )
 
     fig, ax = _ensure_ax(ax, figsize=(7, 0.45 * len(concept_names) + 1.8))
     y = np.arange(len(concept_names))
@@ -749,13 +865,27 @@ def plot_concept_report(
         (0.0, share, "Share of interventions", style.GREY),
         (height, intervener, "Intervener accuracy", style.COLOR_COVERAGE),
     ):
-        ax.barh(y + offset, np.nan_to_num(values), height, color=bar_color, edgecolor="white", label=name)
+        ax.barh(
+            y + offset,
+            np.nan_to_num(values),
+            height,
+            color=bar_color,
+            edgecolor="white",
+            label=name,
+        )
     ax.set_yticks(y)
-    ax.set_yticklabels(concept_names, fontsize=style.FONT_SIZE_TICK, fontfamily="monospace")
+    ax.set_yticklabels(
+        concept_names, fontsize=style.FONT_SIZE_TICK, fontfamily="monospace"
+    )
     ax.set_xlim(0, 100)
     ax.xaxis.set_major_formatter(style.pct_formatter())
     ax.invert_yaxis()
-    ax.legend(fontsize=style.FONT_SIZE_LEGEND, loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3)
+    ax.legend(
+        fontsize=style.FONT_SIZE_LEGEND,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1.0),
+        ncol=3,
+    )
     style.apply_style(ax)
     return fig, ax
 
@@ -781,7 +911,9 @@ def plot_answer_reliance(
     """
     fig, ax = _ensure_ax(ax)
     names = list(dict.fromkeys(results[group]))
-    run_keys = [group, "intervention_source"] + (["seed"] if "seed" in results.columns else [])
+    run_keys = [group, "intervention_source"] + (
+        ["seed"] if "seed" in results.columns else []
+    )
     changes = []
     for key, run in results.groupby(run_keys, sort=False):
         before = run.loc[run["budget"] == 0, metric]
@@ -789,7 +921,9 @@ def plot_answer_reliance(
         if len(before) and len(after):
             changes.append((*key, 100 * (after.mean() - before.iloc[0])))
     summary = _summarize_runs(
-        pd.DataFrame(changes, columns=[*run_keys, "change"]), [group, "intervention_source"], "change"
+        pd.DataFrame(changes, columns=[*run_keys, "change"]),
+        [group, "intervention_source"],
+        "change",
     ).set_index([group, "intervention_source"])
     width = 0.38
     x = np.arange(len(names))
@@ -800,17 +934,34 @@ def plot_answer_reliance(
         means = np.array([summary["mean"].get((n, source), np.nan) for n in names])
         errors = np.array([summary["se"].get((n, source), 0.0) for n in names])
         bars = ax.bar(
-            x + offset, means, width, yerr=errors if errors.any() else None, color=bar_color,
-            edgecolor="white", label=name,
+            x + offset,
+            means,
+            width,
+            yerr=errors if errors.any() else None,
+            color=bar_color,
+            edgecolor="white",
+            label=name,
         )
-        ax.bar_label(bars, labels=[f"{m:+.1f}%" for m in means], padding=3, fontsize=style.FONT_SIZE_ANNOT)
+        ax.bar_label(
+            bars,
+            labels=[f"{m:+.1f}%" for m in means],
+            padding=3,
+            fontsize=style.FONT_SIZE_ANNOT,
+        )
     ax.axhline(0, color="black", linewidth=0.8)
     ax.set_xticks(x)
     ax.set_xticklabels(
-        [str(n) for n in names], fontsize=style.FONT_SIZE,
-        **({"rotation": 20, "ha": "right", "rotation_mode": "anchor"} if len(names) > 3 else {}),
+        [str(n) for n in names],
+        fontsize=style.FONT_SIZE,
+        **(
+            {"rotation": 20, "ha": "right", "rotation_mode": "anchor"}
+            if len(names) > 3
+            else {}
+        ),
     )
-    ax.set_ylabel("\u0394 " + metric.replace("_", " ").title() + " (%)", fontsize=style.FONT_SIZE)
+    ax.set_ylabel(
+        "\u0394 " + metric.replace("_", " ").title() + " (%)", fontsize=style.FONT_SIZE
+    )
     ax.legend(fontsize=style.FONT_SIZE_LEGEND, loc="best", framealpha=0.9)
     _pad_axes(ax, top=0.15, bottom=0.15, left=0.0, right=0.0)
     style.apply_style(ax)
@@ -840,15 +991,30 @@ def plot_confidence(
         The threshold ``t`` fitted on the validation set.
     """
     fig, ax = _ensure_ax(ax)
-    prob_positive, y_true = np.asarray(prob_positive, dtype=float), np.asarray(y_true).astype(int)
+    prob_positive, y_true = (
+        np.asarray(prob_positive, dtype=float),
+        np.asarray(y_true).astype(int),
+    )
     bins = np.linspace(0, 1, 41)
     for label, bar_color in ((0, style.COLOR_NEGATIVE), (1, style.COLOR_ACCURACY)):
-        ax.hist(prob_positive[y_true == label], bins=bins, color=bar_color, alpha=0.6, label=class_names[label])
+        ax.hist(
+            prob_positive[y_true == label],
+            bins=bins,
+            color=bar_color,
+            alpha=0.6,
+            label=class_names[label],
+        )
     ax.axvspan(
-        abstention_threshold, 1 - abstention_threshold, color=style.GREY, alpha=0.12, label="Abstains"
+        abstention_threshold,
+        1 - abstention_threshold,
+        color=style.GREY,
+        alpha=0.12,
+        label="Abstains",
     )
     ax.set_xlim(0, 1)
-    ax.set_xlabel(f"Predicted probability of {class_names[1]}", fontsize=style.FONT_SIZE)
+    ax.set_xlabel(
+        f"Predicted probability of {class_names[1]}", fontsize=style.FONT_SIZE
+    )
     ax.set_ylabel("Instances", fontsize=style.FONT_SIZE)
     ax.legend(fontsize=style.FONT_SIZE_LEGEND, loc="upper center", framealpha=0.9)
     style.apply_style(ax)
