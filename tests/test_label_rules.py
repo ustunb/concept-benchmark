@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+import yaml
 from scipy.special import expit
 
 from concept_benchmark.config import (
@@ -10,6 +11,7 @@ from concept_benchmark.config import (
     ROBOT_TRAIN_SIZE,
     RobotBenchmarkConfig,
 )
+from concept_benchmark.formula import F, LabelFormula
 from concept_benchmark.generators import DatasetGenerator
 from concept_benchmark.synthetic.robot.catalog import generate_robot_catalog
 
@@ -44,9 +46,31 @@ def test_unknown_rule_is_rejected():
 
 
 def test_custom_formula_overrides_the_rule():
-    formula = ROBOT_LABEL_RULES["sparse"].build_formula()
+    formula = LabelFormula(
+        score=3 * F("has_knees").true - 1, temperature=2.0, stochastic=True
+    )
     config = RobotBenchmarkConfig(label_rule="balanced", label_formula=formula)
     assert config.label_formula is formula
+
+
+def test_formula_of_another_rule_is_rejected():
+    with pytest.raises(ValueError, match="label_rule"):
+        RobotBenchmarkConfig(
+            label_rule="balanced",
+            label_formula=ROBOT_LABEL_RULES["sparse"].build_formula(),
+        )
+
+
+def test_changing_the_rule_of_a_saved_config_is_rejected_while_it_keeps_the_old_formula(
+    tmp_path,
+):
+    saved = yaml.safe_load(
+        RobotBenchmarkConfig().to_yaml(tmp_path / "config.yaml").read_text()
+    )
+    saved["label_rule"] = "sparse"
+    (tmp_path / "edited.yaml").write_text(yaml.dump(saved))
+    with pytest.raises(ValueError, match="label_rule"):
+        RobotBenchmarkConfig.from_yaml(tmp_path / "edited.yaml")
 
 
 def test_sparse_rule_files_do_not_share_names_with_the_default():

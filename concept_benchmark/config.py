@@ -436,6 +436,15 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             self.label_formula = ROBOT_LABEL_RULES[self.label_rule].build_formula()
         elif isinstance(self.label_formula, dict):
             self.label_formula = LabelFormula.from_dict(self.label_formula)
+        for name, rule in ROBOT_LABEL_RULES.items():
+            if (
+                name != self.label_rule
+                and self.label_formula.to_dict() == rule.build_formula().to_dict()
+            ):
+                raise ValueError(
+                    f"label_formula is the formula of the {name!r} rule but label_rule is {self.label_rule!r}; "
+                    f"set label_rule={name!r} or leave label_formula unset"
+                )
         if self.data_type == "text":
             self._auto_configure_text()
         self._validate_common()

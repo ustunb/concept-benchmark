@@ -81,6 +81,7 @@ class InterventionSettings:
     )
     records_dir: str | None = None  # save what was asked and answered for each budget
     model_family: str = ""  # names the saved records
+    concept_source: str = ""  # names the saved records
 
 
 class FEOnProbs(FrontEndModel):
@@ -494,7 +495,15 @@ def _load_or_train_noisy_label_model(
     """
     key = "cbm_subjective" if family == "cbm" else f"{family}_subjective"
     path = config.get_model_path(key)
-    if path.exists() and not config.force_retrain:
+    # reuse a saved model only if it was trained on this dataset, with these settings and this noise rate
+    fingerprint_path = path.with_suffix(".fingerprint")
+    fingerprint = f"{config.setup_fingerprint()}:{config.model_fingerprint(family)}:{config.subjective_noise_rate}"
+    is_current = (
+        path.exists()
+        and fingerprint_path.exists()
+        and fingerprint_path.read_text() == fingerprint
+    )
+    if is_current and not config.force_retrain:
         return load(path)
 
     noisy_data = copy.deepcopy(data)
@@ -521,6 +530,7 @@ def _load_or_train_noisy_label_model(
             config, family=family, data=noisy_data, save_key=None
         )
     save(model, path, overwrite=True)
+    fingerprint_path.write_text(fingerprint)
     return model
 
 
@@ -766,6 +776,7 @@ def _save_intervention_records(
     name = "__".join(
         [
             settings.model_family or "model",
+            settings.concept_source or "concepts",
             f"m{len(concept_names)}_{signature}",
             f"{intervener}{accuracy}",
             settings.intervention_strategy,
@@ -1800,6 +1811,7 @@ def _run_cell(
             records_dir=config.intervention_records_dir,
         )
         isettings.model_family = family
+        isettings.concept_source = concept_source
         if expert_type == "llm":
             isettings.intervention_expert = "llm"
             isettings.intervention_llm = _automated_intervention_llm_settings(config)
