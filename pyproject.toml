@@ -75,7 +75,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.sdist]
-exclude = ["/data/", "/results/", "/scripts/", "/.claude/", "/huggingface_export/", "/.ultraplan/", "/dist/", "/build/"]
+only-include = [
+    "concept_benchmark", "experiments", "tests", "examples", "docs",
+    "README.md", "EXPERIMENTS.md", "CHANGELOG.md", "CITATION.cff", "LICENSE", "pyproject.toml", "uv.lock",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["concept_benchmark"]

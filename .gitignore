@@ -4,10 +4,6 @@
 # devcontainers
 .devcontainer/
 
-# Local contributor guide (not versioned)
-AGENTS.md
-CLAUDE.md
-
 # PyCharm
 .idea/
 .RData
@@ -158,12 +154,10 @@ examples/.ipynb_checkpoints
 
 
 /results/
-.ultraplan/
 huggingface_export/
 
-# Local data, caches, notes and agent tooling (anchored: the package has its own data/ folder)
+# Local data, caches and notes (anchored: the package has its own data/ folder)
 /data/
 /experiments/_*
 /notes/
-.claude/
 /docs/paper_results_index.csv
