@@ -2545,20 +2545,25 @@ def run(
 
 def plot_results(config: RobotBenchmarkConfig) -> None:
     """Generate figures from collected results and save to results/figures/."""
-    import json
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from concept_benchmark.evaluation.plots import (
         plot_alignment_comparison,
-        plot_concept_discovery,
+        plot_answer_reliance,
+        plot_concept_report,
         plot_intervention_curve,
-        plot_regime_comparison,
+        plot_intervention_heatmap,
     )
 
     out_dir = results_dir / "figures"
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    def save(fig, name: str) -> None:
+        fig.savefig(out_dir / name, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        logger.info("Saved %s", name)
 
     variant = "subconcept" if config.concept_preset == "foot_subtypes" else "ideal"
     family = _selected_cbm_key(config)
@@ -2566,107 +2571,58 @@ def plot_results(config: RobotBenchmarkConfig) -> None:
     if not results_path.exists():
         logger.info("No results CSV found at %s — skipping plots.", results_path)
         return
+    results = pd.read_csv(results_path)
+    results = results[results["threshold"] == results["threshold"].min()]
 
-    interv_df = pd.read_csv(results_path)
+    dnn_accuracy = None
+    collect_path = config.get_collect_path()
+    if collect_path.exists():
+        collected = pd.read_csv(collect_path)
+        dnn_rows = collected[collected["model"] == "dnn"]
+        if len(dnn_rows):
+            dnn_accuracy = float(dnn_rows["accuracy"].iloc[0])
 
-    # 1. Intervention curve (always)
-    if "regime" in interv_df.columns:
-        baseline = interv_df[
-            (interv_df["regime"] == "baseline") & (interv_df["threshold"] == 0.2)
-        ]
-    else:
-        baseline = interv_df[interv_df["threshold"] == 0.2]
-    if len(baseline) > 0:
-        fig, _ = plot_intervention_curve(baseline)
-        fname = f"robot_{variant}_{family}_intervention_curve.png"
-        fig.savefig(out_dir / fname, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        logger.info("Saved %s", fname)
-
-    # 2. Regime comparison (if multiple regimes)
-    if "regime" in interv_df.columns and interv_df["regime"].nunique() > 1:
-        regime_df = interv_df[interv_df["threshold"] == 0.2]
-        fig, _ = plot_regime_comparison(regime_df)
-        fig.savefig(
-            out_dir / "robot_regime_comparison.png", dpi=150, bbox_inches="tight"
-        )
-        plt.close(fig)
-        logger.info("Saved robot_regime_comparison.png")
-
-    # 3. Concept discovery (if both ideal and subconcept results exist)
-    other_suffix = "_subconcept" if variant == "ideal" else "_ideal"
-    this_suffix = f"_{variant}"
-    other_path = Path(str(results_path).replace(this_suffix, other_suffix))
-    if other_path.exists():
-        other_df = pd.read_csv(other_path)
-
-        # Get baseline (regime=baseline or no regime column) at threshold=0.2
-        def _extract_baseline(df):
-            if "regime" in df.columns:
-                return df[(df["regime"] == "baseline") & (df["threshold"] == 0.2)]
-            return df[df["threshold"] == 0.2]
-
-        this_bl = _extract_baseline(interv_df)
-        other_bl = _extract_baseline(other_df)
-
-        if variant == "ideal":
-            ideal_bl, sub_bl = this_bl, other_bl
-        else:
-            ideal_bl, sub_bl = other_bl, this_bl
-
-        if len(ideal_bl) > 0 and len(sub_bl) > 0:
-            # Get DNN accuracy from collect CSV if available
-            dnn_acc = None
-            collect_path = config.get_collect_path()
-            if collect_path.exists():
-                cdf = pd.read_csv(collect_path)
-                dnn_rows = cdf[cdf["model"] == "dnn"]
-                if len(dnn_rows) > 0:
-                    dnn_acc = float(dnn_rows["accuracy"].values[0])
-            fig, _ = plot_concept_discovery(
-                ideal_bl, sub_bl, dnn_accuracy=dnn_acc or 0.8746
-            )
-            fname = f"robot_{family}_concept_discovery.png"
-            fig.savefig(out_dir / fname, dpi=150, bbox_inches="tight")
-            plt.close(fig)
-            logger.info("Saved %s", fname)
-
-    # 4. Alignment comparison (if alignment JSONs exist for both variants)
-    align_path = results_path.with_name(
-        results_path.name.replace("_cbm_results.csv", "_alignment.json")
+    sources = list(dict.fromkeys(results["intervention_source"]))
+    curve_source = "perfect" if "perfect" in sources else sources[0]
+    curve_rows = results[results["intervention_source"] == curve_source]
+    has_several_concept_sets = curve_rows["concept_source"].nunique() > 1
+    fig, _ = plot_intervention_curve(
+        curve_rows, baseline_accuracy=dnn_accuracy, group="concept_source" if has_several_concept_sets else None
     )
-    other_align = Path(str(align_path).replace(this_suffix, other_suffix))
-    if align_path.exists() and other_align.exists():
-        this_align = json.loads(align_path.read_text())
-        that_align = json.loads(other_align.read_text())
-        # Compute gains relative to DNN
-        dnn_acc = dnn_acc if "dnn_acc" in dir() and dnn_acc else 0.8746
-        if variant == "ideal":
-            results_dict = {
-                "ideal": {
-                    "cbm_gain": this_align["original_accuracy"] - dnn_acc,
-                    "aligned_gain": this_align["aligned_accuracy"] - dnn_acc,
-                },
-                "subconcept": {
-                    "cbm_gain": that_align["original_accuracy"] - dnn_acc,
-                    "aligned_gain": that_align["aligned_accuracy"] - dnn_acc,
-                },
-            }
-        else:
-            results_dict = {
-                "ideal": {
-                    "cbm_gain": that_align["original_accuracy"] - dnn_acc,
-                    "aligned_gain": that_align["aligned_accuracy"] - dnn_acc,
-                },
-                "subconcept": {
-                    "cbm_gain": this_align["original_accuracy"] - dnn_acc,
-                    "aligned_gain": this_align["aligned_accuracy"] - dnn_acc,
-                },
-            }
-        fig, _ = plot_alignment_comparison(results_dict)
-        fig.savefig(out_dir / "robot_alignment.png", dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        logger.info("Saved robot_alignment.png")
+    save(fig, f"robot_{variant}_{family}_intervention_curve.png")
+
+    if len(results[["concept_source", "intervention_source"]].drop_duplicates()) > 1:
+        fig, _ = plot_intervention_heatmap(results)
+        save(fig, f"robot_{variant}_{family}_intervention_heatmap.png")
+
+    if {"self", "perfect"} <= set(sources):
+        fig, _ = plot_answer_reliance(results, group="concept_source")
+        save(fig, f"robot_{variant}_{family}_answer_reliance.png")
+
+    if config.intervention_records_dir:
+        for record in sorted(Path(config.intervention_records_dir).glob("*.npz")):
+            saved = np.load(record)
+            if not saved["mask"].any():
+                continue
+            fig, _ = plot_concept_report(
+                saved["mask"], saved["C_pred"], saved["C_answer"], saved["C_true"], list(saved["concept_names"])
+            )
+            save(fig, f"robot_concept_report_{record.stem}.png")
+
+    alignment_rows = []
+    for preset, concepts in (("ground_truth", "true_concepts"), ("foot_subtypes", "human_concepts")):
+        preset_config = copy.copy(config)
+        preset_config.concept_preset = preset
+        alignment_path = preset_config.get_alignment_results_path()
+        if alignment_path.exists():
+            alignment = json.loads(alignment_path.read_text())
+            alignment_rows += [
+                {"concepts": concepts, "model": "CBM", "accuracy_before": alignment["original_accuracy"]},
+                {"concepts": concepts, "model": "Constrained CBM", "accuracy_before": alignment["aligned_accuracy"]},
+            ]
+    if alignment_rows:
+        fig, _ = plot_alignment_comparison(pd.DataFrame(alignment_rows))
+        save(fig, "robot_alignment.png")
 
 
 # ── CLI entry point ──────────────────────────────────────────────────

@@ -1176,38 +1176,56 @@ def compute_selective_results(
 
 def _plot_results(config) -> None:
     """Generate figures from collected results."""
-    from concept_benchmark.evaluation.plots import plot_selective_classification
+    import matplotlib.pyplot as plt
+
+    from concept_benchmark.evaluation.plots import plot_automation, plot_confidence, plot_selective_classification
     from concept_benchmark.paths import results_dir
 
     out_dir = results_dir / "figures"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Try to load collect CSV for selective metrics
-    collect_candidates = sorted(
-        results_dir.glob(f"sudoku_seed{config.seed}_*_results.csv")
-    )
-    if collect_candidates:
-        import pandas as pd
+    def save(fig, name: str) -> None:
+        fig.savefig(out_dir / name, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        logger.info("Saved %s", out_dir / name)
 
+    dnn_coverage = None
+    collect_candidates = sorted(results_dir.glob(f"sudoku_seed{config.seed}_*_results.csv"))
+    if collect_candidates:
         df = pd.read_csv(collect_candidates[-1])
         dnn_row = df[df["model"] == "dnn"]
         cs_row = df[(df["model"] == "cs") & (df["budget"] == 0)]
         if len(dnn_row) and len(cs_row):
+            dnn_coverage = float(dnn_row.iloc[0].get("selective_cov", 0))
             dnn_metrics = {
                 "selective_acc": float(dnn_row.iloc[0].get("selective_acc", 0)),
-                "coverage": float(dnn_row.iloc[0].get("selective_cov", 0)),
+                "coverage": dnn_coverage,
             }
             cbm_metrics = {
                 "selective_acc": float(cs_row.iloc[0].get("selective_acc", 0)),
                 "coverage": float(cs_row.iloc[0].get("selective_cov", 0)),
             }
             fig, _ = plot_selective_classification(dnn_metrics, cbm_metrics)
-            fig.savefig(
-                out_dir / "sudoku_selective_classification.png",
-                dpi=150,
-                bbox_inches="tight",
-            )
-            logger.info("Saved %s", out_dir / "sudoku_selective_classification.png")
+            save(fig, "sudoku_selective_classification.png")
+
+    key = _selected_cs_key(config)
+    side = config.block_size**2
+    results_key = f"{key}_interventions" if key != "cs" else "interventions"
+    interventions_path = config.get_results_path(results_key, data_type="tabular").with_suffix(".csv")
+    interventions = pd.read_csv(interventions_path) if interventions_path.exists() else None
+    if interventions is not None and "coverage_after" in interventions.columns:
+        n_test = int(config.n_boards * 0.2)
+        fig, _ = plot_automation(
+            interventions, n_instances=n_test, n_concepts=3 * side, baseline_coverage=dnn_coverage
+        )
+        save(fig, f"sudoku_{key}_automation.png")
+
+    confidence_path = config.get_results_path(f"{key}_confidence", data_type="tabular").with_suffix(".npz")
+    if confidence_path.exists() and interventions is not None and "abstention_threshold" in interventions.columns:
+        saved = np.load(confidence_path)
+        threshold = float(interventions.sort_values("budget")["abstention_threshold"].iloc[0])
+        fig, _ = plot_confidence(saved["p_test"], saved["y_test"], threshold)
+        save(fig, f"sudoku_{key}_confidence.png")
 
 
 SUDOKU_STAGES = (
