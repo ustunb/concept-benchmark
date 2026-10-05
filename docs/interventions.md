@@ -127,7 +127,7 @@ class UncertaintyStrategy(InterventionStrategy):
         super().__init__(name="uncertainty")
 
     def propose(self, model, batch, config):
-        k = config.per_instance_limit(batch.n_concepts)
+        k = int(min(config.per_instance_limit(batch.n_concepts), batch.n_concepts))
         mask = np.zeros((batch.n_samples, batch.n_concepts), dtype=bool)
 
         # Rank concepts by uncertainty (closeness to 0.5)

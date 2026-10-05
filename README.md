@@ -204,14 +204,12 @@ dataset = DatasetGenerator(
         "has_antennae": ["false", "true"],
         "ears_shape": ["square", "triangle"],
         "mouth_type": ["closed", "open"],
-        "hand_shape": ["round", "edgy"],       # collapsed to binary by default
-        "foot_shape": ["flat", "pointy"],      # collapsed to binary by default
-        # Subconcepts (use expand_concepts to expose individual subtypes):
-        #   hand_shape: round_circle, round_oval, round_oval2,
-        #               edgy_triangle, edgy_square, edgy_trapezoid
-        #   foot_shape: flat_trapezoid, flat_rounded, flat_square, flat_5sided,
-        #               flat_lshaped, pointy_trapezoid, pointy_rounded,
-        #               pointy_square, pointy_3sided, pointy_4sided
+        # the two shapes list their subtypes; each becomes one binary concept (round/edgy, flat/pointy)
+        # unless it is named in expand_concepts
+        "hand_shape": ["round_circle", "round_oval", "round_oval2",
+                       "edgy_triangle", "edgy_square", "edgy_trapezoid"],
+        "foot_shape": ["flat_trapezoid", "flat_rounded", "flat_square", "flat_5sided", "flat_lshaped",
+                       "pointy_trapezoid", "pointy_rounded", "pointy_square", "pointy_3sided", "pointy_4sided"],
     },
     label_rule="balanced",           # "balanced" (default) or "sparse"; see Labeling rules below
     label_formula=None,              # or your own LabelFormula (see below), which replaces the rule's formula
@@ -285,6 +283,7 @@ dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
 ```python
 from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
 
+dataset = DatasetGenerator(seed=1014, concept_preset="foot_subtypes").generate()
 dataset.sample(
     test_size=10000, val_size=0.2, train_size=3800, seed=1014,
     sampling_constraints=[
@@ -336,14 +335,15 @@ def train_and_evaluate(concept_preset):
     ds = DatasetGenerator(seed=1014, concept_preset=concept_preset).generate_splits()
     cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=ds.train.n_concepts, input_size=32))
     cbm = ConceptBasedModel(concept_detector=cd)
-    cbm.fit(ds.train, ds.val, concept_fit_params={"epochs": 50, "lr": 1e-3, "patience": 10})
+    cbm.fit(ds.train, ds.val, freeze_backbone=False,  # False: train the concept detector too
+            concept_fit_params={"epochs": 50, "lr": 1e-3, "patience": 10})
     return accuracy(cbm.predict(ds.test), ds.test.y)
 
-print(f"True concepts (7):   {train_and_evaluate('ground_truth'):.3f}")   # about 0.85
-print(f"Human concepts (12): {train_and_evaluate('foot_subtypes'):.3f}")  # about 0.78
+print(f"True concepts (7):   {train_and_evaluate('ground_truth'):.3f}")   # 0.834 in our run
+print(f"Human concepts (12): {train_and_evaluate('foot_subtypes'):.3f}")  # 0.809 in our run
 ```
 
-Over the 10 seeds of the paper, the CBM reaches 84.5% with the true concepts and 77.6% with the human concepts before interventions, and 92.0% and 85.7% once every concept is corrected; the DNN reaches 88%. A single run differs from these means by a point or two, and across hardware.
+Over the 10 seeds of the paper, the CBM reaches 84.5% with the true concepts and 77.6% with the human concepts before interventions, and 92.0% and 85.7% once every concept is corrected; the DNN reaches 88%. A single run differs from these means by a few points, and across hardware.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/intervention_curve.png" width="500" alt="Accuracy against the intervention budget for four architectures">
@@ -427,7 +427,9 @@ from experiments.utils import determine_device, get_loader_config
 import numpy as np
 
 # Generate data and train CS model
-dataset = DatasetGenerator(seed=171, n_boards=1000, max_cell_swaps=9).generate_splits()
+dataset = DatasetGenerator(
+    seed=171, n_boards=1000, max_cell_swaps=9, data_type="tabular",  # the digits of each board, not its image
+).generate_splits()
 
 cd = ConceptDetector(model=GroupPoolingConceptSudokuCNN())
 cd.fit(dataset.train, dataset.val, fit_params={
@@ -454,7 +456,7 @@ for tau in np.linspace(0, 0.5, 500):
 
 sel_acc = np.mean(y_pred[keep] == dataset.test.y[keep])
 cov = keep.mean()
-print(f"CS model: selective_acc={sel_acc:.3f}, coverage={cov:.3f}")  # ~0.98, ~1.0
+print(f"CS model: selective_acc={sel_acc:.3f}, coverage={cov:.3f}")  # 0.955, 1.000 in our run
 ```
 
 <p align="center">
@@ -493,7 +495,7 @@ Each split is a `ConceptDatasetSample` with these attributes:
 Access formats:
 
 ```python
-# NumPy arrays (default)
+# NumPy arrays; X (also .inputs) holds the image file names, the texts or the feature rows
 X_train, C_train, y_train = train.X, train.C, train.y
 
 # PyTorch DataLoader
@@ -519,7 +521,7 @@ dataset.sample(test_size=0.2, val_size=0.2, seed=42)
 # Stratified — preserves class proportions in each split
 dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=42)
 
-# Group-based — no group appears in multiple splits (e.g., robot identity)
+# Group-based — no group appears in multiple splits (group_ids: one id per row, e.g. the robot's identity)
 dataset.sample(test_size=0.2, val_size=0.2, groups=group_ids, seed=42)
 
 # Skewed training set — ensure min-fraction of specific concept patterns
@@ -849,7 +851,7 @@ class UncertaintyStrategy(InterventionStrategy):
         super().__init__(name="uncertainty")
 
     def propose(self, model, batch, config):
-        k = config.per_instance_limit(batch.n_concepts)
+        k = int(min(config.per_instance_limit(batch.n_concepts), batch.n_concepts))
         mask = np.zeros((batch.n_samples, batch.n_concepts), dtype=bool)
 
         # Rank concepts by uncertainty (closeness to 0.5)

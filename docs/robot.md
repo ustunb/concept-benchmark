@@ -26,14 +26,12 @@ dataset = DatasetGenerator(
         "has_antennae": ["false", "true"],
         "ears_shape": ["square", "triangle"],
         "mouth_type": ["closed", "open"],
-        "hand_shape": ["round", "edgy"],       # collapsed to binary by default
-        "foot_shape": ["flat", "pointy"],      # collapsed to binary by default
-        # Subconcepts (use expand_concepts to expose individual subtypes):
-        #   hand_shape: round_circle, round_oval, round_oval2,
-        #               edgy_triangle, edgy_square, edgy_trapezoid
-        #   foot_shape: flat_trapezoid, flat_rounded, flat_square, flat_5sided,
-        #               flat_lshaped, pointy_trapezoid, pointy_rounded,
-        #               pointy_square, pointy_3sided, pointy_4sided
+        # the two shapes list their subtypes; each becomes one binary concept (round/edgy, flat/pointy)
+        # unless it is named in expand_concepts
+        "hand_shape": ["round_circle", "round_oval", "round_oval2",
+                       "edgy_triangle", "edgy_square", "edgy_trapezoid"],
+        "foot_shape": ["flat_trapezoid", "flat_rounded", "flat_square", "flat_5sided", "flat_lshaped",
+                       "pointy_trapezoid", "pointy_rounded", "pointy_square", "pointy_3sided", "pointy_4sided"],
     },
     label_rule="balanced",           # "balanced" (default) or "sparse"; see Labeling rules below
     label_formula=None,              # or your own LabelFormula (see below), which replaces the rule's formula
