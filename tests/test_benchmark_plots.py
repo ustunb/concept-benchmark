@@ -306,3 +306,18 @@ def test_alignment_comparison_tolerates_a_missing_model():
     ]
     fig, ax = plot_alignment_comparison(pd.DataFrame(rows))
     plt.close(fig)
+
+
+def test_intervention_heatmap_averages_several_baseline_rows():
+    results = pd.DataFrame(
+        {
+            "model_family": ["cbm"] * 4,
+            "concept_source": ["human_concepts"] * 4,
+            "intervention_source": ["perfect"] * 4,
+            "budget": [0, 1, 0, 1],
+            "accuracy": [0.7, 0.8, 0.9, 1.0],
+        }
+    )
+    fig, ax = plot_intervention_heatmap(results)
+    assert [text.get_text() for text in ax.texts] == ["+10.0%"]
+    plt.close(fig)

@@ -9,7 +9,7 @@ reports, on the test robots with every concept set to its true value:
   * per concept: share of predictions that change when that one concept is flipped (sensitivity of the head);
   * spread of the predicted Glorp probability, the learned distance scale, and the distance between class means.
 
-Run from a code checkout of `grid-seeded-lfcbm` with the cem package:
+Run with the code version that trained the models and the cem package:
     cd <checkout> && PYTHONPATH=. python <repo>/scripts/paper/measure_probcbm_heads.py --pipeline-root <root> --out <csv>
 """
 

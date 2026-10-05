@@ -4,10 +4,10 @@
 
 ### Changed
 
-- **The default robot label rule is now `balanced`.** No single concept decides the label and both classes are equally likely. The previous rule is `label_rule="sparse"` (CLI: `--label-rule sparse`). Datasets generated with default settings differ from 0.3.x; a config saved by 0.3.x needs `label_rule: sparse` and is rejected with an explanation otherwise.
+- **The default robot label rule is now `balanced`.** No single concept decides the label and both classes are equally likely. The previous rule is `label_rule="sparse"` (CLI: `--label-rule sparse`). Datasets generated with default settings differ from 0.3.x; a config saved by 0.3.x needs `label_rule: sparse`.
 - `plot_alignment_comparison` takes a table with one row per run (`concepts`, `model`, `accuracy_before`, optional `accuracy_after`) instead of a dict of gains.
 - `plot_intervention_curve` averages several runs, draws a standard-error band and takes `group=` to draw one line per model or concept set.
-- ECBM follows the authors' code; the settings `ecbm_emb_size`, `ecbm_inference_steps` and `ecbm_inference_lr` are gone.
+- ECBM follows the authors' code; the settings `ecbm_emb_size`, `ecbm_inference_steps` and `ecbm_inference_lr` are gone and must be deleted from a config saved by 0.3.x.
 - `set_deterministic_seed` also turns on PyTorch's deterministic algorithms (with warnings instead of errors).
 
 ### Added

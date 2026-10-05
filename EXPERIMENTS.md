@@ -4,7 +4,7 @@ All commands assume `uv sync` has been run from the repo root (and `./scripts/in
 
 The paper reports every result as mean ± SE over 10 seeds: `1014`–`1023` for robots and `171`–`180` for sudoku. The commands below run one seed; loop over the seeds to reproduce a table. Numbers differ slightly across hardware, so expect to match the paper's means within their standard errors, not digit for digit.
 
-Once the runs exist, [`scripts/paper/README.md`](scripts/paper/README.md) maps every table, figure and test of the paper to the script that produces it.
+[`scripts/paper/README.md`](scripts/paper/README.md) maps every table, figure and test of the paper to the script that computed it from the authors' archived runs.
 
 ## Robot Benchmark
 

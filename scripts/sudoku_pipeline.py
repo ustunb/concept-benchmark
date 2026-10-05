@@ -1176,6 +1176,7 @@ def compute_selective_results(
             0.99,
             1.00,
         ]
+    target_accuracies = sorted({*target_accuracies, config.target_accuracy})
 
     # Load evaluation data: OCR-inferred (image mode) or tabular
     if data is None:

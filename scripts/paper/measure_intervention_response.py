@@ -10,7 +10,7 @@ calls as the pipeline's intervention code:
   * ProbCBM only: mean learned uncertainty (log sigma) per concept.
 Writes one CSV row per (arch, concepts, seed, concept) to --out and prints a summary.
 
-Run from a code checkout of `grid-seeded-lfcbm` (the models are pickled with that code):
+Run with the code version that trained the models (they are pickled with it):
     cd <checkout> && PYTHONPATH=. python <repo>/scripts/paper/measure_intervention_response.py --images <robot_images>
 """
 

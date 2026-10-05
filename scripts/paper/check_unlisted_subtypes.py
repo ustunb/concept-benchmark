@@ -9,7 +9,7 @@ With --images, also runs the human-concept CBM's concept detector on the test ro
 an unlisted subtype, how often any FootShape detector fires (a wrong prediction, since every true value is 0) and
 how often the firing subtype is on the correct Pointy/Flat side, plus accuracy before interventions.
 
-Run from a code checkout of `grid-seeded-lfcbm` (models are pickled with that code):
+Run with the code version that trained the models (they are pickled with it):
     cd <checkout> && PYTHONPATH=. python <repo>/scripts/paper/check_unlisted_subtypes.py [--images <robot_images>]
 """
 

@@ -348,6 +348,11 @@ class DatasetGenerator:
             )
         # split before dropping concepts: the constraints name subtypes that the presets drop
         remaining = data.n - ROBOT_TEST_SIZE - ROBOT_TRAIN_SIZE
+        if remaining < 0:
+            raise ValueError(
+                f"generate_splits() needs {ROBOT_TEST_SIZE + ROBOT_TRAIN_SIZE} robots "
+                f"({ROBOT_TRAIN_SIZE} train, {ROBOT_TEST_SIZE} test) but the catalog has {data.n}."
+            )
         data.sample(
             test_size=ROBOT_TEST_SIZE,
             val_size=int(remaining * ROBOT_VALIDATION_SHARE),

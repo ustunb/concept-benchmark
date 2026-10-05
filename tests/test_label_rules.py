@@ -112,3 +112,11 @@ def test_yaml_round_trip_keeps_the_rule(tmp_path):
     loaded = RobotBenchmarkConfig.from_yaml(config.to_yaml(tmp_path / "config.yaml"))
     assert loaded == config
     assert loaded.sampling_constraints == config.sampling_constraints
+
+
+def test_generate_splits_rejects_a_catalog_smaller_than_the_splits():
+    generator = DatasetGenerator(
+        "robot", seed=1, render_images=False, renders_per_robot=1
+    )
+    with pytest.raises(ValueError, match="needs 13800 robots"):
+        generator.generate_splits()

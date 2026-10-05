@@ -158,6 +158,7 @@ huggingface_export/
 
 # Local data, caches and notes (anchored: the package has its own data/ folder)
 /data/
-/experiments/_*
+/experiments/_*.npz
+/experiments/_*cache*/
 /notes/
 /docs/paper_results_index.csv

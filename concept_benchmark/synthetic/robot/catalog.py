@@ -177,6 +177,7 @@ def generate_robot_catalog(
             signature_file.exists() and signature_file.read_text() == drawing_signature
         )
         if not is_same_drawing:
+            signature_file.unlink(missing_ok=True)
             for old_png in output_path.glob("robot_*.png"):
                 old_png.unlink()
 

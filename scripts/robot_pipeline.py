@@ -534,6 +534,16 @@ def _load_or_train_noisy_label_model(
     return model
 
 
+def _lfcbm_cache_dir(config, name, concepts_file) -> Path:
+    """Folder for the CLIP embeddings of one label-free CBM: one per seed, concept preset and concepts file."""
+    concepts_hash = hashlib.sha1(Path(concepts_file).read_bytes()).hexdigest()[:8]
+    return (
+        config.get_model_path("lfcbm").parent
+        / f"lfcbm{config._preset_suffix}{config._seed_tag}"
+        / f"{name}_{concepts_hash}_cache"
+    )
+
+
 def train_lfcbm(
     config: RobotBenchmarkConfig,
     data=None,
@@ -569,9 +579,7 @@ def train_lfcbm(
     cfg = LFTrainingConfig(
         device=device_str,
         seed=config.seed,
-        cache_dir=config.get_model_path("lfcbm").parent
-        / f"lfcbm{config._seed_tag}"
-        / "lfcbm_cache",
+        cache_dir=_lfcbm_cache_dir(config, "lfcbm", concepts_file),
     )
     lfcbm = LabelFreeCBM(cfg)
 
@@ -1601,9 +1609,7 @@ def _load_or_train_regime_lfcbm(config, regime, data):
     cfg = LFTrainingConfig(
         device=device_str,
         seed=config.seed,
-        cache_dir=config.get_model_path("lfcbm").parent
-        / f"lfcbm{config._seed_tag}"
-        / f"lfcbm_{regime}_cache",
+        cache_dir=_lfcbm_cache_dir(config, f"lfcbm_{regime}", concepts_path),
     )
     lf = LabelFreeCBM(cfg)
     image_dir = data_dir / "robot_images"
@@ -1780,7 +1786,8 @@ def _run_cell(
 
     # Compute baseline accuracy
     supports_aligned = bool(getattr(model, "supports_aligned_concept_replay", False))
-    if family == "cbm" and concept_source in _CONCEPT_SOURCE_TO_LFCBM:
+    is_label_free = family == "cbm" and concept_source in _CONCEPT_SOURCE_TO_LFCBM
+    if is_label_free:
         # LFCBM path: use continuous probs for accuracy
         acc_det = float(
             (
@@ -1807,7 +1814,7 @@ def _run_cell(
             intervention_accuracy=human_acc,
             intervention_threshold=t,
             intervention_strategy=config.intervention_strategy,
-            encoding=config.intervention_encoding,
+            encoding=config.intervention_encoding if is_label_free else "binary",
             records_dir=config.intervention_records_dir,
         )
         isettings.model_family = family
@@ -1983,9 +1990,11 @@ def collect_results(
 ) -> pd.DataFrame:
     """Aggregate all robot results into a single flat CSV.
 
-    Produces one row per (dataset, model, budget) combination with columns:
+    Produces one row per (dataset, model, budget) combination, and per concept and
+    intervention source for the rows with interventions, with columns:
       dataset, model, budget, threshold, accuracy, gain,
-      predictions_intervened_on, avg_concepts_per_sample, predictions_changed
+      predictions_intervened_on, avg_concepts_per_sample, predictions_changed,
+      concept_source, intervention_source
 
     Reads saved artifacts only — no model retraining.
     """
@@ -2068,9 +2077,6 @@ def collect_results(
         results_path = cfg.get_results_path(model_key)
         if results_path.exists():
             interv_df = pd.read_csv(results_path)
-            # Filter to baseline regime if column present
-            if "regime" in interv_df.columns:
-                interv_df = interv_df[interv_df["regime"] == "baseline"]
             # Use threshold=0.2 as the canonical threshold for the summary
             t02 = interv_df[(interv_df["threshold"] == 0.2) & (interv_df["budget"] > 0)]
             for _, row in t02.iterrows():
@@ -2090,6 +2096,8 @@ def collect_results(
                         "predictions_intervened_on": pio,
                         "avg_concepts_per_sample": avg_cps,
                         "predictions_changed": int(row["predictions_changed"]),
+                        "concept_source": row["concept_source"],
+                        "intervention_source": row["intervention_source"],
                     }
                 )
 
@@ -2500,7 +2508,7 @@ def _parse_args(argv=None):
         nargs="+",
         default=None,
         choices=INTERVENTION_SOURCES,
-        help="Intervention sources (e.g. perfect expert llm).",
+        help="Intervention sources (e.g. perfect expert llm self).",
     )
     parser.add_argument(
         "--strategy", type=str, default=None, choices=["up_to_k", "exactly_k"]
@@ -2671,7 +2679,8 @@ def main(argv=None):
         )
 
     # labels are drawn with --label-seed (default: --seed)
-    config.rng_seed = args.label_seed if args.label_seed is not None else config.seed
+    if args.label_seed is not None:
+        config.rng_seed = args.label_seed
 
     _apply_cli_args(config, args)
     missing_fraction = args.missing_fraction or 0.0

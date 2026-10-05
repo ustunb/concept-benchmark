@@ -116,7 +116,7 @@ def install_detector_outputs() -> None:
                     dest,
                     "diagnostic",
                     str(src.relative_to(REPO / "results")),
-                    "CBM concept probabilities on the test robots, from the paper's run on Bridges",
+                    "CBM concept probabilities on the test robots, from the paper's run",
                 )
             )
     update_index(entries)

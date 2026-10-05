@@ -197,7 +197,7 @@ def main() -> None:
     ap.add_argument(
         "--tag",
         default=None,
-        help="Read raw run folders with this tag (e.g. duniforme3) instead.",
+        help="Read raw run folders with this tag instead.",
     )
     ap.add_argument(
         "--seeds", default="1014-1023", help="Seed range 'a-b' or list 'a,b,c'."

@@ -77,6 +77,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.sdist]
 only-include = [
     "concept_benchmark", "experiments", "tests", "examples", "docs",
+    "scripts/paper", "scripts/robot_pipeline.py", "scripts/robot_text_pipeline.py", "scripts/sudoku_pipeline.py",
+    "scripts/generate_robot_data.py", "scripts/generate_sudoku_data.py", "scripts/install_cem_repo.sh",
     "README.md", "EXPERIMENTS.md", "CHANGELOG.md", "CITATION.cff", "LICENSE", "pyproject.toml", "uv.lock",
 ]
 

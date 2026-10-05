@@ -5,8 +5,9 @@ Everything in this folder is specific to the paper: it builds the paper's tables
 entry points are one level up (`scripts/robot_pipeline.py`, `scripts/sudoku_pipeline.py`,
 `scripts/robot_text_pipeline.py`, and the data generators).
 
-Every table, figure and test in the results section is produced by a script from the files in `results/paper/`
-(see `results/paper/README.md` for the layout and `INDEX.csv` for the source of every file). Run from the repository
+Every table, figure and test in the results section is produced by a script from the files in `results/paper/`.
+This folder holds the authors' archived runs and is not part of the repository; the pipelines write their results in a
+different layout, so the scripts document how each number was computed and do not run on fresh pipeline output. Run from the repository
 root with `PYTHONPATH=.` and the project's Python. `_common.py` holds the paths and helpers the scripts share
 (result folders, mean ± SE, table cells, pdflatex) and puts the repository root and `scripts/` on the import path.
 

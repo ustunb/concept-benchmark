@@ -36,6 +36,7 @@ python3 -c "import concept_benchmark; print(concept_benchmark.__version__)"
 The datasets of the paper are also on the Hugging Face Hub ([`robots-true-concepts`](https://huggingface.co/datasets/juliannski/robots-true-concepts), [`robots-human-concepts`](https://huggingface.co/datasets/juliannski/robots-human-concepts), [`sudoku`](https://huggingface.co/datasets/juliannski/sudoku)):
 
 ```python
+# pip install datasets
 from datasets import load_dataset
 ds = load_dataset("juliannski/robots-human-concepts")
 ```

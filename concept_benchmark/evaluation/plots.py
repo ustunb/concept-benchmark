@@ -269,7 +269,7 @@ def plot_intervention_heatmap(
         before = run.loc[run["budget"] == 0, metric]
         after = run.loc[run["budget"] != 0, metric]
         if len(before) and len(after):
-            changes.append((*key, 100 * (after.mean() - before.iloc[0])))
+            changes.append((*key, 100 * (after.mean() - before.mean())))
     if not changes:
         raise ValueError("no run has both a budget of 0 and a larger budget")
     table = (
@@ -948,7 +948,7 @@ def plot_answer_reliance(
         before = run.loc[run["budget"] == 0, metric]
         after = run.loc[run["budget"] != 0, metric]
         if len(before) and len(after):
-            changes.append((*key, 100 * (after.mean() - before.iloc[0])))
+            changes.append((*key, 100 * (after.mean() - before.mean())))
     if not changes:
         raise ValueError("no run has both a budget of 0 and a larger budget")
     summary = _summarize_runs(
