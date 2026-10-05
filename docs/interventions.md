@@ -199,6 +199,25 @@ python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
 
 LLM interventions need an API key (`--llm-api-key` or `GEMINI_API_KEY`); `--llm-cache-only` reuses saved answers.
 
+#### Regimes
+
+A regime names one pairing of concept source and intervention source, as in the first version of the benchmark:
+
+| Regime | Concepts from | Corrected by | Description |
+|--------|--------------|-------------|-------------|
+| **baseline** | Human annotation | True values | Upper bound on the benefit of interventions |
+| **expert** | Human annotation | Expert (80% accurate) | Realistic human annotator |
+| **subjective** | Human annotation with 20% label noise | Expert (80% accurate) | Annotators who disagree on the concepts |
+| **machine** | CLIP scores of the human concepts | Expert (80% accurate) | Automated annotation |
+| **llm** | Concepts written by an LLM | LLM | Fully automated with an LLM |
+| **clip** | Single words chosen by CLIP | LLM | Fully automated with CLIP |
+
+The robot pipeline accepts `--regimes baseline expert machine llm clip` as shorthand for the matching sources. The `subjective` regime runs in the text pipeline:
+
+```bash
+python scripts/robot_text_pipeline.py --seed 1337 --regimes baseline expert subjective
+```
+
 Two further options control how interventions are applied and recorded:
 
 | Option | Description |
