@@ -90,6 +90,16 @@ The paper reports a selective-accuracy target of 0.95 (`--target-accuracy`; the 
 python scripts/sudoku_pipeline.py --seed 171 --cell-px 18 --target-accuracy 0.95 --stages cs intervene selective diagnose
 ```
 
+### Reproducing sudoku numbers on other hardware
+
+A sudoku run is repeatable on one machine, but a single seed can give a very different coverage on another machine. Compare means over the ten seeds, not single seeds.
+
+- The digit recognizer of the `ocr` stage trains to slightly different weights on a different GPU model (about 0.03 points of validation accuracy between an RTX A5000 and an A30), so the models downstream read slightly different boards.
+- Coverage reacts to this in jumps. At 18px the selective accuracy of the CBM sits close to the 0.95 target. When the validation set clears the target the model keeps nearly every board; when it falls just short, the threshold keeps only the boards called invalid and coverage halves.
+- The paper's ten seeds contain both cases: seven seeds have a coverage of 93–100% and three of 47–52% (CBM, 18px, no interventions). In a rerun on the other GPU, seed `171` moved from the first group to the second.
+
+The robot benchmark has no such jump, because it reports accuracy and not a thresholded coverage.
+
 Data generation (`setup`, `ocr`) takes about five minutes per seed; skip it on later runs with `--stages cs dnn intervene selective collect`.
 
 ## Generating Datasets Only
