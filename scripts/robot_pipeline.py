@@ -37,7 +37,7 @@ from concept_benchmark.utils import (
     patch_macos_dataloader,
     set_deterministic_seed,
 )
-from concept_benchmark.config import RobotBenchmarkConfig
+from concept_benchmark.config import ROBOT_LABEL_RULES, RobotBenchmarkConfig
 from concept_benchmark.generators import DatasetGenerator
 from concept_benchmark.ext.fileutils import load, save
 from experiments.cem_integration import (
@@ -255,35 +255,12 @@ def _ensure_intervention_imports():
 
 
 def setup_dataset(config: RobotBenchmarkConfig):
-    """Generate robot dataset, split, and save.
+    """Generate the robot dataset with the paper's split and save it.
 
     Returns the saved ConceptDataset.
     """
-    from concept_benchmark.config import (
-        PRESET_EXCLUDED_CONCEPTS,
-        ROBOT_SAMPLING_CONSTRAINTS,
-    )
-
     logger.info("Generating robot dataset...")
-    data = DatasetGenerator.from_config(config).generate()
-
-    # Split with skewing constraints BEFORE dropping concepts.
-    # The constraints reference subconcept names (e.g. foot_shape_pointy_square)
-    # that exist in the full concept set.  Dropping concepts first would remove
-    # them and disable skewing, changing the training set composition.
-    test_size = 10000
-    train_size = 3800
-    remaining = data.n - test_size
-    n_val = int((remaining - train_size) * 0.2)
-    data.sample(
-        test_size=test_size,
-        val_size=n_val,
-        train_size=train_size,
-        sampling_constraints=ROBOT_SAMPLING_CONSTRAINTS,
-        seed=config.seed,
-    )
-
-    data.drop_concepts(PRESET_EXCLUDED_CONCEPTS[config.concept_preset])
+    data = DatasetGenerator.from_config(config).generate_splits()
     save(data, config.get_dataset_path(), overwrite=True)
     return data
 
@@ -1817,7 +1794,7 @@ def _prepare_model_for_concept_source(config, concept_source, family, data):
         # GT concepts: load the baseline model for this family
         if concept_source == "ground_truth":
             # Use ideal preset (7 concepts) — need a separate config
-            gt_config = RobotBenchmarkConfig(seed=config.seed)
+            gt_config = RobotBenchmarkConfig(seed=config.seed, label_rule=config.label_rule)
             gt_config.rng_seed = config.rng_seed
             gt_config.cbm_family = family
             gt_data = load(gt_config.get_dataset_path())
@@ -2774,8 +2751,11 @@ def _parse_args(argv=None):
         default="ground_truth",
     )
     parser.add_argument(
-        "--label", choices=["default", "balanced"], default="default",
-        help="Label rule: default (paper) or balanced 2-of-3 over mouth/body/knees.",
+        "--label-rule",
+        choices=sorted(ROBOT_LABEL_RULES),
+        default="balanced",
+        help="How robots are labeled: balanced (no single concept decides the label) or "
+        "sparse (three concepts decide it and one class is rare).",
     )
     parser.add_argument(
         "--cbm-family",
@@ -2899,19 +2879,6 @@ def _apply_cli_args(config: RobotBenchmarkConfig, args) -> None:
     if getattr(args, "probcbm_intervention_prob", None) is not None:
         config.probcbm_intervention_prob = args.probcbm_intervention_prob
 
-    if getattr(args, "label", "default") == "balanced":
-        import os as _os
-        from concept_benchmark.formula import F, LabelFormula
-        _p = _os.environ.get("BSPEC", "1,5,8,5,-3").split(",")
-        _nvis, _wv, _wf, _wk, _we, _c = int(_p[0]), float(_p[1]), float(_p[2]), float(_p[3]), float(_p[4]), float(_p[5])
-        _vis = [F("mouth_type").closed, F("body_shape").round, F("head_shape").round, F("has_antennae").true, F("ears_shape").triangle]
-        _score = _wf * F("foot_shape").pointy - _wk * F("has_knees").true - _we * F("has_elbows").true + _c
-        for _i in range(_nvis):
-            _score = _score + _wv * _vis[_i]
-        config.label_formula = LabelFormula(score=_score, temperature=float(_os.environ.get("TEMP", "4.2")), stochastic=True)
-        print("[balanced] BSPEC(nvis,wv,wf,wk,c)=" + _os.environ.get("BSPEC", ""), flush=True)
-        config.image_size = _os.environ.get("IMGSIZE", config.image_size)
-
     if args.budgets:
         config.intervention_budgets = parse_budgets(args.budgets)
     if args.cbm_family:
@@ -2969,14 +2936,12 @@ def main(argv=None):
 
     if args.config:
         config = RobotBenchmarkConfig.from_yaml(args.config)
-    elif args.concept_preset == "foot_subtypes":
-        config = RobotBenchmarkConfig.default_subconcept()
-        config.seed = args.seed
     else:
-        config = RobotBenchmarkConfig(seed=args.seed)
+        config = RobotBenchmarkConfig(
+            seed=args.seed, concept_preset=args.concept_preset, label_rule=args.label_rule
+        )
 
-    # Labels are drawn from the stochastic labeling rule with --label-seed (default: --seed).
-    # The original single-seed paper data used --label-seed 12345.
+    # labels are drawn with --label-seed (default: --seed)
     config.rng_seed = args.label_seed if args.label_seed is not None else config.seed
 
     _apply_cli_args(config, args)

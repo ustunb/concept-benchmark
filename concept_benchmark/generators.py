@@ -1,8 +1,14 @@
 """High-level dataset generators for concept benchmarks.
 
 Provides a unified ``DatasetGenerator`` API that wraps data creation
-and seed management into a single call.  After ``generate()``, call
-``sample()`` to split into train/val/test:
+and seed management into a single call. ``generate_splits()`` returns
+the train/val/test split of the paper; ``generate()`` returns the unsplit
+dataset, which ``sample()`` splits as you choose:
+
+    >>> from concept_benchmark.robots import DatasetGenerator
+    >>> dataset = DatasetGenerator(seed=1014, render_images=False).generate_splits()
+    >>> dataset.train.C.shape
+    (3800, 7)
 
     >>> from concept_benchmark.robots import DatasetGenerator
     >>> from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
@@ -29,6 +35,10 @@ from typing import TYPE_CHECKING, Literal, overload
 import numpy as np
 
 from concept_benchmark.config import (
+    PRESET_EXCLUDED_CONCEPTS,
+    ROBOT_TEST_SIZE,
+    ROBOT_TRAIN_SIZE,
+    ROBOT_VALIDATION_SHARE,
     RobotBenchmarkConfig,
     SudokuBenchmarkConfig,
 )
@@ -318,6 +328,31 @@ class DatasetGenerator:
             data.sample_concept_missingness(p=0.2, rng=99)
         """
         return self._generate_fn(self.config)
+
+    def generate_splits(self) -> ConceptDataset:
+        """Generate the dataset with the train/validation/test split of the paper.
+
+        Robots: 3,800 training robots whose foot subtypes follow the label rule
+        (see ``ROBOT_LABEL_RULES``), 10,000 test robots, and the concepts of
+        ``concept_preset``. Sudoku: 60/20/20, stratified on the label.
+        """
+        data = self.generate()
+        if self.benchmark == "sudoku":
+            data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=self.config.seed)
+            return data
+        if self.config.data_type == "text":
+            raise ValueError("generate_splits() supports image robots and sudoku; use generate() for text.")
+        # split before dropping concepts: the constraints name subtypes that the presets drop
+        remaining = data.n - ROBOT_TEST_SIZE - ROBOT_TRAIN_SIZE
+        data.sample(
+            test_size=ROBOT_TEST_SIZE,
+            val_size=int(remaining * ROBOT_VALIDATION_SHARE),
+            train_size=ROBOT_TRAIN_SIZE,
+            sampling_constraints=self.config.sampling_constraints,
+            seed=self.config.seed,
+        )
+        data.drop_concepts(PRESET_EXCLUDED_CONCEPTS[self.config.concept_preset])
+        return data
 
     @classmethod
     def available_benchmarks(cls) -> list[str]:

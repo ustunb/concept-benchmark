@@ -1,7 +1,7 @@
 """Build Figure 1(a) (decision support) from balanced-rule sweep runs.
 
 Reads either the installed files in results/paper/robot/balanced_rule (`--prefix`, the default source) or raw
-`run_{tag}_s{seed}_{ground_truth,foot_subtypes}/results/` folders (experiments/skew_sweep.py output, `--tag`), and
+`run_{tag}_s{seed}_{ground_truth,foot_subtypes}/results/` folders (robot pipeline output, `--tag`), and
 writes a standalone TikZ panel in the paper's style: CBM accuracy under perfect interventions on
 `true_concepts` and `human_concepts` against the DNN, shaded mean ± SE (or the range over runs), with the
 Gain at k=max (CBM on true concepts minus DNN, paired per seed). Compiles the PDF with pdflatex.
