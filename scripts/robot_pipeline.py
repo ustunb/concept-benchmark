@@ -15,6 +15,8 @@ import os
 
 import concurrent.futures as cf
 import copy
+import hashlib
+import json
 import logging
 import platform
 from dataclasses import dataclass
@@ -37,7 +39,7 @@ from concept_benchmark.utils import (
     patch_macos_dataloader,
     set_deterministic_seed,
 )
-from concept_benchmark.config import ROBOT_LABEL_RULES, RobotBenchmarkConfig
+from concept_benchmark.config import INTERVENTION_ENCODINGS, ROBOT_LABEL_RULES, RobotBenchmarkConfig
 from concept_benchmark.generators import DatasetGenerator
 from concept_benchmark.ext.fileutils import load, save
 from experiments.cem_integration import (
@@ -69,6 +71,8 @@ class InterventionSettings:
     intervention_expert: str = ""  # "" for standard path, "llm" for inline LLM
     intervention_llm: dict[str, Any] | None = None
     run_dir: str = "."
+    encoding: str = "binary"  # how the label predictor reads concepts after an intervention
+    records_dir: str | None = None  # save what was asked and answered for each budget
 
 
 class FEOnProbs(FrontEndModel):
@@ -685,20 +689,6 @@ def train_dnn(
     train_acc = compute_accuracy(model, train_loader, device=device)
     valid_acc = compute_accuracy(model, valid_loader, device=device)
     test_acc = compute_accuracy(model, test_loader, device=device)
-    try:
-        import numpy as _np
-        _pp=[]; _tt=[]
-        model.eval()
-        with torch.no_grad():
-            for _X, _, _yy in test_loader:
-                _o = model(_X.to(device)).squeeze()
-                _pp += list((_o > 0.5).long().cpu().numpy().ravel())
-                _tt += list(_np.asarray(_yy.cpu().numpy()).astype(int).ravel())
-        _pp=_np.array(_pp); _tt=_np.array(_tt)
-        _r0=((_pp==0)&(_tt==0)).sum()/max((_tt==0).sum(),1); _r1=((_pp==1)&(_tt==1)).sum()/max((_tt==1).sum(),1)
-        print("DNN-DIAG pred_P1=%.3f true_P1=%.3f acc=%.3f recall0=%.3f recall1=%.3f distinct=%d" % (_pp.mean(), _tt.mean(), (_pp==_tt).mean(), _r0, _r1, len(set(_pp.tolist()))), flush=True)
-    except Exception as _e:
-        print("DNN-DIAG failed: %r" % (_e,), flush=True)
     logger.info("Training Accuracy: %.2f%%", train_acc * 100)
     logger.info("Validation Accuracy: %.2f%%", valid_acc * 100)
     logger.info("Test Accuracy: %.2f%%", test_acc * 100)
@@ -713,23 +703,79 @@ def train_dnn(
 # ── Intervention helper ───────────────────────────────────────────────
 
 
-def _intervention_encoding() -> str:
-    """hard (default): revealed concepts set to hard 0/1 then binarized.
-    koh595: revealed concepts set to 5th/95th-pct training activation (Koh 2020)."""
-    import os as _os
-    return _os.environ.get("INTERVENTION_ENCODING", "hard").lower()
+def _encode_revealed_concepts(C, mask, low, high):
+    """Set revealed concepts to `high` (present) or `low` (absent); the rest keep their predicted values."""
+    C_encoded = np.asarray(C, dtype=float).copy()
+    high = np.broadcast_to(np.asarray(high, dtype=float), C_encoded.shape)
+    low = np.broadcast_to(np.asarray(low, dtype=float), C_encoded.shape)
+    is_present = mask & (C_encoded >= 0.5)
+    is_absent = mask & (C_encoded < 0.5)
+    C_encoded[is_present] = high[is_present]
+    C_encoded[is_absent] = low[is_absent]
+    return C_encoded
 
 
-def _calibrate_revealed(C, mask, pct5, pct95):
-    """Revealed concepts -> in-distribution 5/95-pct values; rest stay continuous."""
-    C_cal = np.asarray(C, dtype=float).copy()
-    hi = np.broadcast_to(np.asarray(pct95, dtype=float), C_cal.shape)
-    lo = np.broadcast_to(np.asarray(pct5, dtype=float), C_cal.shape)
-    rev_hi = mask & (C_cal >= 0.5)
-    rev_lo = mask & (C_cal < 0.5)
-    C_cal[rev_hi] = hi[rev_hi]
-    C_cal[rev_lo] = lo[rev_lo]
-    return C_cal
+def _predict_after_intervention(
+    cbm, fe, C_after, C_before, mask, *, supports_aligned, encoding, low_values, high_values
+):
+    """Label probabilities once the concepts in `mask` hold the intervener's answers.
+
+    Models with their own concept replay (CEM, ProbCBM, ECBM) receive the answers directly. Otherwise
+    `encoding` decides what the label predictor reads: `binary` thresholds every concept, `percentile` sets
+    revealed concepts to the 5th/95th percentile of their training values (label-free CBMs), and
+    `binary_revealed` sets revealed concepts to 0/1; the last two leave the other concepts continuous.
+    """
+    if supports_aligned:
+        return predict_label_proba_from_concepts(
+            cbm,
+            C_after,
+            row_indices=np.arange(C_after.shape[0], dtype=int),
+            baseline_concepts=C_before,
+            intervention_mask=mask,
+        )
+    if encoding == "percentile" and low_values is not None:
+        return fe.predict_proba(_encode_revealed_concepts(C_after, mask, low_values, high_values))
+    if encoding == "binary_revealed":
+        return fe.predict_proba(_encode_revealed_concepts(C_after, mask, 0.0, 1.0))
+    return fe.predict_proba((C_after >= 0.5).astype(int))
+
+
+def _measure_concept_percentiles(train_proba) -> tuple[np.ndarray, np.ndarray]:
+    """5th and 95th percentile of each concept's predicted value on the training set."""
+    return np.percentile(train_proba, 5, axis=0), np.percentile(train_proba, 95, axis=0)
+
+
+def _name_llm_cache(run_dir, concept_names, inputs) -> Path:
+    """Cache file of LLM answers for these concepts on these test inputs."""
+
+    def signature(items) -> str:
+        digest = hashlib.sha1()
+        for item in map(str, items):
+            digest.update(item.encode("utf-8"))
+            digest.update(b"\x00")
+        return digest.hexdigest()
+
+    return Path(run_dir) / "cache" / f"llm_interventions_{signature(concept_names)}_{signature(inputs)}.jsonl"
+
+
+def _save_intervention_records(records_dir, settings, budget, concept_names, result, test, y_pred_before) -> None:
+    """Save which concepts were asked, what was answered, and the labels before and after, for one budget."""
+    records_dir = Path(records_dir)
+    records_dir.mkdir(parents=True, exist_ok=True)
+    signature = hashlib.sha1("\x00".join(map(str, concept_names)).encode()).hexdigest()[:8]
+    intervener = settings.intervention_expert.lower() or "sim"
+    accuracy = int(settings.intervention_accuracy * 100)
+    np.savez_compressed(
+        records_dir / f"m{len(concept_names)}_{signature}__{intervener}{accuracy}__k{budget}.npz",
+        mask=np.asarray(result.mask, dtype=bool),
+        C_pred=np.asarray(result.C_pred, dtype=np.float32),
+        C_answer=np.asarray(result.C_intervened, dtype=np.float32),
+        C_true=np.asarray(test.C, dtype=np.int8),
+        y=np.asarray(test.y, dtype=np.int8),
+        y_pred_before=np.asarray(y_pred_before, dtype=np.int8),
+        y_pred_after=np.asarray(result.y_pred_after, dtype=np.int8),
+        concept_names=np.asarray(list(map(str, concept_names))),
+    )
 
 
 def _test_interventions(
@@ -742,8 +788,8 @@ def _test_interventions(
     model=None,
     *,
     cache_only: bool = False,
-    pct5=None,
-    pct95=None,
+    low_values=None,
+    high_values=None,
 ):
     """Run interventions for each budget and return results dict.
 
@@ -754,10 +800,7 @@ def _test_interventions(
         When provided, interventions replay through the model's learned
         embeddings instead of binarizing concepts.
     """
-    import hashlib
-    import json
     import time
-    from pathlib import Path
     from types import SimpleNamespace
 
     _ensure_intervention_imports()
@@ -800,8 +843,6 @@ def _test_interventions(
         # was trained on (e.g., 7). The runner needs matching shapes.
         n_model = prob_test.shape[1]
         if hasattr(test, "C") and test.C.shape[1] != n_model:
-            import copy
-
             test = copy.copy(test)
             test.C = test.C[:, :n_model]
     else:
@@ -852,31 +893,7 @@ def _test_interventions(
 
         if settings.intervention_expert.lower() in ("llm", "self") and cache_only:
             # ── Answers from a file (LLM votes) or from the model itself ("self"); standard KFlip ──
-            import hashlib
-            import json
-            from pathlib import Path
-
-            run_root = Path(settings.run_dir)
-            cache_dir = run_root / "cache"
-
-            def _concepts_sig():
-                h = hashlib.sha1()
-                for name in map(str, concept_names):
-                    h.update(name.encode("utf-8"))
-                    h.update(b"\x00")
-                return h.hexdigest()
-
-            def _dataset_sig():
-                h = hashlib.sha1()
-                for pth in map(str, test.inputs):
-                    h.update(pth.encode("utf-8"))
-                    h.update(b"\x00")
-                return h.hexdigest()
-
-            cache_path = (
-                cache_dir
-                / f"llm_interventions_{_concepts_sig()}_{_dataset_sig()}.jsonl"
-            )
+            cache_path = _name_llm_cache(settings.run_dir, concept_names, test.inputs)
             is_self = settings.intervention_expert.lower() == "self"
             if is_self or cache_path.exists():
                 # Load LLM votes into a GT-like concept matrix ("self": no votes, so every answer below
@@ -893,7 +910,6 @@ def _test_interventions(
                             continue
 
                 # Replace test.C with LLM votes for the standard path
-                import copy
                 test_llm = copy.copy(test)
                 # Fill NaN with original predictions (concepts LLM didn't judge)
                 C_llm_filled = np.where(np.isnan(C_llm), (prob_test >= 0.5).astype(np.float32), C_llm)
@@ -910,21 +926,11 @@ def _test_interventions(
                 mask = result.mask
                 C_after = result.C_intervened.copy()
 
-                # No additional noise injection — LLM votes are already noisy
-                if supports_aligned:
-                    result.y_prob_after = predict_label_proba_from_concepts(
-                        cbm,
-                        result.C_intervened,
-                        row_indices=np.arange(result.C_intervened.shape[0], dtype=int),
-                        baseline_concepts=result.C_pred,
-                        intervention_mask=result.mask,
-                    )
-                elif _intervention_encoding() == "koh595" and pct5 is not None:
-                    result.y_prob_after = fe.predict_proba(
-                        _calibrate_revealed(result.C_intervened, result.mask, pct5, pct95))
-                else:
-                    C_final_binary = (result.C_intervened >= 0.5).astype(int)
-                    result.y_prob_after = fe.predict_proba(C_final_binary)
+                result.y_prob_after = _predict_after_intervention(
+                    cbm, fe, result.C_intervened, result.C_pred, result.mask,
+                    supports_aligned=supports_aligned, encoding=settings.encoding,
+                    low_values=low_values, high_values=high_values,
+                )
                 result.y_pred_after = np.argmax(result.y_prob_after, axis=1)
             else:
                 raise FileNotFoundError(f"LLM cache not found at {cache_path}")
@@ -945,11 +951,7 @@ def _test_interventions(
 
             api_key = str(llm_cfg.get("api_key", "")) or os.environ.get(api_key_env, "")
 
-            # When cache_only=True, skip API key validation entirely —
-            # the cache provides all LLM votes, no live calls needed.
-            if cache_only:
-                api_key = api_key or "cache-only-no-key-needed"
-            elif not api_key and not is_local_exec_provider(provider):
+            if not api_key and not is_local_exec_provider(provider):
                 raise SystemExit(
                     f"missing API key: set llm_api_key in config or {api_key_env} in env"
                 )
@@ -1138,28 +1140,8 @@ def _test_interventions(
                 C_true_llm = np.full_like(C_before, np.nan, dtype=float)
 
                 # JSONL on-disk cache
-                run_root = Path(settings.run_dir)
-                cache_dir = run_root / "cache"
-                cache_dir.mkdir(parents=True, exist_ok=True)
-
-                def _concepts_sig():
-                    h = hashlib.sha1()
-                    for name in map(str, concept_names):
-                        h.update(name.encode("utf-8"))
-                        h.update(b"\x00")
-                    return h.hexdigest()
-
-                def _dataset_sig():
-                    h = hashlib.sha1()
-                    for pth in map(str, test.inputs):
-                        h.update(pth.encode("utf-8"))
-                        h.update(b"\x00")
-                    return h.hexdigest()
-
-                cache_path = (
-                    cache_dir
-                    / f"llm_interventions_{_concepts_sig()}_{_dataset_sig()}.jsonl"
-                )
+                cache_path = _name_llm_cache(settings.run_dir, concept_names, test.inputs)
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
 
                 def _load_cache():
                     d = {}
@@ -1438,23 +1420,11 @@ def _test_interventions(
 
             overwrite_mask = mask & ~np.isnan(C_true_llm)
             C_after = np.where(overwrite_mask, C_true_llm, C_before)
-            if supports_aligned:
-                y_prob_after = predict_label_proba_from_concepts(
-                    cbm,
-                    C_after,
-                    row_indices=np.arange(C_after.shape[0], dtype=int),
-                    baseline_concepts=C_before,
-                    intervention_mask=overwrite_mask,
-                )
-            elif _intervention_encoding() == "koh595" and pct5 is not None:
-                y_prob_after = fe.predict_proba(
-                    _calibrate_revealed(C_after, overwrite_mask, pct5, pct95))
-            elif _intervention_encoding() == "hard_revealed":
-                y_prob_after = fe.predict_proba(
-                    _calibrate_revealed(C_after, overwrite_mask, 0.0, 1.0))
-            else:
-                C_final_binary = (C_after >= 0.5).astype(int)
-                y_prob_after = fe.predict_proba(C_final_binary)
+            y_prob_after = _predict_after_intervention(
+                cbm, fe, C_after, C_before, overwrite_mask,
+                supports_aligned=supports_aligned, encoding=settings.encoding,
+                low_values=low_values, high_values=high_values,
+            )
             y_pred_after = np.argmax(y_prob_after, axis=1)
 
             result = SimpleNamespace(
@@ -1485,24 +1455,12 @@ def _test_interventions(
             C_after[mistakes] = 1.0 - C_gt[mistakes]
             result.C_intervened = C_after
 
-            # Recompute downstream prediction after error injection
-            if supports_aligned:
-                result.y_prob_after = predict_label_proba_from_concepts(
-                    cbm,
-                    result.C_intervened,
-                    row_indices=np.arange(result.C_intervened.shape[0], dtype=int),
-                    baseline_concepts=result.C_pred,
-                    intervention_mask=result.mask,
-                )
-            elif _intervention_encoding() == "koh595" and pct5 is not None:
-                result.y_prob_after = fe.predict_proba(
-                    _calibrate_revealed(result.C_intervened, result.mask, pct5, pct95))
-            elif _intervention_encoding() == "hard_revealed":
-                result.y_prob_after = fe.predict_proba(
-                    _calibrate_revealed(result.C_intervened, result.mask, 0.0, 1.0))
-            else:
-                C_final_binary = (result.C_intervened >= 0.5).astype(int)
-                result.y_prob_after = fe.predict_proba(C_final_binary)
+            # predict again, now with the intervener's mistakes
+            result.y_prob_after = _predict_after_intervention(
+                cbm, fe, result.C_intervened, result.C_pred, result.mask,
+                supports_aligned=supports_aligned, encoding=settings.encoding,
+                low_values=low_values, high_values=high_values,
+            )
             result.y_pred_after = np.argmax(result.y_prob_after, axis=1)
 
         # Extract intervention statistics
@@ -1522,24 +1480,9 @@ def _test_interventions(
         y_pred_before = np.argmax(result.y_prob_before, axis=1)
         num_preds_change = int(np.sum(result.y_pred_after != y_pred_before))
 
-        _dump_dir = os.environ.get("INTERVENTION_DUMP_DIR")  # set by --dump-interventions
-        if _dump_dir:  # diagnostics only: which concepts were asked, what was answered, labels before/after
-            import hashlib as _hashlib
-            from pathlib import Path as _Path
-
-            _sig = _hashlib.sha1("\x00".join(map(str, concept_names)).encode()).hexdigest()[:8]
-            _Path(_dump_dir).mkdir(parents=True, exist_ok=True)
-            _who = settings.intervention_expert.lower() or "sim"
-            np.savez_compressed(
-                _Path(_dump_dir) / f"m{len(concept_names)}_{_sig}__{_who}{int(human_acc * 100)}__k{budget}.npz",
-                mask=np.asarray(result.mask, dtype=bool),
-                C_pred=np.asarray(result.C_pred, dtype=np.float32),
-                C_answer=np.asarray(result.C_intervened, dtype=np.float32),
-                C_true=np.asarray(test.C, dtype=np.int8),
-                y=np.asarray(test.y, dtype=np.int8),
-                y_pred_before=np.asarray(y_pred_before, dtype=np.int8),
-                y_pred_after=np.asarray(result.y_pred_after, dtype=np.int8),
-                concept_names=np.asarray(list(map(str, concept_names))),
+        if settings.records_dir:
+            _save_intervention_records(
+                settings.records_dir, settings, budget, concept_names, result, test, y_pred_before
             )
 
         concept_intervention_counts = {
@@ -1708,6 +1651,8 @@ def _run_automated_regime_with_family(
             intervention_accuracy=config.expert_intervention_accuracy,
             intervention_threshold=t,
             intervention_strategy=config.intervention_strategy,
+            encoding=config.intervention_encoding,
+            records_dir=config.intervention_records_dir,
         )
         _, _, r = _test_interventions(
             prob_test=c_preds,
@@ -1765,11 +1710,9 @@ def _prepare_model_for_concept_source(config, concept_source, family, data):
                 concept_detector=None,
                 label_predictor=FEOnProbs(lf.classifier),
             )
-            if _intervention_encoding() == "koh595":
+            if config.intervention_encoding == "percentile":
                 train_paths = [str(image_dir / p) for p in data.train.inputs]
-                P_tr = lf.concept_proba(train_paths)
-                model._koh_pct5 = np.percentile(P_tr, 5, axis=0)
-                model._koh_pct95 = np.percentile(P_tr, 95, axis=0)
+                model.concept_percentiles = _measure_concept_percentiles(lf.concept_proba(train_paths))
             return model, c_preds, list(lf.concept_set.keys), test_truth
         else:
             # Train family model on LFCBM-labeled data
@@ -1785,10 +1728,10 @@ def _prepare_model_for_concept_source(config, concept_source, family, data):
                 )
                 save(model, model_path, overwrite=True)
             c_preds = model.concept_detector.predict_proba(data_lf.test)
-            if _intervention_encoding() == "koh595":
-                P_tr = model.concept_detector.predict_proba(data_lf.train)
-                model._koh_pct5 = np.percentile(P_tr, 5, axis=0)
-                model._koh_pct95 = np.percentile(P_tr, 95, axis=0)
+            if config.intervention_encoding == "percentile":
+                model.concept_percentiles = _measure_concept_percentiles(
+                    model.concept_detector.predict_proba(data_lf.train)
+                )
             return model, c_preds, list(lf.concept_set.keys), test_truth
     else:
         # GT concepts: load the baseline model for this family
@@ -1865,6 +1808,8 @@ def _run_cell(config, concept_source, intervention_source, family, data,
             intervention_accuracy=human_acc,
             intervention_threshold=t,
             intervention_strategy=config.intervention_strategy,
+            encoding=config.intervention_encoding,
+            records_dir=config.intervention_records_dir,
         )
         if expert_type == "llm":
             isettings.intervention_expert = "llm"
@@ -1880,8 +1825,8 @@ def _run_cell(config, concept_source, intervention_source, family, data,
             fe=model.label_predictor,
             test=test_data,
             concept_names=concept_names,
-            pct5=getattr(model, "_koh_pct5", None),
-            pct95=getattr(model, "_koh_pct95", None),
+            low_values=getattr(model, "concept_percentiles", (None, None))[0],
+            high_values=getattr(model, "concept_percentiles", (None, None))[1],
             model=model if supports_aligned else None,
             cache_only=bool(
                 expert_type == "self"
@@ -1929,6 +1874,8 @@ def _run_automated_regime(config, regime, model, data, budgets, thresholds):
             intervention_accuracy=ia_val,
             intervention_threshold=t,
             intervention_strategy=config.intervention_strategy,
+            encoding=config.intervention_encoding,
+            records_dir=config.intervention_records_dir,
             intervention_expert="llm",
             intervention_llm=_automated_intervention_llm_settings(config),
             run_dir=str(results_dir),
@@ -1993,6 +1940,8 @@ def prefill_automated_intervention_caches(
                 intervention_accuracy=config.expert_intervention_accuracy,
                 intervention_threshold=t,
                 intervention_strategy=config.intervention_strategy,
+                encoding=config.intervention_encoding,
+                records_dir=config.intervention_records_dir,
                 intervention_expert="llm",
                 intervention_llm=_automated_intervention_llm_settings(config),
                 run_dir=str(results_dir),
@@ -2098,6 +2047,8 @@ def _run_regime(config, regime, model, data, budgets, thresholds):
             intervention_accuracy=human_acc,
             intervention_threshold=t,
             intervention_strategy=config.intervention_strategy,
+            encoding=config.intervention_encoding,
+            records_dir=config.intervention_records_dir,
         )
         # Pass the full model for CEM/ProbCBM so aligned concept replay
         # is used instead of bare binarization.
@@ -2809,6 +2760,14 @@ def _parse_args(argv=None):
         help="Save, per cell and budget, the concepts intervened on, the answers given, the true values and the "
              "labels before/after as .npz files in DIR (for diagnostics).",
     )
+    parser.add_argument(
+        "--intervention-encoding",
+        choices=sorted(INTERVENTION_ENCODINGS),
+        default=None,
+        help="What a label predictor without concept replay reads after an intervention: binary (every concept "
+        "thresholded; default), percentile (revealed concepts set to the 5th/95th percentile of their training "
+        "values; for label-free CBMs) or binary_revealed (revealed concepts set to 0/1, the rest continuous).",
+    )
     parser.add_argument("--llm-cache-all-concepts", action="store_true")
     parser.add_argument("--llm-workers", type=int, default=None)
     parser.add_argument("--llm-batch-size", type=int, default=None)
@@ -2898,7 +2857,9 @@ def _apply_cli_args(config: RobotBenchmarkConfig, args) -> None:
     if args.llm_cache_only:
         config.llm_cache_only = True
     if args.dump_interventions:
-        os.environ["INTERVENTION_DUMP_DIR"] = args.dump_interventions
+        config.intervention_records_dir = args.dump_interventions
+    if args.intervention_encoding:
+        config.intervention_encoding = args.intervention_encoding
     if args.llm_cache_all_concepts:
         config.llm_cache_all_concepts = True
     if args.llm_workers is not None:

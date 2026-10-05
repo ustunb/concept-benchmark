@@ -189,6 +189,7 @@ IMAGE_SIZE_TO_PIXELS = {
 MISSING_PROPORTION = 0.2
 
 VALID_STRATEGIES = frozenset({"up_to_k", "exactly_k"})
+INTERVENTION_ENCODINGS = frozenset({"binary", "percentile", "binary_revealed"})
 VALID_ROBOT_CBM_FAMILIES = frozenset({"cbm", "cem", "probcbm", "ecbm"})
 VALID_SUDOKU_CBM_FAMILIES = frozenset({"cbm", "cem", "probcbm", "ecbm"})
 VALID_CBM_FAMILIES = VALID_ROBOT_CBM_FAMILIES
@@ -360,6 +361,8 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     )
     intervention_accuracy: float = 1.0
     intervention_strategy: str = "up_to_k"  # "up_to_k" or "exactly_k"
+    intervention_encoding: str = "binary"  # see INTERVENTION_ENCODINGS
+    intervention_records_dir: str | None = None  # save what was asked and answered per budget
 
     # Intervention regimes
     intervention_regimes: list[str] = field(default_factory=lambda: ["baseline"])
@@ -474,6 +477,11 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         if any(b < -1 for b in self.intervention_budgets):
             raise ValueError(
                 f"intervention_budgets must be non-negative (or -1 for max), got {self.intervention_budgets}"
+            )
+        if self.intervention_encoding not in INTERVENTION_ENCODINGS:
+            raise ValueError(
+                f"intervention_encoding must be one of {sorted(INTERVENTION_ENCODINGS)}, "
+                f"got {self.intervention_encoding!r}"
             )
         if self.intervention_strategy not in VALID_STRATEGIES:
             raise ValueError(
@@ -614,6 +622,8 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 "alignment_constraints",
                 "intervention_budgets",
                 "intervention_strategy",
+                "intervention_encoding",
+                "intervention_records_dir",
                 "intervention_regimes",
                 "intervention_accuracy",
                 "intervention_thresholds",
@@ -670,6 +680,8 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             "intervention_thresholds",
             "intervention_accuracy",
             "intervention_strategy",
+            "intervention_encoding",
+            "intervention_records_dir",
             "intervention_regimes",
             "expert_intervention_accuracy",
             "subjective_noise_rate",
