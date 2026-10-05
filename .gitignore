@@ -160,3 +160,10 @@ examples/.ipynb_checkpoints
 /results/
 .ultraplan/
 huggingface_export/
+
+# Local data, caches, notes and agent tooling
+data/
+experiments/_*
+notes/
+.claude/
+docs/paper_results_index.csv
