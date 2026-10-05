@@ -147,8 +147,7 @@ for k in budgets:
     k_str = str(k) if k != n_concepts else f"{k} (max)"
     print(f"  {k_str:>8s}   {acc:>8.4f}   {gain:>+8.4f}")
 
-# Expected results (seed=1014, subconcept, KFlip with threshold=0.2):
-#   k=0: 0.7812  |  k=1: 0.9212  |  k=3: 0.9439  |  k=12 (max): 0.9439
+# Accuracy rises with k; over the paper's 10 seeds the CBM goes from 77.6% (k=0) to 85.7% (k=max).
 
 # ---------------------------------------------------------------------------
 # 6. DNN baseline — end-to-end image classifier (no concepts)
