@@ -97,7 +97,7 @@ def main() -> None:
     for i, (key, label) in enumerate(labels):
         if i == 2:
             lines.append(r"\midrule")
-        lines.append(label + " & " + " & ".join(f"{v:.1f}" for c in args.concept_sets for v in results[c][key]) + r" \\")
+        lines.append(label + " & " + " & ".join(f"{v:.1f}\\%" for c in args.concept_sets for v in results[c][key]) + r" \\")
     lines += [r"\bottomrule", r"\end{tabular}"]
     args.out.write_text("\n".join(lines) + "\n")
     print(f"wrote {args.out}")

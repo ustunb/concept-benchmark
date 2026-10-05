@@ -54,8 +54,8 @@ def dnn_coverage(res: int) -> list[float]:
 def cell(values: list[float], is_best: bool = False) -> str:
     mean, se = mean_se(values)
     if is_best:
-        return f"\\textbf{{{mean:.1f}\\%}}$\\boldsymbol{{\\pm}}$\\textbf{{{se:.1f}}}"
-    return f"{mean:.1f}\\%$\\pm${se:.1f}"
+        return f"\\textbf{{{mean:.1f}\\%}}{{\\scriptsize$\\boldsymbol{{\\pm}}$\\textbf{{{se:.1f}}}}}"
+    return f"{mean:.1f}\\%{{\\scriptsize$\\pm${se:.1f}}}"
 
 
 def main() -> None:
@@ -84,7 +84,7 @@ def main() -> None:
         if len(dnn) != n:
             raise SystemExit(f"{res}px: {len(dnn)} DNN seeds, {n} for the architectures")
         lines.append(r"\midrule")
-        lines.append(rf"\multirow{{5}}{{*}}{{\cell{{l}}{{\textds{{{res}\,px}}\\$n{{=}}{n}$}}}}")
+        lines.append(rf"\multirow{{5}}{{*}}{{\textds{{{res}\,px}}}}")
         lines.append(f" & {'\\DNN{}':<11}& " + " & ".join([cell(dnn), "--", "--", "--"] * 2) + r" \\")
         print(f"{res}px dnn      n={n}  coverage {mean_se(dnn)[0]:5.1f}±{mean_se(dnn)[1]:4.1f}")
         for arch, macro in ARCHS:

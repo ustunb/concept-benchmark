@@ -82,7 +82,7 @@ def main() -> None:
 \begin{tikzpicture}
 \pgfplotsset{
   bars/.style={
-    xbar, bar width=8pt, width=3.6cm, height=3.0cm, scale only axis, clip=false,
+    xbar, bar width=11pt, width=3.6cm, height=3.0cm, scale only axis, clip=false,
     axis line style={black!55, line width=0.5pt}, every tick/.style={black!55, line width=0.4pt},
     axis x line*=bottom, axis y line*=left, tick align=outside, ytick style={draw=none},
     ytick={0,1}, ymin=-0.6, ymax=1.6, yticklabel style={font=\fontsize{8}{9}\selectfont},

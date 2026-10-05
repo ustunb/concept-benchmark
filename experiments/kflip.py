@@ -338,7 +338,8 @@ class KFlipInterventionStrategy(InterventionStrategy):
             rows = np.nonzero(eligible_rows)[0]
             if rows.size == 0:
                 continue
-            mass, lbl_star = subset_mass(rows, subset)
+            # a subset with more value combinations than `n_samples` (over 12 concepts) is estimated from the draws
+            mass, lbl_star = subset_mass(rows, subset, sampled=is_sampled(len(subset)))
             score = mass - cost * len(subset)
             improve = score > best_score[rows]
             if np.any(improve):

@@ -56,8 +56,8 @@ def cell(values: list[float], is_best: bool = False) -> str:
     mean = st.mean(values)
     se = st.stdev(values) / len(values) ** 0.5
     if is_best:
-        return f"\\textbf{{{mean:.1f}\\%}}$\\boldsymbol{{\\pm}}$\\textbf{{{se:.1f}}}"
-    return f"{mean:.1f}\\%$\\pm${se:.1f}"
+        return f"\\textbf{{{mean:.1f}\\%}}{{\\scriptsize$\\boldsymbol{{\\pm}}$\\textbf{{{se:.1f}}}}}"
+    return f"{mean:.1f}\\%{{\\scriptsize$\\pm${se:.1f}}}"
 
 
 def main() -> None:
@@ -71,10 +71,6 @@ def main() -> None:
     lines = [
         r"\begin{table*}[t]",
         r"\centering",
-        r"\caption{Accuracy of concept-based models in the decision-support benchmark under each concept set and "
-        r"intervention regime with $k$ interventions"
-        rf"{suffix}{' (mean $' + chr(92) + 'pm$ SE, $n{=}4$ seeds)' if args.rule == 'sparse' else ''}.}}",
-        rf"\label{{{label}}}",
         r"\small",
         r"\resizebox{1.0\textwidth}{!}{",
         r"\renewcommand{\arraystretch}{1.1}",
@@ -84,7 +80,7 @@ def main() -> None:
         r"\cmidrule(lr){3-14}",
         r"& & \multicolumn{4}{c|}{\textds{perfect}} & \multicolumn{4}{c|}{\textds{expert}} & \multicolumn{4}{c}{\textds{llm}} \\",
         r"\cmidrule(lr){3-6} \cmidrule(lr){7-10} \cmidrule(lr){11-14}",
-        r"\textbf{Dataset} & \textbf{Model} & $k{=}0$ & $k{=}1$ & $k{=}3$ & max & $k{=}0$ & $k{=}1$ & $k{=}3$ & max & $k{=}0$ & $k{=}1$ & $k{=}3$ & max \\",
+        r"\textbf{Dataset} & \textbf{Model} & $k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$ & $k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$ & $k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$ \\",
     ]
     for i, (source, name, m) in enumerate(CONCEPT_SETS):
         lines.append(r"\midrule")
@@ -107,7 +103,18 @@ def main() -> None:
                 first_best = means.index(best[isrc]) if best[isrc] in means else None  # earliest budget only
                 row += [cell([r[k] for r in runs[family, isrc]], is_best=k == first_best) for k in range(4)]
             lines.append(f" & {macro:<11}& " + " & ".join(row) + r" \\")
-    lines += [r"\bottomrule", r"\end{tabular}", r"}", r"\end{table*}"]
+    lines += [
+        r"\bottomrule",
+        r"\end{tabular}",
+        r"}",
+        r"\caption{Accuracy of concept-based models in the decision-support benchmark under each concept set and "
+        r"intervention regime with $k$ interventions"
+        rf"{suffix}{' (mean $' + chr(92) + 'pm$ SE, $n{=}4$ seeds)' if args.rule == 'sparse' else ''}."
+        + (r" With \textds{human\_concepts}, every architecture is less accurate after all interventions than with "
+           r"\textds{true\_concepts}." if args.rule == "sparse" else "") + "}",
+        rf"\label{{{label}}}",
+        r"\end{table*}",
+    ]
     args.out.write_text("\n".join(lines) + "\n")
     print(f"wrote {args.out} ({len(CONCEPT_SETS) * len(ARCHS)} rows)")
 
