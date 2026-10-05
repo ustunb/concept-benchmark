@@ -1,8 +1,8 @@
 # Configuration file for the Sphinx documentation builder.
 
 project = "concept-benchmark"
-copyright = "2025, Anonymous Authors"
-author = "Anonymous Authors"
+copyright = "2026, The Concept Benchmark Authors"
+author = "The Concept Benchmark Authors"
 
 extensions = [
     "sphinx.ext.autodoc",
@@ -68,6 +68,7 @@ def _copy_readme_assets(app, exception):
 
 def setup(app):
     app.connect("build-finished", _copy_readme_assets)
+
 
 # -- Myst settings -----------------------------------------------------------
 suppress_warnings = ["myst.xref_missing"]

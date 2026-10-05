@@ -21,7 +21,8 @@ The package includes two benchmarks:
 3. [Benchmarks](#benchmarks)
 4. [Benchmark Your Own Model](#benchmark-your-own-model)
 5. [Interventions and Alignment](#interventions-and-alignment)
-6. [Citation](#citation)
+6. [Reproducing the Paper](#reproducing-the-paper)
+7. [Citation](#citation)
 
 ## Installation
 
@@ -44,10 +45,10 @@ Then install the package:
 pip install concept-benchmark
 ```
 
-**Dataset generation** works out of the box with `pip install`. **Model training, interventions, and evaluation** (`experiments/` package) require cloning the repo:
+**Dataset generation, metrics, and plots** work out of the box with `pip install`. **Model training and interventions** (`experiments/` package and the pipelines in `scripts/`) require cloning the repo:
 
 ```bash
-git clone https://anonymous.4open.science/r/concept-benchmark-84D2.git
+git clone https://github.com/ustunb/concept-benchmark.git
 cd concept-benchmark
 uv sync
 ```
@@ -55,7 +56,15 @@ uv sync
 Verify the installation:
 
 ```bash
-python3 -c "import concept_benchmark; print('OK')"
+python3 -c "import concept_benchmark; print(concept_benchmark.__version__)"
+```
+
+The datasets of the paper are also on the Hugging Face Hub ([`robots-true-concepts`](https://huggingface.co/datasets/juliannski/robots-true-concepts), [`robots-human-concepts`](https://huggingface.co/datasets/juliannski/robots-human-concepts), [`sudoku`](https://huggingface.co/datasets/juliannski/sudoku)):
+
+```python
+# pip install datasets
+from datasets import load_dataset
+ds = load_dataset("juliannski/robots-human-concepts")
 ```
 
 <details>
@@ -67,7 +76,7 @@ The repo supports three additional CBM families beyond the standard CBM/DNN:
 - **ProbCBM** — Probabilistic Concept Bottleneck Model (`--cbm-family probcbm`)
 - **ECBM** — Energy-based Concept Bottleneck Model (`--cbm-family ecbm`)
 
-**ECBM** is included in the repo and works out of the box. **CEM and ProbCBM** require the official [`mateoespinosa/cem`](https://github.com/mateoespinosa/cem) package — install it with:
+**ECBM** is included in the repo and works out of the box (it follows the authors' code). **CEM and ProbCBM** require the official [`mateoespinosa/cem`](https://github.com/mateoespinosa/cem) package — install it with:
 
 ```bash
 ./scripts/install_cem_repo.sh
@@ -91,26 +100,28 @@ python scripts/robot_pipeline.py --seed 1014 --cbm-family cem
 # Train and evaluate a ProbCBM on the robot benchmark
 python scripts/robot_pipeline.py --seed 1014 --cbm-family probcbm
 
-# CEM / ProbCBM on tabular sudoku
-python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family cem --stages setup cs intervene
-python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family probcbm --stages setup cs intervene
+# Train and evaluate an ECBM on the robot benchmark
+python scripts/robot_pipeline.py --seed 1014 --cbm-family ecbm
+
+# Any family on sudoku
+python scripts/sudoku_pipeline.py --seed 171 --cbm-family cem
+python scripts/sudoku_pipeline.py --seed 171 --cbm-family ecbm
 ```
 
-Key configuration options (set via `--`flags or in the config dataclass):
+Key configuration options (fields of the config dataclass):
 
 | Parameter | Default | Description |
 |---|---|---|
 | `cem_emb_size` | 16 | Concept embedding dimension for CEM |
 | `cem_training_intervention_prob` | 0.25 | Intervention probability during CEM training |
-| `probcbm_train_class_mode` | `independent` | ProbCBM class training: `independent` or `sequential` |
+| `training_mode` | `independent` | How the concept and label parts are trained: `independent`, `sequential` or `joint` (CLI: `--training-mode`) |
 | `probcbm_n_samples_inference` | 50 | Monte Carlo samples during ProbCBM inference |
 
 Notes:
 
 - Existing CBM / DNN / conceptual-safeguards paths do not require these packages.
-- Robot support is implemented for the benchmark pipeline.
-- Sudoku support is currently limited to the tabular variant for `cem` / `probcbm`.
-- Alignment and plotting remain on the original `cbm` path.
+- Every family runs on both benchmarks.
+- Alignment remains on the original `cbm` path.
 
 </details>
 
@@ -122,21 +133,12 @@ A concept bottleneck model (CBM) first predicts interpretable *concepts* from in
 
 ```python
 from concept_benchmark.robots import DatasetGenerator
-from concept_benchmark.transforms import ConceptDropGenerator
 
 dataset = DatasetGenerator(
     seed=1014,
     concept_preset="foot_subtypes",  # expand foot_shape into subtypes (default: "ground_truth")
     render_images=True,              # set False to skip rendering for quick exploration
-).generate()
-
-# Drop some concepts to get a 12-concept setup
-dataset = ConceptDropGenerator(dataset, [
-    "has_elbows", "hand_shape", "foot_shape",
-    "foot_shape_flat_rounded", "foot_shape_flat_lshaped",
-    "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
-]).generate()
-dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
+).generate_splits()                  # the train/val/test split of the paper
 
 print(dataset.train.C.shape)   # (3800, 12) — concept annotations
 print(dataset.train.concepts)
@@ -145,6 +147,8 @@ print(dataset.train.concepts)
 #  'foot_shape_flat_5sided', 'foot_shape_pointy_rounded',
 #  'foot_shape_pointy_square', 'foot_shape_pointy_4sided']
 ```
+
+`generate()` returns the unsplit dataset with every concept, for you to drop concepts and split as you choose (see [Post-processing](#post-processing)).
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/robot_samples.png" width="600" alt="Sample Glorps and Drents with concept annotations">
@@ -161,10 +165,7 @@ dataset = DatasetGenerator(
     max_cell_swaps=9,     # cells swapped in invalid boards (higher = subtler errors)
     valid_board_ratio=0.5,  # fraction of valid boards
     render_images=False,  # set True to generate board images (slower)
-).generate()
-
-# Stratified split — preserves valid/invalid ratio in each split
-dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=171)
+).generate_splits()       # 60/20/20, stratified on the label
 
 print(dataset.train.C.shape)   # (600, 27) — 27 concept annotations
 print(dataset.train.concepts)  # ['row_valid_1', 'row_valid_2', ..., 'block_valid_9']
@@ -174,7 +175,7 @@ print(dataset.train.concepts)  # ['row_valid_1', 'row_valid_2', ..., 'block_vali
   <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/sudoku_samples.png" width="600" alt="Sample Sudoku boards generated by the benchmark">
 </p>
 
-For complete walkthroughs including training and evaluation, see [`examples/robot_pipeline_example.py`](examples/robot_pipeline_example.py) and [`examples/sudoku_quickstart.py`](examples/sudoku_quickstart.py).
+For complete walkthroughs including training and evaluation, see [`examples/robot_pipeline_example.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/robot_pipeline_example.py) and [`examples/sudoku_quickstart.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/sudoku_quickstart.py).
 
 ## Benchmarks
 
@@ -203,25 +204,15 @@ dataset = DatasetGenerator(
         "has_antennae": ["false", "true"],
         "ears_shape": ["square", "triangle"],
         "mouth_type": ["closed", "open"],
-        "hand_shape": ["round", "edgy"],       # collapsed to binary by default
-        "foot_shape": ["flat", "pointy"],      # collapsed to binary by default
-        # Subconcepts (use expand_concepts to expose individual subtypes):
-        #   hand_shape: round_circle, round_oval, round_oval2,
-        #               edgy_triangle, edgy_square, edgy_trapezoid
-        #   foot_shape: flat_trapezoid, flat_rounded, flat_square, flat_5sided,
-        #               flat_lshaped, pointy_trapezoid, pointy_rounded,
-        #               pointy_square, pointy_3sided, pointy_4sided
+        # the two shapes list their subtypes; each becomes one binary concept (round/edgy, flat/pointy)
+        # unless it is named in expand_concepts
+        "hand_shape": ["round_circle", "round_oval", "round_oval2",
+                       "edgy_triangle", "edgy_square", "edgy_trapezoid"],
+        "foot_shape": ["flat_trapezoid", "flat_rounded", "flat_square", "flat_5sided", "flat_lshaped",
+                       "pointy_trapezoid", "pointy_rounded", "pointy_square", "pointy_3sided", "pointy_4sided"],
     },
-    label_formula=LabelFormula(       # scoring rule for class assignment
-        score=(                       #   score = 5·[mouth=closed] + 8·[foot=pointy] - 5·[knees=true] + 2
-            5 * F("mouth_type").closed
-            + 8 * F("foot_shape").pointy
-            - 5 * F("has_knees").true
-            + 2
-        ),
-        temperature=4.2,              #   P(Glorp) = σ(4.2 × score)
-        stochastic=True,
-    ),
+    label_rule="balanced",           # "balanced" (default) or "sparse"; see Labeling rules below
+    label_formula=None,              # or your own LabelFormula (see below), which replaces the rule's formula
     concept_preset="foot_subtypes",  # "ground_truth" or "foot_subtypes" (expands foot_shape into subtypes)
     renders_per_robot=4,             # samples per unique robot config (image: 4, text: 1)
     expand_concepts=["foot_shape"],                 # which features expand into subconcepts
@@ -231,6 +222,30 @@ dataset = DatasetGenerator(
     render_images=True,              # set False to skip rendering PNGs (faster)
     # ── Text-only (data_type="text") ──
     template_complexity="high",      # template complexity level
+).generate()
+```
+
+#### Labeling rules
+
+A robot is a Glorp with probability `σ(4.2 × score)`, where the score comes from one of two rules:
+
+| Rule | Score | What it models |
+|------|-------|----------------|
+| **balanced** (default) | `6·[mouth closed] + 6·[body round] + 6·[head round] + 6·[antennae] + 6·[ears triangle] + 8·[foot pointy] − 3·[knees] − 2·[elbows] − 16.5` | No single concept decides the label and both classes are equally likely. `has_elbows` drives the label but is not a concept, so it is visible in the image and cannot be intervened on. Used for the main results of the paper. |
+| **sparse** | `5·[mouth closed] + 8·[foot pointy] − 5·[knees] + 2` | Three concepts decide the label and 87.5% of robots are Glorps. Models a task where the class of interest is rare. |
+
+Each rule also sets which foot subtypes the training split of `generate_splits()` holds: six of the ten subtypes, at 30%/10% shares under the balanced rule and 49%/0.5% under the sparse rule (`concept_benchmark.config.ROBOT_LABEL_RULES`). To use your own rule, pass a `LabelFormula`:
+
+```python
+from concept_benchmark.robots import DatasetGenerator, LabelFormula, F
+
+dataset = DatasetGenerator(
+    seed=1014,
+    label_formula=LabelFormula(
+        score=4 * F("mouth_type").closed + 6 * F("body_shape").round - 3 * F("has_knees").true - 2,
+        temperature=4.2,              # P(Glorp) = σ(4.2 × score)
+        stochastic=True,
+    ),
 ).generate()
 ```
 
@@ -263,22 +278,20 @@ dataset = ConceptDropGenerator(dataset, ["has_elbows", "hand_shape"]).generate()
 dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
 ```
 
-For the paper's skewed splits (ensuring minimum representation of rare concept patterns), drop additional foot subtypes and use `sampling_constraints`:
+`generate_splits()` does both steps for the paper's setup. Its split requires a minimum share of each training foot subtype through `sampling_constraints`, which you can also pass yourself:
 
 ```python
 from concept_benchmark.config import PRESET_EXCLUDED_CONCEPTS
-from concept_benchmark.transforms import ConceptDropGenerator
 
-dataset = ConceptDropGenerator(dataset, PRESET_EXCLUDED_CONCEPTS["foot_subtypes"]).generate()
-# drops: has_elbows, hand_shape, foot_shape, foot_shape_flat_rounded,
-#        foot_shape_flat_lshaped, foot_shape_pointy_trapezoid, foot_shape_pointy_3sided
-
+dataset = DatasetGenerator(seed=1014, concept_preset="foot_subtypes").generate()
 dataset.sample(
     test_size=10000, val_size=0.2, train_size=3800, seed=1014,
     sampling_constraints=[
-        {"concepts": {"foot_shape_pointy_4sided": 1}, "min_fraction": 0.49},
+        {"concepts": {"foot_shape_pointy_4sided": 1}, "min_fraction": 0.30},
     ],
 )
+# split first: the constraints name subtypes that the preset drops
+dataset.drop_concepts(PRESET_EXCLUDED_CONCEPTS["foot_subtypes"])
 ```
 
 #### Pipeline
@@ -288,11 +301,25 @@ python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes
 python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes --cbm-family cem
 python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes --cbm-family probcbm
 
+# The rare-class rule
+python scripts/robot_pipeline.py --seed 1014 --label-rule sparse
+
 # Add plot to generate figures from results
 python scripts/robot_pipeline.py --seed 1014 --stages setup cbm dnn intervene align collect plot
 ```
 
-Run `python scripts/robot_pipeline.py --help` for the full list of options (including training, intervention, and regime parameters).
+| Option | Description |
+|--------|-------------|
+| `--concept-preset` | `ground_truth` (7 true concepts) or `foot_subtypes` (12 human concepts) |
+| `--label-rule` | `balanced` (default) or `sparse` |
+| `--cbm-family` | `cbm`, `cem`, `probcbm` or `ecbm` |
+| `--concept-sources` | Who annotates the concepts: `ground_truth`, `human_concepts`, `noisy_human_concepts`, `machine_annotation`, `llm_concepts`, `clip_concepts` |
+| `--intervention-sources` | Who answers at test time: `perfect`, `expert`, `llm`, or `self` (the model's own predictions) |
+| `--budgets` | Intervention budgets, e.g. `1 3 max` |
+| `--intervention-encoding` | What a label-free CBM reads after an intervention: `binary` (default), `percentile` or `binary_revealed` |
+| `--dump-interventions DIR` | Save what was asked and answered for each budget (input to `plot_concept_report`) |
+
+Run `python scripts/robot_pipeline.py --help` for the full list of options (including training and LLM parameters).
 
 #### Training and evaluation
 
@@ -300,51 +327,29 @@ Train CBMs on both concept sets and compare (requires cloning the repo):
 
 ```python
 from concept_benchmark.robots import DatasetGenerator
-from concept_benchmark.transforms import ConceptDropGenerator
-from concept_benchmark.evaluation import accuracy, plot_concept_discovery
-from experiments.models import ConceptDetector, FrontEndModel, ConceptBasedModel, RobotConceptClassifier
-import pandas as pd
+from concept_benchmark.evaluation import accuracy
+from experiments.models import ConceptDetector, ConceptBasedModel, RobotConceptClassifier
 
-def train_and_evaluate(concept_preset, drop_list):
+def train_and_evaluate(concept_preset):
     """Generate data, train CBM, return accuracy."""
-    ds = DatasetGenerator(seed=1014, concept_preset=concept_preset).generate()
-    ds = ConceptDropGenerator(ds, drop_list).generate()
-    ds.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
-
+    ds = DatasetGenerator(seed=1014, concept_preset=concept_preset).generate_splits()
     cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=ds.train.n_concepts, input_size=32))
     cbm = ConceptBasedModel(concept_detector=cd)
-    cbm.fit(ds.train, ds.val, concept_fit_params={"epochs": 50, "lr": 1e-3, "patience": 10})
+    cbm.fit(ds.train, ds.val, freeze_backbone=False,  # False: train the concept detector too
+            concept_fit_params={"epochs": 50, "lr": 1e-3, "patience": 10})
     return accuracy(cbm.predict(ds.test), ds.test.y)
 
-# Step 1: Train on ideal concepts (7 concepts)
-ideal_acc = train_and_evaluate("ground_truth", [
-    "has_elbows", "hand_shape",
-    "foot_shape_flat_rounded", "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
-    "foot_shape_flat_lshaped", "foot_shape_pointy_4sided", "foot_shape_pointy_square",
-    "foot_shape_pointy_rounded", "foot_shape_flat_5sided", "foot_shape_flat_square",
-    "foot_shape_flat_trapezoid",
-])
-print(f"Ideal CBM: {ideal_acc:.4f}")      # 0.8673
-
-# Step 2: Train on subconcepts (12 concepts)
-sub_acc = train_and_evaluate("foot_subtypes", [
-    "has_elbows", "hand_shape", "foot_shape",
-    "foot_shape_flat_rounded", "foot_shape_flat_lshaped",
-    "foot_shape_pointy_trapezoid", "foot_shape_pointy_3sided",
-])
-print(f"Subconcept CBM: {sub_acc:.4f}")    # 0.7812
-
-# Step 3: Plot the comparison
-ideal_df = pd.DataFrame({"budget": [0], "accuracy": [ideal_acc]})
-sub_df = pd.DataFrame({"budget": [0], "accuracy": [sub_acc]})
-fig, ax = plot_concept_discovery(ideal_df, sub_df, dnn_accuracy=0.8746, budgets=[0])
+print(f"True concepts (7):   {train_and_evaluate('ground_truth'):.3f}")   # 0.834 in our run
+print(f"Human concepts (12): {train_and_evaluate('foot_subtypes'):.3f}")  # 0.809 in our run
 ```
 
+Over the 10 seeds of the paper, the CBM reaches 84.5% with the true concepts and 77.6% with the human concepts before interventions, and 92.0% and 85.7% once every concept is corrected; the DNN reaches 88%. A single run differs from these means by a few points, and across hardware.
+
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/concept_discovery.png" width="500" alt="Concept discovery: ideal vs subconcept accuracy">
+  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/intervention_curve.png" width="500" alt="Accuracy against the intervention budget for four architectures">
 </p>
 
-For a complete walkthrough including interventions, alignment, and regime comparisons, see [`examples/robot_pipeline_example.py`](examples/robot_pipeline_example.py).
+For a complete walkthrough including interventions and alignment, see [`examples/robot_pipeline_example.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/robot_pipeline_example.py).
 
 ### Sudoku Validation
 
@@ -393,9 +398,21 @@ print(df[show_cols])
 
 ```bash
 python scripts/sudoku_pipeline.py --seed 171
-python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family cem --stages setup cs intervene
-python scripts/sudoku_pipeline.py --seed 171 --data-type tabular --cbm-family probcbm --stages setup cs intervene
+python scripts/sudoku_pipeline.py --seed 171 --cbm-family cem
+
+# Harder concept detection: 18 pixels per cell instead of 50
+python scripts/sudoku_pipeline.py --seed 171 --cell-px 18
+
+# Save each model's confidence for plot_confidence (optional stage)
+python scripts/sudoku_pipeline.py --seed 171 --stages cs intervene selective diagnose plot
 ```
+
+| Option | Description |
+|--------|-------------|
+| `--cbm-family` | `cbm`, `cem`, `probcbm` or `ecbm` |
+| `--cell-px` | Pixels per cell (50 by default; 18 blurs the handwritten digits) |
+| `--target-accuracy` | Selective accuracy that kept predictions must reach (0.90 by default; the paper uses 0.95) |
+| `--stages` | `setup ocr cs dnn intervene selective align collect plot`, plus the optional `diagnose` |
 
 Run `python scripts/sudoku_pipeline.py --help` for the full list of options (including training, intervention, and evaluation parameters).
 
@@ -410,8 +427,9 @@ from experiments.utils import determine_device, get_loader_config
 import numpy as np
 
 # Generate data and train CS model
-dataset = DatasetGenerator(seed=171, n_boards=1000, max_cell_swaps=9).generate()
-dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=171)
+dataset = DatasetGenerator(
+    seed=171, n_boards=1000, max_cell_swaps=9, data_type="tabular",  # the digits of each board, not its image
+).generate_splits()
 
 cd = ConceptDetector(model=GroupPoolingConceptSudokuCNN())
 cd.fit(dataset.train, dataset.val, fit_params={
@@ -438,14 +456,14 @@ for tau in np.linspace(0, 0.5, 500):
 
 sel_acc = np.mean(y_pred[keep] == dataset.test.y[keep])
 cov = keep.mean()
-print(f"CS model: selective_acc={sel_acc:.3f}, coverage={cov:.3f}")  # ~0.98, ~1.0
+print(f"CS model: selective_acc={sel_acc:.3f}, coverage={cov:.3f}")  # 0.955, 1.000 in our run
 ```
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/selective_classification.png" width="500" alt="Selective classification: DNN vs CBM">
+  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/automation.png" width="500" alt="Coverage and net work automated against concept checks">
 </p>
 
-For a complete walkthrough including selective classification and interventions, see [`examples/sudoku_quickstart.py`](examples/sudoku_quickstart.py).
+For a complete walkthrough including selective classification and interventions, see [`examples/sudoku_quickstart.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/sudoku_quickstart.py).
 
 <details>
 <summary><h2 style="display:inline">Benchmark Your Own Model</h2></summary>
@@ -477,7 +495,7 @@ Each split is a `ConceptDatasetSample` with these attributes:
 Access formats:
 
 ```python
-# NumPy arrays (default)
+# NumPy arrays; X (also .inputs) holds the image file names, the texts or the feature rows
 X_train, C_train, y_train = train.X, train.C, train.y
 
 # PyTorch DataLoader
@@ -503,7 +521,7 @@ dataset.sample(test_size=0.2, val_size=0.2, seed=42)
 # Stratified — preserves class proportions in each split
 dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=42)
 
-# Group-based — no group appears in multiple splits (e.g., robot identity)
+# Group-based — no group appears in multiple splits (group_ids: one id per row, e.g. the robot's identity)
 dataset.sample(test_size=0.2, val_size=0.2, groups=group_ids, seed=42)
 
 # Skewed training set — ensure min-fraction of specific concept patterns
@@ -631,7 +649,7 @@ accuracy = np.mean(predictions == test.y)
 print(f"CBM accuracy: {accuracy:.4f}")
 ```
 
-For running interventions and alignment on your model, see the [Interventions and Alignment](#interventions-and-alignment) section and [`examples/robot_pipeline_example.py`](examples/robot_pipeline_example.py).
+For running interventions and alignment on your model, see the [Interventions and Alignment](#interventions-and-alignment) section and [`examples/robot_pipeline_example.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/robot_pipeline_example.py).
 
 ### Metrics and Plots
 
@@ -640,7 +658,7 @@ The `concept_benchmark.evaluation` module provides standalone metric functions a
 ```python
 from concept_benchmark.evaluation import (
     accuracy, gain, selective_accuracy, coverage,
-    plot_intervention_curve, plot_regime_comparison,
+    plot_intervention_curve, plot_intervention_heatmap, plot_concept_report,
 )
 ```
 
@@ -655,24 +673,53 @@ from concept_benchmark.evaluation import (
 | `coverage(confidence, threshold)` | Fraction of samples where the model does not abstain |
 | `net_work_automated(confidence, threshold, n_interventions, n_concepts)` | Net fraction of work automated after intervention cost |
 
-**Plots:**
+**Plots** take the results tables that the pipelines write (or your own, with the same columns). Rows from several runs are averaged and drawn with a standard-error band, so pass the concatenated results of all your seeds.
 
-| Function | Description |
-|----------|-------------|
-| `plot_intervention_curve(results_df, baseline_accuracy=...)` | Line plot of accuracy vs intervention budget *k* |
-| `plot_regime_comparison(regime_df)` | Horizontal bar chart of mean delta-accuracy per regime |
-| `plot_concept_discovery(ideal_df, subconcept_df, dnn_accuracy)` | Clustered bar chart of ideal vs subconcept accuracy |
-| `plot_selective_classification(dnn_metrics, cbm_metrics)` | Grouped bar chart comparing DNN vs CBM on selective metrics |
-| `plot_alignment_comparison(results_dict)` | Horizontal bar chart of CBM vs aligned CBM gain |
+Outcome plots show *what* happens:
 
-All plot functions return `(fig, ax)` and accept an optional `ax` parameter for composing multiple plots.
+| Function | Shows |
+|----------|-------|
+| `plot_intervention_curve(results, group=..., baseline_accuracy=...)` | Accuracy against the intervention budget *k*, one line per model or concept set, with the DNN as a dashed line |
+| `plot_intervention_heatmap(results)` | Change in accuracy from interventions for each model, concept set and intervention source |
+| `plot_alignment_comparison(results)` | Constrained against unconstrained model, before and after interventions |
+| `plot_automation(results, n_instances, n_concepts)` | Coverage and net work automated against the number of concept checks |
+| `plot_selective_classification(dnn_metrics, cbm_metrics)` | DNN against CBM on selective accuracy and coverage |
+| `plot_concept_discovery(ideal_df, subconcept_df, dnn_accuracy)` | True against human concepts at each budget |
+
+Diagnostic plots show *why*:
+
+| Function | Shows | Read it as |
+|----------|-------|------------|
+| `plot_concept_report(mask, concept_proba, concept_answers, concepts_true, concept_names)` | Per concept: detector accuracy, share of interventions, intervener accuracy | An intervener helps only if it is accurate on the concepts the model asks about |
+| `plot_answer_reliance(results)` | Change in accuracy when interventions supply the model's own answers against the true values | Similar bars mean the model does not rely on its concept values |
+| `plot_confidence(prob_positive, y_true, abstention_threshold)` | Predicted probabilities by class, with the band where the model abstains | Instances inside the band are deferred no matter how many concepts are checked |
+
+```python
+import pandas as pd
+from concept_benchmark.evaluation import plot_intervention_curve, plot_intervention_heatmap
+
+# one results file per seed, as written by scripts/robot_pipeline.py
+results = pd.concat(
+    pd.read_csv(path).assign(seed=seed) for seed, path in results_by_seed.items()
+)
+fig, ax = plot_intervention_curve(results, group="model_family", baseline_accuracy=dnn_accuracies)
+fig, ax = plot_intervention_heatmap(results)
+```
+
+All plot functions return `(fig, ax)`. The pipelines' `plot` stage draws the ones that apply to a run. The examples below use the 10-seed results of the paper ([`scripts/paper/make_readme_figures.py`](https://github.com/ustunb/concept-benchmark/blob/main/scripts/paper/make_readme_figures.py)).
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/intervention_curve.png" width="500" alt="Intervention curve">
+  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/intervention_heatmap.png" width="800" alt="Change in accuracy from interventions per model, concept set and intervention source">
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/regime_comparison.png" width="500" alt="Regime comparison">
+  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/concept_report.png" width="420" alt="Per-concept detector accuracy, share of interventions and intervener accuracy">
+  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/answer_reliance.png" width="380" alt="Change in accuracy with the model's own answers against the true values">
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/automation.png" width="400" alt="Coverage and net work automated against concept checks">
+  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/confidence.png" width="400" alt="Predicted probability of a valid board with the abstention band">
 </p>
 
 </details>
@@ -732,9 +779,9 @@ cbm = ConceptBasedModel(concept_detector=cd, label_predictor=fe)
 
 # Configure the intervention
 config = InterventionConfig(
-    max_concepts_per_instance=3,  # correct up to 3 concepts per sample
-    score_threshold=0.2,          # only intervene on concepts with
-                                  # probability within 0.2 of 0.5
+    per_instance_budget=3,  # correct up to 3 concepts per sample
+    score_threshold=0.2,          # intervene when the label would change
+                                  # with probability 0.2 or more
 )
 
 # Run interventions
@@ -804,7 +851,7 @@ class UncertaintyStrategy(InterventionStrategy):
         super().__init__(name="uncertainty")
 
     def propose(self, model, batch, config):
-        k = config.per_instance_limit(batch.n_concepts)
+        k = int(min(config.per_instance_limit(batch.n_concepts), batch.n_concepts))
         mask = np.zeros((batch.n_samples, batch.n_concepts), dtype=bool)
 
         # Rank concepts by uncertainty (closeness to 0.5)
@@ -821,7 +868,7 @@ Use it with the runner:
 ```python
 result = runner.run(
     strategy=UncertaintyStrategy(),
-    config=InterventionConfig(max_concepts_per_instance=3, score_threshold=0.2),
+    config=InterventionConfig(per_instance_budget=3, score_threshold=0.2),
     dataset=test,
 )
 ```
@@ -849,36 +896,55 @@ runner.prepare(strategy, config, validation_dataset=val)
 result = runner.run(strategy, config, dataset=test)
 ```
 
-#### Intervention regimes
+#### Concept sources and intervention sources
 
-The package supports six intervention regimes that simulate different real-world annotation scenarios. Each regime varies the concept source (how concepts are predicted) and the intervention source (who corrects them):
+The robot pipeline varies two things independently: who annotates the concepts a model is trained on, and who answers when the model asks about a concept at test time.
+
+| Concept source | Concepts |
+|----------------|----------|
+| **ground_truth** | The 7 true concepts |
+| **human_concepts** | 12 concepts as a human annotator would list them (six foot subtypes) |
+| **noisy_human_concepts** | The same concepts, annotated with 20% label noise (annotators who disagree) |
+| **machine_annotation** | The human concepts, scored by CLIP (label-free CBM) |
+| **llm_concepts** | Concepts written by an LLM, scored by CLIP |
+| **clip_concepts** | Single words chosen by CLIP, scored by CLIP |
+
+| Intervention source | Answers |
+|---------------------|---------|
+| **perfect** | The true concept values — the upper bound |
+| **expert** | A simulated expert, correct 80% of the time on every concept |
+| **llm** | An LLM that answers each concept from the image (Gemini by default) |
+| **self** | The model's own thresholded predictions — changes no value, so it isolates the effect of the intervention mechanism |
+
+```bash
+python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
+    --concept-sources human_concepts machine_annotation \
+    --intervention-sources perfect expert self --budgets 1 3 max
+```
+
+LLM interventions need an API key (`--llm-api-key` or `GEMINI_API_KEY`); `--llm-cache-only` reuses saved answers.
+
+#### Regimes
+
+A regime names one pairing of concept source and intervention source, as in the first version of the benchmark:
 
 | Regime | Concepts from | Corrected by | Description |
 |--------|--------------|-------------|-------------|
-| **baseline** | Ground truth | Ground truth | Perfect oracle — upper bound on intervention benefit |
-| **expert** | Ground truth | Noisy human (80% acc) | Realistic human annotator |
-| **subjective** | Noisy CBM (20% label noise) | Noisy human (80% acc) | Concepts trained on noisy labels |
-| **machine** | LFCBM (GT descriptions) | Noisy human (80% acc) | Machine-discovered concepts |
-| **llm** | LFCBM (LLM descriptions) | LLM (Gemini by default) | Fully automated with LLM |
-| **clip** | LFCBM (CLIP keywords) | LLM (Gemini by default) | Fully automated with CLIP |
+| **baseline** | Human annotation | True values | Upper bound on the benefit of interventions |
+| **expert** | Human annotation | Expert (80% accurate) | Realistic human annotator |
+| **subjective** | Human annotation with 20% label noise | Expert (80% accurate) | Annotators who disagree on the concepts |
+| **machine** | CLIP scores of the human concepts | Expert (80% accurate) | Automated annotation |
+| **llm** | Concepts written by an LLM | LLM | Fully automated with an LLM |
+| **clip** | Single words chosen by CLIP | LLM | Fully automated with CLIP |
 
-Run regimes via the pipeline script:
-
-```bash
-python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
-    --regimes baseline expert subjective machine
-```
-
-The pipeline also exposes a `custom` regime slot for an additional automated baseline with your own concept descriptions. It requires an explicit concepts file. You can use API-backed providers or switch to local CLI loops with `--llm-provider codex_exec` or `--llm-provider claude_exec`:
+Both robot pipelines accept `--regimes` as shorthand for the matching sources:
 
 ```bash
-python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
-    --regimes custom \
-    --custom-concepts-file path/to/my_concepts.jsonl \
-    --llm-provider codex_exec
+python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes --regimes baseline expert subjective
+python scripts/robot_text_pipeline.py --seed 1337 --regimes baseline expert subjective
 ```
 
-For a complete end-to-end example using `ConceptInterventionRunner` with training, interventions, and alignment, see [`examples/robot_pipeline_example.py`](examples/robot_pipeline_example.py).
+For a complete end-to-end example using `ConceptInterventionRunner` with training, interventions, and alignment, see [`examples/robot_pipeline_example.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/robot_pipeline_example.py).
 
 ### Alignment
 
@@ -888,12 +954,12 @@ Alignment constraints force the label predictor's concept weights to match a use
 
 In standard CBM training, the label predictor (logistic regression on concept activations) learns weights freely from data. This can produce **counterintuitive** weights — e.g., `has_knees` getting a *negative* weight even when knees truly indicate Glorp — because the model exploits correlations among imperfect concept predictions.
 
-The paper (Section 5.2) shows that alignment constraints:
+The paper shows that an alignment constraint can:
 
-- **Preserve** training accuracy — the aligned model performs comparably at k=0 (no interventions).
-- **Destroy** intervention benefit — at k=3, the aligned subconcept model goes from +16% gain to -8% loss.
+- **Raise** accuracy before interventions — the constrained model no longer relies on a concept its detector reads at chance.
+- **Remove** the benefit of interventions — after every concept is corrected, the unconstrained model is the more accurate one.
 
-This happens because alignment forces the model into a weight configuration that is locally optimal for the training distribution but incompatible with ground-truth concept corrections at test time.
+The constraint closes the pathway through which a corrected concept reaches the label.
 
 #### Usage
 
@@ -906,36 +972,46 @@ results = run_alignment(
     concept_based_model=cbm,
     train_dataset=train,
     test_dataset=test,
-    monotonicity_constraints={"has_knees": 1},  # force positive weight
+    monotonicity_constraints={"has_knees": 1},  # require a non-negative weight
 )
 
 print(f"Original accuracy: {results['original_accuracy']:.4f}")
 print(f"Aligned accuracy:  {results['aligned_accuracy']:.4f}")
 print(f"Accuracy change:   {results['accuracy_change']:+.4f}")
-# Expected (seed=1014, subconcept): original 0.7812, aligned 0.7656 (-0.0156)
 ```
 
 The `monotonicity_constraints` dict maps concept names to their required sign: `+1` for positive weight, `-1` for negative.
 
 #### Expected results
 
-| Setup | CBM (k=0) | Aligned (k=0) | CBM (k=3) gain | Aligned (k=3) gain |
-|-------|-----------|----------------|-----------------|---------------------|
-| ideal (7 concepts) | 0.8673 | 0.8657 | +10.2% | -0.4% |
-| subconcept (12 concepts) | 0.7812 | 0.7656 | +6.9% | -8.0% |
+Mean accuracy over the 10 seeds of the paper (balanced rule):
 
-For a complete end-to-end example with training, interventions, and alignment, see [`examples/robot_pipeline_example.py`](examples/robot_pipeline_example.py).
+| Concepts | CBM (k=0) | Constrained (k=0) | CBM (k=max) | Constrained (k=max) |
+|----------|-----------|-------------------|-------------|---------------------|
+| true (7 concepts) | 84.5% | 89.8% | 92.0% | 90.7% |
+| human (12 concepts) | 77.6% | 81.0% | 85.7% | 83.2% |
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/alignment.png" width="700" alt="Constrained against unconstrained CBM before and after interventions">
+</p>
+
+For a complete end-to-end example with training, interventions, and alignment, see [`examples/robot_pipeline_example.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/robot_pipeline_example.py).
 
 </details>
+
+## Reproducing the Paper
+
+[`EXPERIMENTS.md`](https://github.com/ustunb/concept-benchmark/blob/main/EXPERIMENTS.md) lists the commands behind each experiment, and [`scripts/paper/README.md`](https://github.com/ustunb/concept-benchmark/blob/main/scripts/paper/README.md) maps every table, figure and test of the paper to the script that produces it.
 
 ## Citation
 
 If you use this package in your research, please cite:
 
 ```bibtex
-@article{anonymous2026concept,
+@inproceedings{skirzynski2026measuring,
   title={Measuring What Matters: Synthetic Benchmarks for Concept Bottleneck Models},
-  author={Anonymous Authors},
+  author={Skirzy{\'n}ski, Julian and Cheon, Harry and Kadekodi, Shreyas and Stewart, Meredith and Ustun, Berk},
+  booktitle={Advances in Neural Information Processing Systems},
   year={2026},
 }
 ```

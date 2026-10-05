@@ -1,4 +1,5 @@
 """CEM (Concept Embedding Model) wrapper and training."""
+
 from __future__ import annotations
 
 import copy
@@ -94,7 +95,9 @@ class CEMBenchmarkModel(_OfficialBenchmarkModelBase):
             baseline_concepts, dtype=torch.float32, device=device
         )
         if intervention_mask is not None:
-            mask_tensor = torch.as_tensor(intervention_mask, dtype=torch.bool, device=device)
+            mask_tensor = torch.as_tensor(
+                intervention_mask, dtype=torch.bool, device=device
+            )
             concept_tensor = torch.where(mask_tensor, concept_tensor, baseline_tensor)
         pos = pos.to(device)
         neg = neg.to(device)
@@ -142,7 +145,9 @@ def train_cem_model(
     train_loader = make_cem_loader(train_dataset, shuffle=True, **loader_kwargs)
     valid_loader = make_cem_loader(valid_dataset, shuffle=False, **loader_kwargs)
 
-    backbone_spec = _infer_backbone_spec(train_dataset, benchmark=benchmark, config=config)
+    backbone_spec = _infer_backbone_spec(
+        train_dataset, benchmark=benchmark, config=config
+    )
     model_init_kwargs = {
         "n_concepts": train_dataset.n_concepts,
         "n_tasks": train_dataset.n_classes,
@@ -150,9 +155,7 @@ def train_cem_model(
         "training_intervention_prob": float(
             getattr(config, "cem_training_intervention_prob", 0.25)
         ),
-        "concept_loss_weight": float(
-            getattr(config, "cem_concept_loss_weight", 1.0)
-        ),
+        "concept_loss_weight": float(getattr(config, "cem_concept_loss_weight", 1.0)),
         "task_loss_weight": float(getattr(config, "cem_task_loss_weight", 1.0)),
         "learning_rate": _resolve_learning_rate(config),
         "optimizer": "adam",

@@ -147,8 +147,7 @@ for k in budgets:
     k_str = str(k) if k != n_concepts else f"{k} (max)"
     print(f"  {k_str:>8s}   {acc:>8.4f}   {gain:>+8.4f}")
 
-# Expected results (seed=1014, subconcept, KFlip with threshold=0.2):
-#   k=0: 0.7812  |  k=1: 0.9212  |  k=3: 0.9439  |  k=12 (max): 0.9439
+# Accuracy rises with k; over the paper's 10 seeds the CBM goes from 77.6% (k=0) to 85.7% (k=max).
 
 # ---------------------------------------------------------------------------
 # 6. DNN baseline — end-to-end image classifier (no concepts)
@@ -158,7 +157,7 @@ set_deterministic_seed(SEED)
 dnn = RobotClassifierCNN(input_size=32)
 dnn_acc = train_dnn(dnn, train, val, test, device, loader_config=loader_config)
 print(f"  DNN accuracy: {dnn_acc:.4f}")
-# Expected: 0.8746
+# About 0.88 over the paper's 10 seeds.
 
 # ---------------------------------------------------------------------------
 # 7. Alignment — retrain frontend with sign constraints
@@ -176,6 +175,6 @@ alignment_results = run_alignment(
 print(f"  Original accuracy: {alignment_results['original_accuracy']:.4f}")
 print(f"  Aligned accuracy:  {alignment_results['aligned_accuracy']:.4f}")
 print(f"  Change:            {alignment_results['accuracy_change']:+.4f}")
-# Expected: original 0.7812, aligned 0.7656 (-0.0156)
+# Over the paper's 10 seeds the constraint raises accuracy before interventions (77.6% -> 81.0%).
 
 print("\nDone!")

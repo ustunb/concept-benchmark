@@ -33,6 +33,7 @@ The package includes two benchmarks:
 
    interventions
    alignment
+   evaluation
 
 .. toctree::
    :maxdepth: 2

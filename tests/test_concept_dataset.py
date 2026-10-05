@@ -575,3 +575,10 @@ class TestSample:
         ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
         with pytest.raises(ValueError, match="Float size must be in"):
             ds.sample(test_size=1.5, seed=1)
+
+
+def test_x_is_an_alias_of_inputs(tab_small_cv):
+    ds, fid = tab_small_cv
+    ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
+    assert ds.X is ds.inputs
+    assert ds.train.X is ds.train.inputs

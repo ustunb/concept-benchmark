@@ -6,12 +6,12 @@ Alignment constraints force the label predictor's concept weights to match a use
 
 In standard CBM training, the label predictor (logistic regression on concept activations) learns weights freely from data. This can produce **counterintuitive** weights — e.g., `has_knees` getting a *negative* weight even when knees truly indicate Glorp — because the model exploits correlations among imperfect concept predictions.
 
-The paper (Section 5.2) shows that alignment constraints:
+The paper shows that an alignment constraint can:
 
-- **Preserve** training accuracy — the aligned model performs comparably at k=0 (no interventions).
-- **Destroy** intervention benefit — at k=3, the aligned subconcept model goes from +16% gain to -8% loss.
+- **Raise** accuracy before interventions — the constrained model no longer relies on a concept its detector reads at chance.
+- **Remove** the benefit of interventions — after every concept is corrected, the unconstrained model is the more accurate one.
 
-This happens because alignment forces the model into a weight configuration that is locally optimal for the training distribution but incompatible with ground-truth concept corrections at test time.
+The constraint closes the pathway through which a corrected concept reaches the label.
 
 ## Usage
 
@@ -24,22 +24,29 @@ results = run_alignment(
     concept_based_model=cbm,
     train_dataset=train,
     test_dataset=test,
-    monotonicity_constraints={"has_knees": 1},  # force positive weight
+    monotonicity_constraints={"has_knees": 1},  # require a non-negative weight
 )
 
 print(f"Original accuracy: {results['original_accuracy']:.4f}")
 print(f"Aligned accuracy:  {results['aligned_accuracy']:.4f}")
 print(f"Accuracy change:   {results['accuracy_change']:+.4f}")
-# Expected (seed=1014, subconcept): original 0.7812, aligned 0.7656 (-0.0156)
 ```
 
 The `monotonicity_constraints` dict maps concept names to their required sign: `+1` for positive weight, `-1` for negative.
 
 ## Expected results
 
-| Setup | CBM (k=0) | Aligned (k=0) | CBM (k=3) gain | Aligned (k=3) gain |
-|-------|-----------|----------------|-----------------|---------------------|
-| ideal (7 concepts) | 0.8673 | 0.8657 | +10.2% | -0.4% |
-| subconcept (12 concepts) | 0.7812 | 0.7656 | +6.9% | -8.0% |
+Mean accuracy over the 10 seeds of the paper (balanced rule):
 
-For a complete end-to-end example with training, interventions, and alignment, see [`examples/robot_pipeline_example.py`](https://anonymous.4open.science/r/concept-benchmark-84D2/blob/main/examples/robot_pipeline_example.py).
+| Concepts | CBM (k=0) | Constrained (k=0) | CBM (k=max) | Constrained (k=max) |
+|----------|-----------|-------------------|-------------|---------------------|
+| true (7 concepts) | 84.5% | 89.8% | 92.0% | 90.7% |
+| human (12 concepts) | 77.6% | 81.0% | 85.7% | 83.2% |
+
+```{image} assets/alignment.png
+:width: 700px
+:align: center
+:alt: Constrained against unconstrained CBM before and after interventions
+```
+
+For a complete end-to-end example with training, interventions, and alignment, see [`examples/robot_pipeline_example.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/robot_pipeline_example.py).

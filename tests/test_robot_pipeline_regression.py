@@ -27,8 +27,9 @@ for _old, _new in [
         sys.modules[_old] = _new
 
 
+# The reference numbers are for the sparse rule at seed 1014.
 # Model-loading tests need cached artifacts; reference CSV tests don't.
-_ideal_cfg = RobotBenchmarkConfig.default_ideal()
+_ideal_cfg = RobotBenchmarkConfig(label_rule="sparse")
 _has_artifacts = (
     _ideal_cfg.get_dataset_path().exists()
     and _ideal_cfg.get_model_path("cbm").exists()
@@ -42,7 +43,7 @@ _needs_artifacts = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def ideal_config():
-    return RobotBenchmarkConfig.default_ideal()
+    return RobotBenchmarkConfig(label_rule="sparse")
 
 
 @pytest.fixture(scope="module")

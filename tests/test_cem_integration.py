@@ -58,14 +58,11 @@ class _TinyCEMConfig:
     probcbm_n_samples_inference: int = 1
     probcbm_intervention_prob: float = 0.25
     probcbm_max_epochs: int | None = 1
-    ecbm_emb_size: int = 4
     ecbm_hid_size: int = 16
-    ecbm_lambda_xy: float = 1.0
+    ecbm_lambda_xy: float = 3.0
     ecbm_lambda_xc: float = 1.0
     ecbm_lambda_cy: float = 1.0
     ecbm_weight_decay: float = 1e-4
-    ecbm_inference_steps: int = 5
-    ecbm_inference_lr: float = 0.1
     ecbm_max_epochs: int | None = 2
 
 

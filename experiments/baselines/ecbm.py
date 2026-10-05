@@ -1,7 +1,17 @@
-"""ECBM (Energy-based Concept Bottleneck Model) — standalone implementation."""
+"""ECBM (Energy-based Concept Bottleneck Model), ported from the authors' code.
+
+Reference: Xu et al., "Energy-Based Concept Bottleneck Models", ICLR 2024; code at github.com/xmed-lab/ECBM
+(`networks/EBM.py`, `loss.py`, `LitModel.py`, `GradientInference.py`, `utils.py`). The energy network, losses,
+concept augmentation, gradient inference and intervention procedure follow that code; line references below
+point to it. Adapted to this benchmark: the image encoder is the shared backbone used by the CBM, CEM and
+ProbCBM (instead of an ImageNet ResNet-101), hidden size is `ecbm_hid_size`, and training uses Adam with early
+stopping on the validation loss (instead of SGD for 300 epochs).
+"""
+
 from __future__ import annotations
 
 import copy
+import math
 from typing import Any
 
 import numpy as np
@@ -26,17 +36,27 @@ from experiments.baselines._common import (
     _resolve_learning_rate,
     _resolve_loader_config,
     _resolve_patience,
-    _safe_binary_logit,
-    _safe_class_logit,
-    _soft_cross_entropy_from_probs,
-    _stack_numpy,
-    _stack_tensors,
 )
 
+# Gradient inference settings from the authors' inference configs (configs/*_inference.json) and
+# GradientInference.py: energy weights (xy, xc, cy) without and with interventions, learning rate for the
+# label/concept variables, and the early-stopping rule (utils.EarlyStopping(patience=10, delta=1)).
+INFERENCE_WEIGHTS = (1.0, 1.0, 0.01)
+INTERVENTION_WEIGHTS = (0.0, 0.0, 3.0)  # GradientInference.py:134-136
+INFERENCE_LR = 0.1
+INFERENCE_PATIENCE = 10
+INFERENCE_DELTA = 1.0
+INFERENCE_MAX_STEPS = 1000  # safety cap; the authors' loop has none
+INTERVENTION_LOGIT = 5.0  # (one_hot(c) - 0.5) * 10, GradientInference.py:130-131
+# Concept -> label augmentation during training (main.py: cy_perturb_prob, cy_permute_prob).
+CY_CONCEPT_FLIP_SHARE = 0.2
+CY_SAMPLE_FLIP_SHARE = 0.2
+
 
 # ---------------------------------------------------------------------------
-# ECBM network
+# ECBM network (networks/EBM.py: EBM_GL)
 # ---------------------------------------------------------------------------
+
 
 class _ECBMNet(nn.Module):
     def __init__(
@@ -44,7 +64,6 @@ class _ECBMNet(nn.Module):
         *,
         n_concepts: int,
         n_tasks: int,
-        emb_size: int,
         hid_size: int,
         feature_dim: int,
         lambda_xy: float,
@@ -54,8 +73,7 @@ class _ECBMNet(nn.Module):
     ) -> None:
         super().__init__()
         self.n_concepts = int(n_concepts)
-        self.n_tasks = int(n_tasks)
-        self.emb_size = int(emb_size)
+        self.num_classes = int(n_tasks)
         self.hid_size = int(hid_size)
         self.feature_dim = int(feature_dim)
         self.lambda_xy = float(lambda_xy)
@@ -63,79 +81,144 @@ class _ECBMNet(nn.Module):
         self.lambda_cy = float(lambda_cy)
 
         self.backbone = c_extractor_arch(self.feature_dim)
+        self.y_embedding = nn.Parameter(torch.randn((self.num_classes, self.hid_size)))
+        self.c_embedding = nn.Parameter(
+            torch.randn((self.n_concepts * 2, self.hid_size))
+        )
+        self.classifier_xc = nn.ModuleList(
+            [nn.Linear(self.hid_size, 1) for _ in range(self.n_concepts)]
+        )
+        self.concept_proj = nn.Linear(self.n_concepts * self.hid_size, self.hid_size)
         self.xy_fc1 = nn.Linear(self.feature_dim, self.hid_size)
         self.xc_fc1 = nn.Linear(self.feature_dim, self.hid_size)
-        self.classifier_xc = nn.Linear(self.hid_size, self.n_concepts)
-        self.pos_concept_embeddings = nn.Parameter(
-            torch.randn(self.n_concepts, self.emb_size) * 0.05
-        )
-        self.neg_concept_embeddings = nn.Parameter(
-            torch.randn(self.n_concepts, self.emb_size) * 0.05
-        )
-        self.concept_proj = nn.Linear(self.n_concepts * self.emb_size, self.hid_size)
-        self.class_embeddings = nn.Parameter(
-            torch.randn(self.n_tasks, self.hid_size) * 0.05
-        )
-        self.xy_bias = nn.Parameter(torch.zeros(self.n_tasks))
-        self.cy_bias = nn.Parameter(torch.zeros(self.n_tasks))
-        self.xy_scale = nn.Parameter(torch.tensor(5.0))
-        self.cy_scale = nn.Parameter(torch.tensor(5.0))
+        self.classifier_xy = nn.Linear(self.hid_size, 1)
+        self.classifier_cy = nn.Linear(self.hid_size, 1)
+        self.dropout = nn.Dropout(p=0.2)
 
     def extract_features(self, x: torch.Tensor) -> torch.Tensor:
         return self.backbone(x.float())
 
-    def _class_logits(
-        self,
-        hidden: torch.Tensor,
-        *,
-        bias: torch.Tensor,
-        scale: torch.Tensor,
+    def _concept_code(
+        self, present: torch.Tensor, c_embed_cy: torch.Tensor
     ) -> torch.Tensor:
-        hidden = F.normalize(hidden, p=2, dim=-1)
-        class_embeddings = F.normalize(self.class_embeddings, p=2, dim=-1)
-        scaled = F.softplus(scale) + 1.0
-        return scaled * (hidden @ class_embeddings.T) + bias
+        """Concept -> label code: the first embedding block if a concept is present, else the second (EBM.py:173-180, 190-196)."""
+        n = self.n_concepts
+        chosen = torch.where(
+            present.unsqueeze(-1), c_embed_cy[:, :n, :], c_embed_cy[:, n:, :]
+        )
+        return self.concept_proj(chosen.reshape(chosen.shape[0], -1))
 
-    def xy_logits_from_features(self, features: torch.Tensor) -> torch.Tensor:
-        hidden = F.relu(self.xy_fc1(features))
-        return self._class_logits(hidden, bias=self.xy_bias, scale=self.xy_scale)
+    def training_energies(
+        self, features: torch.Tensor, concepts: torch.Tensor, *, augment: bool = True
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Class-wise and state-wise energies for training (EBM.py:89-212, is_training=True).
 
-    def xc_logits_from_features(self, features: torch.Tensor) -> torch.Tensor:
-        hidden = F.relu(self.xc_fc1(features))
-        return self.classifier_xc(hidden)
+        Returns xy [bs, n_classes], cy [bs, n_classes], xc [bs, n_concepts, 2]; lower energy = more likely.
+        """
+        bs, n = features.shape[0], self.n_concepts
+        y_embed = F.normalize(
+            self.y_embedding.unsqueeze(0).repeat(bs, 1, 1), p=2, dim=-1
+        )
+        x_embed = self.dropout(self.xy_fc1(features))[:, None, :].expand_as(y_embed)
+        xy_energy = self.classifier_xy(F.relu(x_embed + x_embed * y_embed)).view(bs, -1)
 
-    def concept_embeddings_from_probs(self, concept_probs: torch.Tensor) -> torch.Tensor:
-        pos = self.pos_concept_embeddings.unsqueeze(0)
-        neg = self.neg_concept_embeddings.unsqueeze(0)
-        return concept_probs.unsqueeze(-1) * pos + (1.0 - concept_probs).unsqueeze(
-            -1
-        ) * neg
+        c_embed_cy = self.c_embedding.unsqueeze(0).repeat(bs, 1, 1)
+        c_embed = F.normalize(c_embed_cy, p=2, dim=-1)
+        x_embed = self.dropout(self.xc_fc1(features))[:, None, :].expand_as(c_embed)
+        xc_energy = []
+        for i in range(n):
+            pos = F.relu(x_embed[:, i] + x_embed[:, i] * c_embed[:, i])
+            neg = F.relu(x_embed[:, i + n] + x_embed[:, i + n] * c_embed[:, i + n])
+            xc_energy.append(
+                self.classifier_xc[i](torch.stack([pos, neg], dim=1)).view(bs, 1, 2)
+            )
+        xc_energy = torch.cat(xc_energy, dim=1)
 
-    def cy_logits_from_concepts(self, concept_probs: torch.Tensor) -> torch.Tensor:
-        concept_embeddings = self.concept_embeddings_from_probs(concept_probs)
-        hidden = F.relu(self.concept_proj(concept_embeddings.flatten(start_dim=1)))
-        return self._class_logits(hidden, bias=self.cy_bias, scale=self.cy_scale)
+        present = concepts >= 0.5
+        if augment:
+            present = _flip_concepts(present)
+        c_code = self._concept_code(present, c_embed_cy)[:, None, :].expand_as(y_embed)
+        cy_energy = self.classifier_cy(F.relu(c_code + c_code * y_embed)).view(bs, -1)
+        return xy_energy, cy_energy, xc_energy
+
+    def inference_energies(
+        self, features: torch.Tensor, y_logits: torch.Tensor, c_logits: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Energies of the current label/concept variables (EBM.py:89-212, is_training=False).
+
+        `y_logits` [bs, n_classes] and `c_logits` [bs, n_concepts, 2] are the optimized variables (the authors'
+        `y_prob` and `c_prob` parameters before softmax). Returns xy [bs], cy [bs], xc [bs, n_concepts].
+        """
+        bs, n = features.shape[0], self.n_concepts
+        y_prob = torch.softmax(y_logits, dim=-1)
+        y_embed = (y_prob.unsqueeze(-1) * self.y_embedding.unsqueeze(0)).sum(dim=1)
+        y_embed = F.normalize(y_embed, p=2, dim=-1)
+        x_embed = self.dropout(self.xy_fc1(features))
+        xy_energy = self.classifier_xy(F.relu(x_embed + x_embed * y_embed)).view(bs)
+
+        c_prob = torch.softmax(c_logits, dim=-1)
+        c_embed_cy = self.c_embedding.unsqueeze(0).repeat(bs, 1, 1)
+        c_embed = (
+            c_embed_cy[:, :n] * c_prob[:, :, 0:1]
+            + c_embed_cy[:, n:] * c_prob[:, :, 1:2]
+        )
+        c_embed = F.normalize(c_embed, p=2, dim=-1)
+        x_embed = self.dropout(self.xc_fc1(features))[:, None, :].expand_as(c_embed)
+        xc_energy = torch.cat(
+            [
+                self.classifier_xc[i](
+                    F.relu(x_embed[:, i] + x_embed[:, i] * c_embed[:, i])
+                )
+                for i in range(n)
+            ],
+            dim=1,
+        )
+
+        c_code = self._concept_code(c_prob[:, :, 1] > 0.5, c_embed_cy)
+        cy_energy = self.classifier_cy(F.relu(c_code + c_code * y_embed)).view(bs)
+        return xy_energy, cy_energy, xc_energy
+
+
+def _flip_concepts(present: torch.Tensor) -> torch.Tensor:
+    """Flip a random 20% of concepts in a random 20% of examples (EBM.py:63-86, `cy_augment`)."""
+    bs, n = present.shape
+    n_concepts = math.ceil(n * CY_CONCEPT_FLIP_SHARE)
+    n_samples = math.ceil(bs * CY_SAMPLE_FLIP_SHARE)
+    concept_idx = torch.randperm(n, device=present.device)[:n_concepts]
+    sample_idx = torch.randperm(bs, device=present.device)[:n_samples]
+    flipped = present.clone()
+    rows = sample_idx[:, None]
+    flipped[rows, concept_idx[None, :]] = ~flipped[rows, concept_idx[None, :]]
+    return flipped
 
 
 # ---------------------------------------------------------------------------
-# ECBM loss and inference
+# ECBM losses (loss.py) and gradient inference (GradientInference.py)
 # ---------------------------------------------------------------------------
 
-def _apply_ecbm_losses(
+
+def _energy_nll(energy: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """E(target) + logsumexp(-E): the authors' EBMLoss (= cross-entropy on -energy)."""
+    return F.cross_entropy(-energy, target)
+
+
+def _ecbm_losses(
     model: _ECBMNet,
-    *,
-    xy_logits: torch.Tensor,
-    xc_logits: torch.Tensor,
-    cy_logits: torch.Tensor,
+    features: torch.Tensor,
     concepts: torch.Tensor,
     labels: torch.Tensor,
 ) -> tuple[torch.Tensor, dict[str, float]]:
-    loss_xy = F.cross_entropy(xy_logits, labels)
-    loss_xc = F.binary_cross_entropy_with_logits(xc_logits, concepts)
-    loss_cy = F.cross_entropy(cy_logits, labels)
+    """Training loss (LitModel.training_step); the unweighted sum is the validation loss the authors monitor."""
+    xy_energy, cy_energy, xc_energy = model.training_energies(features, concepts)
+    loss_xy = _energy_nll(xy_energy, labels)
+    loss_cy = _energy_nll(cy_energy, labels)
+    target_c = (concepts >= 0.5).long()
+    loss_xc = sum(
+        _energy_nll(xc_energy[:, i], target_c[:, i]) for i in range(model.n_concepts)
+    )
     total = (
-        model.lambda_xy * loss_xy
-        + model.lambda_xc * loss_xc
+        model.lambda_xc * loss_xc
+        + model.lambda_xy * loss_xy
         + model.lambda_cy * loss_cy
     )
     metrics = {
@@ -143,116 +226,130 @@ def _apply_ecbm_losses(
         "loss_xc": float(loss_xc.detach().cpu()),
         "loss_cy": float(loss_cy.detach().cpu()),
         "loss_total": float(total.detach().cpu()),
+        "loss_unweighted": float((loss_xy + loss_xc + loss_cy).detach().cpu()),
     }
     return total, metrics
 
 
-def _run_ecbm_inference(
+def _run_gradient_inference(
     model: _ECBMNet,
     features: torch.Tensor,
-    *,
-    steps: int,
-    lr: float,
-    concept_init: torch.Tensor | None = None,
-    label_init: torch.Tensor | None = None,
-    forced_concept_probs: torch.Tensor | None = None,
-    forced_concept_mask: torch.Tensor | None = None,
+    y_logits: torch.Tensor,
+    c_logits: torch.Tensor,
+    weights: tuple[float, float, float],
+    batch_size: int | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    with torch.no_grad():
-        xy_logits = model.xy_logits_from_features(features)
-        xc_logits = model.xc_logits_from_features(features)
-        xy_target = torch.softmax(xy_logits, dim=-1)
-        xc_target = torch.sigmoid(xc_logits)
+    """Optimize the label and concept variables until the stopping rule fires (GradientInference.run_optim).
 
-    if label_init is None:
-        label_logits = _safe_class_logit(xy_target)
-    else:
-        label_logits = _safe_class_logit(label_init)
-    if concept_init is None:
-        concept_logits = _safe_binary_logit(xc_target)
-    else:
-        concept_logits = _safe_binary_logit(concept_init)
+    The authors run this per test batch: the loss is a batch mean and the rule is utils.EarlyStopping(patience=10,
+    delta=1) on the batch's mean x->y energy, i.e. stop after 10 consecutive steps in which it does not drop by
+    more than 1 below its best value. Rows are split into consecutive batches of `batch_size` (one batch if None)
+    and all batches are optimized at once: each batch's loss depends only on its own rows and Adam updates every
+    entry independently, so this matches running the batches one after another; a batch whose rule has fired
+    keeps its values while the others continue.
+    """
+    lambda_xy, lambda_xc, lambda_cy = weights
+    n = features.shape[0]
+    size = n if batch_size is None else int(batch_size)
+    group = torch.div(
+        torch.arange(n, device=features.device), size, rounding_mode="floor"
+    )
+    n_groups = int(group[-1]) + 1
+    counts = torch.bincount(group, minlength=n_groups).to(features.dtype)
 
-    label_logits = nn.Parameter(label_logits.detach().clone())
-    concept_logits = nn.Parameter(concept_logits.detach().clone())
-    optimizer = torch.optim.Adam([label_logits, concept_logits], lr=float(lr))
-
-    fixed_logits = None
-    if forced_concept_probs is not None:
-        fixed_logits = _safe_binary_logit(forced_concept_probs)
-    intervened_rows = None
-    if forced_concept_mask is not None and fixed_logits is not None:
-        intervened_rows = forced_concept_mask.any(dim=-1)
-        with torch.no_grad():
-            concept_logits.data = torch.where(
-                forced_concept_mask,
-                fixed_logits,
-                concept_logits.data,
+    def batch_mean(values: torch.Tensor) -> torch.Tensor:
+        return (
+            torch.zeros(n_groups, device=values.device, dtype=values.dtype).index_add_(
+                0, group, values
             )
-            if intervened_rows.any():
-                label_logits.data[intervened_rows] = 0.0
+            / counts
+        )
 
-    original_requires_grad = [param.requires_grad for param in model.parameters()]
-    for param in model.parameters():
-        param.requires_grad_(False)
+    y_logits = nn.Parameter(y_logits.detach().clone())
+    c_logits = nn.Parameter(c_logits.detach().clone())
+    optimizer = torch.optim.Adam(
+        [
+            {"params": [c_logits], "lr": INFERENCE_LR},
+            {"params": [y_logits], "lr": INFERENCE_LR},
+        ]
+    )
+    requires_grad = [p.requires_grad for p in model.parameters()]
+    for p in model.parameters():
+        p.requires_grad_(False)
+    best = torch.full((n_groups,), float("nan"), device=features.device)
+    counter = torch.zeros(n_groups, dtype=torch.long, device=features.device)
+    active = torch.ones(n_groups, dtype=torch.bool, device=features.device)
     try:
-        for _ in range(max(1, int(steps))):
-            optimizer.zero_grad()
-            y_prob = torch.softmax(label_logits, dim=-1)
-            c_prob = torch.sigmoid(concept_logits)
-            if forced_concept_mask is not None and forced_concept_probs is not None:
-                c_prob = torch.where(forced_concept_mask, forced_concept_probs, c_prob)
-            cy_logits = model.cy_logits_from_concepts(c_prob)
-            cy_prob = torch.softmax(cy_logits, dim=-1)
-
-            loss_xy = _soft_cross_entropy_from_probs(label_logits, xy_target)
-            xc_loss = F.binary_cross_entropy_with_logits(
-                concept_logits,
-                xc_target,
-                reduction="none",
-            )
-            if forced_concept_mask is not None:
-                xc_loss = xc_loss.masked_fill(forced_concept_mask, 0.0)
-                free_count = int((~forced_concept_mask).sum().item())
-                loss_xc = (
-                    xc_loss.sum() / free_count if free_count > 0 else xc_loss.sum() * 0.0
+        with torch.enable_grad():
+            for _ in range(INFERENCE_MAX_STEPS):
+                optimizer.zero_grad()
+                xy_en, cy_en, xc_en = model.inference_energies(
+                    features, y_logits, c_logits
                 )
-            else:
-                loss_xc = xc_loss.mean()
-            loss_cy = 0.5 * (
-                _soft_cross_entropy_from_probs(label_logits, cy_prob.detach())
-                + _soft_cross_entropy_from_probs(cy_logits, y_prob.detach())
-            )
-            loss = (
-                model.lambda_xy * loss_xy
-                + model.lambda_xc * loss_xc
-                + model.lambda_cy * loss_cy
-            )
-            loss.backward()
-            if forced_concept_mask is not None and concept_logits.grad is not None:
-                concept_logits.grad.masked_fill_(forced_concept_mask, 0.0)
-            if intervened_rows is not None and label_logits.grad is not None:
-                non_intervened = ~intervened_rows
-                if non_intervened.any():
-                    label_logits.grad.data[non_intervened] = 0.0
-            optimizer.step()
-            if forced_concept_mask is not None and fixed_logits is not None:
+                xy_mean = batch_mean(xy_en)
+                loss = (
+                    lambda_xy * xy_mean
+                    + lambda_xc * batch_mean(xc_en.sum(dim=1))
+                    + lambda_cy * batch_mean(cy_en)
+                )
+                score = -xy_mean.detach()
+                first = torch.isnan(best)
+                improved = ~first & (score > best + INFERENCE_DELTA)
+                stalled = ~first & ~improved
+                best = torch.where(first | improved, score, best)
+                counter = torch.where(
+                    improved, torch.zeros_like(counter), counter + stalled.long()
+                )
+                frozen_y = y_logits.detach().clone()
+                frozen_c = c_logits.detach().clone()
+                loss[active].sum().backward()
+                optimizer.step()
                 with torch.no_grad():
-                    concept_logits.data = torch.where(
-                        forced_concept_mask,
-                        fixed_logits,
-                        concept_logits.data,
-                    )
-
-        with torch.no_grad():
-            y_prob = torch.softmax(label_logits, dim=-1)
-            c_prob = torch.sigmoid(concept_logits)
-            if forced_concept_mask is not None and forced_concept_probs is not None:
-                c_prob = torch.where(forced_concept_mask, forced_concept_probs, c_prob)
-        return y_prob.detach(), c_prob.detach()
+                    done_rows = ~active[group]
+                    y_logits[done_rows] = frozen_y[done_rows]
+                    c_logits[done_rows] = frozen_c[done_rows]
+                active = active & (counter < INFERENCE_PATIENCE)
+                if not bool(active.any()):
+                    break
     finally:
-        for param, required in zip(model.parameters(), original_requires_grad):
-            param.requires_grad_(required)
+        for p, flag in zip(model.parameters(), requires_grad):
+            p.requires_grad_(flag)
+    return y_logits.detach(), c_logits.detach()
+
+
+def _infer_labels_and_concepts(
+    model: _ECBMNet, features: torch.Tensor, batch_size: int | None = None
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Prediction without interventions: start from uniform variables (GradientInference.inference:80-97)."""
+    bs = features.shape[0]
+    y0 = torch.zeros(bs, model.num_classes, device=features.device)
+    c0 = torch.zeros(bs, model.n_concepts, 2, device=features.device)
+    return _run_gradient_inference(
+        model, features, y0, c0, INFERENCE_WEIGHTS, batch_size
+    )
+
+
+def _intervene(
+    model: _ECBMNet,
+    features: torch.Tensor,
+    c_logits: torch.Tensor,
+    concepts: torch.Tensor,
+    mask: torch.Tensor,
+    batch_size: int | None = None,
+) -> torch.Tensor:
+    """Prediction after an intervention (GradientInference.inference:126-143).
+
+    Intervened concepts are set to +/-5 logits, the label variable is reset to uniform, and inference reruns
+    with only the concept -> label energy (weights 0/0/3). Returns label logits.
+    """
+    target = F.one_hot((concepts >= 0.5).long(), num_classes=2).float()
+    forced = (target - 0.5) * (2 * INTERVENTION_LOGIT)
+    c_start = torch.where(mask.unsqueeze(-1), forced, c_logits)
+    y0 = torch.zeros(features.shape[0], model.num_classes, device=features.device)
+    y_logits, _ = _run_gradient_inference(
+        model, features, y0, c_start, INTERVENTION_WEIGHTS, batch_size
+    )
+    return y_logits
 
 
 def _run_ecbm_epoch(
@@ -264,49 +361,38 @@ def _run_ecbm_epoch(
 ) -> dict[str, float]:
     is_train = optimizer is not None
     model.train(is_train)
-    totals = {"loss_xy": 0.0, "loss_xc": 0.0, "loss_cy": 0.0, "loss_total": 0.0}
+    totals: dict[str, float] = {}
     n_examples = 0
-
     for batch_x, batch_c, batch_y in loader:
         batch_x = _prepare_batch_features(batch_x, device=device)
         batch_c = _prepare_batch_concepts(batch_c, device=device)
         batch_y = _prepare_batch_labels(batch_y, device=device)
-
         if is_train:
             optimizer.zero_grad()
         with torch.set_grad_enabled(is_train):
-            features = model.extract_features(batch_x)
-            xy_logits = model.xy_logits_from_features(features)
-            xc_logits = model.xc_logits_from_features(features)
-            cy_logits = model.cy_logits_from_concepts(batch_c)
-            loss, metrics = _apply_ecbm_losses(
-                model,
-                xy_logits=xy_logits,
-                xc_logits=xc_logits,
-                cy_logits=cy_logits,
-                concepts=batch_c,
-                labels=batch_y,
+            loss, metrics = _ecbm_losses(
+                model, model.extract_features(batch_x), batch_c, batch_y
             )
             if is_train:
                 loss.backward()
                 optimizer.step()
-
         batch_size = int(batch_y.shape[0])
         n_examples += batch_size
         for key, value in metrics.items():
-            totals[key] += value * batch_size
-
-    if n_examples == 0:
-        return {key: 0.0 for key in totals}
-    return {key: value / n_examples for key, value in totals.items()}
+            totals[key] = totals.get(key, 0.0) + value * batch_size
+    return {key: value / max(1, n_examples) for key, value in totals.items()}
 
 
 # ---------------------------------------------------------------------------
 # ECBM benchmark model
 # ---------------------------------------------------------------------------
 
+
 class ECBMBenchmarkModel(_OfficialBenchmarkModelBase):
     family = "ecbm"
+
+    def _inference_batch_size(self) -> int:
+        return int(self._loader_kwargs()["batch_size"])
 
     def _run_official_model(
         self,
@@ -317,35 +403,29 @@ class ECBMBenchmarkModel(_OfficialBenchmarkModelBase):
         device = self._inference_device()
         loader = dataset.loader(shuffle=False, **self._loader_kwargs())
 
-        label_chunks: list[np.ndarray] = []
-        concept_chunks: list[np.ndarray] = []
         feature_chunks: list[torch.Tensor] = []
-        inference_steps = int(self.eval_config.get("ecbm_inference_steps", 10))
-        inference_lr = float(self.eval_config.get("ecbm_inference_lr", 0.1))
-
         model.to(device)
         for batch_x, _, _ in loader:
             batch_x = _prepare_batch_features(batch_x, device=device)
             with torch.no_grad():
-                features = model.extract_features(batch_x)
-            y_prob, c_prob = _run_ecbm_inference(
-                model,
-                features,
-                steps=inference_steps,
-                lr=inference_lr,
-            )
-            label_chunks.append(y_prob.cpu().numpy().astype(np.float32))
-            concept_chunks.append(c_prob.cpu().numpy().astype(np.float32))
-            feature_chunks.append(features.detach().cpu())
+                feature_chunks.append(model.extract_features(batch_x))
+        features = torch.cat(feature_chunks, dim=0)
+        # the loader's batches, run side by side (see _run_gradient_inference)
+        y_logits, c_logits = _infer_labels_and_concepts(
+            model, features, self._inference_batch_size()
+        )
         model.cpu()
 
-        label_probs = _stack_numpy(label_chunks, cols=self.n_classes)
-        concept_probs = _stack_numpy(concept_chunks, cols=self.n_concepts)
+        label_probs = torch.softmax(y_logits, dim=-1).cpu().numpy().astype(np.float32)
+        concept_probs = (
+            torch.softmax(c_logits, dim=-1)[..., 1].cpu().numpy().astype(np.float32)
+        )
         cache = _PredictionCache(
             dataset_id=id(dataset),
             concept_probs=concept_probs,
             label_probs=label_probs,
-            ecbm_features=_stack_tensors(feature_chunks),
+            ecbm_features=features.detach().cpu(),
+            ecbm_concept_logits=c_logits.cpu(),
         )
         return label_probs, concept_probs, cache
 
@@ -358,49 +438,33 @@ class ECBMBenchmarkModel(_OfficialBenchmarkModelBase):
         intervention_mask: np.ndarray | None,
     ) -> np.ndarray:
         model = self._require_official_model()
-        features = cache.ecbm_features
-        if features is None:
+        if cache.ecbm_features is None or cache.ecbm_concept_logits is None:
             raise RuntimeError("Missing cached ECBM features for intervention replay.")
-
-        effective = (
-            np.where(intervention_mask, concepts, baseline_concepts)
-            if intervention_mask is not None
-            else concepts
-        )
-        if np.allclose(effective, baseline_concepts, atol=1e-6, rtol=1e-6):
-            return cache.label_probs.copy()
-
         if intervention_mask is None:
             intervention_mask = ~np.isclose(
-                concepts,
-                baseline_concepts,
-                atol=1e-6,
-                rtol=1e-6,
+                concepts, baseline_concepts, atol=1e-6, rtol=1e-6
             )
+        intervention_mask = np.asarray(intervention_mask, dtype=bool)
+        out = cache.label_probs.copy()
+        rows = np.flatnonzero(intervention_mask.any(axis=1))
+        if rows.size == 0:
+            return out
 
         device = self._inference_device()
-        features = features.to(device)
-        baseline_tensor = torch.as_tensor(
-            baseline_concepts, dtype=torch.float32, device=device
-        )
-        label_init = torch.as_tensor(cache.label_probs, dtype=torch.float32, device=device)
-        forced_probs = torch.as_tensor(effective, dtype=torch.float32, device=device)
-        forced_mask = torch.as_tensor(intervention_mask, dtype=torch.bool, device=device)
-
         if next(model.parameters()).device != device:
             model.to(device)
         model.eval()
-        y_prob, _ = _run_ecbm_inference(
+        t_idx = torch.as_tensor(rows, dtype=torch.long)
+        y_logits = _intervene(
             model,
-            features,
-            steps=int(self.eval_config.get("ecbm_inference_steps", 10)),
-            lr=float(self.eval_config.get("ecbm_inference_lr", 0.1)),
-            concept_init=baseline_tensor,
-            label_init=label_init,
-            forced_concept_probs=forced_probs,
-            forced_concept_mask=forced_mask,
+            cache.ecbm_features.index_select(0, t_idx).to(device),
+            cache.ecbm_concept_logits.index_select(0, t_idx).to(device),
+            torch.as_tensor(concepts[rows], dtype=torch.float32, device=device),
+            torch.as_tensor(intervention_mask[rows], dtype=torch.bool, device=device),
+            self._inference_batch_size(),
         )
-        return y_prob.cpu().numpy().astype(np.float32)
+        out[rows] = torch.softmax(y_logits, dim=-1).cpu().numpy().astype(np.float32)
+        return out
 
     def _rebuild_model(
         self,
@@ -424,6 +488,7 @@ class ECBMBenchmarkModel(_OfficialBenchmarkModelBase):
 # ---------------------------------------------------------------------------
 # ECBM interpretation
 # ---------------------------------------------------------------------------
+
 
 def compute_ecbm_interpretation_summary(
     model: ECBMBenchmarkModel,
@@ -464,7 +529,9 @@ def compute_ecbm_interpretation_summary(
                 "oracle_conditional_prob": float(oracle_mean[int(idx)]),
                 "predicted_lift": float(lift[int(idx)]),
                 "oracle_lift": float(oracle_lift[int(idx)]),
-                "absolute_error": float(abs(pred_mean[int(idx)] - oracle_mean[int(idx)])),
+                "absolute_error": float(
+                    abs(pred_mean[int(idx)] - oracle_mean[int(idx)])
+                ),
             }
             for idx in order[: max(1, int(top_k))]
         ]
@@ -489,10 +556,12 @@ def compute_ecbm_interpretation_summary(
         "family": "ecbm",
         "n_examples": int(dataset.n),
         "overall_predicted_concept_mean": {
-            name: float(overall_pred[idx]) for idx, name in enumerate(model.concept_names)
+            name: float(overall_pred[idx])
+            for idx, name in enumerate(model.concept_names)
         },
         "overall_oracle_concept_mean": {
-            name: float(overall_true[idx]) for idx, name in enumerate(model.concept_names)
+            name: float(overall_true[idx])
+            for idx, name in enumerate(model.concept_names)
         },
         "top_concepts_by_class": top_concepts,
         "rows": rows,
@@ -502,6 +571,7 @@ def compute_ecbm_interpretation_summary(
 # ---------------------------------------------------------------------------
 # Training
 # ---------------------------------------------------------------------------
+
 
 def train_ecbm_model(
     *,
@@ -513,7 +583,7 @@ def train_ecbm_model(
     num_workers: int | None = None,
     pin_memory: bool | None = None,
 ) -> ECBMBenchmarkModel:
-    """Train a local ECBM-style wrapped model on a benchmark split."""
+    """Train an ECBM (authors' energy network and losses) on a benchmark split."""
 
     device = determine_device() if device is None else torch.device(device)
     loader_cfg = _resolve_loader_config(
@@ -526,18 +596,16 @@ def train_ecbm_model(
     train_loader = train_dataset.loader(shuffle=True, **loader_kwargs)
     valid_loader = valid_dataset.loader(shuffle=False, **loader_kwargs)
 
-    backbone_spec = _infer_backbone_spec(train_dataset, benchmark=benchmark, config=config)
-    feature_dim = max(
-        int(backbone_spec.get("default_output_dim", 64)),
-        int(getattr(config, "ecbm_hid_size", 64)),
+    backbone_spec = _infer_backbone_spec(
+        train_dataset, benchmark=benchmark, config=config
     )
+    feature_dim = int(backbone_spec.get("default_output_dim", 128))
     model_init_kwargs = {
         "n_concepts": train_dataset.n_concepts,
         "n_tasks": train_dataset.n_classes,
-        "emb_size": int(getattr(config, "ecbm_emb_size", 8)),
         "hid_size": int(getattr(config, "ecbm_hid_size", 64)),
         "feature_dim": feature_dim,
-        "lambda_xy": float(getattr(config, "ecbm_lambda_xy", 1.0)),
+        "lambda_xy": float(getattr(config, "ecbm_lambda_xy", 3.0)),
         "lambda_xc": float(getattr(config, "ecbm_lambda_xc", 1.0)),
         "lambda_cy": float(getattr(config, "ecbm_lambda_cy", 1.0)),
         "c_extractor_arch": _make_backbone_factory(backbone_spec),
@@ -555,11 +623,14 @@ def train_ecbm_model(
     patience = _resolve_patience(config, benchmark=benchmark)
     epochs_no_improve = 0
     best_epoch = 0
-
     for epoch in range(max_epochs):
         _run_ecbm_epoch(model, train_loader, optimizer=optimizer, device=device)
-        valid_metrics = _run_ecbm_epoch(model, valid_loader, optimizer=None, device=device)
-        current_val = float(valid_metrics["loss_total"])
+        valid_metrics = _run_ecbm_epoch(
+            model, valid_loader, optimizer=None, device=device
+        )
+        current_val = float(
+            valid_metrics["loss_unweighted"]
+        )  # the authors monitor the unweighted sum
         if current_val < best_val_loss - _EARLY_STOP_EPS:
             best_val_loss = current_val
             best_state = copy.deepcopy(model.state_dict())
@@ -576,11 +647,6 @@ def train_ecbm_model(
 
     wrapped_kwargs = copy.deepcopy(model_init_kwargs)
     wrapped_kwargs.pop("c_extractor_arch", None)
-    eval_config = {
-        **loader_cfg,
-        "ecbm_inference_steps": int(getattr(config, "ecbm_inference_steps", 10)),
-        "ecbm_inference_lr": float(getattr(config, "ecbm_inference_lr", 0.1)),
-    }
     return ECBMBenchmarkModel(
         official_model=model,
         benchmark=benchmark,
@@ -588,6 +654,6 @@ def train_ecbm_model(
         class_names=list(train_dataset.classes),
         backbone_spec=backbone_spec,
         model_init_kwargs=wrapped_kwargs,
-        eval_config=eval_config,
+        eval_config=dict(loader_cfg),
         training_summary={"max_epochs": best_epoch + 1},
     )

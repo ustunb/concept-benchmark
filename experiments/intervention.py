@@ -59,7 +59,9 @@ def predict_label_proba_from_concepts(
     replay_target = None
     if hasattr(model, "predict_proba_from_concepts"):
         replay_target = model.predict_proba_from_concepts
-    elif hasattr(getattr(model, "label_predictor", None), "predict_proba_from_concepts"):
+    elif hasattr(
+        getattr(model, "label_predictor", None), "predict_proba_from_concepts"
+    ):
         replay_target = model.label_predictor.predict_proba_from_concepts
 
     if replay_target is not None:
@@ -88,7 +90,11 @@ def _supports_aligned_concept_replay(model: ConceptBasedModel) -> bool:
     if getattr(model, "supports_aligned_concept_replay", False):
         return True
     return bool(
-        getattr(getattr(model, "label_predictor", None), "supports_aligned_concept_replay", False)
+        getattr(
+            getattr(model, "label_predictor", None),
+            "supports_aligned_concept_replay",
+            False,
+        )
     )
 
 
@@ -950,7 +956,9 @@ class ConceptInterventionRunner:
 
         # Propose interventions based on the strategy.
         propose_kwargs = {}
-        if y_prob_baseline is not None and isinstance(strategy, ConceptualSafeguardsStrategy):
+        if y_prob_baseline is not None and isinstance(
+            strategy, ConceptualSafeguardsStrategy
+        ):
             propose_kwargs["y_prob_baseline"] = y_prob_baseline
         proposal = strategy.propose(self.model, batch, config, **propose_kwargs)
         if proposal.mask.shape != batch.C_pred.shape:
@@ -998,7 +1006,9 @@ class ConceptInterventionRunner:
             if y_prob_baseline is not None:
                 y_prob_before = y_prob_baseline
             else:
-                y_prob_before = predict_label_proba_from_concepts(self.model, concepts_before)
+                y_prob_before = predict_label_proba_from_concepts(
+                    self.model, concepts_before
+                )
             y_prob_after = predict_label_proba_from_concepts(self.model, concepts_after)
 
         # Keep predictions for non-intervened samples unchanged.

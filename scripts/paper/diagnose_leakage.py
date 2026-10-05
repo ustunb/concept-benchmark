@@ -6,7 +6,7 @@ Implements three leakage measures from the literature:
 3. Conditional MI — Schoen et al., 2025
 
 Usage::
-    PYTHONPATH=. python scripts/diagnose_leakage.py
+    PYTHONPATH=. python scripts/paper/diagnose_leakage.py
 """
 
 from __future__ import annotations
@@ -55,9 +55,7 @@ def compute_ctl(
     return ctl
 
 
-def compute_icl(
-    c_hat: np.ndarray, c_gt: np.ndarray, concepts: list[str]
-) -> float:
+def compute_icl(c_hat: np.ndarray, c_gt: np.ndarray, concepts: list[str]) -> float:
     """Compute mean ICL score across concept pairs."""
     k = min(c_hat.shape[1], c_gt.shape[1])
     if k < 2:
@@ -146,7 +144,11 @@ def main():
     models = {}
     for family in ["cbm", "cem", "probcbm", "ecbm"]:
         try:
-            cfg_family = RobotBenchmarkConfig.default_subconcept() if args.concept_preset else RobotBenchmarkConfig(seed=1014)
+            cfg_family = (
+                RobotBenchmarkConfig.default_subconcept()
+                if args.concept_preset
+                else RobotBenchmarkConfig(seed=1014)
+            )
             cfg_family.seed = 1014
             cfg_family.cbm_family = family
             model_path = cfg_family.get_model_path(family)
@@ -159,11 +161,14 @@ def main():
 
     # Extract concept predictions
     from concept_benchmark.utils import determine_device
+
     device = str(determine_device())
     concept_preds = {}
     for name, model in models.items():
         # Override device to match current hardware
-        if hasattr(model, "concept_detector") and hasattr(model.concept_detector, "_eval_config"):
+        if hasattr(model, "concept_detector") and hasattr(
+            model.concept_detector, "_eval_config"
+        ):
             model.concept_detector._eval_config["device"] = device
         if hasattr(model, "eval_config"):
             model.eval_config["device"] = device
@@ -172,11 +177,16 @@ def main():
         except (TypeError, FileNotFoundError, OSError) as e:
             # Images not available locally — try predict_proba on the full model
             # which may use cached predictions
-            print(f"  {name}: concept_detector.predict_proba failed ({e.__class__.__name__}), trying model.predict_proba")
+            print(
+                f"  {name}: concept_detector.predict_proba failed ({e.__class__.__name__}), trying model.predict_proba"
+            )
             try:
                 label_probs = model.predict_proba(test)
                 # For official models, the cache now has concept_probs
-                if hasattr(model, "_prediction_cache") and model._prediction_cache is not None:
+                if (
+                    hasattr(model, "_prediction_cache")
+                    and model._prediction_cache is not None
+                ):
                     concept_preds[name] = model._prediction_cache.concept_probs
                 else:
                     print(f"  {name}: no cached concept probs, skipping")
@@ -258,8 +268,10 @@ def main():
         ctl_val = ctl_means[mname]
         icl_val = icl_scores[mname]
         cmi_val = cmi_scores[mname]["leakage"]
-        print(f"\\{mname.replace('PROBCBM','ProbCBM').replace('ECBM','ECBM')}{{}}"
-              f" & {ctl_val:.4f} & {icl_val:.4f} & {cmi_val:.4f} \\\\")
+        print(
+            f"\\{mname.replace('PROBCBM', 'ProbCBM').replace('ECBM', 'ECBM')}{{}}"
+            f" & {ctl_val:.4f} & {icl_val:.4f} & {cmi_val:.4f} \\\\"
+        )
 
 
 if __name__ == "__main__":

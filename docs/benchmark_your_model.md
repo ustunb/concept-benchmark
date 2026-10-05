@@ -11,10 +11,8 @@ Generate a dataset and access it in the format your model expects:
 ```python
 from concept_benchmark.robots import DatasetGenerator
 
-dataset = DatasetGenerator(seed=1014, concept_preset="foot_subtypes", render_images=True).generate()
-dataset.drop_concepts(["has_elbows", "hand_shape"])
-dataset.sample(test_size=10000, val_size=0.2, train_size=3800, seed=1014)
-train, val, test = dataset.train, dataset.validation, dataset.test
+dataset = DatasetGenerator(seed=1014, concept_preset="foot_subtypes", render_images=True).generate_splits()
+train, val, test = dataset.train, dataset.val, dataset.test
 ```
 
 Each split is a `ConceptDatasetSample` with these attributes:
@@ -56,12 +54,12 @@ class MyConceptDetector(ConceptDetector):
         super().__init__()
         self._my_model = my_model
 
-    def predict(self, dataset, **kwargs):
+    def predict_proba(self, dataset, **kwargs):
         """Must return (N, n_concepts) float array in [0, 1]."""
         return self._my_model.predict_concept_probs(dataset.X)
 ```
 
-**Key point:** `predict()` receives a `ConceptDatasetSample`, not raw arrays. Access inputs via `dataset.X`.
+**Key point:** Override `predict_proba()` — it receives a `ConceptDatasetSample`, not raw arrays. Access inputs via `dataset.X`. The base class `predict()` calls `predict_proba()` and thresholds at 0.5 automatically.
 
 ### Using a PyTorch module directly
 
@@ -146,7 +144,7 @@ for k in [1, 3]:
     result = runner.run(
         strategy=KFlipInterventionStrategy(),
         config=InterventionConfig(
-            max_concepts_per_instance=k,
+            per_instance_budget=k,
             score_threshold=0.2,
         ),
         dataset=test,
@@ -156,16 +154,16 @@ for k in [1, 3]:
 ```
 
 **Bypassing the concept detector:**
-If you already have concept probabilities, pass them directly via `concept_proba=` to skip `concept_detector.predict()`:
+If you already have concept probabilities, pass them directly via `concept_proba=` to skip the concept detector:
 
 ```python
 my_concept_probs = my_model.predict_concepts(test.X)  # your own call
 
 result = runner.run(
     strategy=KFlipInterventionStrategy(),
-    config=InterventionConfig(max_concepts_per_instance=3, score_threshold=0.2),
+    config=InterventionConfig(per_instance_budget=3, score_threshold=0.2),
     dataset=test,
-    concept_proba=my_concept_probs,  # bypasses concept_detector.predict()
+    concept_proba=my_concept_probs,  # bypasses the concept detector
 )
 ```
 
@@ -175,7 +173,7 @@ The runner uses `dataset.base_concepts` (clean concepts before noise) for ground
 ```python
 result = runner.run(
     strategy=KFlipInterventionStrategy(),
-    config=InterventionConfig(max_concepts_per_instance=3, score_threshold=0.2),
+    config=InterventionConfig(per_instance_budget=3, score_threshold=0.2),
     dataset=test,
     concept_true=my_ground_truth_concepts,  # override ground truth
 )
@@ -186,7 +184,7 @@ result = runner.run(
 <details>
 <summary><strong>Running alignment</strong></summary>
 
-Test whether sign-constraining concept weights preserves intervention benefit:
+Retrain the label predictor with sign constraints on concept weights and compare accuracy:
 
 ```python
 from experiments.utils import run_alignment
@@ -195,7 +193,7 @@ stats = run_alignment(
     concept_based_model=cbm,
     train_dataset=train,
     test_dataset=test,
-    monotonicity_constraints={"has_knees": 1},  # force positive weight
+    monotonicity_constraints={"has_knees": 1},  # require a non-negative weight
 )
 print(f"Original: {stats['original_accuracy']:.4f}")
 print(f"Aligned:  {stats['aligned_accuracy']:.4f}")
@@ -207,36 +205,36 @@ print(f"Change:   {stats['accuracy_change']:+.4f}")
 ## Comparing to baselines
 
 The repo also includes built-in wrappers for the official `cem` and `probcbm`
-baselines from `mateoespinosa/cem`. These wrappers expose the same practical
-surface used above:
+baselines from `mateoespinosa/cem`, and an `ecbm` baseline that works out of
+the box. These wrappers expose the same practical surface used above:
 
 - `predict(dataset)`
 - `predict_proba(dataset, return_concepts=True)`
 - intervention-time label recomputation from edited concepts
 
-For the robot benchmark:
+Every family runs on both benchmarks:
 
 ```bash
 ./scripts/install_cem_repo.sh
 python scripts/robot_pipeline.py --seed 1014 --cbm-family cem
 python scripts/robot_pipeline.py --seed 1014 --cbm-family probcbm
+python scripts/robot_pipeline.py --seed 1014 --cbm-family ecbm
+python scripts/sudoku_pipeline.py --seed 171 --cbm-family cem
 ```
 
-For sudoku, the current integration is intentionally narrow: `cem` and
-`probcbm` are wired into the tabular pipeline path, while OCR/image-specific
-selective/alignment flows remain on the original `cbm` implementation.
+Alignment remains on the original `cbm` path.
 
-Use the same seed for apples-to-apples comparison with the built-in models. Expected results for the robot benchmark (seed=1014, concept_preset="foot_subtypes"):
+Use the same seeds for apples-to-apples comparison with the built-in models. Expected results for the robot benchmark (`concept_preset="foot_subtypes"`, balanced rule), as means over the 10 seeds of the paper (`1014`–`1023`):
 
-| Model | k=0 | k=1 | k=3 | k=12 (max) |
-|-------|-----|-----|-----|------------|
-| Built-in CBM | 0.7812 | 0.9212 | 0.9439 | 0.9439 |
-| DNN baseline | 0.8746 | — | — | — |
+| Model | k=0 | k=max (every concept corrected) |
+|-------|-----|---------------------------------|
+| Built-in CBM | 77.6% | 85.7% |
+| DNN baseline | 88% | — |
 
-Run the built-in pipeline to generate baseline numbers:
+A single run differs from these means by a point or two, and across hardware. Run the built-in pipeline to generate baseline numbers:
 
 ```bash
-./venv/bin/python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes
+python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes --budgets 1 3 max
 ```
 
-For the complete set of expected results across all regimes, see the [README](https://anonymous.4open.science/r/concept-benchmark-84D2#readme).
+For metrics and plots to compare models, see [Evaluation Metrics and Plots](evaluation.md); for the commands behind each experiment of the paper, see [`EXPERIMENTS.md`](https://github.com/ustunb/concept-benchmark/blob/main/EXPERIMENTS.md).

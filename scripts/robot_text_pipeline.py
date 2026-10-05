@@ -329,7 +329,9 @@ def train_dnn(
     )
 
     # Platt calibration on validation
-    calibrator = _fit_platt(data.validation.inputs, data.validation.y, tok, model, device)
+    calibrator = _fit_platt(
+        data.validation.inputs, data.validation.y, tok, model, device
+    )
 
     metrics = {"accuracy": acc, "seed": config.seed, "model": config.dnn_model_name}
     logger.info("DNN Test Accuracy: %.4f", acc)

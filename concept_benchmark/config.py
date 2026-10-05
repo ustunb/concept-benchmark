@@ -12,6 +12,7 @@ __all__ = [
     "SudokuBenchmarkConfig",
     "PRESET_EXCLUDED_CONCEPTS",
     "TEXT_PRESET_EXCLUDED_CONCEPTS",
+    "ROBOT_LABEL_RULES",
 ]
 
 import copy
@@ -19,7 +20,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field, fields, asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import logging
 
@@ -102,14 +103,82 @@ ROBOT_CONCEPTS = {
 }
 
 
-ROBOT_SAMPLING_CONSTRAINTS = [
-    {"concepts": {"foot_shape_pointy_square": 1}, "min_fraction": 0.005},
-    {"concepts": {"foot_shape_pointy_rounded": 1}, "min_fraction": 0.005},
-    {"concepts": {"foot_shape_pointy_4sided": 1}, "min_fraction": 0.49},
-    {"concepts": {"foot_shape_flat_square": 1}, "min_fraction": 0.005},
-    {"concepts": {"foot_shape_flat_trapezoid": 1}, "min_fraction": 0.005},
-    {"concepts": {"foot_shape_flat_5sided": 1}, "min_fraction": 0.49},
-]
+ROBOT_TRAIN_SIZE = 3800
+ROBOT_TEST_SIZE = 10000
+ROBOT_VALIDATION_SHARE = 0.2
+
+
+def _require_foot_subtype_shares(shares: dict[str, float]) -> tuple[dict, ...]:
+    """Training-set constraints: each listed foot subtype gets at least its share."""
+    return tuple(
+        {"concepts": {f"foot_shape_{subtype}": 1}, "min_fraction": share}
+        for subtype, share in shares.items()
+    )
+
+
+def _build_balanced_formula() -> LabelFormula:
+    """No single concept decides the label; the intercept makes both classes equally likely."""
+    score = (
+        6 * F("mouth_type").closed
+        + 6 * F("body_shape").round
+        + 6 * F("head_shape").round
+        + 6 * F("has_antennae").true
+        + 6 * F("ears_shape").triangle
+        + 8 * F("foot_shape").pointy
+        - 3 * F("has_knees").true
+        - 2 * F("has_elbows").true
+        - 16.5
+    )
+    return LabelFormula(score=score, temperature=4.2, stochastic=True)
+
+
+def _build_sparse_formula() -> LabelFormula:
+    """Three concepts decide the label; 87.5% of robots are Glorps."""
+    score = (
+        5 * F("mouth_type").closed
+        + 8 * F("foot_shape").pointy
+        - 5 * F("has_knees").true
+        + 2
+    )
+    return LabelFormula(score=score, temperature=4.2, stochastic=True)
+
+
+@dataclass(frozen=True)
+class RobotLabelRule:
+    """How robots are labeled and which foot subtypes the training sample holds."""
+
+    build_formula: Callable[[], LabelFormula]
+    sampling_constraints: tuple[dict, ...]
+
+
+ROBOT_LABEL_RULES = {
+    "balanced": RobotLabelRule(
+        build_formula=_build_balanced_formula,
+        sampling_constraints=_require_foot_subtype_shares(
+            {
+                "pointy_4sided": 0.30,
+                "flat_5sided": 0.30,
+                "pointy_square": (1.0 - 2 * 0.30) / 4,
+                "pointy_rounded": (1.0 - 2 * 0.30) / 4,
+                "flat_square": (1.0 - 2 * 0.30) / 4,
+                "flat_trapezoid": (1.0 - 2 * 0.30) / 4,
+            }
+        ),
+    ),
+    "sparse": RobotLabelRule(
+        build_formula=_build_sparse_formula,
+        sampling_constraints=_require_foot_subtype_shares(
+            {
+                "pointy_square": 0.005,
+                "pointy_rounded": 0.005,
+                "pointy_4sided": 0.49,
+                "flat_square": 0.005,
+                "flat_trapezoid": 0.005,
+                "flat_5sided": 0.49,
+            }
+        ),
+    ),
+}
 
 IMAGE_SIZE_TO_PIXELS = {
     "large": 600,
@@ -120,8 +189,9 @@ IMAGE_SIZE_TO_PIXELS = {
 MISSING_PROPORTION = 0.2
 
 VALID_STRATEGIES = frozenset({"up_to_k", "exactly_k"})
+INTERVENTION_ENCODINGS = frozenset({"binary", "percentile", "binary_revealed"})
 VALID_ROBOT_CBM_FAMILIES = frozenset({"cbm", "cem", "probcbm", "ecbm"})
-VALID_SUDOKU_CBM_FAMILIES = frozenset({"cbm", "cem", "probcbm"})
+VALID_SUDOKU_CBM_FAMILIES = frozenset({"cbm", "cem", "probcbm", "ecbm"})
 VALID_CBM_FAMILIES = VALID_ROBOT_CBM_FAMILIES
 _CEM_FINGERPRINT_FIELDS = frozenset(
     {
@@ -145,14 +215,11 @@ _PROBCBM_FINGERPRINT_FIELDS = frozenset(
 )
 _ECBM_FINGERPRINT_FIELDS = frozenset(
     {
-        "ecbm_emb_size",
         "ecbm_hid_size",
         "ecbm_lambda_xy",
         "ecbm_lambda_xc",
         "ecbm_lambda_cy",
         "ecbm_weight_decay",
-        "ecbm_inference_steps",
-        "ecbm_inference_lr",
         "ecbm_max_epochs",
     }
 )
@@ -252,18 +319,8 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     concepts: dict[str, list] = field(
         default_factory=lambda: copy.deepcopy(ROBOT_CONCEPTS)
     )
-    label_formula: LabelFormula = field(
-        default_factory=lambda: LabelFormula(
-            score=(
-                5 * F("mouth_type").closed
-                + 8 * F("foot_shape").pointy
-                - 5 * F("has_knees").true
-                + 2
-            ),
-            temperature=4.2,
-            stochastic=True,
-        )
-    )
+    label_rule: str = "balanced"
+    label_formula: LabelFormula | None = None  # None → the formula of ``label_rule``
     expand_concepts: list[str] = field(
         default_factory=lambda: ["foot_shape"],
     )
@@ -287,14 +344,13 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     probcbm_intervention_prob: float = 0.25
     training_mode: CBMTrainingMode = CBMTrainingMode.Independent
     probcbm_max_epochs: int | None = None
-    ecbm_emb_size: int = 8
     ecbm_hid_size: int = 64
-    ecbm_lambda_xy: float = 1.0
+    # Training energy weights; the authors' default is 3/1/1 (xmed-lab/ECBM main.py). Inference and
+    # intervention weights are fixed in experiments/baselines/ecbm.py as in the authors' code.
+    ecbm_lambda_xy: float = 3.0
     ecbm_lambda_xc: float = 1.0
     ecbm_lambda_cy: float = 1.0
     ecbm_weight_decay: float = 1e-4
-    ecbm_inference_steps: int = 10
-    ecbm_inference_lr: float = 0.1
     ecbm_max_epochs: int | None = None
 
     # Intervention
@@ -305,6 +361,10 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     )
     intervention_accuracy: float = 1.0
     intervention_strategy: str = "up_to_k"  # "up_to_k" or "exactly_k"
+    intervention_encoding: str = "binary"  # see INTERVENTION_ENCODINGS
+    intervention_records_dir: str | None = (
+        None  # save what was asked and answered per budget
+    )
 
     # Intervention regimes
     intervention_regimes: list[str] = field(default_factory=lambda: ["baseline"])
@@ -367,8 +427,24 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             raise ValueError(
                 f"data_type must be 'image' or 'text', got {self.data_type!r}"
             )
-        if isinstance(self.label_formula, dict):
+        if self.label_rule not in ROBOT_LABEL_RULES:
+            raise ValueError(
+                f"label_rule must be one of {sorted(ROBOT_LABEL_RULES)}, "
+                f"got {self.label_rule!r}"
+            )
+        if self.label_formula is None:
+            self.label_formula = ROBOT_LABEL_RULES[self.label_rule].build_formula()
+        elif isinstance(self.label_formula, dict):
             self.label_formula = LabelFormula.from_dict(self.label_formula)
+        for name, rule in ROBOT_LABEL_RULES.items():
+            if (
+                name != self.label_rule
+                and self.label_formula.to_dict() == rule.build_formula().to_dict()
+            ):
+                raise ValueError(
+                    f"label_formula is the formula of the {name!r} rule but label_rule is {self.label_rule!r}; "
+                    f"set label_rule={name!r} or leave label_formula unset"
+                )
         if self.data_type == "text":
             self._auto_configure_text()
         self._validate_common()
@@ -413,15 +489,16 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             raise ValueError(
                 f"intervention_budgets must be non-negative (or -1 for max), got {self.intervention_budgets}"
             )
+        if self.intervention_encoding not in INTERVENTION_ENCODINGS:
+            raise ValueError(
+                f"intervention_encoding must be one of {sorted(INTERVENTION_ENCODINGS)}, "
+                f"got {self.intervention_encoding!r}"
+            )
         if self.intervention_strategy not in VALID_STRATEGIES:
             raise ValueError(
                 f"intervention_strategy must be one of {sorted(VALID_STRATEGIES)}, "
                 f"got {self.intervention_strategy!r}"
             )
-        if self.ecbm_inference_steps < 1:
-            raise ValueError("ecbm_inference_steps must be positive")
-        if self.ecbm_inference_lr <= 0.0:
-            raise ValueError("ecbm_inference_lr must be positive")
 
     def _validate_image(self):
         """Validate image-specific parameters."""
@@ -461,9 +538,24 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         return "stochastic" if self.label_formula.stochastic else "deterministic"
 
     @property
+    def _seed_tag(self) -> str:
+        """``'_seed{seed}'``, plus ``'_labels{rng_seed}'`` when labels come from another seed."""
+        if self.rng_seed is None or self.rng_seed == self.seed:
+            return f"_seed{self.seed}"
+        return f"_seed{self.seed}_labels{self.rng_seed}"
+
+    @property
+    def sampling_constraints(self) -> list[dict]:
+        """Minimum share of each foot subtype in the training sample."""
+        return list(ROBOT_LABEL_RULES[self.label_rule].sampling_constraints)
+
+    @property
     def _preset_suffix(self) -> str:
-        """``'_subconcept'`` or ``'_ideal'`` for filename construction."""
-        return "_subconcept" if self.concept_preset == "foot_subtypes" else "_ideal"
+        """Concept preset, plus the label rule when it is not the default, for filename construction."""
+        preset = "_subconcept" if self.concept_preset == "foot_subtypes" else "_ideal"
+        return (
+            preset if self.label_rule == "balanced" else f"{preset}_{self.label_rule}"
+        )
 
     @property
     def pixel_resolution(self) -> int:
@@ -543,6 +635,8 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
                 "alignment_constraints",
                 "intervention_budgets",
                 "intervention_strategy",
+                "intervention_encoding",
+                "intervention_records_dir",
                 "intervention_regimes",
                 "intervention_accuracy",
                 "intervention_thresholds",
@@ -599,6 +693,8 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             "intervention_thresholds",
             "intervention_accuracy",
             "intervention_strategy",
+            "intervention_encoding",
+            "intervention_records_dir",
             "intervention_regimes",
             "expert_intervention_accuracy",
             "subjective_noise_rate",
@@ -649,19 +745,18 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         """Return the path where the dataset file is saved."""
         if self.data_type == "text":
             return results_dir / f"robot_text_seed{self.seed}.data"
-        filename = (
-            f"robot_{self.data_type}_{self.renders_per_robot}{self._preset_suffix}"
-        )
+        filename = f"robot_{self.data_type}_{self.renders_per_robot}{self._preset_suffix}{self._seed_tag}"
         return results_dir / f"{filename}.data"
 
     def get_model_path(self, model_class: str) -> Path:
         """Return the path where a trained model is saved."""
         if self.data_type == "text":
             return results_dir / f"robot_text_{model_class}_seed{self.seed}.model"
+        seed_tag = self._seed_tag
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}_{self.renders_per_robot}"
             f"{self._preset_suffix}"
-            f"_{model_class}.model"
+            f"_{model_class}{seed_tag}.model"
         )
         return results_dir / filename
 
@@ -672,7 +767,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         filename = f"robot_{self.data_type}_{self._labeling_tag}"
         if model_class in {"cbm", "cem", "probcbm", "ecbm"}:
             filename += self._preset_suffix
-        filename += f"_{model_class}_results.csv"
+        filename += f"_{model_class}{self._seed_tag}_results.csv"
         return results_dir / filename
 
     def get_interpretation_path(self, model_class: str = "ecbm") -> Path:
@@ -684,7 +779,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             )
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}"
-            f"{self._preset_suffix}_{model_class}_interpretation.json"
+            f"{self._preset_suffix}_{model_class}{self._seed_tag}_interpretation.json"
         )
         return results_dir / filename
 
@@ -707,7 +802,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}"
             f"{self._preset_suffix}"
-            f"_alignment.json"
+            f"{self._seed_tag}_alignment.json"
         )
         return results_dir / filename
 
@@ -870,7 +965,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     def get_model_path(self, model_class: str, data_type: str | None = None) -> Path:
         """Return the path where a trained model is saved."""
         dt = data_type or self.data_type
-        filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}"
+        filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}"
         return results_dir / f"{filename}.model"
 
     def get_results_path(
@@ -878,7 +973,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     ) -> Path:
         """Return the path where results are saved."""
         dt = data_type or self.data_type
-        filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}"
+        filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}"
         return results_dir / f"{filename}.results"
 
     def get_alignment_weights(self) -> dict[str, float]:

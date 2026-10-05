@@ -18,8 +18,7 @@ from experiments.models import ConceptDetector, FrontEndModel
 # Assume cd and fe are already trained (see examples/robot_pipeline_example.py)
 
 # Step 1: Get concept probabilities
-# NOTE: cd.predict() returns probabilities in [0, 1], NOT binary predictions.
-concept_probs = cd.predict(test)
+concept_probs = cd.predict_proba(test)
 
 # Step 2-3: For each sample, replace the k most uncertain concepts
 # with ground-truth values
@@ -37,7 +36,7 @@ for k in [1, 3]:
     print(f"k={k}: accuracy={acc:.4f}")
 ```
 
-> **Important:** `ConceptDetector.predict()` returns **probabilities**, not binary predictions. This differs from the sklearn convention. To get binary predictions, threshold at 0.5: `binary = (cd.predict(dataset) > 0.5).astype(int)`.
+> **Note:** `ConceptDetector.predict_proba()` returns probabilities; `ConceptDetector.predict()` thresholds them at 0.5 and returns binary values.
 
 > **Important:** `FrontEndModel.predict()` expects **binary** concept values (0/1), not probabilities. Always threshold before passing to the label predictor.
 
@@ -56,9 +55,9 @@ cbm = ConceptBasedModel(concept_detector=cd, label_predictor=fe)
 
 # Configure the intervention
 config = InterventionConfig(
-    max_concepts_per_instance=3,  # correct up to 3 concepts per sample
-    score_threshold=0.2,          # only intervene on concepts with
-                                  # probability within 0.2 of 0.5
+    per_instance_budget=3,  # correct up to 3 concepts per sample
+    score_threshold=0.2,          # intervene when the label would change
+                                  # with probability 0.2 or more
 )
 
 # Run interventions
@@ -128,7 +127,7 @@ class UncertaintyStrategy(InterventionStrategy):
         super().__init__(name="uncertainty")
 
     def propose(self, model, batch, config):
-        k = config.per_instance_limit(batch.n_concepts)
+        k = int(min(config.per_instance_limit(batch.n_concepts), batch.n_concepts))
         mask = np.zeros((batch.n_samples, batch.n_concepts), dtype=bool)
 
         # Rank concepts by uncertainty (closeness to 0.5)
@@ -145,7 +144,7 @@ Use it with the runner:
 ```python
 result = runner.run(
     strategy=UncertaintyStrategy(),
-    config=InterventionConfig(max_concepts_per_instance=3, score_threshold=0.2),
+    config=InterventionConfig(per_instance_budget=3, score_threshold=0.2),
     dataset=test,
 )
 ```
@@ -173,35 +172,59 @@ runner.prepare(strategy, config, validation_dataset=val)
 result = runner.run(strategy, config, dataset=test)
 ```
 
-## Intervention regimes
+## Concept sources and intervention sources
 
-The package supports six intervention regimes that simulate different real-world annotation scenarios. Each regime varies the concept source (how concepts are predicted) and the intervention source (who corrects them):
+The robot pipeline varies two things independently: who annotates the concepts a model is trained on, and who answers when the model asks about a concept at test time.
+
+| Concept source | Concepts |
+|----------------|----------|
+| **ground_truth** | The 7 true concepts |
+| **human_concepts** | 12 concepts as a human annotator would list them (six foot subtypes) |
+| **noisy_human_concepts** | The same concepts, annotated with 20% label noise (annotators who disagree) |
+| **machine_annotation** | The human concepts, scored by CLIP (label-free CBM) |
+| **llm_concepts** | Concepts written by an LLM, scored by CLIP |
+| **clip_concepts** | Single words chosen by CLIP, scored by CLIP |
+
+| Intervention source | Answers |
+|---------------------|---------|
+| **perfect** | The true concept values — the upper bound |
+| **expert** | A simulated expert, correct 80% of the time on every concept |
+| **llm** | An LLM that answers each concept from the image (Gemini by default) |
+| **self** | The model's own thresholded predictions — changes no value, so it isolates the effect of the intervention mechanism |
+
+```bash
+python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
+    --concept-sources human_concepts machine_annotation \
+    --intervention-sources perfect expert self --budgets 1 3 max
+```
+
+LLM interventions need an API key (`--llm-api-key` or `GEMINI_API_KEY`); `--llm-cache-only` reuses saved answers.
+
+#### Regimes
+
+A regime names one pairing of concept source and intervention source, as in the first version of the benchmark:
 
 | Regime | Concepts from | Corrected by | Description |
 |--------|--------------|-------------|-------------|
-| **baseline** | Ground truth | Ground truth | Perfect oracle — upper bound on intervention benefit |
-| **expert** | Ground truth | Noisy human (80% acc) | Realistic human annotator |
-| **subjective** | Noisy CBM (20% label noise) | Noisy human (80% acc) | Concepts trained on noisy labels |
-| **machine** | LFCBM (GT descriptions) | Noisy human (80% acc) | Machine-discovered concepts |
-| **llm** | LFCBM (LLM descriptions) | LLM (Gemini by default) | Fully automated with LLM |
-| **clip** | LFCBM (CLIP keywords) | LLM (Gemini by default) | Fully automated with CLIP |
+| **baseline** | Human annotation | True values | Upper bound on the benefit of interventions |
+| **expert** | Human annotation | Expert (80% accurate) | Realistic human annotator |
+| **subjective** | Human annotation with 20% label noise | Expert (80% accurate) | Annotators who disagree on the concepts |
+| **machine** | CLIP scores of the human concepts | Expert (80% accurate) | Automated annotation |
+| **llm** | Concepts written by an LLM | LLM | Fully automated with an LLM |
+| **clip** | Single words chosen by CLIP | LLM | Fully automated with CLIP |
 
-Run regimes via the pipeline script:
-
-```bash
-python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
-    --regimes baseline expert subjective machine
-```
-
-For resubmittal experiments, the pipeline also exposes an experimental `placeholder3` automated regime. It is not part of the locked paper table above and must be paired with an explicit concepts file. Intervention judgments can use the existing API-backed providers or local CLI loops with `codex_exec` / `claude_exec`:
+Both robot pipelines accept `--regimes` as shorthand for the matching sources:
 
 ```bash
-python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
-    --regimes placeholder3 \
-    --placeholder3-concepts-file path/to/placeholder3.jsonl \
-    --llm-provider codex_exec
+python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes --regimes baseline expert subjective
+python scripts/robot_text_pipeline.py --seed 1337 --regimes baseline expert subjective
 ```
 
-For details on each regime, see the [Robot benchmark documentation](robot.md).
+Two further options control how interventions are applied and recorded:
 
-For a complete end-to-end example using `ConceptInterventionRunner` with training, interventions, and alignment, see [`examples/robot_pipeline_example.py`](https://anonymous.4open.science/r/concept-benchmark-84D2/blob/main/examples/robot_pipeline_example.py).
+| Option | Description |
+|--------|-------------|
+| `--intervention-encoding` | What a label-free CBM reads after an intervention: `binary` (default), `percentile` or `binary_revealed` |
+| `--dump-interventions DIR` | Save what was asked and answered for each budget (input to `plot_concept_report`) |
+
+For a complete end-to-end example using `ConceptInterventionRunner` with training, interventions, and alignment, see [`examples/robot_pipeline_example.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/robot_pipeline_example.py).

@@ -598,6 +598,11 @@ class ConceptDataset:
         return self._full.inputs
 
     @property
+    def X(self) -> np.ndarray:
+        """Alias of ``inputs``."""
+        return self.inputs
+
+    @property
     def concept_costs_array(self) -> np.ndarray:
         """Per-concept costs as a 1D numpy array ordered by self.concepts."""
         return np.asarray(
@@ -1313,6 +1318,11 @@ class ConceptDatasetSample(Dataset):
     def inputs(self, value: np.ndarray) -> None:
         self._inputs = value
         self.n = len(self._inputs)
+
+    @property
+    def X(self) -> np.ndarray:
+        """Alias of ``inputs``."""
+        return self.inputs
 
     @property
     def y(self) -> np.ndarray:

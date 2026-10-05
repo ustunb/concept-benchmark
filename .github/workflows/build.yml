@@ -32,9 +32,9 @@ jobs:
       - name: Install ruff
         run: uv tool install ruff
       - name: Lint
-        run: ruff check concept_benchmark/ tests/
+        run: ruff check concept_benchmark/ tests/ experiments/ scripts/ examples/
       - name: Format check
-        run: ruff format --check concept_benchmark/ tests/
+        run: ruff format --check concept_benchmark/ tests/ experiments/ scripts/ examples/
 
   test:
     needs: lint

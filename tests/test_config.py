@@ -158,9 +158,9 @@ class TestSudokuConfigValidation:
         cfg = SudokuBenchmarkConfig(cbm_family="probcbm")
         assert cfg.cbm_family == "probcbm"
 
-    def test_rejects_ecbm_family(self):
-        with pytest.raises(ValueError, match="cbm_family must be one of"):
-            SudokuBenchmarkConfig(cbm_family="ecbm")
+    def test_accepts_ecbm_family(self):
+        cfg = SudokuBenchmarkConfig(cbm_family="ecbm")
+        assert cfg.cbm_family == "ecbm"
 
 
 class TestRobotTextConfigValidation:
@@ -302,7 +302,6 @@ class TestModelFingerprintScope:
             probcbm_hidden_dim=32,
             probcbm_latent_dim=16,
             ecbm_hid_size=128,
-            ecbm_inference_steps=10,
         )
         assert base.model_fingerprint("dnn") == changed.model_fingerprint("dnn")
         assert base.get_model_path("dnn") == changed.get_model_path("dnn")

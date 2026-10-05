@@ -24,10 +24,14 @@ from .metrics import (
 )
 from .plots import (
     plot_alignment_comparison,
+    plot_answer_reliance,
+    plot_automation,
     plot_concept_discovery,
+    plot_concept_report,
+    plot_confidence,
     plot_intervention_curve,
+    plot_intervention_heatmap,
     plot_model_comparison,
-    plot_regime_comparison,
     plot_selective_classification,
 )
 
@@ -41,9 +45,13 @@ __all__ = [
     "selective_accuracy",
     # plots
     "plot_alignment_comparison",
+    "plot_answer_reliance",
+    "plot_automation",
     "plot_concept_discovery",
+    "plot_concept_report",
+    "plot_confidence",
     "plot_intervention_curve",
+    "plot_intervention_heatmap",
     "plot_model_comparison",
-    "plot_regime_comparison",
     "plot_selective_classification",
 ]

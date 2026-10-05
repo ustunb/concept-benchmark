@@ -1,11 +1,16 @@
 [project]
 name = "concept-benchmark"
-version = "0.3.1"
+version = "0.4.0"
 description = "Synthetic benchmarks for evaluating Concept Bottleneck Models."
 license = "MIT"
+license-files = ["LICENSE"]
 readme = "README.md"
 authors = [
-    { name = "Anonymous Authors" },
+    { name = "Julian Skirzyński" },
+    { name = "Harry Cheon" },
+    { name = "Shreyas Kadekodi" },
+    { name = "Meredith Stewart" },
+    { name = "Berk Ustun" },
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -21,11 +26,9 @@ classifiers = [
 requires-python = ">=3.10"
 
 dependencies = [
-    # Numerical and ML stack: PINNED to the exact versions used to produce the
-    # paper numbers (CBM ideal=0.8673, DNN=0.8746) at commit 388bdc4f
-    # (Apr 13 2026). Conv2d output and Bernoulli RNG vary across versions, so
-    # any upgrade will silently drift the reference numbers. Do not relax
-    # these pins without re-running tests/test_robot_pipeline_regression.py.
+    # Pinned: Conv2d output and Bernoulli sampling vary across versions, so an
+    # upgrade changes generated labels and trained models. Re-run
+    # tests/test_robot_pipeline_regression.py before relaxing these pins.
     "numpy==2.2.6",
     "torch==2.8.0",
     "torchvision==0.23.0",
@@ -47,7 +50,8 @@ dependencies = [
 explore = ["renumics-spotlight>=1.6"]
 
 [project.urls]
-Repository = "https://anonymous.4open.science/r/concept-benchmark-84D2"
+Repository = "https://github.com/ustunb/concept-benchmark"
+Datasets = "https://huggingface.co/juliannski"
 
 [dependency-groups]
 dev = [
@@ -71,7 +75,12 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.sdist]
-exclude = ["data/", "results/", "scripts/", ".claude/", "huggingface_export/", ".ultraplan/", "dist/", "build/"]
+only-include = [
+    "concept_benchmark", "experiments", "tests", "examples", "docs",
+    "scripts/paper", "scripts/robot_pipeline.py", "scripts/robot_text_pipeline.py", "scripts/sudoku_pipeline.py",
+    "scripts/generate_robot_data.py", "scripts/generate_sudoku_data.py", "scripts/install_cem_repo.sh",
+    "README.md", "EXPERIMENTS.md", "CHANGELOG.md", "CITATION.cff", "LICENSE", "pyproject.toml", "uv.lock",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["concept_benchmark"]

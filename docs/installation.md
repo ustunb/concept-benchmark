@@ -19,20 +19,24 @@ Then install the package:
 pip install concept-benchmark
 ```
 
-Or install from source (includes training/evaluation code and pipeline scripts):
+**Dataset generation, metrics, and plots** work out of the box with `pip install`. **Model training and interventions** (`experiments/` package and the pipelines in `scripts/`) require cloning the repo:
 
 ```bash
-git clone https://anonymous.4open.science/r/concept-benchmark-84D2.git
+git clone https://github.com/ustunb/concept-benchmark.git
 cd concept-benchmark
 uv sync
-```
-
-```{note}
-`pip install concept-benchmark` gives you **dataset generation only** (`concept_benchmark/`). To run the full training/evaluation pipelines, clone the repo and use `uv sync` — this installs all dependencies including dev tools and pipeline scripts.
 ```
 
 Verify the installation:
 
 ```bash
-python3 -c "import concept_benchmark; print('OK')"
+python3 -c "import concept_benchmark; print(concept_benchmark.__version__)"
+```
+
+The datasets of the paper are also on the Hugging Face Hub ([`robots-true-concepts`](https://huggingface.co/datasets/juliannski/robots-true-concepts), [`robots-human-concepts`](https://huggingface.co/datasets/juliannski/robots-human-concepts), [`sudoku`](https://huggingface.co/datasets/juliannski/sudoku)):
+
+```python
+# pip install datasets
+from datasets import load_dataset
+ds = load_dataset("juliannski/robots-human-concepts")
 ```
