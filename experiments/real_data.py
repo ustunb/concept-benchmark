@@ -299,13 +299,12 @@ def run_derm7pt(root: Path, out: Path) -> list[dict]:
     concept_set = LFConceptSet(keys=[f"c{i}" for i in range(len(texts))], texts=texts)
     for seed in range(3):  # label-free concepts; each run has its own CLIP cache folder
         rng = np.random.default_rng(seed)
-        sample = (
-            rng.choice(trainval, size=len(trainval), replace=True)
-            if seed > 0
-            else trainval
-        )
-        cut = int(0.8 * len(sample))
-        fit, held_out = sample[:cut], sample[cut:]
+        cut = int(0.8 * len(trainval))
+        fit, held_out = trainval[:cut], trainval[cut:]
+        if (
+            seed > 0
+        ):  # bootstrap the fit part only, so that the validation images stay held out
+            fit = rng.choice(fit, size=len(fit), replace=True)
         lf = LabelFreeCBM(
             LFTrainingConfig(
                 device=str(determine_device()),
