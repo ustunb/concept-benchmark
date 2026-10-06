@@ -374,7 +374,8 @@ def intervention_table(
                 ),
             }
         )
-    return pd.DataFrame(rows).reindex(columns=ROBOT_BUDGET_COLUMNS).fillna(0)
+    table = pd.DataFrame(rows).reindex(columns=ROBOT_BUDGET_COLUMNS).fillna(0)
+    return table.astype({column: int for column in ROBOT_BUDGET_COLUMNS[2:]})
 
 
 # ── Automation: selective classification with checks ─────────────────
