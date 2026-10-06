@@ -33,7 +33,7 @@ def test_readme_sudoku_training_block_runs(tmp_path, monkeypatch):
     (code,) = [
         code
         for _, code in python_blocks(REPO / "README.md")
-        if "GroupPoolingConceptSudokuCNN()" in code
+        if "automation_table(" in code
     ]
     quick = code.replace("epochs=100", "epochs=2").replace(
         "n_boards=1000", "n_boards=100"
