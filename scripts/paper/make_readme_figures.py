@@ -88,7 +88,10 @@ def main() -> None:
         runs["intervention_source"] == "perfect"
     )
     fig, _ = plot_intervention_curve(
-        runs[is_human_perfect], group="model_family", baseline_accuracy=dnn
+        runs[is_human_perfect],
+        group="model_family",
+        baseline_accuracy=dnn,
+        show_gain=False,
     )
     save(fig, "intervention_curve.png")
 
@@ -143,7 +146,20 @@ def main() -> None:
     sudoku = pd.concat(
         [pd.read_csv(c).assign(seed=i) for i, c in enumerate(cells)], ignore_index=True
     )
-    fig, _ = plot_automation(sudoku, n_instances=200, n_concepts=27)
+    selective = pd.concat(
+        map(pd.read_csv, sorted(PAPER.sudoku_selective.glob("*__res-18px__*.csv")))
+    )
+    dnn_coverage = selective.loc[
+        (selective["model"] == "dnn") & (selective["target_accuracy"].round(3) == 0.95),
+        "selective_cov",
+    ]
+    fig, _ = plot_automation(
+        sudoku,
+        n_instances=200,
+        n_concepts=27,
+        baseline_coverage=list(dnn_coverage),
+        target_accuracy=0.95,
+    )
     save(fig, "automation.png")
 
     seed = 171

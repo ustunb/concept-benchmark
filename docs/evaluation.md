@@ -80,10 +80,10 @@ Outcome plots show *what* happens:
 
 | Function | Shows |
 |----------|-------|
-| `plot_intervention_curve(results, group=..., baseline_accuracy=...)` | Accuracy against the intervention budget *k*, one line per model or concept set, with the DNN as a dashed line |
+| `plot_intervention_curve(results, group=..., baseline_accuracy=...)` | The paper's decision-support panel: accuracy against the intervention budget *k*, one line per model or concept set, with the DNN as a dashed line |
 | `plot_intervention_heatmap(results)` | Change in accuracy from interventions for each model, concept set and intervention source |
 | `plot_alignment_comparison(results)` | Constrained against unconstrained model, before and after interventions |
-| `plot_automation(results, n_instances, n_concepts)` | Coverage and net work automated against the number of concept checks |
+| `plot_automation(results, n_instances, n_concepts, baseline_coverage=..., target_accuracy=...)` | The paper's automation panel: Coverage and NetWorkAutomated against the intervention budget, with the DNN's coverage and the target in the title |
 | `plot_selective_classification(dnn_metrics, cbm_metrics)` | DNN against CBM on selective accuracy and coverage |
 | `plot_concept_discovery(ideal_df, subconcept_df, dnn_accuracy)` | True against human concepts at each budget |
 | `plot_model_comparison(results, dnn_accuracy)` | Models × concept sets at each budget |
@@ -164,7 +164,7 @@ Line plot of coverage and net work automated against the number of concept check
 ```python
 from concept_benchmark.evaluation import plot_automation
 
-fig, ax = plot_automation(results, n_instances=len(test), n_concepts=27)
+fig, ax = plot_automation(results, n_instances=len(test), n_concepts=27, baseline_coverage=dnn_coverage, target_accuracy=0.95)
 ```
 
 ```{image} assets/automation.png

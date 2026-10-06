@@ -1331,6 +1331,7 @@ def _plot_results(config) -> None:
             n_instances=n_test,
             n_concepts=3 * side,
             baseline_coverage=dnn_coverage,
+            target_accuracy=config.target_accuracy,
         )
         save(fig, f"sudoku_{key}_automation.png")
 

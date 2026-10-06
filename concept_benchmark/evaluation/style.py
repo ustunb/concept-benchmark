@@ -72,6 +72,70 @@ def set_paper_style() -> None:
     plt.rcParams.update(_PAPER_RC)
 
 
+# ── The paper's panels ───────────────────────────────────────────────
+
+PANEL_BLUE = "#3B6FB6"
+PANEL_RED = "#C44E52"
+PANEL_GREEN = "#4C9F70"
+PANEL_GREY = "#4D4D4D"
+PANEL_GRID = "#DFE4E9"
+PANEL_TITLE = "#8C8C8C"
+PANEL_AXIS = "#737373"
+PANEL_SERIF = ["cmr10", "DejaVu Serif"]  # axis text, as in the paper's body
+PANEL_SANS = ["Helvetica", "Arial", "DejaVu Sans"]  # model and metric names
+PANEL_COLORS = [PANEL_BLUE, PANEL_RED, PANEL_GREEN, "#8172B2", "#CCB974", "#64B5CD"]
+PANEL_MARKERS = ["o", "^", "s", "D", "v", "P"]
+
+
+def format_name(name: str) -> str:
+    """Legend text: words with an underscore are names from the code and are set in monospace."""
+    return " ".join(
+        rf"$\mathtt{{{word.replace('_', chr(92) + '_')}}}$" if "_" in word else word
+        for word in name.split(" ")
+    )
+
+
+def apply_panel_style(
+    ax, xlabel: str, title: str | None = None, subtitle: str | None = None
+) -> None:
+    """Axes, grid, fonts and title of the paper's two main panels."""
+    plt.rcParams["mathtext.fontset"] = "cm"  # math in Computer Modern, as in the paper
+    ax.set_axisbelow(True)
+    ax.grid(False)
+    ax.yaxis.grid(True, color=PANEL_GRID, linewidth=0.8)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_edgecolor(PANEL_AXIS)
+        ax.spines[side].set_linewidth(0.9)
+    ax.tick_params(colors=PANEL_AXIS, length=4, direction="in", labelsize=11)
+    ax.tick_params(axis="y", right=False)
+    for tick in (*ax.get_xticklabels(), *ax.get_yticklabels()):
+        tick.set_fontfamily(PANEL_SERIF)
+        tick.set_color("#404040")
+    ax.set_xlabel(xlabel, fontfamily=PANEL_SERIF, fontsize=11.5, color=PANEL_GREY)
+    ax.set_ylabel("")
+    if title:
+        heading = rf"$\mathbf{{{title}}}$" + (f" {subtitle}" if subtitle else "")
+        ax.annotate(
+            heading,
+            xy=(0, 1.13),
+            xycoords="axes fraction",
+            fontfamily=PANEL_SERIF,
+            fontsize=11.5,
+            color=PANEL_TITLE,
+            va="bottom",
+        )
+        ax.plot(
+            [0, 1],
+            [1.1, 1.1],
+            transform=ax.transAxes,
+            color="#B8B8B8",
+            linewidth=0.6,
+            clip_on=False,
+        )
+
+
 # ── Helpers ──────────────────────────────────────────────────────────
 
 

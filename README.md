@@ -323,31 +323,65 @@ Run `python scripts/robot_pipeline.py --help` for the full list of options (incl
 
 #### Training and evaluation
 
-Train CBMs on both concept sets and compare (requires cloning the repo):
+One command trains the paper's models for one seed and draws the figure below (stage `plot`, output in `results/figures/`):
+
+```bash
+python scripts/robot_pipeline.py --seed 1014 --concept-preset ground_truth --stages setup cbm dnn intervene collect plot
+```
+
+The same in code, to see every step or to swap in your own model (requires cloning the repo): train a CBM on each
+concept set, correct 1, 3 and all of its concepts with the paper's intervention policy, train the DNN, and draw the
+decision-support panel.
 
 ```python
+import numpy as np
+import pandas as pd
 from concept_benchmark.robots import DatasetGenerator
-from concept_benchmark.evaluation import accuracy
-from experiments.models import ConceptDetector, ConceptBasedModel, RobotConceptClassifier
+from concept_benchmark.evaluation import plot_intervention_curve
+from concept_benchmark.utils import set_deterministic_seed
+from experiments.models import ConceptDetector, ConceptBasedModel, RobotClassifierCNN, RobotConceptClassifier
+from experiments.intervention import ConceptInterventionRunner, InterventionConfig
+from experiments.kflip import KFlipInterventionStrategy
+from experiments.utils import determine_device, get_loader_config, train_dnn
 
-def train_and_evaluate(concept_preset):
-    """Generate data, train CBM, return accuracy."""
+def train_and_intervene(concept_preset, name):
+    """Generate data, train a CBM and return its accuracy with k = 0, 1, 3 and all concepts corrected."""
+    set_deterministic_seed(1014)
     ds = DatasetGenerator(seed=1014, concept_preset=concept_preset).generate_splits()
     cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=ds.train.n_concepts, input_size=32))
     cbm = ConceptBasedModel(concept_detector=cd)
     cbm.fit(ds.train, ds.val, freeze_backbone=False,  # False: train the concept detector too
             concept_fit_params={"epochs": 50, "lr": 1e-3, "patience": 10})
-    return accuracy(cbm.predict(ds.test), ds.test.y)
+    rows = [{"budget": 0, "accuracy": np.mean(cbm.predict(ds.test) == ds.test.y)}]
+    runner = ConceptInterventionRunner(model=cbm)
+    for k in (1, 3, ds.test.n_concepts):
+        config = InterventionConfig(per_instance_budget=k, score_threshold=0.2)
+        result = runner.run(KFlipInterventionStrategy(), config, ds.test)
+        rows.append({"budget": k, "accuracy": np.mean(result.y_pred_after == ds.test.y)})
+    return pd.DataFrame(rows).assign(model=name), ds
 
-print(f"True concepts (7):   {train_and_evaluate('ground_truth'):.3f}")   # 0.834 in our run
-print(f"Human concepts (12): {train_and_evaluate('foot_subtypes'):.3f}")  # 0.809 in our run
+true_results, ds = train_and_intervene("ground_truth", "CBM, true_concepts")
+human_results, _ = train_and_intervene("foot_subtypes", "CBM, human_concepts")
+results = pd.concat([true_results, human_results])
+print(results.pivot(index="model", columns="budget", values="accuracy").round(3))
+
+# DNN: image -> label, without concepts
+set_deterministic_seed(1014)
+dnn_accuracy = train_dnn(RobotClassifierCNN(input_size=32), ds.train, ds.val, ds.test,
+                         determine_device(), loader_config=get_loader_config())
+print(f"DNN: {dnn_accuracy:.3f}")
+
+fig, ax = plot_intervention_curve(results, group="model", baseline_accuracy=dnn_accuracy)
+fig.savefig("robot_example.png", dpi=150, bbox_inches="tight")
 ```
 
-Over the 10 seeds of the paper, the CBM reaches 84.5% with the true concepts and 77.6% with the human concepts before interventions, and 92.0% and 85.7% once every concept is corrected; the DNN reaches 88%. A single run differs from these means by a few points, and across hardware.
-
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/intervention_curve.png" width="500" alt="Accuracy against the intervention budget for four architectures">
+  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/robot_example.png" width="480" alt="Accuracy against the intervention budget for a CBM with true and with human concepts, and the DNN, one run">
 </p>
+
+The figure is what this code saves (seed 1014, about ten minutes on a laptop): 83.4% and 80.9% before interventions,
+90.3% and 83.4% once every concept is corrected, DNN 87.8%. Over the 10 seeds of the paper the CBM reaches 84.5% and
+77.6% before interventions, 92.0% and 85.7% after, and the DNN 88.0%; a run differs from these means by a few points, and across hardware.
 
 For a complete walkthrough including interventions and alignment, see [`examples/robot_pipeline_example.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/robot_pipeline_example.py).
 
@@ -418,50 +452,83 @@ Run `python scripts/sudoku_pipeline.py --help` for the full list of options (inc
 
 #### Training and evaluation
 
-Train a concept-supervised model and evaluate selective classification (requires cloning the repo):
+One command trains the paper's models on the handwritten boards of one seed, at the 18 px per cell of the paper's hard setting, and draws the figure below:
+
+```bash
+python scripts/sudoku_pipeline.py --seed 171 --cell-px 18 --target-accuracy 0.95 --stages setup ocr cs dnn intervene selective collect plot
+```
+
+The same in code (requires cloning the repo): train the CBM and the DNN, let each abstain until it is right on 95% of
+the boards it keeps, correct up to k concepts per board, and draw the automation panel.
 
 ```python
 from concept_benchmark.sudoku import DatasetGenerator
-from experiments.models import ConceptDetector, FrontEndModel, ConceptBasedModel, GroupPoolingConceptSudokuCNN
-from experiments.utils import determine_device, get_loader_config
+from concept_benchmark.evaluation import plot_automation
+from experiments.models import (
+    ConceptBasedModel, ConceptDetector, FrontEndModel, GroupPoolingConceptSudokuCNN, SudokuValidatorCNN,
+)
+from experiments.intervention import ConceptInterventionRunner, InterventionConfig
+from experiments.kflip import KFlipInterventionStrategy
+from experiments.utils import determine_device, get_loader_config, train_dnn
 import numpy as np
+import pandas as pd
+import torch
 
-# Generate data and train CS model
 dataset = DatasetGenerator(
     seed=171, n_boards=1000, max_cell_swaps=9, data_type="tabular",  # the digits of each board, not its image
 ).generate_splits()
+train, val, test = dataset.train, dataset.val, dataset.test
+device, loader_config = determine_device(), get_loader_config()
 
+# CBM: a concept detector (board -> 27 validity concepts) and a label predictor (concepts -> valid)
 cd = ConceptDetector(model=GroupPoolingConceptSudokuCNN())
-cd.fit(dataset.train, dataset.val, fit_params={
-    "epochs": 100, "lr": 1e-3, "patience": 20,
-    "device": str(determine_device()), **get_loader_config(),
-})
+cd.fit(train, val, fit_params={"epochs": 100, "lr": 1e-3, "patience": 20, "device": str(device), **loader_config})
 fe = FrontEndModel()
-fe.fit(dataset.train.C, dataset.train.y)
+fe.fit(train.C, train.y)
 cbm = ConceptBasedModel(concept_detector=cd, label_predictor=fe)
 
-# Selective classification — abstain when uncertain
-# Binary concept predictions → frontend probability → confidence score
-# (for concept-level uncertainty propagation, use cd.predict_proba() instead)
-C_pred = cd.predict(dataset.test).astype(np.float32)
-label_proba = fe.predict_proba(C_pred)[:, 1]
-y_pred = fe.predict(C_pred)
-confidence = np.abs(label_proba - 0.5)
+# DNN: board -> valid, without concepts
+dnn = SudokuValidatorCNN()
+train_dnn(dnn, train, val, test, device, loader_config=loader_config)
+with torch.no_grad():
+    boards = torch.as_tensor(np.asarray(test.X), dtype=torch.long, device=device)
+    p_dnn = torch.sigmoid(dnn.to(device)(boards)).squeeze().cpu().numpy()
 
-# Find threshold for 95% selective accuracy
-for tau in np.linspace(0, 0.5, 500):
-    keep = confidence >= tau
-    if keep.sum() > 0 and np.mean(y_pred[keep] == dataset.test.y[keep]) >= 0.95:
-        break
+def coverage(p_valid, target=0.95):
+    """Share of boards a model keeps when it abstains until it is right on `target` of the boards it keeps."""
+    y_pred, confidence = (p_valid >= 0.5).astype(int), np.abs(p_valid - 0.5)
+    for tau in np.linspace(0, 0.5, 500):
+        keep = confidence >= tau
+        if keep.any() and np.mean(y_pred[keep] == test.y[keep]) >= target:
+            return keep.mean()
+    return 0.0  # the target is out of reach
 
-sel_acc = np.mean(y_pred[keep] == dataset.test.y[keep])
-cov = keep.mean()
-print(f"CS model: selective_acc={sel_acc:.3f}, coverage={cov:.3f}")  # 0.955, 1.000 in our run
+# a human checks up to k concepts of a board; each check costs 1/27 of the work on that board
+runner = ConceptInterventionRunner(model=cbm)
+rows = [{"budget": 0, "coverage_after": coverage(cbm.predict_proba(test)[:, 1]), "total_concept_checks": 0}]
+for k in (1, 3, test.n_concepts):
+    config = InterventionConfig(per_instance_budget=k, score_threshold=0.2)
+    result = runner.run(KFlipInterventionStrategy(), config, test)
+    rows.append({"budget": k, "coverage_after": coverage(result.y_prob_after[:, 1]),
+                 "total_concept_checks": int(result.mask.sum())})
+results = pd.DataFrame(rows)
+print(results, f"\nDNN coverage: {coverage(p_dnn):.3f}")
+
+fig, ax = plot_automation(results, n_instances=test.n, n_concepts=test.n_concepts, baseline_coverage=coverage(p_dnn))
+fig.savefig("sudoku_example.png", dpi=150, bbox_inches="tight")
 ```
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/automation.png" width="500" alt="Coverage and net work automated against concept checks">
+  <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/sudoku_example.png" width="480" alt="Coverage and net work automated against the intervention budget for the CBM and the DNN, one run">
 </p>
+
+The figure is from the pipeline command (seed 171, about ten minutes). At 18 px the digits blur, and on this run the
+CBM reaches the 95% target only by keeping 46% of the boards; the DNN keeps 15%. Checking concepts does not raise
+coverage, and checking all 27 costs more work than the model saves, so net work automated turns negative at k=max.
+Which side of the target a single run lands on depends on the seed and the hardware; the paper averages ten seeds,
+where the CBM keeps 83% of the boards and net work automated falls to 68% at k=max. The code block reads the digits
+of each board instead of its image, which makes the task easy: the CBM keeps every board (coverage 100%, net work
+automated 97% at k=max) while the DNN keeps 2.5%.
 
 For a complete walkthrough including selective classification and interventions, see [`examples/sudoku_quickstart.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/sudoku_quickstart.py).
 
@@ -679,10 +746,10 @@ Outcome plots show *what* happens:
 
 | Function | Shows |
 |----------|-------|
-| `plot_intervention_curve(results, group=..., baseline_accuracy=...)` | Accuracy against the intervention budget *k*, one line per model or concept set, with the DNN as a dashed line |
+| `plot_intervention_curve(results, group=..., baseline_accuracy=...)` | The paper's decision-support panel: accuracy against the intervention budget *k*, one line per model or concept set, with the DNN as a dashed line |
 | `plot_intervention_heatmap(results)` | Change in accuracy from interventions for each model, concept set and intervention source |
 | `plot_alignment_comparison(results)` | Constrained against unconstrained model, before and after interventions |
-| `plot_automation(results, n_instances, n_concepts)` | Coverage and net work automated against the number of concept checks |
+| `plot_automation(results, n_instances, n_concepts, baseline_coverage=..., target_accuracy=...)` | The paper's automation panel: Coverage and NetWorkAutomated against the intervention budget, with the DNN's coverage and the target in the title |
 | `plot_selective_classification(dnn_metrics, cbm_metrics)` | DNN against CBM on selective accuracy and coverage |
 | `plot_concept_discovery(ideal_df, subconcept_df, dnn_accuracy)` | True against human concepts at each budget |
 

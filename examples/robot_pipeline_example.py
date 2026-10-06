@@ -20,7 +20,9 @@ Note: ``uv sync`` makes ``experiments/`` importable automatically.
 """
 
 import numpy as np
+import pandas as pd
 
+from concept_benchmark.evaluation import plot_intervention_curve
 from concept_benchmark.robots import DatasetGenerator
 from concept_benchmark.utils import set_deterministic_seed
 from experiments.intervention import ConceptInterventionRunner, InterventionConfig
@@ -128,6 +130,7 @@ print(f"  {'k':>3s}   {'accuracy':>8s}   {'gain':>8s}")
 print(f"  {'---':>3s}   {'--------':>8s}   {'--------':>8s}")
 
 budgets = [0, 1, 3, n_concepts]
+rows = []
 for k in budgets:
     if k == 0:
         acc = baseline_acc
@@ -146,6 +149,7 @@ for k in budgets:
     gain = acc - baseline_acc
     k_str = str(k) if k != n_concepts else f"{k} (max)"
     print(f"  {k_str:>8s}   {acc:>8.4f}   {gain:>+8.4f}")
+    rows.append({"budget": k, "accuracy": acc})
 
 # Accuracy rises with k; over the paper's 10 seeds the CBM goes from 77.6% (k=0) to 85.7% (k=max).
 
@@ -158,6 +162,13 @@ dnn = RobotClassifierCNN(input_size=32)
 dnn_acc = train_dnn(dnn, train, val, test, device, loader_config=loader_config)
 print(f"  DNN accuracy: {dnn_acc:.4f}")
 # About 0.88 over the paper's 10 seeds.
+
+# The decision-support panel of the paper, for this run
+fig, ax = plot_intervention_curve(
+    pd.DataFrame(rows), label="CBM, human_concepts", baseline_accuracy=dnn_acc
+)
+fig.savefig("robot_pipeline_example.png", dpi=150, bbox_inches="tight")
+print("  Saved robot_pipeline_example.png")
 
 # ---------------------------------------------------------------------------
 # 7. Alignment — retrain frontend with sign constraints

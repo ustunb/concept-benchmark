@@ -18,8 +18,10 @@ Note: ``uv sync`` makes ``experiments/`` importable automatically.
 """
 
 import numpy as np
+import pandas as pd
 from sklearn.metrics import accuracy_score
 
+from concept_benchmark.evaluation import plot_automation
 from concept_benchmark.sudoku import DatasetGenerator
 from concept_benchmark.utils import set_deterministic_seed
 from experiments.intervention import ConceptInterventionRunner, InterventionConfig
@@ -148,9 +150,28 @@ baseline_acc = np.mean(y_pred == test.y)
 n_concepts = test.n_concepts
 runner = ConceptInterventionRunner(model=cbm)
 
+
+def coverage_at(p_valid, target=0.95):
+    """Share of boards kept when the model abstains until it is right on `target` of the kept boards."""
+    pred, confidence = (p_valid >= 0.5).astype(int), np.abs(p_valid - 0.5)
+    for tau in np.linspace(0, 0.5, 500):
+        keep = confidence >= tau
+        if keep.any() and accuracy_score(test.y[keep], pred[keep]) >= target:
+            return keep.mean()
+    return 0.0
+
+
+rows = []
 for k in [0, 1, 3, n_concepts]:
     if k == 0:
         acc = baseline_acc
+        rows.append(
+            {
+                "budget": 0,
+                "coverage_after": coverage_at(label_proba),
+                "total_concept_checks": 0,
+            }
+        )
     else:
         result = runner.run(
             strategy=KFlipInterventionStrategy(),
@@ -162,10 +183,24 @@ for k in [0, 1, 3, n_concepts]:
             concept_proba=concept_probs,
         )
         acc = np.mean(result.y_pred_after == test.y)
+        rows.append(
+            {
+                "budget": k,
+                "coverage_after": coverage_at(result.y_prob_after[:, 1]),
+                "total_concept_checks": int(result.mask.sum()),
+            }
+        )
 
     gain = acc - baseline_acc
     k_str = str(k) if k != n_concepts else f"{k} (max)"
     print(f"  {k_str:>8s}   {acc:>8.4f}   {gain:>+8.4f}")
+
+# The automation panel of the paper, for this run (the DNN is not trained here)
+fig, ax = plot_automation(
+    pd.DataFrame(rows), n_instances=test.n, n_concepts=n_concepts, target_accuracy=0.95
+)
+fig.savefig("sudoku_pipeline_example.png", dpi=150, bbox_inches="tight")
+print("\n  Saved sudoku_pipeline_example.png")
 
 # Note: Unlike robot classification, interventions show diminishing returns
 # in Sudoku due to the AND structure. Fixing one concept rarely flips the

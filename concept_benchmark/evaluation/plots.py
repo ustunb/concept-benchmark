@@ -91,9 +91,10 @@ def plot_intervention_curve(
     label: str | None = None,
     color: str | None = None,
     group: str | None = None,
+    show_gain: bool = True,
     ax: plt.Axes | None = None,
 ) -> tuple[plt.Figure, plt.Axes]:
-    """Line plot of a metric against the intervention budget *k*.
+    """The paper's decision-support panel: a metric against the intervention budget *k*.
 
     Parameters
     ----------
@@ -104,6 +105,8 @@ def plot_intervention_curve(
         Column name to plot on the y-axis (default ``"accuracy"``).
     baseline_accuracy : float or list of float, optional
         Accuracy of the DNN (one value per run); drawn as a dashed line at its mean.
+    show_gain : bool
+        With a DNN accuracy, mark the gain over the DNN of the line that ends highest, at its largest budget.
     label : str, optional
         Legend label for the line (single series).
     color : str, optional
@@ -114,16 +117,16 @@ def plot_intervention_curve(
     ax : Axes, optional
         Existing axes to plot on.
     """
-    fig, ax = _ensure_ax(ax)
+    fig, ax = _ensure_ax(ax, figsize=(4.8, 3.6))
     if group is None:
-        series = [(label, results, color or style.COLOR_ACCURACY)]
+        series = [(label, results, color or style.PANEL_BLUE)]
     else:
         names = list(dict.fromkeys(results[group]))
         series = [
             (
                 str(name),
                 results[results[group] == name],
-                SERIES_COLORS[i % len(SERIES_COLORS)],
+                style.PANEL_COLORS[i % len(style.PANEL_COLORS)],
             )
             for i, name in enumerate(names)
         ]
@@ -160,80 +163,119 @@ def plot_intervention_curve(
         tick_labels = [str(b) for b in every_budget]
 
     plotted = []
-    for name, summary, line_color in summaries:
+    for i, (name, summary, line_color) in enumerate(summaries):
         x = np.array([positions[budget] for budget in summary["budget"]])
         values, errors = (
             summary["mean"].to_numpy() * 100,
             summary["se"].to_numpy() * 100,
         )
-        ax.plot(x, values, marker="o", color=line_color, linewidth=2, label=name)
         if errors.any():
             ax.fill_between(
                 x,
                 values - errors,
                 values + errors,
                 color=line_color,
-                alpha=0.2,
+                alpha=0.22,
                 linewidth=0,
             )
+        ax.plot(
+            x,
+            values,
+            marker=style.PANEL_MARKERS[i % len(style.PANEL_MARKERS)],
+            markersize=6.5,
+            color=line_color,
+            linewidth=2,
+            label=name,
+            zorder=3,
+        )
         plotted.append((x, values))
     ax.set_xticks(np.arange(len(tick_labels)))
     ax.set_xticklabels(tick_labels)
+    ax.set_xlim(-0.35, len(tick_labels) - 0.65)
 
     baseline = None
     if baseline_accuracy is not None:
-        baseline = float(np.mean(baseline_accuracy)) * 100
+        dnn = np.atleast_1d(np.asarray(baseline_accuracy, dtype=float)) * 100
+        baseline = float(dnn.mean())
+        if len(dnn) > 1:
+            error = dnn.std(ddof=1) / np.sqrt(len(dnn))
+            ax.axhspan(
+                baseline - error,
+                baseline + error,
+                color=style.PANEL_GREY,
+                alpha=0.25,
+                linewidth=0,
+            )
         ax.axhline(
             baseline,
-            color=style.COLOR_BASELINE,
+            color=style.PANEL_GREY,
             linestyle="--",
-            linewidth=1.5,
-            label="DNN baseline",
+            linewidth=1.6,
+            label="DNN",
         )
-
-    ax.set_xlabel("Intervention budget (k)", fontsize=style.FONT_SIZE)
-    ax.set_ylabel(metric.replace("_", " ").title() + " (%)", fontsize=style.FONT_SIZE)
-    ax.yaxis.set_major_formatter(style.pct_formatter())
-    style.apply_style(ax)
-    if group is not None or label or baseline is not None:
-        ax.legend(fontsize=style.FONT_SIZE_LEGEND, loc="best", framealpha=0.9)
 
     all_y = np.concatenate(
         [values for _, values in plotted]
         + ([[baseline]] if baseline is not None else [])
     )
-    margin = max((all_y.max() - all_y.min()) * 0.15, 2)
-    ax.set_ylim(all_y.min() - margin * 1.5, all_y.max() + margin * 3)
-    ax.set_xlim(-0.3, len(tick_labels) - 0.5)
+    margin = max((all_y.max() - all_y.min()) * 0.15, 1.5)
+    span = all_y.max() - all_y.min()
+    ax.set_ylim(  # room for the legend below the lines and for the gain above them
+        all_y.min() - max(span * 0.55, margin * 1.5), all_y.max() + margin * 2.2
+    )
 
-    if len(plotted) == 1:  # a single line has room for its values
-        x, values = plotted[0]
-        for i, (bx, by) in enumerate(zip(x, values)):
-            if i == len(x) - 1:
-                xytext, ha, va = (10, 0), "left", "center"
-            elif values[i + 1] - by > 3:  # the line rises: keep the label below it
-                xytext, ha, va = (0, -12), "center", "top"
-            else:
-                xytext, ha, va = (0, 8), "center", "bottom"
-            if (
-                baseline is not None and abs(by - baseline) < 2
-            ):  # keep clear of the dashed line
-                xytext, ha, va = (
-                    ((0, -12), "center", "top")
-                    if by <= baseline
-                    else ((0, 14), "center", "bottom")
-                )
-            ax.annotate(
-                f"{by:.1f}%",
-                (bx, by),
-                textcoords="offset points",
-                xytext=xytext,
-                fontsize=style.FONT_SIZE_ANNOT,
-                ha=ha,
-                va=va,
-                color="black",
-            )
+    # ticks at round values, and at the DNN and the top line's last value, as in the paper
+    x_top, top = max(((x[-1], v[-1]) for x, v in plotted), key=lambda pair: pair[1])
+    marked = [baseline] if baseline is not None else []
+    if show_gain and all(abs(top - m) > 1.5 for m in marked):
+        marked.append(top)
+    low, high = ax.get_ylim()
+    round_ticks = [
+        t
+        for t in np.arange(np.ceil(low / 5) * 5, high, 5)
+        if all(abs(t - m) > 1.2 for m in marked)
+    ]
+    ax.set_yticks(sorted([*round_ticks, *marked]))
+    ax.set_yticklabels(
+        [
+            f"{t:.1f}%" if any(t == m for m in marked) else f"{t:.0f}%"
+            for t in sorted([*round_ticks, *marked])
+        ]
+    )
 
+    if baseline is not None and show_gain:
+        ax.annotate(
+            "",
+            xy=(x_top + 0.14, top),
+            xytext=(x_top + 0.14, baseline),
+            arrowprops={"arrowstyle": "<|-|>", "color": style.PANEL_GREY, "lw": 1.0},
+        )
+        ax.annotate(
+            rf"Gain$\,={top - baseline:+.1f}\%$",
+            xy=(1.0, 0.94),
+            xycoords="axes fraction",
+            ha="right",
+            fontfamily=style.PANEL_SANS,
+            fontsize=10.5,
+        )
+
+    style.apply_panel_style(ax, xlabel="Intervention budget $k$")
+    ax.set_ylabel(
+        metric.replace("_", " ").capitalize(),
+        fontfamily=style.PANEL_SERIF,
+        fontsize=11.5,
+        color=style.PANEL_GREY,
+    )
+    if group is not None or label or baseline is not None:
+        handles, names = ax.get_legend_handles_labels()
+        ax.legend(
+            handles,
+            [style.format_name(str(name)) for name in names],
+            loc="lower right",
+            frameon=False,
+            prop={"family": style.PANEL_SANS, "size": 9.5},
+            handlelength=1.8,
+        )
     return fig, ax
 
 
@@ -777,16 +819,26 @@ def plot_model_comparison(
 # ── Automation ───────────────────────────────────────────────────────
 
 
+def _lowest_line(ax) -> float:
+    """Lowest y value of the lines with markers (the model's curves, not the DNN line)."""
+    return min(
+        float(np.nanmin(line.get_ydata()))
+        for line in ax.get_lines()
+        if line.get_marker() not in ("None", None, "")
+    )
+
+
 def plot_automation(
     results: pd.DataFrame,
     n_instances: int,
     n_concepts: int,
     baseline_coverage: float | list[float] | None = None,
+    target_accuracy: float | None = None,
     ax: plt.Axes | None = None,
 ) -> tuple[plt.Figure, plt.Axes]:
-    """Line plot of coverage and net work automated against the number of concept checks allowed.
+    """The paper's automation panel: Coverage and NetWorkAutomated against the intervention budget *k*.
 
-    Net work automated is the coverage minus the share of concepts a human checked, so the gap between the
+    NetWorkAutomated is the coverage minus the share of concepts a human checked, so the gap between the
     two lines is what the checks cost.
 
     Parameters
@@ -797,9 +849,12 @@ def plot_automation(
     n_instances, n_concepts : int
         Number of test instances and of concepts per instance.
     baseline_coverage : float or list of float, optional
-        Coverage of a model without interventions (e.g. the DNN), drawn as a dashed line.
+        Coverage of the DNN (one value per run), drawn as a horizontal line. The DNN asks for no checks,
+        so its NetWorkAutomated equals its Coverage.
+    target_accuracy : float, optional
+        Selective accuracy the kept predictions had to reach; named in the title.
     """
-    fig, ax = _ensure_ax(ax)
+    fig, ax = _ensure_ax(ax, figsize=(4.6, 3.6))
     runs = results.assign(
         net_work=results["coverage_after"]
         - results["total_concept_checks"] / (n_instances * n_concepts)
@@ -807,39 +862,72 @@ def plot_automation(
     budgets = sorted(runs["budget"].unique())
     x = np.arange(len(budgets))
     for column, name, line_color, marker in (
-        ("coverage_after", "Coverage", style.COLOR_COVERAGE, "o"),
-        ("net_work", "Net work automated", style.COLOR_NET_WORK, "s"),
+        ("coverage_after", "CBM Coverage", style.PANEL_GREEN, "s"),
+        ("net_work", "CBM NetWorkAutomated", style.PANEL_BLUE, "o"),
     ):
         summary = _summarize_runs(runs, ["budget"], column).sort_values("budget")
         values, errors = (
             summary["mean"].to_numpy() * 100,
             summary["se"].to_numpy() * 100,
         )
-        ax.plot(x, values, marker=marker, color=line_color, linewidth=2, label=name)
         if errors.any():
             ax.fill_between(
                 x,
                 values - errors,
                 values + errors,
                 color=line_color,
-                alpha=0.2,
+                alpha=0.22,
                 linewidth=0,
             )
+        ax.plot(
+            x,
+            values,
+            marker=marker,
+            markersize=6,
+            color=line_color,
+            linewidth=2,
+            label=name,
+            zorder=3,
+        )
     if baseline_coverage is not None:
+        dnn = np.atleast_1d(np.asarray(baseline_coverage, dtype=float)) * 100
+        if len(dnn) > 1:
+            error = dnn.std(ddof=1) / np.sqrt(len(dnn))
+            ax.axhspan(
+                dnn.mean() - error,
+                dnn.mean() + error,
+                color=style.PANEL_GREY,
+                alpha=0.25,
+                linewidth=0,
+            )
         ax.axhline(
-            float(np.mean(baseline_coverage)) * 100,
-            color=style.COLOR_BASELINE,
-            linestyle="--",
-            linewidth=1.5,
-            label="DNN baseline",
+            dnn.mean(),
+            color=style.PANEL_GREY,
+            linewidth=1.6,
+            label="DNN (Coverage = NetWorkAutomated)",
         )
     ax.set_xticks(x)
     ax.set_xticklabels(["max" if b == n_concepts else str(b) for b in budgets])
-    ax.set_xlabel("Concept checks per instance (k)", fontsize=style.FONT_SIZE)
-    ax.set_ylabel("Share of instances (%)", fontsize=style.FONT_SIZE)
+    ax.set_xlim(-0.35, len(budgets) - 0.65)
+    lowest = min(float(runs["net_work"].min()) * 100, 0.0)
+    ax.set_ylim(min(lowest - 5, 0) if lowest < 0 else 0, 100)
+    ax.set_yticks([t for t in (-25, 0, 25, 50, 75, 100) if t >= ax.get_ylim()[0]])
     ax.yaxis.set_major_formatter(style.pct_formatter())
-    ax.legend(fontsize=style.FONT_SIZE_LEGEND, loc="best", framealpha=0.9)
-    style.apply_style(ax)
+    title = (
+        None
+        if target_accuracy is None
+        else rf"at target accuracy $\tau{{=}}{100 * target_accuracy:g}\%$"
+    )
+    style.apply_panel_style(
+        ax, xlabel="Intervention budget $k$", title="Automation", subtitle=title
+    )
+    ax.legend(  # in the empty band between the DNN line and the CBM lines, or wherever is free
+        loc="lower left" if lowest >= 0 and _lowest_line(ax) > 45 else "best",
+        bbox_to_anchor=(0.02, 0.1) if lowest >= 0 and _lowest_line(ax) > 45 else None,
+        frameon=False,
+        prop={"family": style.PANEL_SANS, "size": 9.5},
+        handlelength=1.6,
+    )
     return fig, ax
 
 
