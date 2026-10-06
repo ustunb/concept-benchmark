@@ -370,10 +370,23 @@ class ConceptDetector:
             "model": model_copy,
             "embedding_model": embedding_copy,
             "calibration_params": copy.deepcopy(self.calibration_params),
-            "eval_config": copy.deepcopy(self._eval_config),
+            "eval_config": self._portable_eval_config(),
             "n_concepts": self._n_concepts,
             "training_summary": training_summary,
         }
+
+    def _portable_eval_config(self) -> dict[str, Any]:
+        # The device is a property of the machine, not of the model: resolved again on load.
+        return {k: v for k, v in self._eval_config.items() if k != "device"}
+
+    def __getstate__(self) -> dict[str, Any]:
+        state = self.__dict__.copy()
+        state["_eval_config"] = self._portable_eval_config()
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        self._eval_config = self._portable_eval_config()
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
         """Restore detector state saved with :meth:`state_dict`."""
@@ -393,7 +406,9 @@ class ConceptDetector:
             self.model.eval()
 
         self.calibration_params = state.get("calibration_params")
-        self._eval_config = state.get("eval_config", {})
+        self._eval_config = {
+            k: v for k, v in state.get("eval_config", {}).items() if k != "device"
+        }
         self._n_concepts = state.get("n_concepts")
 
         summary = state.get("training_summary")
@@ -789,7 +804,9 @@ class ConceptDetector:
         batch_size = int(self._eval_config.get("batch_size", 128))
         num_workers = self._eval_config.get("num_workers", 0)
         pin_memory = self._eval_config.get("pin_memory", False)
-        device = torch.device(self._eval_config.get("device", "cpu"))
+        from concept_benchmark.utils import determine_device
+
+        device = torch.device(self._eval_config.get("device") or determine_device())
 
         loader = dataset.loader(
             batch_size=batch_size,
@@ -1022,6 +1039,7 @@ class ConceptBasedModel:
         self._propagate = should_propagate
         self._concept_possibilities = None
         self._y_proba_all_concepts = None
+        self._propagation_key = None
 
         # MC configuration
         assert mc_mode in {"auto", "mc", "exact"}
@@ -1129,10 +1147,10 @@ class ConceptBasedModel:
             # Only prepare exact propagation tables if we'll use exact mode
             try:
                 n_concepts = self.concept_detector.n_concepts
-            except AttributeError:
+            except (AttributeError, RuntimeError):
                 n_concepts = None
             if n_concepts is not None and self._should_use_exact(n_concepts):
-                self._prep_propagation()
+                self._prep_propagation(n_concepts)
 
     def predict(
         self,
@@ -1167,19 +1185,27 @@ class ConceptBasedModel:
         )
 
         if should_propagate:
-            n_concepts = concept_preds.shape[1]
-            if self._should_use_exact(n_concepts):
-                y_prob = self._propagate_predict_proba(concept_preds)
-            else:
-                y_prob = self._propagate_predict_proba_mc(concept_preds)
+            y_prob = self.propagate_predict_proba(concept_preds)
             return (y_prob, concept_preds) if return_concepts else y_prob
 
-        binary_concept_preds = (concept_preds > 0.5).astype(np.float32)
+        binary_concept_preds = (concept_preds >= 0.5).astype(np.float32)
         pred_y_prob = self.label_predictor.predict_proba(binary_concept_preds)
 
         out = pred_y_prob if not return_concepts else (pred_y_prob, concept_preds)
 
         return out
+
+    def propagate_predict_proba(self, concept_preds: np.ndarray) -> np.ndarray:
+        """Label probabilities under the concept probabilities: exact enumeration when
+        feasible, otherwise seeded Monte Carlo sampling."""
+        n_concepts = np.asarray(concept_preds).shape[1]
+        if self._should_use_exact(n_concepts):
+            return self._propagate_predict_proba(concept_preds)
+        if self._random_state is None:
+            raise ValueError(
+                "Monte Carlo concept propagation needs random_state to be set on the model."
+            )
+        return self._propagate_predict_proba_mc(concept_preds)
 
     def _propagate_predict_proba(
         self,
@@ -1188,8 +1214,14 @@ class ConceptBasedModel:
         """
         Predict probabilities using concept propagation.
         """
-        if self._concept_possibilities is None or self._y_proba_all_concepts is None:
-            self._prep_propagation()
+        n_concepts = int(np.asarray(concept_preds).shape[1])
+        if (
+            self._concept_possibilities is None
+            or self._y_proba_all_concepts is None
+            or getattr(self, "_propagation_key", None)
+            != self._label_predictor_key(n_concepts)
+        ):
+            self._prep_propagation(n_concepts)
 
         # Vectorized propagation over all samples and concept combinations
         # Shapes:
@@ -1251,12 +1283,7 @@ class ConceptBasedModel:
         sumsq_acc = None  # will be (N, K)
         done = np.zeros(N, dtype=bool)
 
-        # RNG: deterministic only if seed provided
-        rng = (
-            np.random.default_rng(self._random_state)
-            if self._random_state is not None
-            else np.random.default_rng()
-        )
+        rng = np.random.default_rng(self._random_state)
 
         target_samples = max(1, self._mc_samples)
         max_samples = max(target_samples, self._mc_max_samples)
@@ -1337,7 +1364,7 @@ class ConceptBasedModel:
         # Final means as output
         if sum_acc is None:
             # No sampling happened (edge case), fallback to deterministic round
-            return self.label_predictor.predict_proba((P > 0.5).astype(np.float32))
+            return self.label_predictor.predict_proba((P >= 0.5).astype(np.float32))
         out = sum_acc / counts[:, None]
         return out
 
@@ -1361,11 +1388,12 @@ class ConceptBasedModel:
 
         return probas
 
-    def _gen_concept_possibilities(self):
+    def _gen_concept_possibilities(self, n_concepts: int | None = None):
         """
         Generate all possible concept combinations.
         """
-        n_concepts = self.concept_detector.n_concepts
+        if n_concepts is None:
+            n_concepts = self.concept_detector.n_concepts
         all_poss = np.array(list(itertools.product([0, 1], repeat=n_concepts)))
 
         return all_poss
@@ -1382,10 +1410,26 @@ class ConceptBasedModel:
 
         return all_y_probas
 
-    def _prep_propagation(self):
+    def _prep_propagation(self, n_concepts: int | None = None):
         """
         Prepare for propagation by generating concept possibilities and
         predicting probabilities for all concept combinations.
         """
-        self._concept_possibilities = self._gen_concept_possibilities()
+        self._concept_possibilities = self._gen_concept_possibilities(n_concepts)
         self._y_proba_all_concepts = self._pred_y_proba_concept_possibilities()
+        self._propagation_key = self._label_predictor_key(
+            self._concept_possibilities.shape[1]
+        )
+
+    def _label_predictor_key(self, n_concepts: int) -> tuple:
+        """Identity of the fitted label predictor the propagation tables were built from."""
+        predictor = self.label_predictor
+        parts: list[Any] = [int(n_concepts), id(predictor)]
+        for name in ("coef_", "intercept_"):
+            value = getattr(predictor, name, None)
+            if value is None:
+                inner = getattr(predictor, "model", None)
+                value = getattr(inner, name, None)
+            if value is not None:
+                parts.append(np.asarray(value).tobytes())
+        return tuple(parts)

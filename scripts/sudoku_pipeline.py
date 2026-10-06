@@ -10,9 +10,9 @@ Usage:
 
 from __future__ import annotations
 
-import copy
 import logging
 import math
+import os
 import platform
 from pathlib import Path
 
@@ -20,8 +20,12 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from tqdm import tqdm
 
+from concept_benchmark.evaluation import (
+    abstention_threshold,
+    decision_threshold,
+    selective_kept,
+)
 from concept_benchmark.utils import (
     compute_accuracy,
     determine_device,
@@ -37,9 +41,11 @@ from experiments.cem_integration import (
     train_ecbm_model,
     train_probcbm_model,
 )
+from experiments.evaluate import automation_table, predict_proba_positive
+from experiments.evaluate import train_cbm as train_cbm_block
+from experiments.evaluate import train_dnn as train_dnn_block
 from experiments.models import (
     ConceptBasedModel,
-    ConceptDetector,
 )
 from experiments.intervention import (
     ConceptInterventionRunner,
@@ -158,7 +164,7 @@ def train_cs(
     loader_config = {
         "device": device,
         "batch_size": config.batch_size,
-        "num_workers": 0 if _macos else 12,
+        "num_workers": 0 if _macos else min(12, os.cpu_count() or 1),
         "pin_memory": not _macos,
     }
 
@@ -167,42 +173,35 @@ def train_cs(
     if use_vit:
         from experiments.models import RobotViTConceptClassifier
 
-        n_concepts = data.train.n_concepts
-        concept_model = RobotViTConceptClassifier(num_concepts=n_concepts)
-        cd = ConceptDetector(model=concept_model)
-        cbm = ConceptBasedModel(concept_detector=cd, should_propagate=False)
-        loader_config["batch_size"] = 16
-        cbm.fit(
-            train_dataset=data.train,
-            valid_dataset=data.validation,
-            freeze_backbone=False,
-            concept_embed_params={"shuffle": False, **loader_config},
-            concept_fit_params={
-                "epochs": config.cs_epochs,
-                "lr": 5e-5,
-                "patience": config.cs_patience,
-                **loader_config,
+        cbm = train_cbm_block(
+            data.train,
+            data.validation,
+            detector=lambda: RobotViTConceptClassifier(
+                num_concepts=data.train.n_concepts
+            ),
+            epochs=config.cs_epochs,
+            lr=5e-5,
+            patience=config.cs_patience,
+            seed=config.seed,
+            loader_config={
+                **{k: v for k, v in loader_config.items() if k != "device"},
+                "batch_size": 16,
             },
+            should_propagate=False,
         )
     else:
-        from experiments.models import (
-            GroupPoolingConceptSudokuCNN as SudokuConceptModel,
-        )
+        from experiments.models import GroupPoolingConceptSudokuCNN
 
-        model = SudokuConceptModel()
-        cd = ConceptDetector(model=model)
-        cbm = ConceptBasedModel(concept_detector=cd, should_propagate=True)
-        cbm.fit(
-            train_dataset=data.train,
-            valid_dataset=data.validation,
-            freeze_backbone=False,
-            concept_embed_params={"shuffle": False, **loader_config},
-            concept_fit_params={
-                "epochs": config.cs_epochs,
-                "lr": 1e-3,
-                "patience": config.cs_patience,
-                **loader_config,
-            },
+        cbm = train_cbm_block(
+            data.train,
+            data.validation,
+            detector=GroupPoolingConceptSudokuCNN,
+            epochs=config.cs_epochs,
+            lr=1e-3,
+            patience=config.cs_patience,
+            seed=config.seed,
+            loader_config={k: v for k, v in loader_config.items() if k != "device"},
+            should_propagate=True,
         )
 
     test_pred = cbm.predict(data.test)
@@ -259,7 +258,6 @@ def train_dnn(
                 )
 
         model = ViTDNN()
-        criterion = nn.BCELoss()
         optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, model.parameters()), lr=5e-5
         )
@@ -267,59 +265,22 @@ def train_dnn(
         from experiments.models import SudokuValidatorCNN as DNNSudokuModel
 
         model = DNNSudokuModel()
-        criterion = nn.BCELoss()
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
     loader_config = get_loader_config()
+    model = train_dnn_block(
+        model,
+        data.train,
+        data.validation,
+        device=device,
+        epochs=config.epochs,
+        patience=config.patience,
+        loader_config=loader_config,
+        optimizer=optimizer,
+    )
     train_loader = data.train.loader(shuffle=True, **loader_config)
     valid_loader = data.validation.loader(shuffle=False, **loader_config)
     test_loader = data.test.loader(shuffle=False, **loader_config)
-
-    model.to(device)
-
-    best_val_loss = float("inf")
-    best_state_dict = None
-    epochs_no_improve = 0
-
-    for epoch in tqdm(range(config.epochs), desc="Epochs"):
-        model.train()
-        for X, _, y in train_loader:
-            optimizer.zero_grad()
-            X, y = X.to(device), y.to(device)
-            outputs = model(X)
-            loss = criterion(outputs.squeeze(), y.float())
-            loss.backward()
-            optimizer.step()
-
-        model.eval()
-        val_loss_sum = 0.0
-        val_batches = 0
-        with torch.no_grad():
-            for X, _, y in valid_loader:
-                X, y = X.to(device), y.to(device)
-                outputs = model(X)
-                batch_loss = criterion(outputs.squeeze(), y.float())
-                val_loss_sum += batch_loss.item()
-                val_batches += 1
-        avg_val_loss = val_loss_sum / max(val_batches, 1)
-
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
-            best_state_dict = copy.deepcopy(model.state_dict())
-            epochs_no_improve = 0
-        else:
-            epochs_no_improve += 1
-            if config.patience > 0 and epochs_no_improve >= config.patience:
-                logger.info(
-                    "Early stopping at epoch %d with best val loss %.6f",
-                    epoch + 1,
-                    best_val_loss,
-                )
-                break
-
-    if best_state_dict is not None:
-        model.load_state_dict(best_state_dict)
-
     train_acc = compute_accuracy(model, train_loader, device=device)
     valid_acc = compute_accuracy(model, valid_loader, device=device)
     test_acc = compute_accuracy(model, test_loader, device=device)
@@ -327,7 +288,7 @@ def train_dnn(
     logger.info("Validation Accuracy: %.2f%%", valid_acc * 100)
     logger.info("Test Accuracy: %.2f%%", test_acc * 100)
 
-    weights = best_state_dict if best_state_dict is not None else model.state_dict()
+    weights = model.state_dict()
     save(weights, config.get_model_path("dnn", data_type="tabular"), overwrite=True)
     return weights
 
@@ -365,7 +326,7 @@ def diagnose_confidence(
 
     saved = {}
     for name, split in (("val", data.validation), ("test", data.test)):
-        prob_pos, y_true = _cs_val_probs(cs_model, split)
+        prob_pos, y_true = predict_proba_positive(cs_model, split), np.asarray(split.y)
         saved[f"p_{name}"] = np.asarray(prob_pos, dtype=np.float64)
         saved[f"y_{name}"] = np.asarray(y_true).astype(int)
         saved[f"C_{name}"] = np.asarray(split.C).astype(int)
@@ -436,152 +397,25 @@ def run_interventions(
         )
         cs_model._random_state = config.seed
 
-    # Find selective accuracy threshold on validation set
-    cs_probs, cs_y = _cs_val_probs(cs_model, data.validation)
-    decision_threshold, cs_val_acc = _decision_threshold_sweep(cs_y, cs_probs)
-    cs_t, cs_cov = _selective_accuracy_threshold(
-        cs_y, cs_probs, config.target_accuracy, decision_threshold
+    budgets = [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
+    cs_intervention_df = automation_table(
+        cs_model,
+        data.validation,
+        data.test,
+        budgets,
+        target_accuracy=config.target_accuracy,
+        seed=config.seed,
+        concept_groups=config.block_size**2,
     )
-
-    if cs_t is None:
+    if (
+        "abstention_threshold" not in cs_intervention_df.columns
+    ):  # the target was out of reach
         logger.warning(
             "Model %s cannot reach target selective accuracy %.2f; "
             "reporting raw accuracy with no interventions.",
             _selected_cs_key(config),
             config.target_accuracy,
         )
-        cs_test_probs, cs_test_y = _cs_val_probs(cs_model, data.test)
-        raw_acc = float(
-            (
-                cs_test_y.astype(int)
-                == (cs_test_probs >= decision_threshold).astype(int)
-            ).mean()
-        )
-        logger.info("  Raw test accuracy: %.4f", raw_acc)
-        budgets = [
-            data.n_concepts if b == -1 else b for b in config.intervention_budgets
-        ]
-        rows = [
-            {
-                "budget": b,
-                "accuracy": raw_acc,
-                "predictions_intervened_on": 0,
-                "total_concept_checks": 0,
-                "row_checks": 0,
-                "col_checks": 0,
-                "block_checks": 0,
-                "total_concept_edits_made": 0,
-                "selective_accuracy_after": float("nan"),
-                "coverage_after": 0.0,
-            }
-            for b in [0] + budgets
-        ]
-        cs_intervention_df = pd.DataFrame(rows)
-        results_key = (
-            f"{_selected_cs_key(config)}_interventions"
-            if _selected_cs_key(config) != "cs"
-            else "interventions"
-        )
-        csv_path = config.get_results_path(
-            results_key, data_type="tabular"
-        ).with_suffix(".csv")
-        csv_path.parent.mkdir(parents=True, exist_ok=True)
-        cs_intervention_df.to_csv(csv_path, index=False)
-        return cs_intervention_df
-
-    # Test set selective metrics
-    cs_test_probs, cs_test_y = _cs_val_probs(cs_model, data.test)
-    cs_sel_acc, cs_sel_cov = _selective_metrics(
-        cs_test_y, cs_test_probs, cs_t, decision_threshold
-    )
-
-    # Run interventions at different budgets
-    cs_runner = ConceptInterventionRunner(cs_model)
-    cs_strategy = ConceptualSafeguardsStrategy()
-
-    # Compute baseline predictions ONCE for consistent coverage across k values
-    interv_cfg_k0 = InterventionConfig(
-        abstention_threshold=cs_t,
-        per_instance_budget=0,
-        random_state=config.seed,
-    )
-    result_k0 = cs_runner.run(cs_strategy, interv_cfg_k0, data.test)
-    y_prob_baseline = result_k0.y_prob_after  # = y_prob_before since k=0
-
-    # Validation baseline: the decision threshold is refit here at every budget,
-    # because intervening shifts the probability distribution it was tuned on.
-    val_k0 = cs_runner.run(cs_strategy, interv_cfg_k0, data.validation)
-    y_prob_baseline_val = val_k0.y_prob_after
-    val_y = np.asarray(data.validation.y)
-    dt_0, _ = _decision_threshold_sweep(val_y, y_prob_baseline_val[:, 1])
-    k0_sel_acc, k0_cov = _selective_at_thresholds(
-        data.test.y, result_k0.y_prob_after[:, 1], cs_t, dt_0
-    )
-
-    no_interv = {
-        "budget": 0,
-        "accuracy": float((result_k0.y_pred_after == data.test.y).mean()),
-        "predictions_intervened_on": 0,
-        "total_concept_checks": 0,
-        "row_checks": 0,
-        "col_checks": 0,
-        "block_checks": 0,
-        "total_concept_edits_made": 0,
-        "selective_accuracy_after": k0_sel_acc,
-        "coverage_after": k0_cov,
-        "decision_threshold": dt_0,
-        "abstention_threshold": cs_t,
-    }
-
-    rows = [no_interv]
-    budgets = [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
-    for budget in budgets:
-        interv_cfg = InterventionConfig(
-            abstention_threshold=cs_t,
-            per_instance_budget=budget,
-            random_state=config.seed,
-        )
-        val_result = cs_runner.run(
-            cs_strategy,
-            interv_cfg,
-            data.validation,
-            y_prob_baseline=y_prob_baseline_val,
-        )
-        dt_k, _ = _decision_threshold_sweep(val_y, val_result.y_prob_after[:, 1])
-        result = cs_runner.run(
-            cs_strategy, interv_cfg, data.test, y_prob_baseline=y_prob_baseline
-        )
-        acc_intervened = float((result.y_pred_after == data.test.y).mean())
-        predictions_intervened_on = int(np.sum(np.any(result.mask, axis=1)))
-        total_concept_checks = int(np.sum(result.mask))
-        side = config.block_size**2  # concepts are ordered rows, columns, blocks
-        row_checks = int(result.mask[:, :side].sum())
-        col_checks = int(result.mask[:, side : 2 * side].sum())
-        block_checks = int(result.mask[:, 2 * side :].sum())
-        pred_binary = (result.C_pred >= 0.5).astype(int)
-        final_binary = (result.C_intervened >= 0.5).astype(int)
-        total_concept_edits_made = int(np.sum(pred_binary != final_binary))
-        selective_acc_after, coverage_after = _selective_at_thresholds(
-            data.test.y, result.y_prob_after[:, 1], cs_t, dt_k
-        )
-        rows.append(
-            {
-                "budget": budget,
-                "accuracy": acc_intervened,
-                "predictions_intervened_on": predictions_intervened_on,
-                "total_concept_checks": total_concept_checks,
-                "row_checks": row_checks,
-                "col_checks": col_checks,
-                "block_checks": block_checks,
-                "total_concept_edits_made": total_concept_edits_made,
-                "selective_accuracy_after": selective_acc_after,
-                "coverage_after": coverage_after,
-                "decision_threshold": dt_k,
-                "abstention_threshold": cs_t,
-            }
-        )
-
-    cs_intervention_df = pd.DataFrame(rows)
 
     results_key = (
         f"{_selected_cs_key(config)}_interventions"
@@ -973,170 +807,6 @@ def run(
 # ── Helper functions ──────────────────────────────────────────────────
 
 
-_TIE_MARGIN = 1e-6  # see _selective_accuracy_threshold
-
-
-def _selective_accuracy_threshold(
-    y_true: np.ndarray,
-    prob_pos: np.ndarray,
-    target_acc: float,
-    decision_threshold: float = 0.5,
-) -> tuple[float | None, float | None]:
-    y_true = np.asarray(y_true).astype(int)
-    prob_pos = np.asarray(prob_pos, dtype=float).reshape(-1)
-    min_prob = np.minimum(prob_pos, 1.0 - prob_pos)
-    candidates = np.unique(np.concatenate(([0.0], min_prob)))
-    candidates = candidates[(candidates >= 0.0) & (candidates <= 0.5)]
-    candidates.sort()
-    for t in candidates[::-1]:
-        mask = min_prob <= t
-        if not np.any(mask):
-            continue
-        preds = (prob_pos[mask] >= decision_threshold).astype(int)
-        acc = float((preds == y_true[mask]).mean())
-        if acc >= target_acc:
-            coverage = float(mask.mean())
-            # Predictions exactly at confidence t are kept here, so the returned threshold must keep them
-            # too under the abstention rule t <= p <= 1 - t used at test time and by the strategies:
-            # move it just above t, but never past the next confidence level that this fit dropped.
-            dropped = candidates[candidates > t]
-            gap = (float(dropped.min()) if dropped.size else 0.5) - float(t)
-            return float(t) + min(_TIE_MARGIN, 0.5 * gap), coverage
-    return None, None
-
-
-def _classwise_accuracy_thresholds(
-    y_true: np.ndarray,
-    prob_pos: np.ndarray,
-    target_acc: float,
-    decision_threshold: float = 0.5,
-) -> tuple[float | None, float | None]:
-    """One confidence threshold per predicted class (alternative to `_selective_accuracy_threshold`).
-
-    Returns ``(t_pos, t_neg)``: keep a positive prediction if ``p >= t_pos`` and a negative prediction if
-    ``p <= t_neg``, each chosen as the largest set of predictions of that class with accuracy >= target_acc.
-    A side is ``None`` when no set of its predictions reaches the target.
-    """
-    y_true = np.asarray(y_true).astype(int)
-    prob_pos = np.asarray(prob_pos, dtype=float).reshape(-1)
-    positive = prob_pos >= decision_threshold
-
-    def fit(confidence: np.ndarray, correct: np.ndarray) -> float | None:
-        best = None
-        for c in np.unique(confidence):
-            if correct[confidence >= c].mean() >= target_acc:
-                best = float(c) if best is None else min(best, float(c))
-        return best
-
-    t_pos = fit(prob_pos[positive], y_true[positive] == 1) if positive.any() else None
-    # negatives are fitted on -p, so that the threshold is one of the probabilities themselves
-    t_neg = (
-        fit(-prob_pos[~positive], y_true[~positive] == 0) if (~positive).any() else None
-    )
-    return t_pos, (None if t_neg is None else -t_neg)
-
-
-def _selective_at_classwise_thresholds(y_true, prob_pos, t_pos, t_neg, decision_t):
-    """Selective accuracy and coverage under one threshold per predicted class."""
-    y_true = np.asarray(y_true).astype(int)
-    prob_pos = np.asarray(prob_pos, dtype=float).reshape(-1)
-    positive = prob_pos >= decision_t
-    covered = np.zeros_like(positive)
-    if t_pos is not None:
-        covered |= positive & (prob_pos >= t_pos)
-    if t_neg is not None:
-        covered |= ~positive & (prob_pos <= t_neg)
-    if not covered.any():
-        return float("nan"), 0.0
-    return float((positive[covered].astype(int) == y_true[covered]).mean()), float(
-        covered.mean()
-    )
-
-
-def _decision_threshold_sweep(
-    y_true: np.ndarray,
-    prob_pos: np.ndarray,
-    thresholds: np.ndarray | None = None,
-) -> tuple[float, float]:
-    y_true = np.asarray(y_true).astype(int)
-    prob_pos = np.asarray(prob_pos, dtype=float).reshape(-1)
-    if thresholds is None:
-        thresholds = np.linspace(0.0, 1.0, 101, dtype=float)
-    best_acc = -1.0
-    best_thresholds = []
-    for t in thresholds:
-        preds = (prob_pos >= t).astype(int)
-        acc = float((preds == y_true).mean())
-        if acc > best_acc:
-            best_acc = acc
-            best_thresholds = [float(t)]
-        elif acc == best_acc:
-            best_thresholds.append(float(t))
-    best_t = (
-        0.5 * (min(best_thresholds) + max(best_thresholds)) if best_thresholds else 0.5
-    )
-    return best_t, best_acc
-
-
-def _selective_metrics(
-    y_true: np.ndarray,
-    prob_pos: np.ndarray,
-    t: float | None,
-    decision_threshold: float = 0.5,
-) -> tuple[float | None, float]:
-    if t is None:
-        return None, 0.0
-    y_true = np.asarray(y_true).astype(int)
-    prob_pos = np.asarray(prob_pos, dtype=float).reshape(-1)
-    min_prob = np.minimum(prob_pos, 1.0 - prob_pos)
-    mask = min_prob <= t
-    if not np.any(mask):
-        return None, 0.0
-    preds = (prob_pos[mask] >= decision_threshold).astype(int)
-    acc = float((preds == y_true[mask]).mean())
-    coverage = float(mask.mean())
-    return acc, coverage
-
-
-def _selective_at_thresholds(y_true, prob_pos, abstention_t, decision_t):
-    """Selective accuracy and coverage under the intervention abstention rule.
-
-    Mirrors the abstention expression used by ConceptualSafeguardsStrategy so the
-    coverage figure is unchanged, but scores kept predictions with the tuned
-    decision threshold instead of a hard 0.5 cut.
-    """
-    y_true = np.asarray(y_true).astype(int)
-    prob_pos = np.asarray(prob_pos, dtype=float).reshape(-1)
-    abstain = (prob_pos >= abstention_t) & (prob_pos <= 1.0 - abstention_t)
-    covered = ~abstain
-    if not covered.any():
-        return float("nan"), 0.0
-    preds = (prob_pos[covered] >= decision_t).astype(int)
-    return float((preds == y_true[covered]).mean()), float(covered.mean())
-
-
-def _cs_val_probs(model, dataset):
-    probas = model.predict_proba(dataset)
-    if probas.ndim == 1:
-        prob_pos = probas
-    else:
-        prob_pos = probas[:, 1]
-    y_true = np.asarray(dataset.y)
-    return prob_pos, y_true
-
-
-def _dnn_val_probs(model, loader, device):
-    model.eval()
-    all_probs, all_y = [], []
-    with torch.no_grad():
-        for X, _, y in loader:
-            X = X.to(device)
-            probs = model(X).squeeze(-1).detach().cpu().numpy()
-            all_probs.append(probs)
-            all_y.append(y.cpu().numpy())
-    return np.concatenate(all_probs), np.concatenate(all_y)
-
-
 # ── Stage: compute and save selective metrics ─────────────────────────
 
 
@@ -1188,10 +858,6 @@ def compute_selective_results(
             data = load(tab_dir / "sudoku_dataset.pkl")
         data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
-    loader_cfg = get_loader_config()
-    val_loader = data.validation.loader(shuffle=False, **loader_cfg)
-    tst_loader = data.test.loader(shuffle=False, **loader_cfg)
-
     rows: list[dict] = []
 
     # ---- DNN selective metrics ----
@@ -1204,18 +870,22 @@ def compute_selective_results(
     dnn.load_state_dict(dnn_weights)
     dnn.to(device)
 
-    dnn_val_probs, dnn_val_y = _dnn_val_probs(dnn, val_loader, device)
-    dnn_dt, _ = _decision_threshold_sweep(dnn_val_y, dnn_val_probs)
-    dnn_test_probs, dnn_test_y = _dnn_val_probs(dnn, tst_loader, device)
+    dnn_val_probs, dnn_val_y = (
+        predict_proba_positive(dnn, data.validation, device=device),
+        np.asarray(data.validation.y),
+    )
+    dnn_dt, _ = decision_threshold(dnn_val_y, dnn_val_probs)
+    dnn_test_probs, dnn_test_y = (
+        predict_proba_positive(dnn, data.test, device=device),
+        np.asarray(data.test.y),
+    )
     dnn_raw_acc = float(
         ((dnn_test_probs >= dnn_dt).astype(int) == dnn_test_y.astype(int)).mean()
     )
 
     for tau in target_accuracies:
-        confidence_t, _ = _selective_accuracy_threshold(
-            dnn_val_y, dnn_val_probs, tau, dnn_dt
-        )
-        sel_acc, sel_cov = _selective_metrics(
+        confidence_t, _ = abstention_threshold(dnn_val_y, dnn_val_probs, tau, dnn_dt)
+        sel_acc, sel_cov = selective_kept(
             dnn_test_y, dnn_test_probs, confidence_t, dnn_dt
         )
         rows.append(
@@ -1235,20 +905,22 @@ def compute_selective_results(
         )
         cs_model._random_state = config.seed
 
-    cs_val_probs, cs_val_y = _cs_val_probs(cs_model, data.validation)
-    cs_dt, _ = _decision_threshold_sweep(cs_val_y, cs_val_probs)
-    cs_test_probs, cs_test_y = _cs_val_probs(cs_model, data.test)
+    cs_val_probs, cs_val_y = (
+        predict_proba_positive(cs_model, data.validation),
+        np.asarray(data.validation.y),
+    )
+    cs_dt, _ = decision_threshold(cs_val_y, cs_val_probs)
+    cs_test_probs, cs_test_y = (
+        predict_proba_positive(cs_model, data.test),
+        np.asarray(data.test.y),
+    )
     cs_raw_acc = float(
         ((cs_test_probs >= cs_dt).astype(int) == cs_test_y.astype(int)).mean()
     )
 
     for tau in target_accuracies:
-        confidence_t, _ = _selective_accuracy_threshold(
-            cs_val_y, cs_val_probs, tau, cs_dt
-        )
-        sel_acc, sel_cov = _selective_metrics(
-            cs_test_y, cs_test_probs, confidence_t, cs_dt
-        )
+        confidence_t, _ = abstention_threshold(cs_val_y, cs_val_probs, tau, cs_dt)
+        sel_acc, sel_cov = selective_kept(cs_test_y, cs_test_probs, confidence_t, cs_dt)
         rows.append(
             {
                 "model": "cs",

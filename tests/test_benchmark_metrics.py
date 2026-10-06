@@ -4,7 +4,9 @@ import numpy as np
 import pytest
 
 from concept_benchmark.evaluation.metrics import (
-    confidence_threshold,
+    abstention_threshold,
+    decision_threshold,
+    selective_at,
     accuracy,
     coverage,
     delta_accuracy,
@@ -122,15 +124,31 @@ class TestNetWorkAutomated:
         assert result == pytest.approx(1.0 - 2.0 / 10)  # coverage=1, avg_cost=2/10
 
 
-def test_confidence_threshold_is_the_lowest_that_reaches_the_target():
+def test_abstention_threshold_keeps_the_confident_predictions_that_reach_the_target():
     y_true = np.array([1, 1, 1, 0, 0, 1])
-    y_pred = np.array(
-        [1, 1, 1, 0, 1, 0]
-    )  # the two least confident predictions are wrong
-    confidence = np.array([0.5, 0.4, 0.3, 0.2, 0.1, 0.05])
-    assert confidence_threshold(y_pred, y_true, confidence, 1.0) == 0.2
-    assert confidence_threshold(y_pred, y_true, confidence, 0.6) == 0.05
+    prob = np.array(
+        [0.99, 0.95, 0.9, 0.05, 0.6, 0.45]
+    )  # the two least confident are wrong
+    threshold, kept = abstention_threshold(y_true, prob, target_accuracy=1.0)
+    assert kept == pytest.approx(4 / 6)
+    assert selective_at(y_true, prob, threshold, 0.5) == (1.0, pytest.approx(4 / 6))
 
 
-def test_confidence_threshold_is_none_when_the_target_is_out_of_reach():
-    assert confidence_threshold([1, 0], [0, 1], [0.3, 0.4], 0.5) is None
+def test_abstention_threshold_is_none_when_the_target_is_out_of_reach():
+    assert abstention_threshold([0, 1], [0.9, 0.1], target_accuracy=0.5) == (None, None)
+
+
+def test_decision_threshold_is_the_midpoint_of_the_best_cuts():
+    threshold, accuracy = decision_threshold([0, 0, 1, 1], [0.1, 0.2, 0.8, 0.9])
+    assert accuracy == 1.0
+    assert threshold == pytest.approx(
+        0.505
+    )  # the cuts 0.21 to 0.80 of the 0.01 grid tie
+
+
+def test_intervention_metrics_rejects_no_predictions():
+    from concept_benchmark.evaluation.metrics import intervention_metrics
+
+    empty = np.zeros((0, 2))
+    with pytest.raises(ValueError, match="at least one prediction"):
+        intervention_metrics(empty, empty, empty, empty, empty, np.zeros(0), 0.0)

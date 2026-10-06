@@ -21,7 +21,7 @@ dataset = DatasetGenerator(
     render_images=True,        # set False to skip rendering PNGs (faster, image only)
     block_size=3,              # block size (3 = standard 9×9 board)
     n_boards=1000,             # number of boards to generate
-    max_cell_swaps=9,          # cells swapped in invalid boards (higher = subtler errors)
+    max_cell_swaps=9,          # corruptions applied to each invalid board, 1 to 9 (each swaps or duplicates digits)
     valid_board_ratio=0.5,     # fraction of valid boards
     # ── Rendering (image only) ──
     font_style="handwritten",  # "handwritten" or "printed"

@@ -272,7 +272,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
                         base_logit[r] - base_Z_f64[r][:, subset_arr] @ w_sub
                     )  # (m,)
                     all_logit = remaining[:, None] + values @ w_sub  # (m, A)
-                    flip_mask = (all_logit >= 0).astype(int) != base_lbl[r][
+                    flip_mask = (all_logit > 0).astype(int) != base_lbl[r][
                         :, None
                     ]  # (m, A)
                     weighted = w_assign * flip_mask
@@ -375,13 +375,15 @@ class KFlipInterventionStrategy(InterventionStrategy):
         y_prob_now = base_probs
         pred_now = base_lbl
         conf = y_prob_now[np.arange(n_samples), pred_now]
+        # a row without a subset (no concept can flip it) is never a candidate, even at threshold 0
+        has_subset = np.array([len(subset) > 0 for subset in best_subset], dtype=bool)
+        candidate = has_subset & (flip_prob >= threshold)
         if config.select_only_abstained and config.abstention_threshold is not None:
             abstain_mask = (conf >= config.abstention_threshold) & (
                 conf <= 1.0 - config.abstention_threshold
             )
-            candidate_ids = np.nonzero((flip_prob >= threshold) & abstain_mask)[0]
-        else:
-            candidate_ids = np.nonzero(flip_prob >= threshold)[0]
+            candidate &= abstain_mask
+        candidate_ids = np.nonzero(candidate)[0]
 
         selected = self._select_instances(candidate_ids, config, rng=config.rng)
 

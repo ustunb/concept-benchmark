@@ -84,12 +84,23 @@ class ConstrainedFrontEndModel(FrontEndModel):
             ) from None
 
         n_samples, n_features = C.shape
-        y_bin = (y == 1).astype(int)
+        classes = np.unique(y)
+        if classes.size != 2:
+            raise ValueError(
+                f"Constrained frontend needs binary labels, got classes {classes.tolist()}."
+            )
+        # The second class is the positive one, as in sklearn's classes_[1]; predict
+        # returns 0/1, so the labels are expected to be {0, 1}.
+        y_bin = (y == classes[1]).astype(int)
         w = cp.Variable(n_features)
         b = cp.Variable()
 
         logits = C @ w + b
-        loss = cp.sum(cp.logistic(-cp.multiply(2 * y_bin - 1, logits)))
+        # Same objective as the sklearn LogisticRegression it replaces (C=1.0):
+        # sklearn minimises 0.5 * ||w||^2 + C * sum(log-loss), bias unpenalised.
+        loss = 0.5 * cp.sum_squares(w) + 1.0 * cp.sum(
+            cp.logistic(-cp.multiply(2 * y_bin - 1, logits))
+        )
         constraints = []
         for idx, sign in self._mono.items():
             constraints.append(w[idx] >= 0 if sign == 1 else w[idx] <= 0)
@@ -116,7 +127,7 @@ class ConstrainedFrontEndModel(FrontEndModel):
 
     def predict(self, C: np.ndarray) -> np.ndarray:
         logits = C @ self.model.coef_[0] + self.model.intercept_[0]
-        return (logits >= 0).astype(int)
+        return (logits > 0).astype(int)
 
     def predict_proba(self, C: np.ndarray) -> np.ndarray:
         logits = C @ self.model.coef_[0] + self.model.intercept_[0]
@@ -223,19 +234,17 @@ def align_frontend_weights(frontend_model, concept_names, weight_dict):
     n_concepts = len(concept_names)
     new_coef = np.zeros((1, n_concepts))
 
-    _log = logging.getLogger(__name__)
+    unknown = [
+        name for name in weight_dict if name != "bias" and name not in concept_names
+    ]
+    if unknown:
+        raise KeyError(
+            f"Unknown concept name(s) {unknown} in weight_dict (known: {list(concept_names)})"
+        )
     for concept_name, weight in weight_dict.items():
         if concept_name == "bias":
             continue
-        if concept_name in concept_names:
-            concept_idx = concept_names.index(concept_name)
-            new_coef[0, concept_idx] = weight
-        else:
-            _log.warning(
-                "Unknown concept name %r in weight_dict (known: %s)",
-                concept_name,
-                concept_names,
-            )
+        new_coef[0, concept_names.index(concept_name)] = weight
 
     new_bias = weight_dict.get("bias", 0.0)
     lr_model.coef_ = new_coef

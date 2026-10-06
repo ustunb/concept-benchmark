@@ -294,9 +294,19 @@ def create_robot_image_dataset(
             "The 'model' string parameter has been removed. "
             "Use 'model_features' (a dict of feature->value) instead."
         )
-    model_features = extra_params.get("model_features", {})
-    if not model_features:
-        raise ValueError("'model_features' must be provided and non-empty")
+    formula = extra_params.get("label_formula")
+    if formula is None:
+        model_features = extra_params.get("model_features", {})
+        if not model_features:
+            raise ValueError("'model_features' must be provided and non-empty")
+        formula = LabelFormula.from_weights(
+            features=model_features,
+            weights=extra_params.get("model_weights") or {},
+            intercept=extra_params.get("model_intercept", 0.0),
+            temperature=extra_params.get("model_scalar", 1.0),
+            stochastic=model_type == "stochastic",
+        )
+    is_stochastic = formula.stochastic
 
     num_combinations = int(np.prod([len(v) for v in concepts.values()]))
     total_robots = num_robots or num_combinations * samples_per_instance
@@ -324,15 +334,6 @@ def create_robot_image_dataset(
     df = catalog_df
 
     # Specify true labels via LabelFormula
-    weights = extra_params.get("model_weights") or {}
-    is_stochastic = model_type == "stochastic"
-    formula = LabelFormula.from_weights(
-        features=model_features,
-        weights=weights,
-        intercept=extra_params.get("model_intercept", 0.0),
-        temperature=extra_params.get("model_scalar", 1.0),
-        stochastic=is_stochastic,
-    )
     if is_stochastic:
         glorp_model_true = formula.probability
     else:

@@ -37,6 +37,7 @@ import numpy as np
 from tqdm import tqdm
 
 from concept_benchmark.data import ConceptDatasetSample
+from concept_benchmark.evaluation.metrics import abstention_mask
 from experiments.models import ConceptBasedModel
 
 
@@ -149,6 +150,7 @@ class InterventionBatch:
             )
         if self.instance_ids is None:
             self.instance_ids = np.arange(self.C_pred.shape[0])
+        self.instance_ids = np.asarray(self.instance_ids)
         if self.instance_ids.shape[0] != self.C_pred.shape[0]:
             raise ValueError("Length of instance_ids must match the number of samples.")
         if self.concept_costs is None:
@@ -450,12 +452,9 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
             elif hasattr(model, "predict_proba_from_concepts"):
                 y_prob = model.predict_proba_from_concepts(batch.C_pred)
             else:
-                y_prob = model._propagate_predict_proba_mc(batch.C_pred)
+                y_prob = model.propagate_predict_proba(batch.C_pred)
         predicted = np.argmax(y_prob, axis=1)
-        confidences = y_prob[np.arange(batch.n_samples), predicted]
-        abstain_mask = (confidences >= config.abstention_threshold) & (
-            confidences <= 1.0 - config.abstention_threshold
-        )
+        abstain_mask = abstention_mask(y_prob, config.abstention_threshold)
 
         non_abstained = ~abstain_mask
         if batch.y_true is not None:
@@ -492,6 +491,7 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
             selected_instances=selected,
             details={
                 "selective_acc_before": selective_acc_before,
+                "abstain_mask": abstain_mask,
                 "candidate_uncertainty_scores": candidate_scores,
                 "candidate_ids": candidate_ids,
             },
@@ -519,34 +519,39 @@ class OrderedCBMStrategy(InterventionStrategy):
         n_samples, n_concepts = batch.C_pred.shape
         supports_aligned = _supports_aligned_concept_replay(model)
         row_indices = _aligned_replay_row_indices(batch)
+
+        # Rank on the concepts the runner feeds the label predictor: the soft
+        # probabilities for aligned replay, the >= 0.5 thresholded values otherwise.
+        def _as_input(concepts: np.ndarray) -> np.ndarray:
+            return concepts if supports_aligned else (concepts >= 0.5).astype(int)
+
         y_prob_orig = predict_label_proba_from_concepts(
             model,
-            batch.C_pred,
+            _as_input(batch.C_pred),
             row_indices=row_indices if supports_aligned else None,
             baseline_concepts=batch.C_pred if supports_aligned else None,
         )
         y_pred_orig = np.argmax(y_prob_orig, axis=1)
         y_error_orig = (y_pred_orig != batch.y_true).astype(int)
 
+        known = ~np.isnan(batch.C_true)
         error_deltas = np.zeros((n_samples, n_concepts))
         for concept_idx in range(n_concepts):
-            C_intervened = batch.C_pred.copy()
-            C_intervened[:, concept_idx] = batch.C_true[:, concept_idx]
-            intervention_mask = None
-            if supports_aligned:
-                intervention_mask = np.zeros_like(batch.C_pred, dtype=bool)
-                intervention_mask[:, concept_idx] = True
+            intervention_mask = np.zeros_like(batch.C_pred, dtype=bool)
+            intervention_mask[:, concept_idx] = known[:, concept_idx]
+            C_intervened = np.where(intervention_mask, batch.C_true, batch.C_pred)
             y_prob_tti = predict_label_proba_from_concepts(
                 model,
-                C_intervened,
+                _as_input(C_intervened),
                 row_indices=row_indices if supports_aligned else None,
                 baseline_concepts=batch.C_pred if supports_aligned else None,
-                intervention_mask=intervention_mask,
+                intervention_mask=intervention_mask if supports_aligned else None,
             )
             y_pred_tti = np.argmax(y_prob_tti, axis=1)
             y_error_tti = (y_pred_tti != batch.y_true).astype(int)
             error_deltas[:, concept_idx] = y_error_tti - y_error_orig
 
+        error_deltas = np.nan_to_num(error_deltas, nan=0.0)
         best_concepts = np.argmin(error_deltas, axis=1)
         counts = np.bincount(best_concepts, minlength=n_concepts)
         ordering = np.argsort(-counts)
@@ -578,11 +583,7 @@ class OrderedCBMStrategy(InterventionStrategy):
                 row_indices=row_indices if supports_aligned else None,
                 baseline_concepts=batch.C_pred if supports_aligned else None,
             )
-            predicted = np.argmax(y_prob, axis=1)
-            confidences = y_prob[np.arange(batch.n_samples), predicted]
-            abstain_mask = (confidences >= config.abstention_threshold) & (
-                confidences <= 1.0 - config.abstention_threshold
-            )
+            abstain_mask = abstention_mask(y_prob, config.abstention_threshold)
             candidate_ids = np.nonzero(abstain_mask)[0]
         else:
             candidate_ids = np.arange(batch.n_samples)
@@ -625,11 +626,7 @@ class RandomInterventionStrategy(InterventionStrategy):
                 row_indices=row_indices if supports_aligned else None,
                 baseline_concepts=batch.C_pred if supports_aligned else None,
             )
-            predicted = np.argmax(y_prob, axis=1)
-            confidences = y_prob[np.arange(batch.n_samples), predicted]
-            abstain_mask = (confidences >= config.abstention_threshold) & (
-                confidences <= 1.0 - config.abstention_threshold
-            )
+            abstain_mask = abstention_mask(y_prob, config.abstention_threshold)
             candidate_ids = np.nonzero(abstain_mask)[0]
         else:
             candidate_ids = np.arange(batch.n_samples)
@@ -994,7 +991,7 @@ class ConceptInterventionRunner:
             if hasattr(self.model, "predict_proba_from_concepts"):
                 predict_proba_fn = self.model.predict_proba_from_concepts
             else:
-                predict_proba_fn = self.model._propagate_predict_proba_mc
+                predict_proba_fn = self.model.propagate_predict_proba
             if y_prob_baseline is not None:
                 y_prob_before = y_prob_baseline
             else:
@@ -1023,19 +1020,24 @@ class ConceptInterventionRunner:
             strategy_metrics["selective_acc_before"] = proposal.details.get(
                 "selective_acc_before", None
             )
+            abstain_pre = proposal.details.get("abstain_mask")
+            if abstain_pre is None:
+                abstain_pre = abstention_mask(
+                    y_prob_before, config.abstention_threshold
+                )
             strategy_metrics["coverage_before"] = (
-                1 - (proposal.selected_instances.size / batch.n_samples)
-                if batch.n_samples > 0
-                else 0.0
+                1 - abstain_pre.mean() if batch.n_samples > 0 else 0.0
             )
 
-            abstain_post = (y_prob_after[:, 1] >= config.abstention_threshold) & (
-                y_prob_after[:, 1] <= 1.0 - config.abstention_threshold
-            )
+            abstain_post = abstention_mask(y_prob_after, config.abstention_threshold)
 
             if batch.y_true is not None:
                 strategy_metrics["selective_acc_after"] = (
-                    (y_pred_after[~abstain_post] == batch.y_true[~abstain_post]).mean()
+                    float(
+                        (
+                            y_pred_after[~abstain_post] == batch.y_true[~abstain_post]
+                        ).mean()
+                    )
                     if (~abstain_post).any()
                     else -np.inf
                 )

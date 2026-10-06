@@ -18,16 +18,17 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 
+from concept_benchmark.evaluation import abstention_threshold, selective_at
 from concept_benchmark.sudoku import DatasetGenerator
 
 # ---------------------------------------------------------------------------
-# 1. Generate dataset (renders board images by default, ~35 s for 100 boards)
+# 1. Generate dataset (renders board images by default, about 20 s for 50 boards)
 # ---------------------------------------------------------------------------
 print("Generating Sudoku dataset (50 boards with handwritten digit images)...")
 dataset = DatasetGenerator(seed=171, n_boards=50).generate()
 dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=171)
 
-train, test = dataset.train, dataset.test
+train, val, test = dataset.train, dataset.val, dataset.test
 print(f"  Training:  {train.n} samples, {train.n_concepts} concepts")
 print(f"  Test:      {test.n} samples")
 print(f"  Concepts:  {train.concepts[:5]} ... ({train.n_concepts} total)")
@@ -86,25 +87,18 @@ print("\nSelective classification demo:")
 print("  (With perfect concept detectors, confidence = label predictor margin)")
 
 proba = clf.predict_proba(test.C)[:, 1]
-y_pred = clf.predict(test.C)
 
-for target_acc in [0.90, 0.95, 0.99]:
-    confidence = np.abs(proba - 0.5)
-    # Find threshold that achieves target accuracy
-    best_tau = 0.5
-    for tau in np.linspace(0, 0.5, 500):
-        keep = confidence >= tau
-        if keep.sum() == 0:
-            continue
-        if accuracy_score(test.y[keep], y_pred[keep]) >= target_acc:
-            best_tau = tau
-            break
-
-    keep = confidence >= best_tau
-    coverage = keep.mean()
-    sel_acc = accuracy_score(test.y[keep], y_pred[keep]) if keep.sum() > 0 else 0.0
+for target_accuracy in [0.90, 0.95, 0.99]:
+    # the threshold at which the kept predictions reach the target (fit on the validation boards)
+    threshold, _ = abstention_threshold(
+        val.y, clf.predict_proba(val.C)[:, 1], target_accuracy
+    )
+    if threshold is None:
+        print(f"  target={target_accuracy:.2f}:  out of reach")
+        continue
+    sel_acc, cov = selective_at(test.y, proba, threshold, 0.5)
     print(
-        f"  target={target_acc:.2f}:  sel_acc={sel_acc:.4f},  coverage={coverage:.1%}"
+        f"  target={target_accuracy:.2f}:  sel_acc={sel_acc:.4f},  coverage={cov:.1%}"
     )
 
 print("\nDone!")

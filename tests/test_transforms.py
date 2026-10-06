@@ -301,3 +301,11 @@ def test_repr_contains_key_info():
 
     r = repr(LabelNoiseGenerator(ds, p=0.05))
     assert "p=0.05" in r
+
+
+def test_concept_noise_generator_honours_splits():
+    ds = _make_dataset()
+    noisy = ConceptNoiseGenerator(ds, p=1.0, seed=0, splits={"train"}).generate()
+    assert np.all(noisy.train.C != noisy.train.base_concepts)
+    np.testing.assert_array_equal(noisy.validation.C, noisy.validation.base_concepts)
+    np.testing.assert_array_equal(noisy.test.C, noisy.test.base_concepts)

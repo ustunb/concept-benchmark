@@ -52,6 +52,8 @@ def _resolve_split_size(size: int | float, total: int) -> int:
         if not 0.0 < size < 1.0:
             raise ValueError(f"Float size must be in (0, 1), got {size}")
         return int(round(size * total))
+    if size < 0:
+        raise ValueError(f"Size must be non-negative, got {size}")
     return min(int(size), total)
 
 
@@ -100,8 +102,8 @@ def _group_split(
     n = len(groups)
     unique_groups = np.unique(groups)
     n_groups = len(unique_groups)
-    g_test = max(1, int(round(n_test / n * n_groups)))
-    g_val = max(1, int(round(n_val / n * n_groups)))
+    g_test = max(1, int(round(n_test / n * n_groups))) if n_test > 0 else 0
+    g_val = max(1, int(round(n_val / n * n_groups))) if n_val > 0 else 0
 
     if stratify is not None:
         # Majority label per group
@@ -423,6 +425,27 @@ class ConceptDataset:
             seen.add(sid)
             yield sample
 
+    def _named_splits(self) -> dict[str, "ConceptDatasetSample"]:
+        return {
+            "train": self.train,
+            "validation": self.validation,
+            "test": self.test,
+        }
+
+    def _split_rows(self, splits: set[str] | None) -> np.ndarray:
+        """Boolean row mask over the full dataset of the rows in *splits* (all rows when ``None``)."""
+        if splits is None:
+            return np.ones(self.n, dtype=bool)
+        unknown = set(splits) - set(self.SAMPLE_TYPES)
+        if unknown:
+            raise ValueError(
+                f"unknown splits: {sorted(unknown)}. Valid: {list(self.SAMPLE_TYPES)}"
+            )
+        rows = np.zeros(self.n, dtype=bool)
+        for name in splits:
+            rows |= getattr(self, name).indices
+        return rows
+
     def _apply_noise_settings(self):
         for sample in self._iter_samples():
             sample.has_concept_noise = self._has_concept_noise
@@ -560,11 +583,35 @@ class ConceptDataset:
             cvindices=self._cvindices,
             **self._init_kwargs,
         )
-        cpy.has_concept_noise = self.has_concept_noise
-        cpy.has_concept_missing = self.has_concept_missing
-        cpy.has_label_noise = self.has_label_noise
-
+        self._copy_noise_and_splits_to(cpy)
         return cpy
+
+    def _copy_noise_and_splits_to(self, other: "ConceptDataset") -> None:
+        """Give *other* this dataset's noise masks, noisy labels, flags and split rows."""
+        full = self._full
+        if full.concept_noise_mask is not None:
+            other._full.set_concept_noise_mask(full.concept_noise_mask.copy())
+        if full.concept_missing_mask is not None:
+            other._full.set_concept_missing_mask(
+                full.concept_missing_mask.copy(),
+                fill_value=full.concept_missing_fill_value,
+            )
+        if full.label_noise_labels is not None:
+            other._full.set_label_noise_labels(full.label_noise_labels.copy())
+        other._has_concept_noise = self._has_concept_noise
+        other._has_concept_missing = self._has_concept_missing
+        other._has_label_noise = self._has_label_noise
+        if self.fold_id is not None:
+            other.split(
+                fold_id=self.fold_id,
+                fold_num_validation=self.fold_num_validation,
+                fold_num_test=self.fold_num_test,
+            )
+        elif self.train is not full:
+            other.train = other._full.filter(self.train.indices)
+            other.validation = other._full.filter(self.validation.indices)
+            other.test = other._full.filter(self.test.indices)
+        other._apply_noise_settings()
 
     #### INSTANCE VARIABLES
     @property
@@ -752,9 +799,6 @@ class ConceptDataset:
             assert self.fold_id is not None
 
         # parse fold numbers
-        if fold_num_validation is not None and fold_num_test is not None:
-            assert int(fold_num_test) != int(fold_num_validation)
-
         if fold_num_validation is not None:
             fold_num_validation = int(fold_num_validation)
             assert fold_num_validation in self._fold_number_range
@@ -764,6 +808,14 @@ class ConceptDataset:
             fold_num_test = int(fold_num_test)
             assert fold_num_test in self._fold_number_range
             self._fold_num_test = fold_num_test
+
+        if (
+            self._fold_num_test != 0
+            and self._fold_num_validation == self._fold_num_test
+        ):
+            raise ValueError(
+                f"fold_num_validation and fold_num_test must differ, both are {self._fold_num_test}"
+            )
 
         # update subsamples
         self.train = self._full.filter(
@@ -848,23 +900,15 @@ class ConceptDataset:
         # preserving metadata and CV indices from the original dataset.
         new_ds = ConceptDataset(
             inputs=embedded_full.inputs,
-            C=embedded_full.C,
-            y=embedded_full.y,
+            C=embedded_full.base_concepts,
+            y=embedded_full.base_labels,
             meta=embedded_full.meta,
             input_type=embedded_full.input_type,
             classes=embedded_full.classes,
             cvindices=self._cvindices,
             **self._init_kwargs,
         )
-
-        # Re-apply existing split configuration on the new dataset, if any.
-        if self.fold_id is not None:
-            new_ds.split(
-                fold_id=self.fold_id,
-                fold_num_validation=self.fold_num_validation,
-                fold_num_test=self.fold_num_test,
-            )
-
+        self._copy_noise_and_splits_to(new_ds)
         return new_ds
 
     def sample(
@@ -909,6 +953,12 @@ class ConceptDataset:
         """
         from .utils import _create_skewed_training_set
 
+        if sampling_constraints and (groups is not None or stratify is not None):
+            raise ValueError(
+                "sampling_constraints cannot be combined with groups or stratify"
+            )
+        if train_size is not None and train_size < 0:
+            raise ValueError(f"train_size must be non-negative, got {train_size}")
         rng = np.random.default_rng(seed)
         n = self.n
         n_test = _resolve_split_size(test_size, n)
@@ -1010,32 +1060,23 @@ class ConceptDataset:
         if enable is not None:
             self.has_concept_missing = bool(enable)
 
+        concepts = self._full.base_concepts
+        if mechanism_key == "mcar":
+            full_mask = sample_mcar_mask(rng_generated, concepts.shape, p)
+        else:
+            full_mask = sample_mnar_mask(
+                rng_generated, concepts, base_p=p, config=mnar_config
+            )
+        full_mask &= self._split_rows(splits)[:, None]
+        self._full.set_concept_missing_mask(full_mask, fill_value=fill_value)
+
         masks: dict[str, np.ndarray] = {}
-        all_splits = {
-            "train": self.train,
-            "validation": self.validation,
-            "test": self.test,
-        }
-
-        for split_name, sample in all_splits.items():
-            if splits is not None and split_name not in splits:
-                continue
-            if sample is None or sample.base_concepts is None:
-                continue
-
-            if sample.base_concepts.size == 0:
-                masks[split_name] = np.zeros_like(sample.base_concepts, dtype=bool)
-                continue
-
-            if mechanism_key == "mcar":
-                mask = sample_mcar_mask(rng_generated, sample.base_concepts.shape, p)
-            else:
-                mask = sample_mnar_mask(
-                    rng_generated, sample.base_concepts, base_p=p, config=mnar_config
-                )
-
-            sample.set_concept_missing_mask(mask, fill_value=fill_value)
-            masks[split_name] = mask
+        for split_name, sample in self._named_splits().items():
+            mask = full_mask[sample.indices]
+            if sample is not self._full:
+                sample.set_concept_missing_mask(mask, fill_value=fill_value)
+            if splits is None or split_name in splits:
+                masks[split_name] = mask
 
         return masks
 
@@ -1046,6 +1087,7 @@ class ConceptDataset:
         rng: np.random.Generator | int | None = None,
         config: Mapping[str, object] | None = None,
         enable: bool | None = None,
+        splits: set[str] | None = None,
     ) -> dict[str, np.ndarray]:
         """Sample concept-level noise masks (bit flips).
 
@@ -1065,6 +1107,9 @@ class ConceptDataset:
               above options.
         enable : bool, optional
             If provided, sets :attr:`has_concept_noise` after sampling.
+        splits : set of str, optional
+            Which splits to apply noise to (e.g. ``{"train"}``).
+            ``None`` applies to all splits.
 
         Returns
         -------
@@ -1076,29 +1121,22 @@ class ConceptDataset:
             self.has_concept_noise = bool(enable)
 
         rng_generated = coerce_rng(rng)
+        full_mask = sample_concept_noise_mask(
+            rng_generated,
+            self._full.base_concepts,
+            base_p=p,
+            config=config,
+        )
+        full_mask &= self._split_rows(splits)[:, None]
+        self._full.set_concept_noise_mask(full_mask)
+
         masks: dict[str, np.ndarray] = {}
-        splits = {
-            "train": self.train,
-            "validation": self.validation,
-            "test": self.test,
-        }
-
-        for split_name, sample in splits.items():
-            if sample is None or sample.base_concepts is None:
-                continue
-
-            if sample.base_concepts.size == 0:
-                masks[split_name] = np.zeros_like(sample.base_concepts, dtype=bool)
-                continue
-
-            mask = sample_concept_noise_mask(
-                rng_generated,
-                sample.base_concepts,
-                base_p=p,
-                config=config,
-            )
-            sample.set_concept_noise_mask(mask)
-            masks[split_name] = mask
+        for split_name, sample in self._named_splits().items():
+            mask = full_mask[sample.indices]
+            if sample is not self._full:
+                sample.set_concept_noise_mask(mask)
+            if splits is None or split_name in splits:
+                masks[split_name] = mask
 
         return masks
 
@@ -1146,26 +1184,10 @@ class ConceptDataset:
         self._full.set_label_noise_labels(full_labels)
         noisy_labels["full"] = full_labels
 
-        splits = {
-            "train": self.train,
-            "validation": self.validation,
-            "test": self.test,
-        }
-
-        for split_name, sample in splits.items():
-            if sample is None or sample.base_labels.size == 0:
-                continue
-            if sample is self._full:
-                noisy_labels[split_name] = full_labels
-                continue
-            new_labels = sample_label_noise(
-                rng_generated,
-                sample.base_labels,
-                num_classes=sample.n_classes,
-                base_p=p,
-                config=label_noise_config,
-            )
-            sample.set_label_noise_labels(new_labels)
+        for split_name, sample in self._named_splits().items():
+            new_labels = full_labels[sample.indices]
+            if sample is not self._full:
+                sample.set_label_noise_labels(new_labels)
             noisy_labels[split_name] = new_labels
 
         return noisy_labels
@@ -1507,6 +1529,15 @@ class ConceptDatasetSample(Dataset):
             return False
         if not _deep_equal(self.meta, other.meta):
             return False
+        for mine, theirs in (
+            (self.concept_noise_mask, other.concept_noise_mask),
+            (self.concept_missing_mask, other.concept_missing_mask),
+            (self.label_noise_labels, other.label_noise_labels),
+        ):
+            if (mine is None) != (theirs is None):
+                return False
+            if mine is not None and not np.array_equal(mine, theirs):
+                return False
         if self.transform is not other.transform:
             return False
         if self.concept_transform is not other.concept_transform:
@@ -1558,6 +1589,23 @@ class ConceptDatasetSample(Dataset):
         """Number of classes."""
         return len(self.classes)
 
+    _PER_ROW_META = (
+        "UC",
+        "df_indices",
+        "robot_ids",
+        "row_index",
+        "img_paths",
+        "semantic_id",
+    )
+
+    def _filter_meta(self, indices: np.ndarray) -> dict:
+        """Copy of ``meta`` with every per-row entry sliced to *indices*."""
+        filtered_meta = self.meta.copy()
+        for key in self._PER_ROW_META:
+            if key in filtered_meta and filtered_meta[key] is not None:
+                filtered_meta[key] = np.asarray(filtered_meta[key])[indices]
+        return filtered_meta
+
     def filter(self, indices):
         """Return a new sample containing only the selected rows.
 
@@ -1576,12 +1624,7 @@ class ConceptDatasetSample(Dataset):
         assert indices.ndim == 1 and indices.shape[0] == self.n
         assert np.isin(indices, (0, 1)).all()
 
-        filtered_meta = self.meta.copy()
-        if "UC" in filtered_meta:
-            filtered_meta["UC"] = filtered_meta["UC"][indices]
-            filtered_meta["df_indices"] = filtered_meta["df_indices"][indices]
-        if "robot_ids" in filtered_meta:
-            filtered_meta["robot_ids"] = np.asarray(filtered_meta["robot_ids"])[indices]
+        filtered_meta = self._filter_meta(indices)
 
         new_sample = self.__class__(
             parent=self.parent,
@@ -1914,12 +1957,7 @@ class ConceptImageDatasetSample(ConceptDatasetSample):
         assert indices.ndim == 1 and indices.shape[0] == self.n
         assert np.isin(indices, (0, 1)).all()
 
-        filtered_meta = self.meta.copy()
-        if "UC" in filtered_meta:
-            filtered_meta["UC"] = filtered_meta["UC"][indices]
-            filtered_meta["df_indices"] = filtered_meta["df_indices"][indices]
-        if "robot_ids" in filtered_meta:
-            filtered_meta["robot_ids"] = np.asarray(filtered_meta["robot_ids"])[indices]
+        filtered_meta = self._filter_meta(indices)
 
         new_sample = self.__class__(
             parent=self.parent,

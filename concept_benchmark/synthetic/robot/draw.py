@@ -51,217 +51,20 @@ COLOR_SCHEMES = generate_color_schemes(
 DEFAULT_ROBOT_FEATURES = {
     "head_shape": "square",
     "body_shape": "square",
-    "foot_shape": "flat",
+    "foot_shape": "flat_square",
     "foot_subtype_choice": "default",
     "has_knees": True,
     "color_scheme": COLOR_SCHEMES[0],
 }
 
 FOOT_SUBTYPES = {
-    "flat": ["flat_4sided", "flat_5sided", "flat_lshaped"],
-    "pointy": ["pointy_3sided", "pointy_4sided", "pointy_6sided"],
+    foot_type: [s for s in ALL_ROBOT_FEATURES["foot_shape"] if s.startswith(foot_type)]
+    for foot_type in ("flat", "pointy")
 }
 
 
-def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs):
-    # set unspecified features using default values
-    features = dict(DEFAULT_ROBOT_FEATURES)
-    features.update(kwargs)
-
-    # canvas
-    canvas = (
-        pero.svg.SVGCanvas(width=width, height=height)
-        if filetype == "svg"
-        else pero.Image(width=width, height=height)
-    )
-    if filetype != "svg":
-        canvas.fill(pero.colors.White)
-    canvas.line_cap = pero.ROUND
-    canvas.line_join = pero.ROUND
-    canvas.line_color = pero.colors.Black
-    canvas.line_width = 2
-
-    # colors
-    if isinstance(features["color_scheme"], int):
-        color_scheme_id = np.mod(
-            features["color_scheme"] + col_scheme_add, len(COLOR_SCHEMES)
-        )
-        color_left, color_right = COLOR_SCHEMES[color_scheme_id]
-        if kwargs.get("verbose", False):
-            print(np.mod(features["color_scheme"] + col_scheme_add, len(COLOR_SCHEMES)))
-            print(color_left, color_right)
-    elif isinstance(features["color_scheme"], tuple):
-        color_left, color_right = features["color_scheme"]
-
-    # lengths
-    r = canvas.height / 12.0
-
-    # anchor points
-    y_top = 2 * r
-    x_mid = 0.5 * canvas.width
-
-    # standard elements
-    line = pero.Line(line_color=pero.colors.Black, line_width=1)
-    ray = pero.Ray(line_color=pero.colors.Black, line_width=1)
-
-    # face lengths
-    head_shape = features["head_shape"]
-    head_height = 1.75 * r
-    head_width = 1.75 * r
-    y_top_face = y_top
-
-    ############################################################################
-    # arms, hands, elbows, body
-    ############################################################################
-    y_top += head_height
-
-    body_width = 3.5 * r
-    body_height = 4.0 * r
-    x_left = x_mid - 0.5 * body_width
-    x_right = x_mid + 0.5 * body_width
-    y_arm = y_top + 0.33 * body_height
-
-    arm_length = 0.75 * body_width
-    hand_length = 0.25 * body_width
-
-    # arms
-    ray.draw(canvas, x=x_left, y=y_arm, length=arm_length, angle=pero.rads(180))
-
-    ray.draw(canvas, x=x_right, y=y_arm, length=arm_length, angle=pero.rads(0))
-
-    # elbows
-    if "has_elbows" in features.keys():
-        elbow_size = 0.1 * r if width < 120 or features["has_elbows"] == "true" else 0
-        elbow = pero.Ellipse(y=y_arm, width=elbow_size, height=elbow_size)
-        elbow.draw(canvas, x=x_left - 0.5 * arm_length, fill_color=color_left)
-        elbow.draw(canvas, x=x_right + 0.5 * arm_length, fill_color=color_right)
-
-    # hands
-    hand_shape = features.get("hand_shape", "round_circle")
-    hand_type, hand_subtype = hand_shape.split("_")[0], hand_shape.split("_")[1]
-    hand_x_left = x_left - arm_length
-    hand_x_right = x_right + arm_length
-    hand_y = y_arm
-    hand_size = 0.6 * r
-
-    if hand_type == "round":
-        if hand_subtype == "circle":
-            # Round circle hands - centered at arm end
-            hand = pero.Ellipse(width=hand_size, height=hand_size)
-            hand.draw(canvas, x=hand_x_left, y=hand_y, fill_color=color_left)
-            hand.draw(canvas, x=hand_x_right, y=hand_y, fill_color=color_right)
-
-        elif hand_subtype == "oval":
-            # Round oval hands (widened horizontally) - centered at arm end
-            hand = pero.Ellipse(width=hand_size * 1.5, height=hand_size)
-            hand.draw(canvas, x=hand_x_left, y=hand_y, fill_color=color_left)
-            hand.draw(canvas, x=hand_x_right, y=hand_y, fill_color=color_right)
-
-        elif hand_subtype == "oval2":
-            # Round oval2 hands (widened vertically) - centered at arm end
-            hand = pero.Ellipse(width=hand_size, height=hand_size * 1.5)
-            hand.draw(canvas, x=hand_x_left, y=hand_y, fill_color=color_left)
-            hand.draw(canvas, x=hand_x_right, y=hand_y, fill_color=color_right)
-
-    elif hand_type == "edgy":
-        if hand_subtype == "triangle":
-            # Edgy triangle hands - tip facing outward away from body
-            hand = pero.Polygon(line_color=pero.colors.Black)
-
-            # Left triangle hand (base at arm, tip pointing left)
-            p_left = (
-                (hand_x_left, hand_y - hand_size / 2),  # top of base
-                (hand_x_left, hand_y + hand_size / 2),  # bottom of base
-                (hand_x_left - hand_size, hand_y),  # tip pointing left
-            )
-            hand.draw(canvas, points=p_left, fill_color=color_left)
-
-            # Right triangle hand (base at arm, tip pointing right)
-            p_right = (
-                (hand_x_right, hand_y - hand_size / 2),  # top of base
-                (hand_x_right, hand_y + hand_size / 2),  # bottom of base
-                (hand_x_right + hand_size, hand_y),  # tip pointing right
-            )
-            hand.draw(canvas, points=p_right, fill_color=color_right)
-
-        elif hand_subtype == "square":
-            # Edgy square hands - centered at arm end
-            hand = pero.Rect(width=hand_size, height=hand_size)
-            hand.draw(
-                canvas,
-                x=hand_x_left - hand_size / 2,
-                y=hand_y - hand_size / 2,
-                fill_color=color_left,
-            )
-            hand.draw(
-                canvas,
-                x=hand_x_right - hand_size / 2,
-                y=hand_y - hand_size / 2,
-                fill_color=color_right,
-            )
-
-        elif hand_subtype == "trapezoid":
-            # Edgy trapezoid hands - shorter base at arm end, wider base pointing outward
-            hand = pero.Polygon(line_color=pero.colors.Black)
-
-            # Left trapezoid hand (wider base pointing left)
-            p_left = (
-                (hand_x_left, hand_y - hand_size / 4),  # top of shorter base
-                (hand_x_left, hand_y + hand_size / 4),  # bottom of shorter base
-                (
-                    hand_x_left - hand_size,
-                    hand_y + hand_size / 2,
-                ),  # bottom of wider base
-                (hand_x_left - hand_size, hand_y - hand_size / 2),  # top of wider base
-            )
-            hand.draw(canvas, points=p_left, fill_color=color_left)
-
-            # Right trapezoid hand (wider base pointing right)
-            p_right = (
-                (hand_x_right, hand_y - hand_size / 4),  # top of shorter base
-                (hand_x_right, hand_y + hand_size / 4),  # bottom of shorter base
-                (
-                    hand_x_right + hand_size,
-                    hand_y + hand_size / 2,
-                ),  # bottom of wider base
-                (hand_x_right + hand_size, hand_y - hand_size / 2),  # top of wider base
-            )
-            hand.draw(canvas, points=p_right, fill_color=color_right)
-
-    # body
-    y_body = y_top
-
-    ############################################################################
-    # legs, knees, feet
-    ############################################################################
-    y_top += body_height
-    foot_gap = 1.0 * r
-    foot_width = (body_width - 2.0 * foot_gap) / 2.0
-    foot_height = foot_width
-    x_left = x_mid - 0.5 * foot_gap - 0.5 * foot_width
-    x_right = x_mid + 0.5 * foot_gap + 0.5 * foot_width
-
-    # legs
-    leg_height = 0.75 * (body_height - foot_height)
-    line.draw(canvas, x1=x_left, x2=x_left, y1=y_top * 0.9, y2=y_top + leg_height)
-    line.draw(canvas, x1=x_right, x2=x_right, y1=y_top * 0.9, y2=y_top + leg_height)
-
-    # knees
-    if "has_knees" in features.keys():
-        knee_size = 0.1 * r if width < 120 or features["has_knees"] == "true" else 0
-
-        knee = pero.Ellipse(
-            x=x_left, y=y_top + 0.5 * leg_height, width=knee_size, height=knee_size
-        )
-        knee.draw(canvas, x=x_left, fill_color=color_left)
-        knee.draw(canvas, x=x_right, fill_color=color_right)
-
-    y_top += leg_height
-    foot_subtype = features["foot_shape"]
-    if foot_subtype in FOOT_SUBTYPES.keys():
-        if features["foot_subtype_choice"] == "default":
-            foot_subtype = "%s" % FOOT_SUBTYPES[foot_subtype][0]
-
+def foot_polygons(foot_subtype, x_left, x_right, y_top, foot_width, foot_height):
+    """Outline of the left and right foot of one subtype, as drawn and as masked."""
     # PAIR 1: trapezoid
     if foot_subtype == "flat_trapezoid":
         # Add rounded/curved top edges like rounded shape
@@ -510,7 +313,213 @@ def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs
         )
 
     else:
-        raise TypeError("invalid foot type")
+        raise TypeError(f"invalid foot type {foot_subtype!r}")
+    return p_left, p_right
+
+
+def draw_robot(filetype="svg", col_scheme_add=0, width=600, height=600, **kwargs):
+    # set unspecified features using default values
+    features = dict(DEFAULT_ROBOT_FEATURES)
+    features.update(kwargs)
+
+    # canvas
+    canvas = (
+        pero.svg.SVGCanvas(width=width, height=height)
+        if filetype == "svg"
+        else pero.Image(width=width, height=height)
+    )
+    if filetype != "svg":
+        canvas.fill(pero.colors.White)
+    canvas.line_cap = pero.ROUND
+    canvas.line_join = pero.ROUND
+    canvas.line_color = pero.colors.Black
+    canvas.line_width = 2
+
+    # colors
+    if isinstance(features["color_scheme"], int):
+        color_scheme_id = np.mod(
+            features["color_scheme"] + col_scheme_add, len(COLOR_SCHEMES)
+        )
+        color_left, color_right = COLOR_SCHEMES[color_scheme_id]
+        if kwargs.get("verbose", False):
+            print(np.mod(features["color_scheme"] + col_scheme_add, len(COLOR_SCHEMES)))
+            print(color_left, color_right)
+    elif isinstance(features["color_scheme"], tuple):
+        color_left, color_right = features["color_scheme"]
+
+    # lengths
+    r = canvas.height / 12.0
+
+    # anchor points
+    y_top = 2 * r
+    x_mid = 0.5 * canvas.width
+
+    # standard elements
+    line = pero.Line(line_color=pero.colors.Black, line_width=1)
+    ray = pero.Ray(line_color=pero.colors.Black, line_width=1)
+
+    # face lengths
+    head_shape = features["head_shape"]
+    head_height = 1.75 * r
+    head_width = 1.75 * r
+    y_top_face = y_top
+
+    ############################################################################
+    # arms, hands, elbows, body
+    ############################################################################
+    y_top += head_height
+
+    body_width = 3.5 * r
+    body_height = 4.0 * r
+    x_left = x_mid - 0.5 * body_width
+    x_right = x_mid + 0.5 * body_width
+    y_arm = y_top + 0.33 * body_height
+
+    arm_length = 0.75 * body_width
+    hand_length = 0.25 * body_width
+
+    # arms
+    ray.draw(canvas, x=x_left, y=y_arm, length=arm_length, angle=pero.rads(180))
+
+    ray.draw(canvas, x=x_right, y=y_arm, length=arm_length, angle=pero.rads(0))
+
+    # elbows (and knees below) are drawn at every size under 120 px on purpose,
+    # so the small images stay ambiguous for humans
+    if "has_elbows" in features.keys():
+        elbow_size = 0.1 * r if width < 120 or features["has_elbows"] == "true" else 0
+        elbow = pero.Ellipse(y=y_arm, width=elbow_size, height=elbow_size)
+        elbow.draw(canvas, x=x_left - 0.5 * arm_length, fill_color=color_left)
+        elbow.draw(canvas, x=x_right + 0.5 * arm_length, fill_color=color_right)
+
+    # hands
+    hand_shape = features.get("hand_shape", "round_circle")
+    hand_type, hand_subtype = hand_shape.split("_")[0], hand_shape.split("_")[1]
+    hand_x_left = x_left - arm_length
+    hand_x_right = x_right + arm_length
+    hand_y = y_arm
+    hand_size = 0.6 * r
+
+    if hand_type == "round":
+        if hand_subtype == "circle":
+            # Round circle hands - centered at arm end
+            hand = pero.Ellipse(width=hand_size, height=hand_size)
+            hand.draw(canvas, x=hand_x_left, y=hand_y, fill_color=color_left)
+            hand.draw(canvas, x=hand_x_right, y=hand_y, fill_color=color_right)
+
+        elif hand_subtype == "oval":
+            # Round oval hands (widened horizontally) - centered at arm end
+            hand = pero.Ellipse(width=hand_size * 1.5, height=hand_size)
+            hand.draw(canvas, x=hand_x_left, y=hand_y, fill_color=color_left)
+            hand.draw(canvas, x=hand_x_right, y=hand_y, fill_color=color_right)
+
+        elif hand_subtype == "oval2":
+            # Round oval2 hands (widened vertically) - centered at arm end
+            hand = pero.Ellipse(width=hand_size, height=hand_size * 1.5)
+            hand.draw(canvas, x=hand_x_left, y=hand_y, fill_color=color_left)
+            hand.draw(canvas, x=hand_x_right, y=hand_y, fill_color=color_right)
+
+    elif hand_type == "edgy":
+        if hand_subtype == "triangle":
+            # Edgy triangle hands - tip facing outward away from body
+            hand = pero.Polygon(line_color=pero.colors.Black)
+
+            # Left triangle hand (base at arm, tip pointing left)
+            p_left = (
+                (hand_x_left, hand_y - hand_size / 2),  # top of base
+                (hand_x_left, hand_y + hand_size / 2),  # bottom of base
+                (hand_x_left - hand_size, hand_y),  # tip pointing left
+            )
+            hand.draw(canvas, points=p_left, fill_color=color_left)
+
+            # Right triangle hand (base at arm, tip pointing right)
+            p_right = (
+                (hand_x_right, hand_y - hand_size / 2),  # top of base
+                (hand_x_right, hand_y + hand_size / 2),  # bottom of base
+                (hand_x_right + hand_size, hand_y),  # tip pointing right
+            )
+            hand.draw(canvas, points=p_right, fill_color=color_right)
+
+        elif hand_subtype == "square":
+            # Edgy square hands - centered at arm end
+            hand = pero.Rect(width=hand_size, height=hand_size)
+            hand.draw(
+                canvas,
+                x=hand_x_left - hand_size / 2,
+                y=hand_y - hand_size / 2,
+                fill_color=color_left,
+            )
+            hand.draw(
+                canvas,
+                x=hand_x_right - hand_size / 2,
+                y=hand_y - hand_size / 2,
+                fill_color=color_right,
+            )
+
+        elif hand_subtype == "trapezoid":
+            # Edgy trapezoid hands - shorter base at arm end, wider base pointing outward
+            hand = pero.Polygon(line_color=pero.colors.Black)
+
+            # Left trapezoid hand (wider base pointing left)
+            p_left = (
+                (hand_x_left, hand_y - hand_size / 4),  # top of shorter base
+                (hand_x_left, hand_y + hand_size / 4),  # bottom of shorter base
+                (
+                    hand_x_left - hand_size,
+                    hand_y + hand_size / 2,
+                ),  # bottom of wider base
+                (hand_x_left - hand_size, hand_y - hand_size / 2),  # top of wider base
+            )
+            hand.draw(canvas, points=p_left, fill_color=color_left)
+
+            # Right trapezoid hand (wider base pointing right)
+            p_right = (
+                (hand_x_right, hand_y - hand_size / 4),  # top of shorter base
+                (hand_x_right, hand_y + hand_size / 4),  # bottom of shorter base
+                (
+                    hand_x_right + hand_size,
+                    hand_y + hand_size / 2,
+                ),  # bottom of wider base
+                (hand_x_right + hand_size, hand_y - hand_size / 2),  # top of wider base
+            )
+            hand.draw(canvas, points=p_right, fill_color=color_right)
+
+    # body
+    y_body = y_top
+
+    ############################################################################
+    # legs, knees, feet
+    ############################################################################
+    y_top += body_height
+    foot_gap = 1.0 * r
+    foot_width = (body_width - 2.0 * foot_gap) / 2.0
+    foot_height = foot_width
+    x_left = x_mid - 0.5 * foot_gap - 0.5 * foot_width
+    x_right = x_mid + 0.5 * foot_gap + 0.5 * foot_width
+
+    # legs
+    leg_height = 0.75 * (body_height - foot_height)
+    line.draw(canvas, x1=x_left, x2=x_left, y1=y_top * 0.9, y2=y_top + leg_height)
+    line.draw(canvas, x1=x_right, x2=x_right, y1=y_top * 0.9, y2=y_top + leg_height)
+
+    # knees
+    if "has_knees" in features.keys():
+        knee_size = 0.1 * r if width < 120 or features["has_knees"] == "true" else 0
+
+        knee = pero.Ellipse(
+            x=x_left, y=y_top + 0.5 * leg_height, width=knee_size, height=knee_size
+        )
+        knee.draw(canvas, x=x_left, fill_color=color_left)
+        knee.draw(canvas, x=x_right, fill_color=color_right)
+
+    y_top += leg_height
+    foot_subtype = features["foot_shape"]
+    if foot_subtype in FOOT_SUBTYPES.keys():
+        if features["foot_subtype_choice"] == "default":
+            foot_subtype = "%s" % FOOT_SUBTYPES[foot_subtype][0]
+
+    p_left, p_right = foot_polygons(
+        foot_subtype, x_left, x_right, y_top, foot_width, foot_height
+    )
 
     ############################################################################
     # body (drawn last)
@@ -974,99 +983,12 @@ def draw_robot_mask(
             if features.get("foot_subtype_choice", "default") == "default":
                 foot_subtype = "%s" % FOOT_SUBTYPES[foot_subtype][0]
 
-        if foot_subtype == "flat_4sided":
-            p_left = (
-                (x_left_foot - 0.5 * foot_width, y_top_feet),
-                (x_left_foot - 0.5 * foot_width, y_top_feet + foot_height),
-                (x_left_foot + 0.5 * foot_width, y_top_feet + foot_height),
-                (x_left_foot + 0.5 * foot_width, y_top_feet),
-            )
-            p_right = (
-                (x_right_foot - 0.5 * foot_width, y_top_feet),
-                (x_right_foot - 0.5 * foot_width, y_top_feet + foot_height),
-                (x_right_foot + 0.5 * foot_width, y_top_feet + foot_height),
-                (x_right_foot + 0.5 * foot_width, y_top_feet),
-            )
-        elif foot_subtype == "flat_5sided":
-            p_left = (
-                (x_left_foot, y_top_feet),
-                (x_left_foot - 0.5 * foot_width, y_top_feet + 0.3 * foot_height),
-                (x_left_foot - 0.5 * foot_width, y_top_feet + foot_height),
-                (x_left_foot + 0.5 * foot_width, y_top_feet + foot_height),
-                (x_left_foot + 0.5 * foot_width, y_top_feet + 0.3 * foot_height),
-            )
-            p_right = (
-                (x_right_foot, y_top_feet),
-                (x_right_foot - 0.5 * foot_width, y_top_feet + 0.3 * foot_height),
-                (x_right_foot - 0.5 * foot_width, y_top_feet + foot_height),
-                (x_right_foot + 0.5 * foot_width, y_top_feet + foot_height),
-                (x_right_foot + 0.5 * foot_width, y_top_feet + 0.3 * foot_height),
-            )
-        elif foot_subtype == "flat_lshaped":
-            p_left = (
-                (x_left_foot - 0.5 * foot_width, y_top_feet),
-                (x_left_foot - 0.5 * foot_width, y_top_feet + 0.5 * foot_height),
-                (x_left_foot - 1.00 * foot_width, y_top_feet + 0.5 * foot_height),
-                (x_left_foot - 1.00 * foot_width, y_top_feet + 1.0 * foot_height),
-                (x_left_foot + 0.5 * foot_width, y_top_feet + 1.0 * foot_height),
-                (x_left_foot + 0.5 * foot_width, y_top_feet),
-            )
-            p_right = (
-                (x_right_foot + 0.5 * foot_width, y_top_feet),
-                (x_right_foot + 0.5 * foot_width, y_top_feet + 0.5 * foot_height),
-                (x_right_foot + 1.00 * foot_width, y_top_feet + 0.5 * foot_height),
-                (x_right_foot + 1.00 * foot_width, y_top_feet + 1.0 * foot_height),
-                (x_right_foot - 0.5 * foot_width, y_top_feet + 1.0 * foot_height),
-                (x_right_foot - 0.5 * foot_width, y_top_feet),
-            )
-        elif foot_subtype == "pointy_3sided":
-            p_left = (
-                (x_left_foot - 0.5 * foot_width, y_top_feet),
-                (x_left_foot + 0.5 * foot_width, y_top_feet),
-                (x_left_foot, y_top_feet + foot_height),
-            )
-            p_right = (
-                (x_right_foot - 0.5 * foot_width, y_top_feet),
-                (x_right_foot + 0.5 * foot_width, y_top_feet),
-                (x_right_foot, y_top_feet + foot_height),
-            )
-        elif foot_subtype == "pointy_4sided":
-            p_left = (
-                (x_left_foot, y_top_feet),
-                (x_left_foot - 0.5 * foot_width, y_top_feet + 0.5 * foot_height),
-                (x_left_foot, y_top_feet + foot_height),
-                (x_left_foot + 0.5 * foot_width, y_top_feet + 0.5 * foot_height),
-            )
-            p_right = (
-                (x_right_foot, y_top_feet),
-                (x_right_foot - 0.5 * foot_width, y_top_feet + 0.5 * foot_height),
-                (x_right_foot, y_top_feet + foot_height),
-                (x_right_foot + 0.5 * foot_width, y_top_feet + 0.5 * foot_height),
-            )
-        elif foot_subtype == "pointy_6sided":
-            p_left = (
-                (x_left_foot, y_top_feet),
-                (x_left_foot - 0.33 * foot_width, y_top_feet + 0.33 * foot_height),
-                (x_left_foot - 0.33 * foot_width, y_top_feet + 0.66 * foot_height),
-                (x_left_foot, y_top_feet + foot_height),
-                (x_left_foot + 0.33 * foot_width, y_top_feet + 0.66 * foot_height),
-                (x_left_foot + 0.33 * foot_width, y_top_feet + 0.33 * foot_height),
-            )
-            p_right = (
-                (x_right_foot, y_top_feet),
-                (x_right_foot - 0.33 * foot_width, y_top_feet + 0.33 * foot_height),
-                (x_right_foot - 0.33 * foot_width, y_top_feet + 0.66 * foot_height),
-                (x_right_foot, y_top_feet + foot_height),
-                (x_right_foot + 0.33 * foot_width, y_top_feet + 0.66 * foot_height),
-                (x_right_foot + 0.33 * foot_width, y_top_feet + 0.33 * foot_height),
-            )
-        else:
-            p_left = p_right = None
-
-        if p_left is not None and p_right is not None:
-            foot = pero.Polygon(line_color=None)
-            foot.draw(canvas, points=p_left, fill_color=pero.colors.White)
-            foot.draw(canvas, points=p_right, fill_color=pero.colors.White)
+        p_left, p_right = foot_polygons(
+            foot_subtype, x_left_foot, x_right_foot, y_top_feet, foot_width, foot_height
+        )
+        foot = pero.Polygon(line_color=None)
+        foot.draw(canvas, points=p_left, fill_color=pero.colors.White)
+        foot.draw(canvas, points=p_right, fill_color=pero.colors.White)
 
     return canvas
 

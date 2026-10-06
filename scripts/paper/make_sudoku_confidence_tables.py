@@ -26,12 +26,12 @@ from pathlib import Path
 import numpy as np
 
 from _common import PAPER, add_results_root, read_budget_rows, use_results_root
-from sudoku_pipeline import (
-    _classwise_accuracy_thresholds,
-    _decision_threshold_sweep,
-    _selective_accuracy_threshold,
-    _selective_at_classwise_thresholds,
-    _selective_at_thresholds,
+from concept_benchmark.evaluation import (
+    abstention_threshold,
+    classwise_thresholds,
+    decision_threshold,
+    selective_at,
+    selective_at_classwise,
 )
 
 ARCHS = [
@@ -75,22 +75,19 @@ def classwise(tau: float) -> dict[tuple[int, str], tuple[float, float]]:
             single, per_class = [], []
             for seed in seeds(res):
                 d = confidence(arch, res, seed)
-                decision, _ = _decision_threshold_sweep(d["y_val"], d["p_val"])
-                t, _ = _selective_accuracy_threshold(
-                    d["y_val"], d["p_val"], tau, decision
-                )
+                decision, _ = decision_threshold(d["y_val"], d["p_val"])
+                t, _ = abstention_threshold(d["y_val"], d["p_val"], tau, decision)
                 single.append(
                     0.0
                     if t is None
-                    else 100
-                    * _selective_at_thresholds(d["y_test"], d["p_test"], t, decision)[1]
+                    else 100 * selective_at(d["y_test"], d["p_test"], t, decision)[1]
                 )
-                t_pos, t_neg = _classwise_accuracy_thresholds(
+                t_pos, t_neg = classwise_thresholds(
                     d["y_val"], d["p_val"], tau, decision
                 )
                 per_class.append(
                     100
-                    * _selective_at_classwise_thresholds(
+                    * selective_at_classwise(
                         d["y_test"], d["p_test"], t_pos, t_neg, decision
                     )[1]
                 )

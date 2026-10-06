@@ -348,7 +348,10 @@ class DefaultConceptTrainer:
                     )
                 history["val_f1"].append(val_metric)
 
-                improved = val_metric > best_metric + cfg["min_delta"]
+                improved = (
+                    not np.isnan(val_metric)
+                    and val_metric > best_metric + cfg["min_delta"]
+                )
                 if improved:
                     best_metric = val_metric
                     patience_counter = 0

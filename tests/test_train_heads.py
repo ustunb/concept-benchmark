@@ -31,3 +31,35 @@ def test_train_heads_with_encoder_finetunes_encoder_changes(tabular_train_valid)
 
 
 ## Calibration is handled in ConceptDetector; no wrapper-based calibrators here.
+
+
+def test_nan_validation_metric_is_never_the_best_epoch(
+    tabular_train_valid, monkeypatch
+):
+    import math
+
+    import numpy as np
+    from experiments import train as train_module
+    from experiments.train import DefaultConceptTrainer
+
+    train, valid, d, k = tabular_train_valid
+    real_f1 = train_module.f1_score
+    calls = {"n": 0}
+
+    def _f1_nan_first_epoch(*args, **kwargs):
+        calls["n"] += 1
+        return float("nan") if calls["n"] <= k else real_f1(*args, **kwargs)
+
+    monkeypatch.setattr(train_module, "f1_score", _f1_nan_first_epoch)
+    result = DefaultConceptTrainer()(
+        nn.Linear(d, k),
+        train,
+        valid,
+        num_concepts=k,
+        params={"epochs": 3, "device": "cpu", "batch_size": 8, "patience": 5},
+    )
+    history = result.history["val_f1"]
+    assert math.isnan(history[0])
+    finite = [v for v in history if not math.isnan(v)]
+    assert finite and result.best_metric == max(finite)
+    assert not np.isnan(result.best_metric)

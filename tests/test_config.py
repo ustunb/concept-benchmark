@@ -354,3 +354,84 @@ class TestModelFingerprintScope:
         content = path.read_text()
         assert "seed" in content
         assert "n_boards" in content
+
+
+class TestFingerprintsAndPaths:
+    def test_robot_image_fingerprints_match_the_paper_datasets(self):
+        assert (
+            RobotBenchmarkConfig().setup_fingerprint()
+            == "bfd4d456fd0a9efdbb71b89aa5ab788b59c4e9ccc1f0a4413723649d13f1f137"
+        )
+        assert (
+            RobotBenchmarkConfig.default_subconcept().setup_fingerprint()
+            == "343b929b7a8fef3fb3b2ba8b95bb41fb3fe9960b4e8a62fa5dd715d5c4f038e9"
+        )
+
+    def test_robot_image_settings_carry_the_formula_object(self):
+        cfg = RobotBenchmarkConfig()
+        settings = cfg.to_dict()
+        assert settings["label_formula"] is cfg.label_formula
+        assert "model_features" not in settings
+
+    def test_sudoku_fingerprint_follows_data_parameters_only(self):
+        base = SudokuBenchmarkConfig(cell_px=18)
+        assert (
+            base.setup_fingerprint()
+            == SudokuBenchmarkConfig(cell_px=18, epochs=3).setup_fingerprint()
+        )
+        for other in (
+            SudokuBenchmarkConfig(cell_px=50),
+            SudokuBenchmarkConfig(cell_px=18, font_style="printed"),
+            SudokuBenchmarkConfig(cell_px=18, max_cell_swaps=3),
+            SudokuBenchmarkConfig(cell_px=18, n_boards=10),
+            SudokuBenchmarkConfig(cell_px=18, seed=172),
+        ):
+            assert other.setup_fingerprint() != base.setup_fingerprint()
+
+    def test_sudoku_alignment_path_has_the_seed(self):
+        name = (
+            SudokuBenchmarkConfig(seed=172, cell_px=18)
+            .get_alignment_results_path()
+            .name
+        )
+        assert name == "sudoku_alignment_image_n3_mc9_px18_seed172.json"
+
+    def test_robot_text_paths_name_preset_rule_and_complexity(self):
+        cfg = RobotBenchmarkConfig(
+            data_type="text",
+            seed=7,
+            concept_preset="foot_subtypes",
+            label_rule="sparse",
+            template_complexity="low",
+        )
+        assert (
+            cfg.get_dataset_path().name == "robot_text_subconcept_sparse_low_seed7.data"
+        )
+        assert (
+            cfg.get_model_path("cbm").name
+            == "robot_text_cbm_subconcept_sparse_low_seed7.model"
+        )
+        assert (
+            cfg.get_alignment_results_path().name
+            == "robot_text_alignment_subconcept_sparse_low_seed7.json"
+        )
+        assert (
+            cfg.get_dataset_path()
+            != RobotBenchmarkConfig(data_type="text", seed=7).get_dataset_path()
+        )
+
+    def test_yaml_round_trip_of_tuples(self, tmp_path):
+        from dataclasses import dataclass
+
+        from concept_benchmark.config import _BenchmarkConfigBase
+
+        @dataclass
+        class Config(_BenchmarkConfigBase):
+            sizes: tuple[int, ...] = (1, 2)
+            names: list[str] | None = None
+
+        cfg = Config(sizes=(3, 4), names=["a", "b"])
+        path = cfg.to_yaml(tmp_path / "config.yaml")
+        assert "python/tuple" not in path.read_text()
+        restored = Config.from_yaml(path)
+        assert restored.sizes == (3, 4) and restored.names == ["a", "b"]

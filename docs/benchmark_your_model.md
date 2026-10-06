@@ -132,31 +132,26 @@ print(f"CBM accuracy: {accuracy:.4f}")
 <details>
 <summary><strong>Running interventions on your model</strong></summary>
 
-Use `ConceptInterventionRunner` to evaluate intervention benefit:
+Use `intervention_table` to evaluate intervention benefit:
+
+```python
+from experiments.evaluate import intervention_table
+
+results = intervention_table(cbm, test, budgets=(1, 3, "max"), seed=1014)
+print(results[["budget", "accuracy"]])
+```
+
+`intervention_table` runs the paper's policy (`KFlipInterventionStrategy` through `ConceptInterventionRunner`) at
+each budget and returns the table that `plot_intervention_curve` reads.
+
+**Bypassing the concept detector:**
+If you already have concept probabilities, call the runner that `intervention_table` wraps and pass them via `concept_proba=`:
 
 ```python
 from experiments.intervention import ConceptInterventionRunner, InterventionConfig
 from experiments.kflip import KFlipInterventionStrategy
 
 runner = ConceptInterventionRunner(model=cbm)
-
-for k in [1, 3]:
-    result = runner.run(
-        strategy=KFlipInterventionStrategy(),
-        config=InterventionConfig(
-            per_instance_budget=k,
-            score_threshold=0.2,
-        ),
-        dataset=test,
-    )
-    acc_after = np.mean(result.y_pred_after == test.y)
-    print(f"k={k}: accuracy={acc_after:.4f}")
-```
-
-**Bypassing the concept detector:**
-If you already have concept probabilities, pass them directly via `concept_proba=` to skip the concept detector:
-
-```python
 my_concept_probs = my_model.predict_concepts(test.X)  # your own call
 
 result = runner.run(

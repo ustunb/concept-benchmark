@@ -115,3 +115,25 @@ def test_implies_can_target_text_binary_parent_when_present():
             value=0,
         ),
     )
+
+
+def test_default_robot_draws_and_every_foot_subtype_has_a_mask():
+    from concept_benchmark.synthetic.robot.draw import (
+        ALL_ROBOT_FEATURES,
+        draw_robot,
+        draw_robot_mask,
+        image_to_numpy_and_pillow,
+    )
+
+    draw_robot(filetype="png", width=32, height=32)
+    for subtype in ALL_ROBOT_FEATURES["foot_shape"]:
+        mask = draw_robot_mask(width=64, height=64, parts=("feet",), foot_shape=subtype)
+        pixels, _ = image_to_numpy_and_pillow(mask)
+        assert np.asarray(pixels).max() > 0, subtype
+
+
+def test_robot_catalog_has_no_foot_orientation_column():
+    ds = DatasetGenerator(
+        render_images=False, concept_preset="foot_subtypes"
+    ).generate()
+    assert "foot_orientation" not in ds.meta["catalog_df"].columns

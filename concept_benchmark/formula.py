@@ -165,6 +165,8 @@ class _Weighted(_Expr):
     def __str__(self) -> str:
         w = self.weight
         child_str = str(self.child)
+        if isinstance(self.child, _Sum):
+            child_str = f"({child_str})"
         if w == 1.0:
             return child_str
         if w == -1.0:
@@ -366,6 +368,8 @@ class LabelFormula:
             raise TypeError(
                 f"score must be an expression built with F(), got {type(score).__name__}"
             )
+        if temperature <= 0:
+            raise ValueError(f"temperature must be positive, got {temperature}")
         object.__setattr__(self, "_score_expr", score)
         object.__setattr__(self, "temperature", float(temperature))
         object.__setattr__(self, "stochastic", bool(stochastic))
@@ -541,7 +545,11 @@ class LabelFormula:
     # ── Validation ───────────────────────────────────────────────────
 
     def validate_against(self, concepts: dict) -> None:
-        """Check that all formula features and values exist in *concepts*."""
+        """Check that all formula features and values exist in *concepts*.
+
+        A value may be a listed value or the type that a subtype value
+        collapses to (``pointy`` for ``pointy_4sided``).
+        """
         for node in self._iter_indicators():
             if node.feature not in concepts:
                 raise ValueError(
@@ -549,15 +557,12 @@ class LabelFormula:
                     f"Available: {sorted(concepts)}"
                 )
             valid = [str(v) for v in concepts[node.feature]]
-            if node.value not in valid:
-                if not any(
-                    node.value.startswith(str(v)) or str(v).startswith(node.value)
-                    for v in concepts[node.feature]
-                ):
-                    raise ValueError(
-                        f"Value {node.value!r} not valid for feature {node.feature!r}. "
-                        f"Valid values: {valid}"
-                    )
+            types = {v.split("_", 1)[0] for v in valid if "_" in v}
+            if node.value not in valid and node.value not in types:
+                raise ValueError(
+                    f"Value {node.value!r} not valid for feature {node.feature!r}. "
+                    f"Valid values: {valid}"
+                )
 
     def _iter_indicators(self):
         """Yield all _Indicator nodes in the tree."""

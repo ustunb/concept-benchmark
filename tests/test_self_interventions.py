@@ -9,6 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 robot_pipeline = pytest.importorskip("robot_pipeline")
+from experiments.evaluate import predict_after_intervention  # noqa: E402
 from experiments.models import FrontEndModel  # noqa: E402
 from tests.conftest import make_tabular_dataset  # noqa: E402
 
@@ -70,7 +71,7 @@ def _concepts_read_after_intervention(encoding, low_values=None, high_values=Non
     frontend = _RecordingFrontEnd()
     C_after = np.array([[1.0, 0.3, 0.7], [0.0, 0.6, 0.2]])
     mask = np.array([[True, False, False], [True, False, False]])
-    robot_pipeline._predict_after_intervention(
+    predict_after_intervention(
         None,
         frontend,
         C_after,

@@ -15,7 +15,8 @@ The simplest way to run interventions is to directly manipulate concept predicti
 import numpy as np
 from experiments.models import ConceptDetector, FrontEndModel
 
-# Assume cd and fe are already trained (see examples/robot_pipeline_example.py)
+# cd and fe are a trained concept detector and label predictor, e.g. cbm.concept_detector and
+# cbm.label_predictor of a CBM from experiments.evaluate.train_cbm
 
 # Step 1: Get concept probabilities
 concept_probs = cd.predict_proba(test)
@@ -227,4 +228,4 @@ Two further options control how interventions are applied and recorded:
 | `--intervention-encoding` | What a label-free CBM reads after an intervention: `binary` (default), `percentile` or `binary_revealed` |
 | `--dump-interventions DIR` | Save what was asked and answered for each budget (input to `plot_concept_report`) |
 
-For a complete end-to-end example using `ConceptInterventionRunner` with training, interventions, and alignment, see [`examples/robot_pipeline_example.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/robot_pipeline_example.py).
+For a complete end-to-end example with training, interventions (through the `intervention_table` block, which runs `ConceptInterventionRunner` with the paper's policy) and alignment, see [`examples/robot_pipeline_example.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/robot_pipeline_example.py).

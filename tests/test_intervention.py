@@ -19,6 +19,7 @@ from experiments.intervention import (
     StrategyProposal,
 )
 from experiments.models import FrontEndModel
+from concept_benchmark.evaluation.metrics import abstention_mask
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -632,3 +633,130 @@ class TestRunner:
         assert fe.calls[0]["dataset_id"] == id(sample)
         assert fe.calls[1]["dataset_id"] is None
         assert result.mask.shape == concept_proba.shape
+
+
+# ── Protocol fixes ───────────────────────────────────────────────────
+
+
+def _make_sample(C_true, y_true, n_concepts):
+    from concept_benchmark.data import ConceptDatasetSample
+
+    return ConceptDatasetSample(
+        inputs=np.zeros((len(y_true), 2), dtype=np.float32),
+        C=np.nan_to_num(C_true).astype(np.int8),
+        y=np.asarray(y_true, dtype=np.int32),
+        meta={
+            "classes": ["c0", "c1"],
+            "concepts": [f"z{i}" for i in range(n_concepts)],
+            "data_type": "tabular",
+        },
+        input_type="tabular",
+        classes=(0, 1),
+    )
+
+
+def _frontend_with_weights(coef, intercept):
+    fe = FrontEndModel()
+    n = len(coef)
+    fe.fit(np.eye(n, dtype=float), np.arange(n) % 2)
+    fe.model.coef_[:] = np.asarray([coef], dtype=float)
+    fe.model.intercept_[:] = float(intercept)
+    return fe
+
+
+class TestConceptualSafeguardsPropagation:
+    def test_unseeded_monte_carlo_raises(self):
+        from experiments.models import ConceptBasedModel
+
+        fe = _make_cbm(k=4).label_predictor
+        batch = _make_batch(n=6, k=4)
+        config = InterventionConfig(abstention_threshold=0.2, per_instance_budget=1)
+        strat = ConceptualSafeguardsStrategy()
+        with pytest.raises(ValueError, match="random_state"):
+            strat.propose(
+                ConceptBasedModel(label_predictor=fe, mc_mode="mc"), batch, config
+            )
+        strat.propose(
+            ConceptBasedModel(label_predictor=fe, mc_mode="mc", random_state=0),
+            batch,
+            config,
+        )
+
+    def test_exact_propagation_when_feasible(self):
+        model = _make_cbm(k=4)  # 2^4 assignments: the exact gate
+        batch = _make_batch(n=6, k=4)
+        config = InterventionConfig(abstention_threshold=0.2, per_instance_budget=1)
+        strat = ConceptualSafeguardsStrategy()
+        proposal = strat.propose(model, batch, config)
+        expected = abstention_mask(
+            model._propagate_predict_proba(batch.C_pred), config.abstention_threshold
+        )
+        np.testing.assert_array_equal(proposal.details["abstain_mask"], expected)
+
+
+class TestOrderedCBMPrepare:
+    def test_ranks_on_thresholded_concepts_and_tolerates_missing_truth(self):
+        from experiments.models import ConceptBasedModel
+
+        # label = [5, 5] . z - 5 > 0: on the thresholded concepts [1, 0] the row is wrong
+        # and only concept 1 fixes it; on the soft [0.6, 0.45] it is already right.
+        model = ConceptBasedModel(
+            label_predictor=_frontend_with_weights([5.0, 5.0], -5.0)
+        )
+        C_pred = np.array([[0.6, 0.45], [0.6, 0.45], [0.9, 0.9]], dtype=np.float32)
+        C_true = np.array([[1, 1], [1, 1], [np.nan, np.nan]], dtype=np.float32)
+        batch = InterventionBatch(
+            C_pred=C_pred, C_true=C_true, y_true=np.array([1, 1, 1])
+        )
+        strat = OrderedCBMStrategy()
+        strat.prepare(model, batch, InterventionConfig(per_instance_budget=1))
+        assert np.isfinite(strat.state["error_deltas"]).all()
+        np.testing.assert_array_equal(strat.state["error_deltas"][2], [0, 0])
+        assert strat.state["ordering"].tolist() == [1, 0]
+
+
+class TestConceptualSafeguardsRunMetrics:
+    def test_coverage_before_comes_from_abstention_not_selection(self):
+        from experiments.models import ConceptBasedModel
+
+        rng = np.random.default_rng(0)
+        C_true = rng.integers(0, 2, size=(8, 3)).astype(np.float32)
+        y_true = rng.integers(0, 2, size=8)
+        model = ConceptBasedModel(
+            label_predictor=_frontend_with_weights([1.0, 1.0, 1.0], -1.5)
+        )
+        result = ConceptInterventionRunner(model).run(
+            ConceptualSafeguardsStrategy(),
+            InterventionConfig(
+                abstention_threshold=0.0, per_instance_budget=1, instance_budget=1
+            ),
+            _make_sample(C_true, y_true, 3),
+            concept_proba=rng.random((8, 3)).astype(np.float32),
+        )
+        assert result.proposal.selected_instances.size == 1
+        assert result.strategy_metrics["coverage_before"] == 0.0
+
+    def test_three_class_selective_metrics(self):
+        from experiments.models import ConceptBasedModel
+
+        rng = np.random.default_rng(1)
+        C = rng.random((60, 3)).astype(np.float32)
+        C[:40] = np.where(
+            C[:40] >= 0.5, 0.98, 0.02
+        )  # confident rows, then uncertain ones
+        y = (C >= 0.5).astype(int)[:, :2] @ np.array([1, 2]) % 3  # three classes
+        fe = FrontEndModel()
+        fe.fit((C >= 0.5).astype(float), y)
+        model = ConceptBasedModel(label_predictor=fe)
+        result = ConceptInterventionRunner(model).run(
+            ConceptualSafeguardsStrategy(),
+            InterventionConfig(abstention_threshold=0.35, per_instance_budget=1),
+            _make_sample((C >= 0.5).astype(np.float32), y, 3),
+            concept_proba=C,
+        )
+        assert result.y_prob_after.shape[1] == 3
+        kept = ~abstention_mask(result.y_prob_after, 0.35)
+        assert kept.any() and not kept.all()
+        expected = float((result.y_pred_after[kept] == y[kept]).mean())
+        assert result.strategy_metrics["selective_acc_after"] == pytest.approx(expected)
+        assert result.strategy_metrics["coverage_after"] == pytest.approx(kept.mean())

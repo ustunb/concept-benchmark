@@ -374,8 +374,6 @@ class LabelFreeCBM:
 
     def __init__(self, cfg: LFTrainingConfig) -> None:
         self.cfg = cfg
-        torch.manual_seed(int(cfg.seed))
-        np.random.seed(int(cfg.seed))
 
         self.encoder: _CLIPEncoder | None = None
         self.concept_set: LFConceptSet | None = None
@@ -479,7 +477,10 @@ class LabelFreeCBM:
         P_va_t = torch.from_numpy(P_va.T).to(device)  # (M, Nva)
 
         M, D = P_tr_t.shape[0], F_tr.shape[1]
-        W = torch.randn(M, D, device=device) * 0.02
+        # The only random draw of the fit: a local generator, so the init does not depend
+        # on whatever consumed the global RNG before (CLIP model construction, other fits).
+        generator = torch.Generator().manual_seed(int(self.cfg.seed))
+        W = (torch.randn(M, D, generator=generator) * 0.02).to(device)
         W.requires_grad_(True)
 
         opt = torch.optim.Adam([W], lr=self.cfg.lr, weight_decay=self.cfg.weight_decay)

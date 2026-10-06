@@ -15,12 +15,25 @@
 - `DatasetGenerator.generate_splits()`: the train/validation/test split of the paper.
 - `ROBOT_LABEL_RULES`, `label_rule`: the two label rules and the training foot subtypes that go with each.
 - Plots: `plot_intervention_heatmap`, `plot_automation`, `plot_concept_report`, `plot_answer_reliance`, `plot_confidence`.
+- Metrics: `abstention_threshold`, `decision_threshold`, `selective_at` (the paper's selective-classification protocol), `classwise_thresholds`, `intervention_metrics`.
+- `experiments.evaluate`: `train_cbm`, `train_dnn`, `intervention_table`, `automation_table`, `coverage_at_target`, `predict_labels`, `predict_proba_positive`; the pipelines and the examples are built from these blocks.
+- `plot_intervention_curve` and `plot_automation` draw the paper's two panels.
 - Robot pipeline: `--label-rule`, `--intervention-encoding`, `--intervention-sources self`, `--dump-interventions`, the `noisy_human_concepts` concept source, and all four architectures on every concept source.
 - Sudoku pipeline: ECBM, the optional `diagnose` stage, and abstention thresholds fitted with the rule that applies them.
 - `experiments/real_data.py`: interventions on Derm7pt and CUB.
 - `scripts/paper/`: the scripts behind every table, figure and test of the paper. They read one results folder (`--results-root`): the paper's results, a separate download on the releases page, or your own runs copied with `collect_pipeline_runs.py`.
 - `LICENSE`, `concept_benchmark.__version__`.
 
+### Fixed
+
+- Sudoku: corruptions that cancelled out left about 1% of the "invalid" boards valid; the generator now redraws until a concept is violated. Datasets regenerated with 0.4.0 differ from 0.3.x in those boards.
+- Abstention follows one rule, `min(p, 1 - p) >= t` (`abstention_mask`), in the threshold fit, the measures and the intervention strategies; the two inequalities used before could disagree by one floating-point ulp.
+- `decision_threshold` returns a threshold inside a run of tied best thresholds and the accuracy at that threshold.
+- A concept probability of exactly 0.5 counts as present everywhere, and a label logit of exactly 0 predicts the negative class, as `LogisticRegression.predict` does.
+
 ### Removed
+
+- `concept_benchmark.metrics.compute_selective_metric` and `experiments.metrics` (use `selective_at`, which applies the same abstention band).
+- `experiments.utils` keeps only `run_alignment`: `determine_device`, `get_loader_config`, `compute_accuracy` and `patch_macos_dataloader` live in `concept_benchmark.utils`, and `experiments.utils.train_dnn` is replaced by `experiments.evaluate.train_dnn`, which returns the trained model instead of a test accuracy.
 
 - `plot_regime_comparison` (use `plot_intervention_heatmap`).

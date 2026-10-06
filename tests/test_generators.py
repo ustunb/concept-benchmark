@@ -208,6 +208,14 @@ class TestRobotDatasetGenerator:
         assert gen.config.label_formula.weights == {"foot_shape": 8.0}
 
 
+@pytest.mark.parametrize("complexity", ["low", "medium", "high"])
+def test_text_corpus_fills_every_placeholder(complexity):
+    ds = DatasetGenerator(
+        "robot", data_type="text", template_complexity=complexity, seed=3
+    ).generate()
+    assert not [text for text in ds.inputs if "{" in text or "}" in text]
+
+
 # ── Sudoku via DatasetGenerator ──────────────────────────────────────
 
 
@@ -259,6 +267,13 @@ class TestSudokuDatasetGenerator:
         ds.sample(test_size=0.2, val_size=0.2, stratify=ds.y, seed=42)
         assert len(ds.train.y) + len(ds.validation.y) + len(ds.test.y) == 10
 
+    def test_image_boards_are_written_to_a_parameter_named_folder(self):
+        gen = DatasetGenerator("sudoku", seed=42, n_boards=10, data_type="image")
+        ds = gen.generate()
+        folder = ds.inputs[0].parent
+        assert folder == gen.config.get_dataset_path(data_type="image")
+        assert folder.name == "sudoku_image_n3_ns10_mc9_px50_seed42"
+
     def test_boards_stored_in_meta(self):
         ds = DatasetGenerator(
             "sudoku", seed=42, n_boards=20, data_type="tabular"
@@ -273,3 +288,18 @@ class TestSudokuDatasetGenerator:
         gen = DatasetGenerator("sudoku", seed=55)
         assert gen.config.seed == 55
         assert gen.benchmark == "sudoku"
+
+
+def test_every_generated_invalid_sudoku_board_is_invalid():
+    from concept_benchmark.synthetic.sudoku.utils import (
+        generate_invalid_board,
+        generate_valid_board,
+        get_concepts,
+    )
+
+    rng = np.random.default_rng(0)
+    for seed in range(3000):
+        board = generate_invalid_board(
+            base_board=generate_valid_board(rng=rng), num_actions=2, seed=seed
+        )
+        assert not get_concepts(board, return_label=True)["board_valid"], seed

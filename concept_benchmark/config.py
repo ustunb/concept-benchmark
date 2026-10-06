@@ -250,7 +250,7 @@ def _enums_to_strings(value):
     if isinstance(value, list):
         return [_enums_to_strings(v) for v in value]
     if isinstance(value, tuple):
-        return tuple(_enums_to_strings(v) for v in value)
+        return [_enums_to_strings(v) for v in value]
     return value
 
 
@@ -268,6 +268,14 @@ class _BenchmarkConfigBase:
         """Post-process loaded YAML dict before passing to constructor."""
         if "training_mode" in d and isinstance(d["training_mode"], str):
             d["training_mode"] = CBMTrainingMode(d["training_mode"])
+        return cls._restore_tuples(d)
+
+    @classmethod
+    def _restore_tuples(cls, d: dict) -> dict:
+        """Turn the lists YAML stores back into tuples for fields annotated as tuples."""
+        for f in fields(cls):
+            if str(f.type).startswith("tuple") and isinstance(d.get(f.name), list):
+                d[f.name] = tuple(d[f.name])
         return d
 
     def _scoped_field_names(self, scope: str) -> frozenset[str]:
@@ -558,6 +566,11 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         )
 
     @property
+    def _text_tag(self) -> str:
+        """Concept preset, label rule, template complexity and seed for text filenames."""
+        return f"{self._preset_suffix}_{self.template_complexity}{self._seed_tag}"
+
+    @property
     def pixel_resolution(self) -> int:
         """Pixel resolution for the current image_size."""
         return IMAGE_SIZE_TO_PIXELS[self.image_size]
@@ -589,9 +602,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         """Convert label_formula dict back to LabelFormula on load."""
         if "label_formula" in d and isinstance(d["label_formula"], dict):
             d["label_formula"] = LabelFormula.from_dict(d["label_formula"])
-        if "training_mode" in d and isinstance(d["training_mode"], str):
-            d["training_mode"] = CBMTrainingMode(d["training_mode"])
-        return d
+        return super()._restore_from_yaml_dict(d)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a dict compatible with DEFAULT_ROBOT_SETTINGS.
@@ -613,11 +624,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             "concepts": copy.deepcopy(self.concepts),
             "additional_features": list(self.expand_concepts),
             "subconcept": self.concept_preset == "foot_subtypes",
-            "model_type": self._labeling_tag,
-            "model_features": dict(self.label_formula.features),
-            "model_weights": dict(self.label_formula.weights),
-            "model_intercept": self.label_formula.intercept,
-            "model_scalar": self.label_formula.temperature,
+            "label_formula": self.label_formula,
         }
 
     def setup_fingerprint(self) -> str:
@@ -677,6 +684,16 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         d.pop("draw", None)  # meta-flag, not a data param
         d.pop("output_directory", None)  # derived from image_resolution
         d.pop("train_dnn", None)  # not a data param
+        formula = d.pop("label_formula")
+        d["model_type"] = self._labeling_tag
+        try:
+            # the flat form keeps the fingerprints of the cached datasets valid
+            d["model_features"] = dict(formula.features)
+            d["model_weights"] = dict(formula.weights)
+            d["model_intercept"] = formula.intercept
+            d["model_scalar"] = formula.temperature
+        except TypeError:  # not a linear formula
+            d["label_formula"] = formula.to_dict()
         return _dict_sha256(d)
 
     def model_fingerprint(self, model_class: str | None = None) -> str:
@@ -744,14 +761,14 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     def get_dataset_path(self) -> Path:
         """Return the path where the dataset file is saved."""
         if self.data_type == "text":
-            return results_dir / f"robot_text_seed{self.seed}.data"
+            return results_dir / f"robot_text{self._text_tag}.data"
         filename = f"robot_{self.data_type}_{self.renders_per_robot}{self._preset_suffix}{self._seed_tag}"
         return results_dir / f"{filename}.data"
 
     def get_model_path(self, model_class: str) -> Path:
         """Return the path where a trained model is saved."""
         if self.data_type == "text":
-            return results_dir / f"robot_text_{model_class}_seed{self.seed}.model"
+            return results_dir / f"robot_text_{model_class}{self._text_tag}.model"
         seed_tag = self._seed_tag
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}_{self.renders_per_robot}"
@@ -763,7 +780,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     def get_results_path(self, model_class: str = "cbm") -> Path:
         """Return the path where results CSV is saved."""
         if self.data_type == "text":
-            return results_dir / f"robot_text_{model_class}_seed{self.seed}_results.csv"
+            return results_dir / f"robot_text_{model_class}{self._text_tag}_results.csv"
         filename = f"robot_{self.data_type}_{self._labeling_tag}"
         if model_class in {"cbm", "cem", "probcbm", "ecbm"}:
             filename += self._preset_suffix
@@ -775,7 +792,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         if self.data_type == "text":
             return (
                 results_dir
-                / f"robot_text_{model_class}_seed{self.seed}_interpretation.json"
+                / f"robot_text_{model_class}{self._text_tag}_interpretation.json"
             )
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}"
@@ -798,7 +815,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     def get_alignment_results_path(self) -> Path:
         """Return the path where alignment results JSON is saved."""
         if self.data_type == "text":
-            return results_dir / f"robot_text_alignment_seed{self.seed}.json"
+            return results_dir / f"robot_text_alignment{self._text_tag}.json"
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}"
             f"{self._preset_suffix}"
@@ -823,7 +840,10 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     def get_collect_path(self) -> Path:
         """Return the path for the collect-stage summary CSV."""
         if self.data_type == "text":
-            return results_dir / "robot_text_results.csv"
+            return (
+                results_dir
+                / f"robot_text{self._text_tag}_{self._config_hash()}_results.csv"
+            )
         variant = "subconcept" if self.concept_preset == "foot_subtypes" else "ideal"
         return (
             results_dir
@@ -838,11 +858,11 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
 class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     """Configuration for the sudoku validation benchmark."""
 
-    block_size: int = 3
-    n_boards: int = 1000
-    valid_board_ratio: float = 0.5
-    max_cell_swaps: int = 9
-    seed: int = 171
+    block_size: int = field(default=3, metadata={"scope": "data"})
+    n_boards: int = field(default=1000, metadata={"scope": "data"})
+    valid_board_ratio: float = field(default=0.5, metadata={"scope": "data"})
+    max_cell_swaps: int = field(default=9, metadata={"scope": "data"})
+    seed: int = field(default=171, metadata={"scope": "data"})
     data_type: str = "image"
     render_images: bool = True
 
@@ -877,13 +897,15 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     # Alignment
     alignment_weights: dict[str, float] | None = None
 
-    # OCR settings
-    cell_px: int = 50
-    cell_margin_px: int = 2
-    gridline_px: int = 2
-    block_border_px: int = 5
-    font_size: int = 25
-    font_style: str = "handwritten"  # "handwritten" or "printed"
+    # Board rendering
+    cell_px: int = field(default=50, metadata={"scope": "data"})
+    cell_margin_px: int = field(default=2, metadata={"scope": "data"})
+    gridline_px: int = field(default=2, metadata={"scope": "data"})
+    block_border_px: int = field(default=5, metadata={"scope": "data"})
+    font_size: int = field(default=25, metadata={"scope": "data"})
+    font_style: str = field(
+        default="handwritten", metadata={"scope": "data"}
+    )  # "handwritten" or "printed"
 
     def __post_init__(self):
         if self.font_style not in ("handwritten", "printed"):
@@ -927,9 +949,9 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
 
     def setup_fingerprint(self) -> str:
         """Hash of all parameters that affect data generation."""
-        d = self.to_dict()
-        d.pop("temp_train_data_path", None)
-        return _dict_sha256(d)
+        d = self._prepare_asdict()
+        data_fields = self._scoped_field_names("data")
+        return _dict_sha256({k: v for k, v in d.items() if k in data_fields})
 
     def model_fingerprint(self, model_class: str | None = None) -> str:
         """Hash of all parameters that affect model training."""
@@ -995,7 +1017,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     def get_alignment_results_path(self, data_type: str | None = None) -> Path:
         """Return the path where alignment results JSON is saved."""
         dt = data_type or self.data_type
-        filename = f"sudoku_alignment_{dt}_n{self.block_size}_mc{self.max_cell_swaps}"
+        filename = f"sudoku_alignment_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}"
         return results_dir / f"{filename}.json"
 
     def _config_hash(self) -> str:

@@ -16,10 +16,17 @@ Plots::
 
 from .metrics import (
     accuracy,
-    confidence_threshold,
+    abstention_mask,
+    abstention_threshold,
+    classwise_thresholds,
+    decision_threshold,
+    selective_at,
+    selective_at_classwise,
+    selective_kept,
     coverage,
     delta_accuracy,
     gain,
+    intervention_metrics,
     net_work_automated,
     selective_accuracy,
 )
@@ -39,10 +46,17 @@ from .plots import (
 __all__ = [
     # metrics
     "accuracy",
-    "confidence_threshold",
+    "abstention_mask",
+    "abstention_threshold",
+    "classwise_thresholds",
+    "decision_threshold",
+    "selective_at",
+    "selective_at_classwise",
+    "selective_kept",
     "coverage",
     "delta_accuracy",
     "gain",
+    "intervention_metrics",
     "net_work_automated",
     "selective_accuracy",
     # plots

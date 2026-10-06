@@ -1,208 +1,72 @@
-"""Sudoku validation — full neural CS model pipeline with interventions.
+"""Sudoku: train a CBM and a DNN, let them abstain, check concepts, draw the automation panel.
 
-Tier 2: requires cloning the repo (uses the ``experiments/`` package).
+Requires cloning the repo (uses ``experiments/``). Each step is one block of the benchmark; the pipeline
+``scripts/sudoku_pipeline.py`` runs the same blocks on the images of the boards (through the digit
+recognizer); this example reads the digits of each board directly.
 
-This example walks through the complete concept-supervised (CS) workflow:
-  1. Generate a Sudoku dataset with handwritten digit images
-  2. Train a ConceptDetector (board digits → 27 validity concepts)
-  3. Train a FrontEndModel (concepts → valid/invalid label)
-  4. Evaluate selective classification (abstain on uncertain predictions)
-  5. Run oracle interventions and observe AND-fragility
-
-Timing: Data generation ~5 min, model training ~30 s, evaluation ~2 min.
-
-Usage:
     ./venv/bin/python examples/sudoku_pipeline_example.py
 
-Note: ``uv sync`` makes ``experiments/`` importable automatically.
+About a minute.
 """
 
-import numpy as np
-import pandas as pd
-from sklearn.metrics import accuracy_score
-
-from concept_benchmark.evaluation import confidence_threshold, plot_automation
+from concept_benchmark.evaluation import plot_automation
 from concept_benchmark.sudoku import DatasetGenerator
-from concept_benchmark.utils import set_deterministic_seed
-from experiments.intervention import ConceptInterventionRunner, InterventionConfig
-from experiments.kflip import KFlipInterventionStrategy
-from experiments.models import (
-    ConceptBasedModel,
-    ConceptDetector,
-    FrontEndModel,
-    GroupPoolingConceptSudokuCNN,
+from experiments.evaluate import (
+    automation_table,
+    coverage_at_target,
+    train_cbm,
+    train_dnn,
 )
-from experiments.utils import (
-    determine_device,
-    get_loader_config,
-    patch_macos_dataloader,
-)
+from experiments.models import GroupPoolingConceptSudokuCNN, SudokuValidatorCNN
 
-SEED = 171
+SEED, TARGET = 171, 0.95
 
-# ---------------------------------------------------------------------------
-# 0. Reproducibility and device setup
-# ---------------------------------------------------------------------------
-set_deterministic_seed(SEED)
-patch_macos_dataloader()
-device = determine_device()
-loader_config = get_loader_config()
-print(f"Using device: {device}")
-
-# ---------------------------------------------------------------------------
-# 1. Generate dataset
-# ---------------------------------------------------------------------------
-print("Generating Sudoku dataset (1000 boards, max_cell_swaps=9)...")
+# 1. Data: 1,000 boards, half of them invalid, 1 to 9 cells swapped in each invalid board
 dataset = DatasetGenerator(
-    seed=SEED,
-    n_boards=1000,
-    max_cell_swaps=9,  # cells swapped in invalid boards (higher = subtler)
-    valid_board_ratio=0.5,  # 50% valid, 50% invalid
-    data_type="tabular",  # use "image" to render board PNGs for explore()
-).generate()
-dataset.sample(test_size=0.2, val_size=0.2, stratify=dataset.y, seed=SEED)
+    seed=SEED, n_boards=1000, max_cell_swaps=9, data_type="tabular"
+).generate_splits()
+train, val, test = dataset.train, dataset.val, dataset.test
+print(
+    f"train {train.n}, validation {val.n}, test {test.n}; {train.n_concepts} concepts"
+)
 
-train, val, test = dataset.train, dataset.validation, dataset.test
-print(f"  Training:    {train.n} samples, {train.n_concepts} concepts")
-print(f"  Validation:  {val.n} samples")
-print(f"  Test:        {test.n} samples")
-print(f"  Concepts:    {train.concepts[:5]} ... ({train.n_concepts} total)")
-
-# ---------------------------------------------------------------------------
-# 2. Train concept detector (board → 27 validity concepts)
-# ---------------------------------------------------------------------------
-print("\nTraining ConceptDetector (GroupPoolingConceptSudokuCNN)...")
-cd = ConceptDetector(model=GroupPoolingConceptSudokuCNN())
-cd.fit(
+# 2. CBM: board -> 27 validity concepts -> valid. A board is valid iff every concept holds (an AND).
+cbm = train_cbm(
     train,
     val,
-    fit_params={
-        "epochs": 100,
-        "lr": 1e-3,
-        "patience": 20,
-        "device": str(device),
-        **loader_config,
-    },
+    detector=GroupPoolingConceptSudokuCNN,
+    epochs=100,
+    patience=20,
+    seed=SEED,
+    should_propagate=True,
 )
-print("  Done.")
+weights = cbm.label_predictor.model.coef_[0]
+print(f"all concept weights positive: {(weights > 0).all()}")
 
-# ---------------------------------------------------------------------------
-# 3. Train label predictor (concepts → valid/invalid)
-# ---------------------------------------------------------------------------
-print("Training FrontEndModel...")
-fe = FrontEndModel()
-fe.fit(train.C, train.y)
+# 3. DNN: board -> valid, no concepts
+dnn = train_dnn(SudokuValidatorCNN, train, val, seed=SEED)
 
-# Show the AND structure: all weights should be positive
-weights = fe.model.coef_[0]
-print(f"  All concept weights positive: {(weights > 0).all()}")
-print(f"  Weight range: [{weights.min():.2f}, {weights.max():.2f}]")
+# 4. Automation: both abstain until they are right on 95% of the boards they keep;
+#    a human checks up to k concepts of each board the CBM would defer
+results = automation_table(
+    cbm, val, test, budgets=(1, 3, "max"), target_accuracy=TARGET, seed=SEED
+)
+dnn_accuracy, dnn_coverage = coverage_at_target(dnn, val, test, TARGET)
+print(
+    results[
+        ["budget", "selective_accuracy_after", "coverage_after", "total_concept_checks"]
+    ].to_string(index=False)
+)
+print(f"DNN: selective accuracy {dnn_accuracy:.3f}, coverage {dnn_coverage:.3f}")
+# Checking concepts rarely raises coverage: one wrong concept keeps the board invalid (the AND).
 
-# ---------------------------------------------------------------------------
-# 4. Combine into a CS model and evaluate
-# ---------------------------------------------------------------------------
-cbm = ConceptBasedModel(concept_detector=cd, label_predictor=fe)
-predictions = cbm.predict(test)
-raw_acc = np.mean(predictions == test.y)
-print(f"\nCS model raw accuracy: {raw_acc:.4f}")
-
-# ---------------------------------------------------------------------------
-# 5. Selective classification — abstain on uncertain predictions
-# ---------------------------------------------------------------------------
-# The key metric for Sudoku is selective classification: the model only
-# answers when confident, achieving high accuracy on kept predictions.
-concept_probs = cd.predict_proba(test)
-C_binary = cd.predict(test).astype(np.float32)
-label_proba = fe.predict_proba(C_binary)[:, 1]
-y_pred = fe.predict(C_binary)
-
-print("\nSelective classification (abstain when uncertain):")
-print(f"  {'target_acc':>12s}   {'sel_acc':>8s}   {'coverage':>8s}")
-print(f"  {'----------':>12s}   {'-------':>8s}   {'--------':>8s}")
-
-for target_acc in [0.90, 0.95, 0.99]:
-    confidence = np.abs(label_proba - 0.5)
-    best_tau = 0.0
-    for tau in np.linspace(0, 0.5, 500):
-        keep = confidence >= tau
-        if keep.sum() == 0:
-            continue
-        if accuracy_score(test.y[keep], y_pred[keep]) >= target_acc:
-            best_tau = tau
-            break
-
-    keep = confidence >= best_tau
-    coverage = keep.mean()
-    sel_acc = accuracy_score(test.y[keep], y_pred[keep]) if keep.sum() > 0 else 0.0
-    print(f"  {target_acc:>12.2f}   {sel_acc:>8.4f}   {coverage:>7.1%}")
-
-# ---------------------------------------------------------------------------
-# 6. Oracle interventions — demonstrate AND-fragility
-# ---------------------------------------------------------------------------
-# In Sudoku, a board is valid iff ALL 27 concepts are true. This AND
-# structure means fixing a single wrong concept may not help: if another
-# concept is also wrong, the board is still predicted invalid.
-print("\nOracle interventions (correct k most uncertain concepts):")
-print(f"  {'k':>8s}   {'accuracy':>8s}   {'gain':>8s}")
-print(f"  {'---':>8s}   {'--------':>8s}   {'--------':>8s}")
-
-baseline_acc = np.mean(y_pred == test.y)
-n_concepts = test.n_concepts
-runner = ConceptInterventionRunner(model=cbm)
-
-
-def coverage_at(p_valid, target=0.95):
-    """Share of boards kept when the model abstains until it is right on `target` of the kept boards."""
-    confidence = np.abs(p_valid - 0.5)
-    threshold = confidence_threshold(
-        (p_valid >= 0.5).astype(int), test.y, confidence, target
-    )
-    return 0.0 if threshold is None else float(np.mean(confidence >= threshold))
-
-
-rows = []
-for k in [0, 1, 3, n_concepts]:
-    if k == 0:
-        acc = baseline_acc
-        rows.append(
-            {
-                "budget": 0,
-                "coverage_after": coverage_at(label_proba),
-                "total_concept_checks": 0,
-            }
-        )
-    else:
-        result = runner.run(
-            strategy=KFlipInterventionStrategy(),
-            config=InterventionConfig(
-                per_instance_budget=k,
-                score_threshold=0.2,
-            ),
-            dataset=test,
-            concept_proba=concept_probs,
-        )
-        acc = np.mean(result.y_pred_after == test.y)
-        rows.append(
-            {
-                "budget": k,
-                "coverage_after": coverage_at(result.y_prob_after[:, 1]),
-                "total_concept_checks": int(result.mask.sum()),
-            }
-        )
-
-    gain = acc - baseline_acc
-    k_str = str(k) if k != n_concepts else f"{k} (max)"
-    print(f"  {k_str:>8s}   {acc:>8.4f}   {gain:>+8.4f}")
-
-# The automation panel of the paper, for this run (the DNN is not trained here)
+# 5. The paper's panel for this run
 fig, ax = plot_automation(
-    pd.DataFrame(rows), n_instances=test.n, n_concepts=n_concepts, target_accuracy=0.95
+    results,
+    n_instances=test.n,
+    n_concepts=train.n_concepts,
+    baseline_coverage=dnn_coverage,
+    target_accuracy=TARGET,
 )
 fig.savefig("sudoku_pipeline_example.png", dpi=150, bbox_inches="tight")
-print("\n  Saved sudoku_pipeline_example.png")
-
-# Note: Unlike robot classification, interventions show diminishing returns
-# in Sudoku due to the AND structure. Fixing one concept rarely flips the
-# final prediction unless ALL remaining concepts are already correct.
-
-print("\nDone!")
+print("saved sudoku_pipeline_example.png")
