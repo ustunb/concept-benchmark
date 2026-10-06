@@ -112,7 +112,7 @@ def test_automation_table_rows_and_fallback(cbm, splits):
         cbm, val, test, budgets=(1, "max"), target_accuracy=0.0, seed=0
     )
     assert list(table["budget"]) == [0, 1, K]
-    assert {"abstention_threshold", "decision_threshold"} <= set(table.columns)
+    assert "abstention_threshold" in table.columns
     assert table["coverage_after"].between(0.0, 1.0).all()
     out_of_reach = automation_table(
         cbm, val, test, budgets=(1,), target_accuracy=1.01, seed=0

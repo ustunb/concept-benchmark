@@ -872,6 +872,9 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     batch_size: int = 32
     cs_epochs: int = 100
     cs_patience: int = 20
+    calibrate_concepts: bool = (
+        True  # Platt-scale each concept on validation; abstention needs calibrated P
+    )
     cbm_family: str = "cbm"
     cem_emb_size: int = 16
     cem_training_intervention_prob: float = 0.25

@@ -15,7 +15,6 @@ from torch import nn
 
 from concept_benchmark.evaluation import (
     abstention_threshold,
-    decision_threshold,
     intervention_metrics,
     selective_at,
 )
@@ -62,11 +61,14 @@ def train_cbm(
     seed: int,
     loader_config: dict | None = None,
     should_propagate: bool = False,
+    should_calibrate: bool = False,
 ) -> ConceptBasedModel:
     """Train the paper's CBM: a concept detector and a logistic label predictor on the true concepts.
 
     The detector is the robot CNN unless `detector`, a module class or factory, is given (e.g.
     ``GroupPoolingConceptSudokuCNN``); it is built after seeding, so that the run is repeatable.
+    With `should_calibrate`, each concept's probabilities are Platt-scaled on `validation` after training,
+    so that the label probabilities that abstention relies on are calibrated (:func:`calibrate_concepts`).
     With `should_propagate`, the label predictor reads the detector's probabilities instead of its 0/1 calls
     (the sudoku models of the paper). `patience` 0 disables early stopping. `seed` fixes the weights, the
     batches and the model's own sampling.
@@ -100,8 +102,21 @@ def train_cbm(
             "patience": patience if patience > 0 else epochs,
             **loader_config,
         },
+        should_calibrate=should_calibrate,
     )
     return cbm
+
+
+def calibrate_concepts(model: ConceptBasedModel, validation) -> ConceptBasedModel:
+    """Platt-scale each concept's probabilities on `validation` (a saved model can be calibrated afterwards).
+
+    Conceptual safeguards abstain on the propagated label probability, which is only as calibrated as the
+    concept probabilities it is built from; an underconfident detector makes every valid sudoku board look
+    uncertain. The scaling is fitted on the validation split, applied to every later prediction, and
+    changes nothing about the detector's weights.
+    """
+    model.concept_detector.calibrate(validation)
+    return model
 
 
 def train_dnn(
@@ -194,22 +209,21 @@ def coverage_at_target(
 ) -> tuple[float, float]:
     """Selective accuracy and coverage on `test` of a model that abstains until it reaches `target_accuracy`.
 
-    The abstention and decision thresholds are fitted on `validation` as in the paper. Returns
-    ``(nan, 0.0)`` when no threshold reaches the target.
+    The abstention threshold is fitted on `validation` as in the paper; the model predicts the positive
+    class above 0.5. Returns ``(nan, 0.0)`` when no threshold reaches the target.
     """
     val_prob, val_y = (
         predict_proba_positive(model, validation),
         np.asarray(validation.y).astype(int),
     )
-    decision, _ = decision_threshold(val_y, val_prob)
-    threshold, _ = abstention_threshold(val_y, val_prob, target_accuracy, decision)
+    threshold, _ = abstention_threshold(val_y, val_prob, target_accuracy)
     if threshold is None:
         return float("nan"), 0.0
     return selective_at(
         np.asarray(test.y).astype(int),
         predict_proba_positive(model, test),
         threshold,
-        decision,
+        0.5,
     )
 
 
@@ -406,9 +420,11 @@ def automation_table(
 ) -> pd.DataFrame:
     """Coverage and the checks it costs with 0, then each budget of concept checks per instance: the automation table.
 
-    The paper's protocol: the abstention threshold is fitted once on the validation predictions (the label
-    probabilities the strategy itself works with) so that the kept predictions reach `target_accuracy`; the decision threshold is refit on validation at every budget;
-    a human checks up to k concepts of each board the model would abstain on (conceptual safeguards).
+    The paper's protocol (conceptual safeguards): the model predicts a valid board above 0.5 and abstains
+    on ``t <= p <= 1 - t``, with the threshold ``t`` fitted once on the validation predictions (the label
+    probabilities the strategy itself works with) so that the kept predictions reach `target_accuracy`;
+    a human then checks up to k concepts of each board the model abstains on, and the same gate is applied
+    to the probabilities after the checks.
     One row per budget with the columns the sudoku pipeline writes (``coverage_after``,
     ``selective_accuracy_after``, ``total_concept_checks``, ...). Pass it to ``plot_automation``.
     With `concept_groups` (concepts per group, e.g. 9 for sudoku rows/columns/blocks), the checks are also
@@ -425,14 +441,13 @@ def automation_table(
     )  # k=0: the probabilities before any check
     val_prob = val_k0.y_prob_after[:, 1]
     val_y = np.asarray(validation.y).astype(int)
-    val_decision, _ = decision_threshold(val_y, val_prob)
-    threshold, _ = abstention_threshold(val_y, val_prob, target_accuracy, val_decision)
+    threshold, _ = abstention_threshold(val_y, val_prob, target_accuracy)
     y_test = np.asarray(test.y).astype(int)
     all_budgets = _budgets(budgets, test.n_concepts)
     test_k0 = runner.run(policy, probe, test)
     if threshold is None:
         raw_accuracy = float(
-            ((test_k0.y_prob_after[:, 1] >= val_decision).astype(int) == y_test).mean()
+            ((test_k0.y_prob_after[:, 1] >= 0.5).astype(int) == y_test).mean()
         )
         return pd.DataFrame(
             [
@@ -452,9 +467,8 @@ def automation_table(
             ]
         )
 
-    decision_0, _ = decision_threshold(val_y, val_prob)
     accuracy_0, coverage_0 = selective_at(
-        y_test, test_k0.y_prob_after[:, 1], threshold, decision_0
+        y_test, test_k0.y_prob_after[:, 1], threshold, 0.5
     )
     rows = [
         {
@@ -466,7 +480,6 @@ def automation_table(
             "total_concept_edits_made": 0,
             "selective_accuracy_after": accuracy_0,
             "coverage_after": coverage_0,
-            "decision_threshold": decision_0,
             "abstention_threshold": threshold,
         }
     ]
@@ -474,13 +487,9 @@ def automation_table(
         config = InterventionConfig(
             abstention_threshold=threshold, per_instance_budget=k, random_state=seed
         )
-        val_result = runner.run(
-            policy, config, validation, y_prob_baseline=val_k0.y_prob_after
-        )
-        decision_k, _ = decision_threshold(val_y, val_result.y_prob_after[:, 1])
         result = runner.run(policy, config, test, y_prob_baseline=test_k0.y_prob_after)
         accuracy_k, coverage_k = selective_at(
-            y_test, result.y_prob_after[:, 1], threshold, decision_k
+            y_test, result.y_prob_after[:, 1], threshold, 0.5
         )
         edits = (result.C_pred >= 0.5) != (result.C_intervened >= 0.5)
         rows.append(
@@ -493,7 +502,6 @@ def automation_table(
                 "total_concept_edits_made": int(np.sum(edits)),
                 "selective_accuracy_after": accuracy_k,
                 "coverage_after": coverage_k,
-                "decision_threshold": decision_k,
                 "abstention_threshold": threshold,
             }
         )
