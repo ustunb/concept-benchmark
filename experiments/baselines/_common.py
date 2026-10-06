@@ -722,14 +722,21 @@ class _OfficialBenchmarkModelBase(ConceptBasedModel):
             ),
             "pin_memory": bool(
                 self.eval_config.get("pin_memory", defaults["pin_memory"])
-            ),
+            )
+            and self._inference_device().type == "cuda",
         }
 
     def _inference_device(self) -> torch.device:
+        # The device a model was trained on is not necessarily available where it is loaded.
         configured = self.eval_config.get("device")
         if configured is None:
             return _effective_pl_device(determine_device())
-        return _effective_pl_device(torch.device(configured))
+        device = torch.device(configured)
+        if device.type == "cuda" and not torch.cuda.is_available():
+            return _effective_pl_device(determine_device())
+        if device.type == "mps" and not torch.backends.mps.is_available():
+            return _effective_pl_device(determine_device())
+        return _effective_pl_device(device)
 
     def predict_proba(
         self,
