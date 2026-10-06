@@ -335,7 +335,7 @@ def train_cbm(
     loader_config = {
         "device": device,
         "batch_size": config.batch_size,
-        "num_workers": 0 if _macos else 12,
+        "num_workers": 0 if _macos else min(12, os.cpu_count() or 1),
         "pin_memory": not _macos,
     }
     torch.manual_seed(config.seed)

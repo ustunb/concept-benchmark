@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import logging
 import math
+import os
 import platform
 from pathlib import Path
 
@@ -158,7 +159,7 @@ def train_cs(
     loader_config = {
         "device": device,
         "batch_size": config.batch_size,
-        "num_workers": 0 if _macos else 12,
+        "num_workers": 0 if _macos else min(12, os.cpu_count() or 1),
         "pin_memory": not _macos,
     }
 
