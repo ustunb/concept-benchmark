@@ -116,7 +116,7 @@ class ConstrainedFrontEndModel(FrontEndModel):
 
     def predict(self, C: np.ndarray) -> np.ndarray:
         logits = C @ self.model.coef_[0] + self.model.intercept_[0]
-        return (logits >= 0).astype(int)
+        return (logits > 0).astype(int)
 
     def predict_proba(self, C: np.ndarray) -> np.ndarray:
         logits = C @ self.model.coef_[0] + self.model.intercept_[0]

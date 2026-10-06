@@ -37,6 +37,7 @@ import numpy as np
 from tqdm import tqdm
 
 from concept_benchmark.data import ConceptDatasetSample
+from concept_benchmark.evaluation.metrics import abstention_mask
 from experiments.models import ConceptBasedModel
 
 
@@ -452,10 +453,7 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
             else:
                 y_prob = model._propagate_predict_proba_mc(batch.C_pred)
         predicted = np.argmax(y_prob, axis=1)
-        confidences = y_prob[np.arange(batch.n_samples), predicted]
-        abstain_mask = (confidences >= config.abstention_threshold) & (
-            confidences <= 1.0 - config.abstention_threshold
-        )
+        abstain_mask = abstention_mask(y_prob, config.abstention_threshold)
 
         non_abstained = ~abstain_mask
         if batch.y_true is not None:
@@ -578,11 +576,7 @@ class OrderedCBMStrategy(InterventionStrategy):
                 row_indices=row_indices if supports_aligned else None,
                 baseline_concepts=batch.C_pred if supports_aligned else None,
             )
-            predicted = np.argmax(y_prob, axis=1)
-            confidences = y_prob[np.arange(batch.n_samples), predicted]
-            abstain_mask = (confidences >= config.abstention_threshold) & (
-                confidences <= 1.0 - config.abstention_threshold
-            )
+            abstain_mask = abstention_mask(y_prob, config.abstention_threshold)
             candidate_ids = np.nonzero(abstain_mask)[0]
         else:
             candidate_ids = np.arange(batch.n_samples)
@@ -625,11 +619,7 @@ class RandomInterventionStrategy(InterventionStrategy):
                 row_indices=row_indices if supports_aligned else None,
                 baseline_concepts=batch.C_pred if supports_aligned else None,
             )
-            predicted = np.argmax(y_prob, axis=1)
-            confidences = y_prob[np.arange(batch.n_samples), predicted]
-            abstain_mask = (confidences >= config.abstention_threshold) & (
-                confidences <= 1.0 - config.abstention_threshold
-            )
+            abstain_mask = abstention_mask(y_prob, config.abstention_threshold)
             candidate_ids = np.nonzero(abstain_mask)[0]
         else:
             candidate_ids = np.arange(batch.n_samples)
@@ -1029,9 +1019,7 @@ class ConceptInterventionRunner:
                 else 0.0
             )
 
-            abstain_post = (y_prob_after[:, 1] >= config.abstention_threshold) & (
-                y_prob_after[:, 1] <= 1.0 - config.abstention_threshold
-            )
+            abstain_post = abstention_mask(y_prob_after, config.abstention_threshold)
 
             if batch.y_true is not None:
                 strategy_metrics["selective_acc_after"] = (

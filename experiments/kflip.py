@@ -272,7 +272,7 @@ class KFlipInterventionStrategy(InterventionStrategy):
                         base_logit[r] - base_Z_f64[r][:, subset_arr] @ w_sub
                     )  # (m,)
                     all_logit = remaining[:, None] + values @ w_sub  # (m, A)
-                    flip_mask = (all_logit >= 0).astype(int) != base_lbl[r][
+                    flip_mask = (all_logit > 0).astype(int) != base_lbl[r][
                         :, None
                     ]  # (m, A)
                     weighted = w_assign * flip_mask

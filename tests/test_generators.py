@@ -273,3 +273,18 @@ class TestSudokuDatasetGenerator:
         gen = DatasetGenerator("sudoku", seed=55)
         assert gen.config.seed == 55
         assert gen.benchmark == "sudoku"
+
+
+def test_every_generated_invalid_sudoku_board_is_invalid():
+    from concept_benchmark.synthetic.sudoku.utils import (
+        generate_invalid_board,
+        generate_valid_board,
+        get_concepts,
+    )
+
+    rng = np.random.default_rng(0)
+    for seed in range(3000):
+        board = generate_invalid_board(
+            base_board=generate_valid_board(rng=rng), num_actions=2, seed=seed
+        )
+        assert not get_concepts(board, return_label=True)["board_valid"], seed

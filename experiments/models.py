@@ -1174,7 +1174,7 @@ class ConceptBasedModel:
                 y_prob = self._propagate_predict_proba_mc(concept_preds)
             return (y_prob, concept_preds) if return_concepts else y_prob
 
-        binary_concept_preds = (concept_preds > 0.5).astype(np.float32)
+        binary_concept_preds = (concept_preds >= 0.5).astype(np.float32)
         pred_y_prob = self.label_predictor.predict_proba(binary_concept_preds)
 
         out = pred_y_prob if not return_concepts else (pred_y_prob, concept_preds)
@@ -1337,7 +1337,7 @@ class ConceptBasedModel:
         # Final means as output
         if sum_acc is None:
             # No sampling happened (edge case), fallback to deterministic round
-            return self.label_predictor.predict_proba((P > 0.5).astype(np.float32))
+            return self.label_predictor.predict_proba((P >= 0.5).astype(np.float32))
         out = sum_acc / counts[:, None]
         return out
 

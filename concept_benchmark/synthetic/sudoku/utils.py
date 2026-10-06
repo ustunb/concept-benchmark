@@ -275,9 +275,21 @@ def generate_invalid_board(
     if base_board is None:
         base_board = generate_valid_board()
     rng = random.Random(seed)
-    b = base_board.copy()
-    N, n = _assert_board_size(b)
+    N, n = _assert_board_size(base_board)
 
+    # A few actions (e.g. two swaps that undo each other) leave the board valid: redraw until a concept
+    # is violated, so that every board returned is invalid.
+    for _ in range(100):
+        b = _apply_corruptions(base_board, num_actions, mode, rng, N)
+        if not get_concepts(b, return_label=True)["board_valid"]:
+            return b
+    raise RuntimeError("Could not produce an invalid board in 100 draws.")
+
+
+def _apply_corruptions(
+    base_board: np.ndarray, num_actions: int, mode: str | None, rng: random.Random, N: int
+) -> np.ndarray:
+    b = base_board.copy()
     for t in range(num_actions):
         cur_seed = rng.randrange(1 << 30)
         if mode is None:

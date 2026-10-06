@@ -172,3 +172,14 @@ class TestTestAlignment:
         alignment_test_fn(concept_preds_test, params, fe, ds)
         # Original should NOT be modified (deep copy inside)
         np.testing.assert_array_equal(fe.model.coef_, original_coef)
+
+
+def test_constrained_model_predicts_negative_at_zero_logit_like_sklearn():
+    from sklearn.linear_model import LogisticRegression
+
+    model = ConstrainedFrontEndModel.__new__(ConstrainedFrontEndModel)
+    model.model = type("W", (), {"coef_": np.array([[1.0, -1.0]]), "intercept_": np.array([0.0])})()
+    sklearn_model = LogisticRegression().fit(np.array([[0, 1], [1, 0]]), np.array([0, 1]))
+    sklearn_model.coef_, sklearn_model.intercept_ = model.model.coef_, model.model.intercept_
+    C = np.array([[1.0, 1.0]])
+    assert model.predict(C).tolist() == sklearn_model.predict(C).tolist() == [0]

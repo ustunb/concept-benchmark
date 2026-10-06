@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from concept_benchmark.evaluation import (
+    abstention_mask,
     abstention_threshold,
     classwise_thresholds,
     decision_threshold,
@@ -94,3 +95,44 @@ def test_classwise_fit_and_evaluation_agree_on_random_probabilities():
         accuracy, coverage = selective_at_classwise(y, p, t_pos, t_neg, 0.5)
         if coverage > 0:
             assert accuracy >= 0.9 - 1e-12
+
+
+def test_abstention_mask_agrees_with_the_fit_on_random_probabilities():
+    rng = np.random.default_rng(3)
+    y = rng.integers(0, 2, size=400)
+    p = np.round(rng.uniform(0.0, 1.0, size=400), 3)
+    t, coverage = abstention_threshold(y, p, target_accuracy=0.0)
+    assert coverage == 1.0
+    _, coverage_at_t = selective_at(y, p, t, 0.5)
+    assert coverage_at_t == coverage
+    assert not abstention_mask(p, t).any()
+    assert np.array_equal(abstention_mask(p, t), abstention_mask(np.column_stack([1 - p, p]), t))
+
+
+def test_abstention_mask_uses_the_same_margin_for_both_classes():
+    # 1 - (1 - t) is not t in floating point; the margin rule must not depend on the class
+    t = 0.3
+    p = np.array([t, 1 - t, t - 1e-12, 1 - t + 1e-12])
+    assert abstention_mask(p, t).tolist() == [True, True, False, False]
+
+
+def test_abstention_mask_multiclass_uses_the_top_probability():
+    y_prob = np.array([[0.5, 0.3, 0.2], [0.8, 0.1, 0.1]])
+    assert abstention_mask(y_prob, 0.3).tolist() == [True, False]
+
+
+def test_decision_threshold_returns_the_accuracy_at_the_returned_threshold():
+    # best accuracy at t in {0.0..0.1} and at t in {0.9..1.0}; the midpoint of all of them (0.5) is worse
+    y = np.array([1, 1, 1, 0])
+    p = np.array([0.95, 0.15, 0.15, 0.5])
+    t, acc = decision_threshold(y, p)
+    assert acc == ((p >= t).astype(int) == y).mean()
+    assert acc == 0.75
+    assert t <= 0.15
+
+
+def test_decision_threshold_prefers_the_longest_run_of_tied_thresholds():
+    y = np.array([1, 0])
+    p = np.array([0.9, 0.2])
+    t, acc = decision_threshold(y, p, thresholds=np.array([0.1, 0.3, 0.4, 0.5, 0.95]))
+    assert (t, acc) == (0.4, 1.0)
