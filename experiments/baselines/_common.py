@@ -90,6 +90,8 @@ def require_cem_dependencies(
 
     _ensure_local_cem_checkout_on_path()
     _patch_reduce_on_plateau_for_torch_compat()
+    if not hasattr(np, "Inf"):
+        np.Inf = np.inf  # pytorch-lightning 1.9 (the version the CEM code needs) still reads np.Inf
 
     try:
         pl = importlib.import_module("pytorch_lightning")
