@@ -178,8 +178,44 @@ def test_constrained_model_predicts_negative_at_zero_logit_like_sklearn():
     from sklearn.linear_model import LogisticRegression
 
     model = ConstrainedFrontEndModel.__new__(ConstrainedFrontEndModel)
-    model.model = type("W", (), {"coef_": np.array([[1.0, -1.0]]), "intercept_": np.array([0.0])})()
-    sklearn_model = LogisticRegression().fit(np.array([[0, 1], [1, 0]]), np.array([0, 1]))
-    sklearn_model.coef_, sklearn_model.intercept_ = model.model.coef_, model.model.intercept_
+    model.model = type(
+        "W", (), {"coef_": np.array([[1.0, -1.0]]), "intercept_": np.array([0.0])}
+    )()
+    sklearn_model = LogisticRegression().fit(
+        np.array([[0, 1], [1, 0]]), np.array([0, 1])
+    )
+    sklearn_model.coef_, sklearn_model.intercept_ = (
+        model.model.coef_,
+        model.model.intercept_,
+    )
     C = np.array([[1.0, 1.0]])
     assert model.predict(C).tolist() == sklearn_model.predict(C).tolist() == [0]
+
+
+def test_unknown_concept_name_raises():
+    fe, _, _ = _fit_frontend(k=3)
+    with pytest.raises(KeyError, match="not_a_concept"):
+        align_frontend_weights(fe, ["c0", "c1", "c2"], {"not_a_concept": 1.0})
+
+
+def test_constrained_fit_matches_sklearn_objective_when_constraint_is_slack():
+    pytest.importorskip("cvxpy")
+    from sklearn.linear_model import LogisticRegression
+
+    rng = np.random.default_rng(3)
+    C = rng.integers(0, 2, size=(200, 3)).astype(float)
+    y = (C[:, 0] + rng.normal(scale=0.5, size=200) > 0.5).astype(int)
+    fe = ConstrainedFrontEndModel(["c0", "c1", "c2"], {"c0": 1})
+    fe.fit(C, y)
+    sk = LogisticRegression(C=1.0, max_iter=1000).fit(C, y)
+    assert fe.model.coef_[0, 0] >= 0
+    np.testing.assert_allclose(fe.model.coef_[0], sk.coef_[0], atol=1e-3)
+    np.testing.assert_allclose(fe.model.intercept_[0], sk.intercept_[0], atol=1e-3)
+
+
+def test_constrained_fit_rejects_non_binary_labels():
+    pytest.importorskip("cvxpy")
+    fe = ConstrainedFrontEndModel(["c0", "c1"], {"c0": 1})
+    C = np.random.default_rng(0).integers(0, 2, size=(30, 2)).astype(float)
+    with pytest.raises(ValueError, match="binary"):
+        fe.fit(C, np.arange(30) % 3)

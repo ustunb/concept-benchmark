@@ -507,3 +507,33 @@ class TestKFlipManyConcepts:
                 np.where(exact.mask, p.astype(np.float64), 1.0), axis=1
             )
             np.testing.assert_allclose(truth, truth_exact, atol=0.02)
+
+
+def test_zero_threshold_selects_only_rows_with_an_intervention():
+    k = 3
+    model = _make_model(k=k)
+    coef = model.label_predictor.model.coef_
+    coef[:] = np.array([[4.0, 4.0, 0.0]])
+    model.label_predictor.model.intercept_[:] = -2.0
+    C_pred = np.array(
+        [
+            [0.5, 0.01, 0.5],  # logit 2; concept 0 alone flips it with probability 0.5
+            [0.999, 0.999, 0.5],  # logit 6; no single concept can flip it
+        ],
+        dtype=np.float32,
+    )
+    batch = InterventionBatch(
+        C_pred=C_pred, C_true=np.ones_like(C_pred), y_true=np.array([1, 1])
+    )
+    config = InterventionConfig(per_instance_budget=1, score_threshold=0.0)
+    proposal = KFlipInterventionStrategy().propose(model, batch, config)
+    assert proposal.selected_instances.tolist() == [0]
+    assert proposal.mask[1].sum() == 0
+
+
+def test_batch_coerces_instance_ids_to_array():
+    batch = InterventionBatch(
+        C_pred=np.zeros((2, 2)), C_true=np.zeros((2, 2)), instance_ids=[5, 7]
+    )
+    assert isinstance(batch.instance_ids, np.ndarray)
+    assert batch.instance_ids.tolist() == [5, 7]

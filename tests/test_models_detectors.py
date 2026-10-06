@@ -87,3 +87,42 @@ def test_detector_calibrate_after_fit_changes_predictions(tabular_train_valid):
     _proba_checks(pr_uncal, len(valid), k)
     _proba_checks(pr_cal, len(valid), k)
     assert not np.allclose(pr_uncal, pr_cal)
+
+
+def test_detector_pickle_drops_device_and_resolves_it_on_load(
+    tabular_train_valid, monkeypatch
+):
+    import pickle
+    import torch
+
+    train, valid, d, k = tabular_train_valid
+    det = ConceptDetector(embedding_model=nn.Linear(d, 6))
+    det.fit(train, valid, fit_params={"epochs": 1, "device": "cpu"})
+    det._eval_config["device"] = torch.device("cuda")  # a device this machine may lack
+    assert "device" not in det.state_dict()["eval_config"]
+
+    restored = pickle.loads(pickle.dumps(det))
+    assert "device" not in restored._eval_config
+    monkeypatch.setenv("PYTORCH_DEVICE", "cpu")
+    proba = restored.predict_proba(valid)
+    _proba_checks(proba, len(valid), k)
+
+
+def test_exact_propagation_tables_follow_the_label_predictor():
+    from experiments.models import ConceptBasedModel, FrontEndModel
+
+    rng = np.random.default_rng(0)
+    C = rng.integers(0, 2, size=(40, 3)).astype(float)
+    fe = FrontEndModel()
+    fe.fit(C, C[:, 0].astype(int))
+    model = ConceptBasedModel(label_predictor=fe, mc_mode="exact")
+    P = rng.random((5, 3))
+    before = model.propagate_predict_proba(P)
+
+    fe.fit(C, C[:, 1].astype(int))  # refit in place: the cached tables are stale
+    after = model.propagate_predict_proba(P)
+    fresh = ConceptBasedModel(
+        label_predictor=fe, mc_mode="exact"
+    ).propagate_predict_proba(P)
+    np.testing.assert_allclose(after, fresh)
+    assert not np.allclose(before, after)

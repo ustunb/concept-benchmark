@@ -144,3 +144,14 @@ class TestLabelFreeCBMPickle:
         state = cbm.__getstate__()
         for k in ("_img_train", "_img_valid", "_img_test", "_txt_concepts"):
             assert k not in state
+
+
+class TestLabelFreeCBMSeeding:
+    def test_init_leaves_global_rng_alone(self):
+        import torch
+
+        before = torch.initial_seed()
+        state = np.random.get_state()[1].copy()
+        LabelFreeCBM(LFTrainingConfig(device="cpu", seed=7))
+        assert torch.initial_seed() == before
+        assert np.array_equal(np.random.get_state()[1], state)
