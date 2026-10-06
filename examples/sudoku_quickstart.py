@@ -22,7 +22,7 @@ from concept_benchmark.evaluation import abstention_threshold, selective_at
 from concept_benchmark.sudoku import DatasetGenerator
 
 # ---------------------------------------------------------------------------
-# 1. Generate dataset (renders board images by default, ~35 s for 100 boards)
+# 1. Generate dataset (renders board images by default, about 20 s for 50 boards)
 # ---------------------------------------------------------------------------
 print("Generating Sudoku dataset (50 boards with handwritten digit images)...")
 dataset = DatasetGenerator(seed=171, n_boards=50).generate()

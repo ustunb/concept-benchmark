@@ -35,11 +35,18 @@ def test_readme_sudoku_training_block_runs(tmp_path, monkeypatch):
         for _, code in python_blocks(REPO / "README.md")
         if "automation_table(" in code
     ]
-    quick = code.replace("epochs=100", "epochs=2").replace(
-        "n_boards=1000", "n_boards=100"
+    quick = (
+        code.replace("epochs=100", "epochs=2")
+        .replace("n_boards=1000", "n_boards=100")
+        .replace(
+            "dataset.train, dataset.val, seed=171)",
+            "dataset.train, dataset.val, epochs=2, seed=171)",
+        )
     )
     assert quick != code
     namespace = {}
     exec(compile(quick, "README.md", "exec"), namespace)
-    results = namespace["results"]  # empty when the tiny model misses the target
-    assert results.empty or results["coverage_after"].between(0.0, 1.0).all()
+    results = namespace["results"]
+    assert list(results["budget"]) == [0, 1, 3, 27]
+    assert results["coverage_after"].between(0.0, 1.0).all()
+    assert {"selective_accuracy_after", "total_concept_checks"} <= set(results.columns)

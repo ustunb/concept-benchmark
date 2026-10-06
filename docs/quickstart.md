@@ -79,6 +79,9 @@ print(f"CBM accuracy: {accuracy:.4f}")
 # about 0.78
 ```
 
+Steps 1 to 3 are what `experiments.evaluate.train_cbm(dataset.train, dataset.val, seed=1014)` does in one call; the
+README's examples use that block.
+
 Over the 10 seeds of the paper, the CBM reaches 84.5% with the true concepts and 77.6% with the human concepts before interventions, and 92.0% and 85.7% once every concept is corrected; the DNN reaches 88%. A single run differs from these means by a point or two, and across hardware.
 
 For a complete walkthrough including interventions and alignment, see `examples/robot_pipeline_example.py`.

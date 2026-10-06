@@ -329,7 +329,7 @@ Quickstart: one command trains the paper's models for one seed and draws the fig
 python scripts/robot_pipeline.py --seed 1014 --concept-preset ground_truth --stages setup cbm dnn intervene collect plot
 ```
 
-The same in code (requires cloning the repo); each call is a block the pipeline runs, so swap in your own model or your own results:
+The same in code (requires cloning the repo); each call is a block the pipelines are built from, so swap in your own model or your own results:
 
 ```python
 import pandas as pd
@@ -435,7 +435,7 @@ Quickstart: one command trains the paper's models on the handwritten boards of o
 python scripts/sudoku_pipeline.py --seed 171 --cell-px 18 --target-accuracy 0.95 --stages setup ocr cs dnn intervene selective collect plot
 ```
 
-The same in code, on the digits of each board instead of its image (requires cloning the repo); the blocks are the ones the pipeline runs:
+The same in code, on the digits of each board instead of its image (requires cloning the repo); the blocks are the ones the pipeline is built from:
 
 ```python
 from concept_benchmark.sudoku import DatasetGenerator
@@ -685,14 +685,14 @@ from concept_benchmark.evaluation import (
 | `intervention_metrics(mask, concepts_before, concepts_after, y_prob_before, y_prob_after, y_true, accuracy_before)` | What an intervention did: accuracy, gain, predictions and concepts touched |
 | `net_work_automated(confidence, threshold, n_interventions, n_concepts)` | Net fraction of work automated after intervention cost |
 
-**Blocks that need a model** live in `experiments.evaluate` (requires cloning the repo) and are what the pipelines run:
+**Blocks that need a model** live in `experiments.evaluate` (requires cloning the repo); the pipelines are built from them:
 
 | Function | Returns |
 |----------|---------|
-| `train_cbm(train, validation, detector=..., seed=...)` | The paper's CBM: concept detector plus logistic label predictor |
+| `train_cbm(train, validation, seed=..., detector=...)` | The paper's CBM: concept detector plus logistic label predictor |
 | `train_dnn(model, train, validation, seed=...)` | A binary classifier trained with early stopping |
-| `intervention_table(cbm, test, budgets=(1, 3, "max"), ...)` | Accuracy at each budget of corrected concepts (the decision-support table) |
-| `automation_table(cbm, validation, test, budgets, target_accuracy)` | Coverage and checks at each budget under the paper's abstention protocol (the automation table) |
+| `intervention_table(cbm, test, budgets=(1, 3, "max"), seed=...)` | Accuracy at each budget of corrected concepts (the decision-support table) |
+| `automation_table(cbm, validation, test, budgets=(1, 3, "max"), target_accuracy=0.95, seed=171)` | Coverage and checks at each budget under the paper's abstention protocol (the automation table) |
 | `coverage_at_target(model, validation, test, target_accuracy)` | Selective accuracy and coverage of any model at a target |
 | `predict_labels(model, dataset)`, `predict_proba_positive(model, dataset)` | Predictions of a DNN or a CBM |
 
@@ -768,7 +768,7 @@ import numpy as np
 from experiments.models import ConceptDetector, FrontEndModel
 
 # cd and fe are a trained concept detector and label predictor, e.g. cbm.concept_detector and
-# cbm.label_predictor of a CBM from train_cbm (see docs/quickstart.md)
+# cbm.label_predictor of a CBM from experiments.evaluate.train_cbm
 
 # Step 1: Get concept probabilities
 concept_probs = cd.predict_proba(test)

@@ -408,9 +408,8 @@ def run_interventions(
         concept_groups=config.block_size**2,
     )
     if (
-        cs_intervention_df["total_concept_checks"].eq(0).all()
-        and cs_intervention_df["coverage_after"].eq(0.0).all()
-    ):
+        "abstention_threshold" not in cs_intervention_df.columns
+    ):  # the target was out of reach
         logger.warning(
             "Model %s cannot reach target selective accuracy %.2f; "
             "reporting raw accuracy with no interventions.",

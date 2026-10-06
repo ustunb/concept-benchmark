@@ -1,7 +1,7 @@
 """The evaluation blocks of the benchmarks: train a model, intervene at a set of budgets, get the results table.
 
 The tables these functions return are what the plots in ``concept_benchmark.evaluation`` read and what the
-pipelines write; the pipelines call these same functions.
+pipelines write; the pipelines are built from these functions.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ def train_cbm(
     epochs: int = 50,
     lr: float = 1e-3,
     patience: int = 10,
-    seed: int = 1014,
+    seed: int,
     loader_config: dict | None = None,
     should_propagate: bool = False,
 ) -> ConceptBasedModel:
@@ -68,7 +68,8 @@ def train_cbm(
     The detector is the robot CNN unless `detector`, a module class or factory, is given (e.g.
     ``GroupPoolingConceptSudokuCNN``); it is built after seeding, so that the run is repeatable.
     With `should_propagate`, the label predictor reads the detector's probabilities instead of its 0/1 calls
-    (the sudoku models of the paper).
+    (the sudoku models of the paper). `patience` 0 disables early stopping. `seed` fixes the weights, the
+    batches and the model's own sampling.
     """
     set_deterministic_seed(seed)
     loader_config = {
@@ -86,6 +87,7 @@ def train_cbm(
     cbm = ConceptBasedModel(
         concept_detector=ConceptDetector(model=model),
         should_propagate=should_propagate,
+        random_state=seed,
     )
     cbm.fit(
         train_dataset=train,
@@ -95,7 +97,7 @@ def train_cbm(
         concept_fit_params={
             "epochs": epochs,
             "lr": lr,
-            "patience": patience,
+            "patience": patience if patience > 0 else epochs,
             **loader_config,
         },
     )
@@ -127,7 +129,9 @@ def train_dnn(
     if not isinstance(model, nn.Module):
         model = model()
     device = device or determine_device()
-    loader_config = loader_config or get_loader_config()
+    loader_config = {
+        k: v for k, v in (loader_config or get_loader_config()).items() if k != "device"
+    }
     model.to(device)
     criterion = nn.BCELoss()
     optimizer = optimizer or torch.optim.Adam(model.parameters(), lr=lr)
@@ -140,7 +144,7 @@ def train_dnn(
         for X, _, y in train_loader:
             optimizer.zero_grad()
             X, y = X.to(device), y.to(device)
-            loss = criterion(model(X).squeeze(), y.float())
+            loss = criterion(model(X).squeeze(-1), y.float())
             loss.backward()
             optimizer.step()
         model.eval()
@@ -148,7 +152,7 @@ def train_dnn(
         with torch.no_grad():
             for X, _, y in valid_loader:
                 X, y = X.to(device), y.to(device)
-                val_loss_sum += criterion(model(X).squeeze(), y.float()).item()
+                val_loss_sum += criterion(model(X).squeeze(-1), y.float()).item()
                 val_batches += 1
         val_loss = val_loss_sum / max(val_batches, 1)
         if val_loss < best_val_loss:
@@ -331,26 +335,30 @@ def intervention_table(
     test,
     budgets=(1, 3, "max"),
     *,
-    seed: int = 1014,
+    seed: int,
     intervention_accuracy: float = 1.0,
     score_threshold: float = 0.2,
     strategy: str = "up_to_k",
     encoding: str = "binary",
+    low_values=None,
+    high_values=None,
 ) -> pd.DataFrame:
     """Accuracy of a CBM with 0, then each budget of corrected concepts per instance: the decision-support table.
 
-    One row per budget (``"max"`` is every concept) with the columns the robot pipeline writes:
-    ``budget``, ``accuracy``, ``predictions_intervened_on``, ``predictions_changed``,
+    One row per budget (``"max"`` is every concept; budgets are at least 1) with the columns the robot
+    pipeline writes: ``budget``, ``accuracy``, ``predictions_intervened_on``, ``predictions_changed``,
     ``total_concept_confirmations``, ``total_concept_edits_made``. Pass it to ``plot_intervention_curve``.
+    The ``percentile`` encoding needs `low_values` and `high_values`, one per concept.
     """
+    if encoding == "percentile" and (low_values is None or high_values is None):
+        raise ValueError("encoding='percentile' needs low_values and high_values")
     torch.manual_seed(seed)
     concept_proba = np.asarray(cbm.concept_detector.predict_proba(test))
     accuracy_before = float((cbm.predict(test) == test.y.astype(int)).mean())
     runner = ConceptInterventionRunner(cbm)
     rng = np.random.default_rng(seed)
     rows = [{"budget": 0, "accuracy": accuracy_before}]
-    for budget in budgets:
-        k = test.n_concepts if budget == "max" else int(budget)
+    for k in _budgets(budgets, test.n_concepts):
         result = intervene(
             runner,
             test,
@@ -362,6 +370,8 @@ def intervention_table(
             score_threshold=score_threshold,
             strategy=strategy,
             encoding=encoding,
+            low_values=low_values,
+            high_values=high_values,
         )
         rows.append(
             {
@@ -390,14 +400,14 @@ def automation_table(
     test,
     budgets=(1, 3, "max"),
     *,
-    target_accuracy: float = 0.95,
-    seed: int = 171,
+    target_accuracy: float,
+    seed: int,
     concept_groups: int | None = None,
 ) -> pd.DataFrame:
     """Coverage and the checks it costs with 0, then each budget of concept checks per instance: the automation table.
 
-    The paper's protocol: the abstention threshold is fitted once on the validation predictions so that the
-    kept predictions reach `target_accuracy`; the decision threshold is refit on validation at every budget;
+    The paper's protocol: the abstention threshold is fitted once on the validation predictions (the label
+    probabilities the strategy itself works with) so that the kept predictions reach `target_accuracy`; the decision threshold is refit on validation at every budget;
     a human checks up to k concepts of each board the model would abstain on (conceptual safeguards).
     One row per budget with the columns the sudoku pipeline writes (``coverage_after``,
     ``selective_accuracy_after``, ``total_concept_checks``, ...). Pass it to ``plot_automation``.
@@ -405,18 +415,24 @@ def automation_table(
     counted per group. When no threshold reaches the target, the model cannot abstain its way to it: the
     rows then carry its raw accuracy, no checks, and coverage 0.
     """
-    val_prob = np.asarray(model.predict_proba(validation))[:, 1]
+    runner = ConceptInterventionRunner(model)
+    policy = ConceptualSafeguardsStrategy()
+    probe = InterventionConfig(
+        abstention_threshold=0.0, per_instance_budget=0, random_state=seed
+    )
+    val_k0 = runner.run(
+        policy, probe, validation
+    )  # k=0: the probabilities before any check
+    val_prob = val_k0.y_prob_after[:, 1]
     val_y = np.asarray(validation.y).astype(int)
     val_decision, _ = decision_threshold(val_y, val_prob)
     threshold, _ = abstention_threshold(val_y, val_prob, target_accuracy, val_decision)
     y_test = np.asarray(test.y).astype(int)
-    all_budgets = [test.n_concepts if b == "max" else int(b) for b in budgets]
+    all_budgets = _budgets(budgets, test.n_concepts)
+    test_k0 = runner.run(policy, probe, test)
     if threshold is None:
         raw_accuracy = float(
-            (
-                (predict_proba_positive(model, test) >= val_decision).astype(int)
-                == y_test
-            ).mean()
+            ((test_k0.y_prob_after[:, 1] >= val_decision).astype(int) == y_test).mean()
         )
         return pd.DataFrame(
             [
@@ -436,14 +452,7 @@ def automation_table(
             ]
         )
 
-    runner = ConceptInterventionRunner(model)
-    policy = ConceptualSafeguardsStrategy()
-    config_k0 = InterventionConfig(
-        abstention_threshold=threshold, per_instance_budget=0, random_state=seed
-    )
-    test_k0 = runner.run(policy, config_k0, test)
-    val_k0 = runner.run(policy, config_k0, validation)
-    decision_0, _ = decision_threshold(val_y, val_k0.y_prob_after[:, 1])
+    decision_0, _ = decision_threshold(val_y, val_prob)
     accuracy_0, coverage_0 = selective_at(
         y_test, test_k0.y_prob_after[:, 1], threshold, decision_0
     )
@@ -489,6 +498,16 @@ def automation_table(
             }
         )
     return pd.DataFrame(rows)
+
+
+def _budgets(budgets, n_concepts: int) -> list[int]:
+    """Budgets as concept counts: ``"max"`` is every concept, larger numbers are capped, 0 is not a budget."""
+    counts = [n_concepts if b == "max" else min(int(b), n_concepts) for b in budgets]
+    if any(k < 1 for k in counts):
+        raise ValueError(
+            "budgets are at least 1; the table always starts with the row without interventions"
+        )
+    return counts
 
 
 def _group_checks(mask: np.ndarray, concept_groups: int | None) -> dict[str, int]:

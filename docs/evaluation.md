@@ -68,6 +68,9 @@ threshold, _ = abstention_threshold(y_val, p_val, target_accuracy=0.95, decision
 selective_acc, cov = selective_at(y_test, p_test, threshold, decision)
 ```
 
+`abstention_threshold` returns `(None, None)` when no threshold reaches the target; `coverage_at_target` and
+`automation_table` report coverage 0 in that case.
+
 `classwise_thresholds` and `selective_at_classwise` fit one threshold per predicted class instead (an appendix variant).
 
 ### intervention_metrics

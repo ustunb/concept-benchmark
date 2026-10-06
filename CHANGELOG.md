@@ -26,6 +26,7 @@
 
 ### Removed
 
+- `concept_benchmark.metrics.compute_selective_metric` and `experiments.metrics` (use `selective_at`, which applies the same abstention band).
 - `experiments.utils` keeps only `run_alignment`: `determine_device`, `get_loader_config`, `compute_accuracy` and `patch_macos_dataloader` live in `concept_benchmark.utils`, and `experiments.utils.train_dnn` is replaced by `experiments.evaluate.train_dnn`, which returns the trained model instead of a test accuracy.
 
 - `plot_regime_comparison` (use `plot_intervention_heatmap`).

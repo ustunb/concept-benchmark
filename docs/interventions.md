@@ -16,7 +16,7 @@ import numpy as np
 from experiments.models import ConceptDetector, FrontEndModel
 
 # cd and fe are a trained concept detector and label predictor, e.g. cbm.concept_detector and
-# cbm.label_predictor of a CBM from train_cbm (see docs/quickstart.md)
+# cbm.label_predictor of a CBM from experiments.evaluate.train_cbm
 
 # Step 1: Get concept probabilities
 concept_probs = cd.predict_proba(test)
