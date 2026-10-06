@@ -41,11 +41,12 @@ def make_image_transform(args):
     starters_list = []
     candidates_list = []
 
-    def _wrapped(board, *, outfile=None):
+    def _wrapped(board, *, outfile=None, board_index=None):
         # image_transform must support return_meta=True and return:
         #   (img_or_path, starters, candidates_meta)
         img_or_path, starters, _candidates = image_transform(
             board,
+            board_index=board_index,
             cell_px=args.cell_px,
             margin_px=args.margin_px,
             line_px=args.line_px,

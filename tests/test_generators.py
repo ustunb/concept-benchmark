@@ -300,6 +300,20 @@ class TestSudokuDatasetGenerator:
         # so the share of ink is the same at both sizes: nothing overflows or is dropped
         assert abs((np.asarray(images[50]) < 128).mean() - (small < 128).mean()) < 0.02
 
+    def test_every_board_has_its_own_handwriting(self, tmp_path):
+        import numpy as np
+        from PIL import Image
+        from concept_benchmark.synthetic.sudoku import image_transform
+        from concept_benchmark.synthetic.sudoku.utils import generate_valid_board
+
+        board = generate_valid_board(rng=np.random.default_rng(5))
+        image_transform(board, cell_px=50, outfile=tmp_path / "a.png", board_index=1)
+        image_transform(board, cell_px=50, outfile=tmp_path / "b.png", board_index=2)
+        a, b = (np.asarray(Image.open(tmp_path / f"{n}.png")) for n in "ab")
+        assert not np.array_equal(a, b)  # same digits, different strokes
+        # the grid and the printed starters are identical, only the handwriting moves
+        assert (a != b).mean() < 0.1
+
     def test_boards_stored_in_meta(self):
         ds = DatasetGenerator(
             "sudoku", seed=42, n_boards=20, data_type="tabular"

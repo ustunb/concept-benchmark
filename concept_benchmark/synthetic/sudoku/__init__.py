@@ -115,7 +115,7 @@ def create_sudoku_dataset(
         board_list.append(b.copy())
         if data_type == "image":
             img_path = ds_path / f"valid_{i}.png"
-            transform(b, outfile=img_path)
+            transform(b, outfile=img_path, board_index=i)
             X_list.append(img_path)
         else:
             X_list.append(transform(b))
@@ -150,7 +150,7 @@ def create_sudoku_dataset(
 
         if data_type == "image":
             img_path = ds_path / f"invalid_{i}.png"
-            transform(b, outfile=img_path)
+            transform(b, outfile=img_path, board_index=n_valid + i)
             X_list.append(img_path)
         else:
             X_list.append(transform(b))
@@ -297,6 +297,7 @@ def image_transform(
     outfile: str | None = None,
     # NEW: if True, also return (starters, candidates) alongside the image
     return_meta: bool = False,
+    board_index: int | None = None,
 ) -> np.ndarray | str | tuple:
     """Render an NxN Sudoku board to an RGB image with prior-option bubbles (handwritten).
     Each bubble shows *all* options inline in one row (tight kerning). Starters never get bubbles.
@@ -304,7 +305,12 @@ def image_transform(
     The board is drawn at ``_REFERENCE_CELL_PX`` (50 px per cell, where ``line_px``, ``bold_px`` and
     ``font_size`` are pixel sizes) and resampled to ``cell_px``, so a board at any resolution is the
     same picture, only smaller; at 50 px nothing is resampled.
+
+    ``board_index`` seeds the handwriting: with it, every board is written in its own strokes (a digit
+    in a cell is drawn differently on every board); without it, a digit in a cell is always drawn the
+    same way, so a dataset holds only 9 x N x N distinct glyphs.
     """
+    hand_seed = 0 if board_index is None else int(board_index) * 7919
     N = board.shape[0]
     assert board.ndim == 2 and N == board.shape[1], "board must be square"
     n = int(math.isqrt(N))
@@ -436,7 +442,11 @@ def image_transform(
             tries = 0
             while mini >= 4 and tries < 6:
                 seq_img = _render_inline_candidates(
-                    generator, opts, fill_color, size=mini, seed_base=(r * N + c) * 997
+                    generator,
+                    opts,
+                    fill_color,
+                    size=mini,
+                    seed_base=hand_seed + (r * N + c) * 997,
                 )
                 bubble_w = seq_img.width + 2 * pad
                 bubble_h = seq_img.height + 2 * pad
@@ -518,7 +528,7 @@ def image_transform(
                 # Non-starters: handwritten if possible, otherwise printed
                 if text.isdigit() and (generator is not None):
                     hand_size_main = max(8, int(cell_px * 0.82))
-                    rng_seed = (r * N + c) * 131 + v
+                    rng_seed = hand_seed + (r * N + c) * 131 + v
                     digit_img = generator.generate(
                         digit=int(text),
                         size=hand_size_main,

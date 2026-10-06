@@ -198,6 +198,15 @@ def build_ocr_concept_dataset(
     logger.info("[INFO] saved OCR-inferred ConceptDataset to %s", out_path)
 
 
+def _test_board_images(dataset_dir: Path, seed: int) -> set[str]:
+    """Image names of the boards the pipeline holds out as its test split (the same split it draws later)."""
+    from concept_benchmark.ext.fileutils import load
+
+    data = load(dataset_dir / "sudoku_dataset.pkl")
+    data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=seed)
+    return {Path(str(x)).name for x in data.test.inputs}
+
+
 def main():
     defaults = SudokuBenchmarkConfig.default()
     ap = argparse.ArgumentParser(
@@ -254,12 +263,15 @@ def main():
     logger = setup_logging(log_file)
 
     logger.info(f"[INFO] loading dataset from {dataset_dir} using {jsonl_path}")
+    test_images = _test_board_images(dataset_dir, cfg.seed)
+    logger.info(f"[INFO] {len(test_images)} test boards left out of OCR training")
     sudoku_ds = SudokuCellDataset(
         dataset_dir,
         jsonl_path,
         cell_px=args.cell_px,
         margin_px=args.margin_px,
         dump_debug=not args.no_debug_dumps,
+        exclude_images=test_images,
     )
 
     # split
