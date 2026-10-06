@@ -287,7 +287,11 @@ def generate_invalid_board(
 
 
 def _apply_corruptions(
-    base_board: np.ndarray, num_actions: int, mode: str | None, rng: random.Random, N: int
+    base_board: np.ndarray,
+    num_actions: int,
+    mode: str | None,
+    rng: random.Random,
+    N: int,
 ) -> np.ndarray:
     b = base_board.copy()
     for t in range(num_actions):

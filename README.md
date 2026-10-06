@@ -162,7 +162,7 @@ from concept_benchmark.sudoku import DatasetGenerator
 dataset = DatasetGenerator(
     seed=171,             # reproducibility
     n_boards=1000,        # number of boards
-    max_cell_swaps=9,     # cells swapped in invalid boards (higher = subtler errors)
+    max_cell_swaps=9,     # corruptions applied to each invalid board, 1 to 9 (each swaps or duplicates digits)
     valid_board_ratio=0.5,  # fraction of valid boards
     render_images=False,  # set True to generate board images (slower)
 ).generate_splits()       # 60/20/20, stratified on the label
@@ -231,7 +231,7 @@ A robot is a Glorp with probability `σ(4.2 × score)`, where the score comes fr
 
 | Rule | Score | What it models |
 |------|-------|----------------|
-| **balanced** (default) | `6·[mouth closed] + 6·[body round] + 6·[head round] + 6·[antennae] + 6·[ears triangle] + 8·[foot pointy] − 3·[knees] − 2·[elbows] − 16.5` | No single concept decides the label and both classes are equally likely. `has_elbows` drives the label but is not a concept, so it is visible in the image and cannot be intervened on. Used for the main results of the paper. |
+| **balanced** (default) | `6·[mouth closed] + 6·[body round] + 6·[head round] + 6·[antennae] + 6·[ears triangle] + 8·[foot pointy] − 3·[knees] − 2·[elbows] − 16.5` | No single concept decides the label and both classes are equally likely. `has_elbows` drives the label but is not a concept, so it cannot be intervened on; like `has_knees`, it is drawn as a dot too small to read at 32 px, so the labels of small images are partly unpredictable. Used for the main results of the paper. |
 | **sparse** | `5·[mouth closed] + 8·[foot pointy] − 5·[knees] + 2` | Three concepts decide the label and 87.5% of robots are Glorps. Models a task where the class of interest is rare. |
 
 Each rule also sets which foot subtypes the training split of `generate_splits()` holds: six of the ten subtypes, at 30%/10% shares under the balanced rule and 49%/0.5% under the sparse rule (`concept_benchmark.config.ROBOT_LABEL_RULES`). To use your own rule, pass a `LabelFormula`:
@@ -381,7 +381,7 @@ dataset = DatasetGenerator(
     render_images=True,        # set False to skip rendering PNGs (faster, image only)
     block_size=3,              # block size (3 = standard 9×9 board)
     n_boards=1000,             # number of boards to generate
-    max_cell_swaps=9,          # cells swapped in invalid boards (higher = subtler errors)
+    max_cell_swaps=9,          # corruptions applied to each invalid board, 1 to 9 (each swaps or duplicates digits)
     valid_board_ratio=0.5,     # fraction of valid boards
     # ── Rendering (image only) ──
     font_style="handwritten",  # "handwritten" or "printed"

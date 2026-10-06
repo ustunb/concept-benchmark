@@ -24,6 +24,13 @@
 - `scripts/paper/`: the scripts behind every table, figure and test of the paper. They read one results folder (`--results-root`): the paper's results, a separate download on the releases page, or your own runs copied with `collect_pipeline_runs.py`.
 - `LICENSE`, `concept_benchmark.__version__`.
 
+### Fixed
+
+- Sudoku: corruptions that cancelled out left about 1% of the "invalid" boards valid; the generator now redraws until a concept is violated. Datasets regenerated with 0.4.0 differ from 0.3.x in those boards.
+- Abstention follows one rule, `min(p, 1 - p) >= t` (`abstention_mask`), in the threshold fit, the measures and the intervention strategies; the two inequalities used before could disagree by one floating-point ulp.
+- `decision_threshold` returns a threshold inside a run of tied best thresholds and the accuracy at that threshold.
+- A concept probability of exactly 0.5 counts as present everywhere, and a label logit of exactly 0 predicts the negative class, as `LogisticRegression.predict` does.
+
 ### Removed
 
 - `concept_benchmark.metrics.compute_selective_metric` and `experiments.metrics` (use `selective_at`, which applies the same abstention band).

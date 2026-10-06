@@ -120,3 +120,22 @@ def test_generate_splits_rejects_a_catalog_smaller_than_the_splits():
     )
     with pytest.raises(ValueError, match="needs 13800 robots"):
         generator.generate_splits()
+
+
+def test_nonpositive_temperature_is_rejected():
+    with pytest.raises(ValueError, match="temperature"):
+        LabelFormula(score=F("has_knees").true, temperature=0.0)
+
+
+def test_validate_against_accepts_values_and_their_types_only():
+    concepts = {"foot_shape": ["flat_4sided", "pointy_3sided"]}
+    LabelFormula(score=F("foot_shape").flat).validate_against(concepts)
+    LabelFormula(score=F("foot_shape").flat_4sided).validate_against(concepts)
+    for value in ("fla", "flat_", "flat_4sided_wide"):
+        with pytest.raises(ValueError, match=f"{value!r} not valid"):
+            LabelFormula(score=F("foot_shape").eq(value)).validate_against(concepts)
+
+
+def test_weighted_sum_prints_its_parentheses():
+    formula = LabelFormula(score=2 * (F("a").x + F("b").y) - (F("c").z + 1))
+    assert str(formula) == "2·([a=x] + [b=y]) - ([c=z] + 1)"

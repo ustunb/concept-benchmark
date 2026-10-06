@@ -118,7 +118,7 @@ from concept_benchmark.sudoku import DatasetGenerator
 dataset = DatasetGenerator(
     seed=171,             # reproducibility
     n_boards=1000,        # number of boards
-    max_cell_swaps=9,     # cells swapped in invalid boards (higher = subtler errors)
+    max_cell_swaps=9,     # corruptions applied to each invalid board, 1 to 9 (each swaps or duplicates digits)
     valid_board_ratio=0.5,  # fraction of valid boards
     render_images=False,  # set True to generate board images (slower)
 ).generate_splits()       # 60/20/20, stratified on the label

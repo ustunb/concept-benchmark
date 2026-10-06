@@ -4,13 +4,29 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import numpy as np
 
+from concept_benchmark.config import ROBOT_CONCEPTS
 from concept_benchmark.synthetic.robot.text.catalog import CORE_CONCEPT_NAMES
+
+_NAT_KEY_OF_FEATURE = {
+    "head_shape": "HEAD_NAT",
+    "body_shape": "BODY_NAT",
+    "ears_shape": "EARS_NAT",
+    "mouth_type": "MOUTH_NAT",
+    "hand_shape": "HANDS_NAT",
+    "foot_shape": "FEET_NAT",
+    "has_antennae": "ANT_NAT",
+    "has_knees": "KNEES_NAT",
+    "has_elbows": "ELBOWS_NAT",
+}
+_COLORS = ["red", "blue", "green", "yellow", "orange", "purple", "grey", "white"]
+_PLACEHOLDER = re.compile(r"\{([A-Za-z_]+)(?:~(not|syn))?\}")
 
 if TYPE_CHECKING:
     from concept_benchmark.config import RobotBenchmarkConfig
@@ -262,30 +278,29 @@ def render_from_corpus(row: dict, corpus: list[dict], seed: int) -> str:
     idx = int(hashlib.sha256(key.encode()).hexdigest(), 16) % len(cand)
     txt = str(cand[idx].get("text", ""))
 
-    # Replace natural language tokens
     nat = nat_from_tokens(row, seed)
-    for k, v in nat.items():
-        ph = "{" + k + "}"
-        if ph in txt:
-            txt = txt.replace(ph, v)
 
-    # Replace raw attribute placeholders
-    raw_map = {
-        "head_shape": str(row["head_shape"]),
-        "body_shape": str(row["body_shape"]),
-        "ears_shape": str(row["ears_shape"]),
-        "mouth_type": str(row["mouth_type"]),
-        "hand_shape": str(row["hand_shape"]),
-        "foot_shape": str(row["foot_shape"]),
-        "has_antennae": str(row["has_antennae"]),
-        "has_knees": str(row["has_knees"]),
-        "has_elbows": str(row["has_elbows"]),
-    }
-    for k, v in raw_map.items():
-        ph = "{" + k + "}"
-        if ph in txt:
-            txt = txt.replace(ph, v)
-    return txt
+    def pick(opts, name):
+        h = hashlib.sha256(f"{key}:{name}".encode()).hexdigest()
+        return opts[int(h, 16) % len(opts)]
+
+    def fill(match):
+        name, modifier = match.group(1), match.group(2)
+        if name in nat:
+            return nat[name]
+        if name == "color":
+            return pick(_COLORS, name)
+        if name not in _NAT_KEY_OF_FEATURE:
+            raise ValueError(f"Unknown placeholder {match.group(0)!r} in {txt!r}")
+        value = str(row[name])
+        if modifier is None:
+            return value
+        if modifier == "syn":
+            return nat[_NAT_KEY_OF_FEATURE[name]]
+        others = [str(v) for v in ROBOT_CONCEPTS[name] if str(v) != value]
+        return pick(others, match.group(0))
+
+    return _PLACEHOLDER.sub(fill, txt)
 
 
 def core_vector_from_row(row: dict) -> np.ndarray:

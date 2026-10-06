@@ -82,6 +82,7 @@ def generate_sudoku_dataset(config: SudokuBenchmarkConfig) -> ConceptDataset:
     if data_type == "image" and config.render_images:
         from concept_benchmark.synthetic.sudoku import image_transform
 
+        kwargs["dataset_name"] = config.get_dataset_path(data_type="image").name
         kwargs["transform"] = partial(
             image_transform,
             cell_px=config.cell_px,
