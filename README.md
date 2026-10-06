@@ -323,15 +323,13 @@ Run `python scripts/robot_pipeline.py --help` for the full list of options (incl
 
 #### Training and evaluation
 
-One command trains the paper's models for one seed and draws the figure below (stage `plot`, output in `results/figures/`):
+Quickstart: one command trains the paper's models for one seed and draws the figure below into `results/figures/`:
 
 ```bash
 python scripts/robot_pipeline.py --seed 1014 --concept-preset ground_truth --stages setup cbm dnn intervene collect plot
 ```
 
-The same in code, to see every step or to swap in your own model (requires cloning the repo): train a CBM on each
-concept set, correct 1, 3 and all of its concepts with the paper's intervention policy, train the DNN, and draw the
-decision-support panel.
+The same in code, to swap in your own model or plot your own results (requires cloning the repo):
 
 ```python
 import numpy as np
@@ -379,9 +377,8 @@ fig.savefig("robot_example.png", dpi=150, bbox_inches="tight")
   <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/robot_example.png" width="480" alt="Accuracy against the intervention budget for a CBM with true and with human concepts, and the DNN, one run">
 </p>
 
-The figure is what this code saves (seed 1014, about ten minutes on a laptop): 83.4% and 80.9% before interventions,
-90.3% and 83.4% once every concept is corrected, DNN 87.8%. Over the 10 seeds of the paper the CBM reaches 84.5% and
-77.6% before interventions, 92.0% and 85.7% after, and the DNN 88.0%; a run differs from these means by a few points, and across hardware.
+One run, about ten minutes on a laptop. Over the 10 seeds of the paper the CBM reaches 84.5% (true concepts) and
+77.6% (human concepts) before interventions, 92.0% and 85.7% after, and the DNN 88.0%.
 
 For a complete walkthrough including interventions and alignment, see [`examples/robot_pipeline_example.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/robot_pipeline_example.py).
 
@@ -452,14 +449,13 @@ Run `python scripts/sudoku_pipeline.py --help` for the full list of options (inc
 
 #### Training and evaluation
 
-One command trains the paper's models on the handwritten boards of one seed, at the 18 px per cell of the paper's hard setting, and draws the figure below:
+Quickstart: one command trains the paper's models on the handwritten boards of one seed (18 px per cell, the paper's hard setting) and draws the figure below:
 
 ```bash
 python scripts/sudoku_pipeline.py --seed 171 --cell-px 18 --target-accuracy 0.95 --stages setup ocr cs dnn intervene selective collect plot
 ```
 
-The same in code (requires cloning the repo): train the CBM and the DNN, let each abstain until it is right on 95% of
-the boards it keeps, correct up to k concepts per board, and draw the automation panel.
+The same in code, on the digits of each board instead of its image (requires cloning the repo):
 
 ```python
 from concept_benchmark.sudoku import DatasetGenerator
@@ -522,13 +518,10 @@ fig.savefig("sudoku_example.png", dpi=150, bbox_inches="tight")
   <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/sudoku_example.png" width="480" alt="Coverage and net work automated against the intervention budget for the CBM and the DNN, one run">
 </p>
 
-The figure is from the pipeline command (seed 171, about ten minutes). At 18 px the digits blur, and on this run the
-CBM reaches the 95% target only by keeping 46% of the boards; the DNN keeps 15%. Checking concepts does not raise
-coverage, and checking all 27 costs more work than the model saves, so net work automated turns negative at k=max.
-Which side of the target a single run lands on depends on the seed and the hardware; the paper averages ten seeds,
-where the CBM keeps 83% of the boards and net work automated falls to 68% at k=max. The code block reads the digits
-of each board instead of its image, which makes the task easy: the CBM keeps every board (coverage 100%, net work
-automated 97% at k=max) while the DNN keeps 2.5%.
+One run of the pipeline command. On this run the CBM meets the 95% target by keeping 46% of the boards (the DNN 15%),
+and checking all 27 concepts costs more work than it saves, so net work automated turns negative at k=max. A single
+run can land on either side of the target; over the paper's 10 seeds the CBM keeps 83% of the boards and net work
+automated falls to 68% at k=max. With the digits instead of the images, as in the code block, the CBM keeps every board.
 
 For a complete walkthrough including selective classification and interventions, see [`examples/sudoku_quickstart.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/sudoku_quickstart.py).
 
