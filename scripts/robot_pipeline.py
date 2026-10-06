@@ -740,7 +740,6 @@ def _test_interventions(
     torch.manual_seed(settings.seed)
     budgets = list(settings.budgets)
     human_acc = settings.intervention_accuracy
-    err_prob = 1.0 - human_acc
 
     _coerce_to_gt = concept_names is None
     if concept_names is None:
@@ -860,9 +859,6 @@ def _test_interventions(
                     concept_proba=prob_test,
                     labels=test.y.astype(int),
                 )
-                mask = result.mask
-                C_after = result.C_intervened.copy()
-
                 result.y_prob_after = predict_after_intervention(
                     cbm,
                     fe,

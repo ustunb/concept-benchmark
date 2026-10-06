@@ -64,7 +64,7 @@ The paper's selective-classification protocol. `decision_threshold` finds the cu
 from concept_benchmark.evaluation import abstention_threshold, decision_threshold, selective_at
 
 decision, _ = decision_threshold(y_val, p_val)
-threshold, _ = abstention_threshold(y_val, p_val, target_acc=0.95, decision_threshold=decision)
+threshold, _ = abstention_threshold(y_val, p_val, target_accuracy=0.95, decision_threshold=decision)
 selective_acc, cov = selective_at(y_test, p_test, threshold, decision)
 ```
 

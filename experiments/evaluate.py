@@ -103,7 +103,7 @@ def train_cbm(
 
 
 def train_dnn(
-    model: nn.Module,
+    model,
     train,
     validation,
     *,
@@ -117,12 +117,15 @@ def train_dnn(
 ) -> nn.Module:
     """Train a binary classifier (one sigmoid output) with early stopping on the validation loss.
 
-    Adam with learning rate `lr` unless an `optimizer` is given. Returns the model with the weights of its
-    best epoch. Give `seed` to make the run repeatable (the pipelines seed before building the model).
+    `model` is a module, or a class or factory that builds one; with `seed`, the model is built after
+    seeding so that the run is repeatable. Adam with learning rate `lr` unless an `optimizer` is given.
+    Returns the model with the weights of its best epoch.
     """
     if seed is not None:
         set_deterministic_seed(seed)
         torch.manual_seed(seed)
+    if not isinstance(model, nn.Module):
+        model = model()
     device = device or determine_device()
     loader_config = loader_config or get_loader_config()
     model.to(device)
@@ -399,14 +402,40 @@ def automation_table(
     One row per budget with the columns the sudoku pipeline writes (``coverage_after``,
     ``selective_accuracy_after``, ``total_concept_checks``, ...). Pass it to ``plot_automation``.
     With `concept_groups` (concepts per group, e.g. 9 for sudoku rows/columns/blocks), the checks are also
-    counted per group. Returns an empty table when no threshold reaches the target.
+    counted per group. When no threshold reaches the target, the model cannot abstain its way to it: the
+    rows then carry its raw accuracy, no checks, and coverage 0.
     """
     val_prob = np.asarray(model.predict_proba(validation))[:, 1]
     val_y = np.asarray(validation.y).astype(int)
     val_decision, _ = decision_threshold(val_y, val_prob)
     threshold, _ = abstention_threshold(val_y, val_prob, target_accuracy, val_decision)
+    y_test = np.asarray(test.y).astype(int)
+    all_budgets = [test.n_concepts if b == "max" else int(b) for b in budgets]
     if threshold is None:
-        return pd.DataFrame()
+        raw_accuracy = float(
+            (
+                (predict_proba_positive(model, test) >= val_decision).astype(int)
+                == y_test
+            ).mean()
+        )
+        return pd.DataFrame(
+            [
+                {
+                    "budget": k,
+                    "accuracy": raw_accuracy,
+                    "predictions_intervened_on": 0,
+                    "total_concept_checks": 0,
+                    **_group_checks(
+                        np.zeros((1, test.n_concepts), dtype=bool), concept_groups
+                    ),
+                    "total_concept_edits_made": 0,
+                    "selective_accuracy_after": float("nan"),
+                    "coverage_after": 0.0,
+                }
+                for k in [0, *all_budgets]
+            ]
+        )
+
     runner = ConceptInterventionRunner(model)
     policy = ConceptualSafeguardsStrategy()
     config_k0 = InterventionConfig(
@@ -414,7 +443,6 @@ def automation_table(
     )
     test_k0 = runner.run(policy, config_k0, test)
     val_k0 = runner.run(policy, config_k0, validation)
-    y_test = np.asarray(test.y).astype(int)
     decision_0, _ = decision_threshold(val_y, val_k0.y_prob_after[:, 1])
     accuracy_0, coverage_0 = selective_at(
         y_test, test_k0.y_prob_after[:, 1], threshold, decision_0
@@ -433,8 +461,7 @@ def automation_table(
             "abstention_threshold": threshold,
         }
     ]
-    for budget in budgets:
-        k = test.n_concepts if budget == "max" else int(budget)
+    for k in all_budgets:
         config = InterventionConfig(
             abstention_threshold=threshold, per_instance_budget=k, random_state=seed
         )

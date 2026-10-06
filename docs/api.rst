@@ -92,14 +92,26 @@ Utilities (experiments/)
    These functions require cloning the repository. They are not included in
    ``pip install concept-benchmark``.
 
-.. autofunction:: experiments.utils.train_dnn
+.. autofunction:: experiments.evaluate.train_cbm
+
+.. autofunction:: experiments.evaluate.train_dnn
+
+.. autofunction:: experiments.evaluate.intervention_table
+
+.. autofunction:: experiments.evaluate.automation_table
+
+.. autofunction:: experiments.evaluate.coverage_at_target
+
+.. autofunction:: experiments.evaluate.predict_labels
+
+.. autofunction:: experiments.evaluate.predict_proba_positive
 
 .. autofunction:: experiments.utils.run_alignment
 
-.. autofunction:: experiments.utils.determine_device
+.. autofunction:: concept_benchmark.utils.determine_device
 
-.. autofunction:: experiments.utils.compute_accuracy
+.. autofunction:: concept_benchmark.utils.compute_accuracy
 
-.. autofunction:: experiments.utils.get_loader_config
+.. autofunction:: concept_benchmark.utils.get_loader_config
 
 .. autofunction:: concept_benchmark.utils.set_deterministic_seed

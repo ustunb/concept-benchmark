@@ -98,9 +98,9 @@ summary on any model the pipelines can train or load.
 
 ## Notes
 
-- Sudoku abstention: the threshold is fitted on validation and applied with one rule (`_selective_accuracy_threshold`
-  keeps predictions exactly at the threshold; see `tests/test_selective_thresholds.py`). `_classwise_accuracy_thresholds`
-  fits one threshold per predicted class.
+- Sudoku abstention: the threshold is fitted on validation and applied with one rule (`abstention_threshold` in
+  `concept_benchmark.evaluation` keeps predictions exactly at the threshold; see `tests/test_selective_thresholds.py`).
+  `classwise_thresholds` fits one threshold per predicted class.
 - ProbCBM samples at prediction time, so its confidence files and cells are one draw each.
 - Models are saved with `device="cuda"`; scripts that load them on a CPU call `set_cpu` (defined with the
   intervention-response diagnostic) or read saved detector outputs instead.

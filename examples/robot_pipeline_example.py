@@ -41,7 +41,7 @@ print(
 # Over the paper's 10 seeds the CBM goes from 77.6% (k=0) to 85.7% (k=max).
 
 # 4. DNN: image -> label, no concepts
-dnn = train_dnn(RobotClassifierCNN(input_size=32), train, val, seed=SEED)
+dnn = train_dnn(lambda: RobotClassifierCNN(input_size=32), train, val, seed=SEED)
 dnn_accuracy = accuracy(predict_labels(dnn, test), test.y)
 print(f"DNN accuracy: {dnn_accuracy:.4f}")  # about 0.88 over the paper's 10 seeds
 

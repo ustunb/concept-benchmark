@@ -21,7 +21,7 @@ from experiments.models import GroupPoolingConceptSudokuCNN, SudokuValidatorCNN
 
 SEED, TARGET = 171, 0.95
 
-# 1. Data: 1,000 boards, half of them invalid, 9 cells swapped in each invalid board
+# 1. Data: 1,000 boards, half of them invalid, 1 to 9 cells swapped in each invalid board
 dataset = DatasetGenerator(
     seed=SEED, n_boards=1000, max_cell_swaps=9, data_type="tabular"
 ).generate_splits()
@@ -44,7 +44,7 @@ weights = cbm.label_predictor.model.coef_[0]
 print(f"all concept weights positive: {(weights > 0).all()}")
 
 # 3. DNN: board -> valid, no concepts
-dnn = train_dnn(SudokuValidatorCNN(), train, val, seed=SEED)
+dnn = train_dnn(SudokuValidatorCNN, train, val, seed=SEED)
 
 # 4. Automation: both abstain until they are right on 95% of the boards they keep;
 #    a human checks up to k concepts of each board the CBM would defer

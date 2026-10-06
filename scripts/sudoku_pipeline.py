@@ -41,12 +41,11 @@ from experiments.cem_integration import (
     train_ecbm_model,
     train_probcbm_model,
 )
-from experiments.evaluate import automation_table
+from experiments.evaluate import automation_table, predict_proba_positive
 from experiments.evaluate import train_cbm as train_cbm_block
 from experiments.evaluate import train_dnn as train_dnn_block
 from experiments.models import (
     ConceptBasedModel,
-    ConceptDetector,
 )
 from experiments.intervention import (
     ConceptInterventionRunner,
@@ -174,22 +173,21 @@ def train_cs(
     if use_vit:
         from experiments.models import RobotViTConceptClassifier
 
-        n_concepts = data.train.n_concepts
-        concept_model = RobotViTConceptClassifier(num_concepts=n_concepts)
-        cd = ConceptDetector(model=concept_model)
-        cbm = ConceptBasedModel(concept_detector=cd, should_propagate=False)
-        loader_config["batch_size"] = 16
-        cbm.fit(
-            train_dataset=data.train,
-            valid_dataset=data.validation,
-            freeze_backbone=False,
-            concept_embed_params={"shuffle": False, **loader_config},
-            concept_fit_params={
-                "epochs": config.cs_epochs,
-                "lr": 5e-5,
-                "patience": config.cs_patience,
-                **loader_config,
+        cbm = train_cbm_block(
+            data.train,
+            data.validation,
+            detector=lambda: RobotViTConceptClassifier(
+                num_concepts=data.train.n_concepts
+            ),
+            epochs=config.cs_epochs,
+            lr=5e-5,
+            patience=config.cs_patience,
+            seed=config.seed,
+            loader_config={
+                **{k: v for k, v in loader_config.items() if k != "device"},
+                "batch_size": 16,
             },
+            should_propagate=False,
         )
     else:
         from experiments.models import GroupPoolingConceptSudokuCNN
@@ -328,7 +326,7 @@ def diagnose_confidence(
 
     saved = {}
     for name, split in (("val", data.validation), ("test", data.test)):
-        prob_pos, y_true = _cs_val_probs(cs_model, split)
+        prob_pos, y_true = predict_proba_positive(cs_model, split), np.asarray(split.y)
         saved[f"p_{name}"] = np.asarray(prob_pos, dtype=np.float64)
         saved[f"y_{name}"] = np.asarray(y_true).astype(int)
         saved[f"C_{name}"] = np.asarray(split.C).astype(int)
@@ -409,38 +407,15 @@ def run_interventions(
         seed=config.seed,
         concept_groups=config.block_size**2,
     )
-    if cs_intervention_df.empty:
+    if (
+        cs_intervention_df["total_concept_checks"].eq(0).all()
+        and cs_intervention_df["coverage_after"].eq(0.0).all()
+    ):
         logger.warning(
             "Model %s cannot reach target selective accuracy %.2f; "
             "reporting raw accuracy with no interventions.",
             _selected_cs_key(config),
             config.target_accuracy,
-        )
-        cs_probs, cs_y = _cs_val_probs(cs_model, data.validation)
-        cs_decision_t, _ = decision_threshold(cs_y, cs_probs)
-        cs_test_probs, cs_test_y = _cs_val_probs(cs_model, data.test)
-        raw_acc = float(
-            (
-                cs_test_y.astype(int) == (cs_test_probs >= cs_decision_t).astype(int)
-            ).mean()
-        )
-        logger.info("  Raw test accuracy: %.4f", raw_acc)
-        cs_intervention_df = pd.DataFrame(
-            [
-                {
-                    "budget": b,
-                    "accuracy": raw_acc,
-                    "predictions_intervened_on": 0,
-                    "total_concept_checks": 0,
-                    "row_checks": 0,
-                    "col_checks": 0,
-                    "block_checks": 0,
-                    "total_concept_edits_made": 0,
-                    "selective_accuracy_after": float("nan"),
-                    "coverage_after": 0.0,
-                }
-                for b in [0] + budgets
-            ]
         )
 
     results_key = (
@@ -833,28 +808,6 @@ def run(
 # ── Helper functions ──────────────────────────────────────────────────
 
 
-def _cs_val_probs(model, dataset):
-    probas = model.predict_proba(dataset)
-    if probas.ndim == 1:
-        prob_pos = probas
-    else:
-        prob_pos = probas[:, 1]
-    y_true = np.asarray(dataset.y)
-    return prob_pos, y_true
-
-
-def _dnn_val_probs(model, loader, device):
-    model.eval()
-    all_probs, all_y = [], []
-    with torch.no_grad():
-        for X, _, y in loader:
-            X = X.to(device)
-            probs = model(X).squeeze(-1).detach().cpu().numpy()
-            all_probs.append(probs)
-            all_y.append(y.cpu().numpy())
-    return np.concatenate(all_probs), np.concatenate(all_y)
-
-
 # ── Stage: compute and save selective metrics ─────────────────────────
 
 
@@ -906,10 +859,6 @@ def compute_selective_results(
             data = load(tab_dir / "sudoku_dataset.pkl")
         data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=config.seed)
 
-    loader_cfg = get_loader_config()
-    val_loader = data.validation.loader(shuffle=False, **loader_cfg)
-    tst_loader = data.test.loader(shuffle=False, **loader_cfg)
-
     rows: list[dict] = []
 
     # ---- DNN selective metrics ----
@@ -922,9 +871,15 @@ def compute_selective_results(
     dnn.load_state_dict(dnn_weights)
     dnn.to(device)
 
-    dnn_val_probs, dnn_val_y = _dnn_val_probs(dnn, val_loader, device)
+    dnn_val_probs, dnn_val_y = (
+        predict_proba_positive(dnn, data.validation, device=device),
+        np.asarray(data.validation.y),
+    )
     dnn_dt, _ = decision_threshold(dnn_val_y, dnn_val_probs)
-    dnn_test_probs, dnn_test_y = _dnn_val_probs(dnn, tst_loader, device)
+    dnn_test_probs, dnn_test_y = (
+        predict_proba_positive(dnn, data.test, device=device),
+        np.asarray(data.test.y),
+    )
     dnn_raw_acc = float(
         ((dnn_test_probs >= dnn_dt).astype(int) == dnn_test_y.astype(int)).mean()
     )
@@ -951,9 +906,15 @@ def compute_selective_results(
         )
         cs_model._random_state = config.seed
 
-    cs_val_probs, cs_val_y = _cs_val_probs(cs_model, data.validation)
+    cs_val_probs, cs_val_y = (
+        predict_proba_positive(cs_model, data.validation),
+        np.asarray(data.validation.y),
+    )
     cs_dt, _ = decision_threshold(cs_val_y, cs_val_probs)
-    cs_test_probs, cs_test_y = _cs_val_probs(cs_model, data.test)
+    cs_test_probs, cs_test_y = (
+        predict_proba_positive(cs_model, data.test),
+        np.asarray(data.test.y),
+    )
     cs_raw_acc = float(
         ((cs_test_probs >= cs_dt).astype(int) == cs_test_y.astype(int)).mean()
     )

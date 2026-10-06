@@ -78,7 +78,7 @@ def test_classwise_threshold_keeps_the_predictions_it_was_fitted_on():
     # 1 - (1 - 0.1) is not 0.1 in floating point: the threshold must be the probability itself
     y = np.array([0, 0, 0, 0, 0, 1])
     p = np.array([0.1, 0.1, 0.1, 0.1, 0.1, 0.4])
-    t_pos, t_neg = classwise_thresholds(y, p, target_acc=1.0)
+    t_pos, t_neg = classwise_thresholds(y, p, target_accuracy=1.0)
     accuracy, coverage = selective_at_classwise(y, p, t_pos, t_neg, 0.5)
     assert t_neg == 0.1
     assert accuracy == 1.0
@@ -90,7 +90,7 @@ def test_classwise_fit_and_evaluation_agree_on_random_probabilities():
     for _ in range(200):
         y = rng.integers(0, 2, size=40)
         p = np.round(rng.random(40), 2)
-        t_pos, t_neg = classwise_thresholds(y, p, target_acc=0.9)
+        t_pos, t_neg = classwise_thresholds(y, p, target_accuracy=0.9)
         accuracy, coverage = selective_at_classwise(y, p, t_pos, t_neg, 0.5)
         if coverage > 0:
             assert accuracy >= 0.9 - 1e-12

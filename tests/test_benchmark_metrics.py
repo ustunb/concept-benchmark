@@ -129,13 +129,13 @@ def test_abstention_threshold_keeps_the_confident_predictions_that_reach_the_tar
     prob = np.array(
         [0.99, 0.95, 0.9, 0.05, 0.6, 0.45]
     )  # the two least confident are wrong
-    threshold, kept = abstention_threshold(y_true, prob, target_acc=1.0)
+    threshold, kept = abstention_threshold(y_true, prob, target_accuracy=1.0)
     assert kept == pytest.approx(4 / 6)
     assert selective_at(y_true, prob, threshold, 0.5) == (1.0, pytest.approx(4 / 6))
 
 
 def test_abstention_threshold_is_none_when_the_target_is_out_of_reach():
-    assert abstention_threshold([0, 1], [0.9, 0.1], target_acc=0.5) == (None, None)
+    assert abstention_threshold([0, 1], [0.9, 0.1], target_accuracy=0.5) == (None, None)
 
 
 def test_decision_threshold_is_the_midpoint_of_the_best_cuts():

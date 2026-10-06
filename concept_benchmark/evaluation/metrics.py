@@ -3,11 +3,13 @@
 All functions take numpy arrays and return floats. No model objects,
 no datasets — just predictions and labels.
 
-Decision-support metrics (robot benchmark):
-    :func:`accuracy`, :func:`delta_accuracy`, :func:`gain`
+Decision support (robots):
+    :func:`accuracy`, :func:`delta_accuracy`, :func:`gain`, :func:`intervention_metrics`
 
-Automation metrics (sudoku benchmark):
-    :func:`selective_accuracy`, :func:`coverage`, :func:`net_work_automated`
+Automation (sudoku):
+    :func:`selective_accuracy`, :func:`coverage`, :func:`net_work_automated`, and the paper's abstention
+    protocol: :func:`decision_threshold`, :func:`abstention_threshold`, :func:`selective_at`
+    (:func:`classwise_thresholds`, :func:`selective_at_classwise` fit one threshold per predicted class)
 """
 
 from __future__ import annotations
@@ -206,19 +208,19 @@ _TIE_MARGIN = 1e-6  # see abstention_threshold
 
 def abstention_threshold(
     y_true: np.ndarray,
-    prob_pos: np.ndarray,
-    target_acc: float,
+    prob_positive: np.ndarray,
+    target_accuracy: float,
     decision_threshold: float = 0.5,
 ) -> tuple[float | None, float | None]:
-    """Abstention threshold at which the kept predictions reach ``target_acc``, and their coverage.
+    """Abstention threshold at which the kept predictions reach ``target_accuracy``, and their coverage.
 
     A model abstains on ``t <= p <= 1 - t`` (see :func:`selective_at`). The threshold is the largest ``t``
     whose kept predictions, scored with ``decision_threshold``, reach the target; fit it on validation
     predictions. Returns ``(None, None)`` when no threshold reaches the target.
     """
     y_true = np.asarray(y_true).astype(int)
-    prob_pos = np.asarray(prob_pos, dtype=float).reshape(-1)
-    min_prob = np.minimum(prob_pos, 1.0 - prob_pos)
+    prob_positive = np.asarray(prob_positive, dtype=float).reshape(-1)
+    min_prob = np.minimum(prob_positive, 1.0 - prob_positive)
     candidates = np.unique(np.concatenate(([0.0], min_prob)))
     candidates = candidates[(candidates >= 0.0) & (candidates <= 0.5)]
     candidates.sort()
@@ -226,9 +228,9 @@ def abstention_threshold(
         mask = min_prob <= t
         if not np.any(mask):
             continue
-        preds = (prob_pos[mask] >= decision_threshold).astype(int)
+        preds = (prob_positive[mask] >= decision_threshold).astype(int)
         acc = float((preds == y_true[mask]).mean())
-        if acc >= target_acc:
+        if acc >= target_accuracy:
             coverage = float(mask.mean())
             # Predictions exactly at confidence t are kept here, so the returned threshold must keep them
             # too under the abstention rule t <= p <= 1 - t used at test time and by the strategies:
@@ -241,45 +243,49 @@ def abstention_threshold(
 
 def classwise_thresholds(
     y_true: np.ndarray,
-    prob_pos: np.ndarray,
-    target_acc: float,
+    prob_positive: np.ndarray,
+    target_accuracy: float,
     decision_threshold: float = 0.5,
 ) -> tuple[float | None, float | None]:
     """One confidence threshold per predicted class (alternative to :func:`abstention_threshold`).
 
     Returns ``(t_pos, t_neg)``: keep a positive prediction if ``p >= t_pos`` and a negative prediction if
-    ``p <= t_neg``, each chosen as the largest set of predictions of that class with accuracy >= target_acc.
+    ``p <= t_neg``, each chosen as the largest set of predictions of that class with accuracy >= target_accuracy.
     A side is ``None`` when no set of its predictions reaches the target.
     """
     y_true = np.asarray(y_true).astype(int)
-    prob_pos = np.asarray(prob_pos, dtype=float).reshape(-1)
-    positive = prob_pos >= decision_threshold
+    prob_positive = np.asarray(prob_positive, dtype=float).reshape(-1)
+    positive = prob_positive >= decision_threshold
 
     def fit(confidence: np.ndarray, correct: np.ndarray) -> float | None:
         best = None
         for c in np.unique(confidence):
-            if correct[confidence >= c].mean() >= target_acc:
+            if correct[confidence >= c].mean() >= target_accuracy:
                 best = float(c) if best is None else min(best, float(c))
         return best
 
-    t_pos = fit(prob_pos[positive], y_true[positive] == 1) if positive.any() else None
+    t_pos = (
+        fit(prob_positive[positive], y_true[positive] == 1) if positive.any() else None
+    )
     # negatives are fitted on -p, so that the threshold is one of the probabilities themselves
     t_neg = (
-        fit(-prob_pos[~positive], y_true[~positive] == 0) if (~positive).any() else None
+        fit(-prob_positive[~positive], y_true[~positive] == 0)
+        if (~positive).any()
+        else None
     )
     return t_pos, (None if t_neg is None else -t_neg)
 
 
-def selective_at_classwise(y_true, prob_pos, t_pos, t_neg, decision_t):
+def selective_at_classwise(y_true, prob_positive, t_pos, t_neg, decision_threshold):
     """Selective accuracy and coverage under one threshold per predicted class."""
     y_true = np.asarray(y_true).astype(int)
-    prob_pos = np.asarray(prob_pos, dtype=float).reshape(-1)
-    positive = prob_pos >= decision_t
+    prob_positive = np.asarray(prob_positive, dtype=float).reshape(-1)
+    positive = prob_positive >= decision_threshold
     covered = np.zeros_like(positive)
     if t_pos is not None:
-        covered |= positive & (prob_pos >= t_pos)
+        covered |= positive & (prob_positive >= t_pos)
     if t_neg is not None:
-        covered |= ~positive & (prob_pos <= t_neg)
+        covered |= ~positive & (prob_positive <= t_neg)
     if not covered.any():
         return float("nan"), 0.0
     return float((positive[covered].astype(int) == y_true[covered]).mean()), float(
@@ -289,18 +295,18 @@ def selective_at_classwise(y_true, prob_pos, t_pos, t_neg, decision_t):
 
 def decision_threshold(
     y_true: np.ndarray,
-    prob_pos: np.ndarray,
+    prob_positive: np.ndarray,
     thresholds: np.ndarray | None = None,
 ) -> tuple[float, float]:
     """Decision threshold on P(positive) with the highest accuracy (midpoint of the tied best), and that accuracy."""
     y_true = np.asarray(y_true).astype(int)
-    prob_pos = np.asarray(prob_pos, dtype=float).reshape(-1)
+    prob_positive = np.asarray(prob_positive, dtype=float).reshape(-1)
     if thresholds is None:
         thresholds = np.linspace(0.0, 1.0, 101, dtype=float)
     best_acc = -1.0
     best_thresholds = []
     for t in thresholds:
-        preds = (prob_pos >= t).astype(int)
+        preds = (prob_positive >= t).astype(int)
         acc = float((preds == y_true).mean())
         if acc > best_acc:
             best_acc = acc
@@ -315,37 +321,39 @@ def decision_threshold(
 
 def selective_kept(
     y_true: np.ndarray,
-    prob_pos: np.ndarray,
-    t: float | None,
+    prob_positive: np.ndarray,
+    threshold: float | None,
     decision_threshold: float = 0.5,
 ) -> tuple[float | None, float]:
-    """Selective accuracy and coverage of the predictions with ``min(p, 1 - p) <= t``, the rule the fit uses."""
-    if t is None:
+    """Selective accuracy and coverage of the predictions with ``min(p, 1 - p) <= threshold``, the rule the fit uses."""
+    if threshold is None:
         return None, 0.0
     y_true = np.asarray(y_true).astype(int)
-    prob_pos = np.asarray(prob_pos, dtype=float).reshape(-1)
-    min_prob = np.minimum(prob_pos, 1.0 - prob_pos)
-    mask = min_prob <= t
+    prob_positive = np.asarray(prob_positive, dtype=float).reshape(-1)
+    min_prob = np.minimum(prob_positive, 1.0 - prob_positive)
+    mask = min_prob <= threshold
     if not np.any(mask):
         return None, 0.0
-    preds = (prob_pos[mask] >= decision_threshold).astype(int)
+    preds = (prob_positive[mask] >= decision_threshold).astype(int)
     acc = float((preds == y_true[mask]).mean())
     coverage = float(mask.mean())
     return acc, coverage
 
 
-def selective_at(y_true, prob_pos, abstention_t, decision_t):
-    """Selective accuracy and coverage under the intervention abstention rule.
+def selective_at(y_true, prob_positive, abstention_threshold, decision_threshold):
+    """Selective accuracy and coverage of a model that abstains on ``t <= p <= 1 - t``.
 
-    Mirrors the abstention expression used by ConceptualSafeguardsStrategy so the
-    coverage figure is unchanged, but scores kept predictions with the tuned
-    decision threshold instead of a hard 0.5 cut.
+    The kept predictions are ``p < t`` or ``p > 1 - t`` (the rule of the intervention strategies) and are
+    scored with ``decision_threshold``, not with a 0.5 cut. Coverage is 0 and accuracy ``nan`` when nothing
+    is kept.
     """
     y_true = np.asarray(y_true).astype(int)
-    prob_pos = np.asarray(prob_pos, dtype=float).reshape(-1)
-    abstain = (prob_pos >= abstention_t) & (prob_pos <= 1.0 - abstention_t)
+    prob_positive = np.asarray(prob_positive, dtype=float).reshape(-1)
+    abstain = (prob_positive >= abstention_threshold) & (
+        prob_positive <= 1.0 - abstention_threshold
+    )
     covered = ~abstain
     if not covered.any():
         return float("nan"), 0.0
-    preds = (prob_pos[covered] >= decision_t).astype(int)
+    preds = (prob_positive[covered] >= decision_threshold).astype(int)
     return float((preds == y_true[covered]).mean()), float(covered.mean())
