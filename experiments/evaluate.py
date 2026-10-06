@@ -501,10 +501,12 @@ def automation_table(
         config = InterventionConfig(
             abstention_threshold=threshold, per_instance_budget=k, random_state=seed
         )
-        # the strategy defers on the scaled probabilities (passed as the baseline) and the checked
-        # boards' new probabilities are scaled the same way before the gate
+        # the strategy defers on the scaled probabilities (passed as the baseline); the checked boards'
+        # new probabilities are scaled the same way, the others keep their k=0 values
         result = runner.run(policy, config, test, y_prob_baseline=test_prob_0)
-        test_prob_k = scaled(result.y_prob_after)
+        checked = np.any(result.mask, axis=1)
+        test_prob_k = test_prob_0.copy()
+        test_prob_k[checked] = scaled(result.y_prob_after)[checked]
         accuracy_k, coverage_k = selective_at(y_test, test_prob_k[:, 1], threshold, 0.5)
         edits = (result.C_pred >= 0.5) != (result.C_intervened >= 0.5)
         rows.append(
