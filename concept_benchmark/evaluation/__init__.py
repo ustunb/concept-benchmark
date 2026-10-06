@@ -16,6 +16,7 @@ Plots::
 
 from .metrics import (
     accuracy,
+    confidence_threshold,
     coverage,
     delta_accuracy,
     gain,
@@ -38,6 +39,7 @@ from .plots import (
 __all__ = [
     # metrics
     "accuracy",
+    "confidence_threshold",
     "coverage",
     "delta_accuracy",
     "gain",

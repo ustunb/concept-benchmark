@@ -124,6 +124,39 @@ def coverage(
     return float((confidence >= threshold).mean())
 
 
+def confidence_threshold(
+    y_pred: np.ndarray,
+    y_true: np.ndarray,
+    confidence: np.ndarray,
+    target_accuracy: float,
+) -> float | None:
+    """Lowest confidence at which the kept predictions reach ``target_accuracy``.
+
+    The model keeps the predictions with ``confidence >= threshold`` and abstains on the rest. The
+    threshold is fitted on the given predictions (use a validation set) and then passed to
+    :func:`selective_accuracy` and :func:`coverage`. Returns ``None`` when no threshold reaches the target.
+
+    Parameters
+    ----------
+    y_pred, y_true : arrays of shape (N,)
+        Predicted and true labels.
+    confidence : array of shape (N,)
+        Confidence score per sample, e.g. ``abs(p - 0.5)`` for a binary model's probability ``p``.
+    target_accuracy : float
+        Accuracy the kept predictions must reach.
+    """
+    y_pred, y_true = np.asarray(y_pred), np.asarray(y_true)
+    confidence = np.asarray(confidence, dtype=float)
+    is_correct = y_pred == y_true
+    for threshold in np.unique(
+        confidence
+    ):  # from keeping everything to keeping the most confident
+        kept = confidence >= threshold
+        if is_correct[kept].mean() >= target_accuracy:
+            return float(threshold)
+    return None
+
+
 def net_work_automated(
     confidence: np.ndarray,
     threshold: float,

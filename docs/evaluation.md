@@ -56,6 +56,17 @@ from concept_benchmark.evaluation import coverage
 cov = coverage(confidence, threshold=0.5)
 ```
 
+### confidence_threshold
+
+Lowest confidence at which the kept predictions reach a target accuracy. Fit it on validation predictions, then pass it to `selective_accuracy` and `coverage`. Returns `None` when no threshold reaches the target.
+
+```python
+from concept_benchmark.evaluation import confidence_threshold, coverage
+
+threshold = confidence_threshold(y_pred_val, y_true_val, confidence_val, target_accuracy=0.95)
+cov = coverage(confidence_test, threshold)
+```
+
 ### net_work_automated
 
 Net fraction of work automated after accounting for intervention cost: `coverage - mean(n_interventions / n_concepts)`. A value near 1 means most work is automated with few interventions. A value near 0 or negative means interventions cost more than they save.

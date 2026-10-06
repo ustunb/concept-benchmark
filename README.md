@@ -459,7 +459,7 @@ The same in code, on the digits of each board instead of its image (requires clo
 
 ```python
 from concept_benchmark.sudoku import DatasetGenerator
-from concept_benchmark.evaluation import plot_automation
+from concept_benchmark.evaluation import confidence_threshold, plot_automation
 from experiments.models import (
     ConceptBasedModel, ConceptDetector, FrontEndModel, GroupPoolingConceptSudokuCNN, SudokuValidatorCNN,
 )
@@ -492,12 +492,9 @@ with torch.no_grad():
 
 def coverage(p_valid, target=0.95):
     """Share of boards a model keeps when it abstains until it is right on `target` of the boards it keeps."""
-    y_pred, confidence = (p_valid >= 0.5).astype(int), np.abs(p_valid - 0.5)
-    for tau in np.linspace(0, 0.5, 500):
-        keep = confidence >= tau
-        if keep.any() and np.mean(y_pred[keep] == test.y[keep]) >= target:
-            return keep.mean()
-    return 0.0  # the target is out of reach
+    confidence = np.abs(p_valid - 0.5)
+    threshold = confidence_threshold((p_valid >= 0.5).astype(int), test.y, confidence, target)
+    return 0.0 if threshold is None else np.mean(confidence >= threshold)
 
 # a human checks up to k concepts of a board; each check costs 1/27 of the work on that board
 runner = ConceptInterventionRunner(model=cbm)
@@ -731,6 +728,7 @@ from concept_benchmark.evaluation import (
 | `gain(y_pred, y_true, baseline_accuracy)` | Accuracy gain over a baseline model (e.g. DNN) |
 | `selective_accuracy(y_pred, y_true, confidence, threshold)` | Accuracy on non-abstained samples |
 | `coverage(confidence, threshold)` | Fraction of samples where the model does not abstain |
+| `confidence_threshold(y_pred, y_true, confidence, target_accuracy)` | Lowest confidence at which the kept predictions reach a target accuracy; fit it on validation data |
 | `net_work_automated(confidence, threshold, n_interventions, n_concepts)` | Net fraction of work automated after intervention cost |
 
 **Plots** take the results tables that the pipelines write (or your own, with the same columns). Rows from several runs are averaged and drawn with a standard-error band, so pass the concatenated results of all your seeds.

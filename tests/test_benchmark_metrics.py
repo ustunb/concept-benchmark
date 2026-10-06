@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from concept_benchmark.evaluation.metrics import (
+    confidence_threshold,
     accuracy,
     coverage,
     delta_accuracy,
@@ -119,3 +120,17 @@ class TestNetWorkAutomated:
             confidence, threshold=0.5, n_interventions=n_interventions, n_concepts=10
         )
         assert result == pytest.approx(1.0 - 2.0 / 10)  # coverage=1, avg_cost=2/10
+
+
+def test_confidence_threshold_is_the_lowest_that_reaches_the_target():
+    y_true = np.array([1, 1, 1, 0, 0, 1])
+    y_pred = np.array(
+        [1, 1, 1, 0, 1, 0]
+    )  # the two least confident predictions are wrong
+    confidence = np.array([0.5, 0.4, 0.3, 0.2, 0.1, 0.05])
+    assert confidence_threshold(y_pred, y_true, confidence, 1.0) == 0.2
+    assert confidence_threshold(y_pred, y_true, confidence, 0.6) == 0.05
+
+
+def test_confidence_threshold_is_none_when_the_target_is_out_of_reach():
+    assert confidence_threshold([1, 0], [0, 1], [0.3, 0.4], 0.5) is None

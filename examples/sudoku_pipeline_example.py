@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score
 
-from concept_benchmark.evaluation import plot_automation
+from concept_benchmark.evaluation import confidence_threshold, plot_automation
 from concept_benchmark.sudoku import DatasetGenerator
 from concept_benchmark.utils import set_deterministic_seed
 from experiments.intervention import ConceptInterventionRunner, InterventionConfig
@@ -153,12 +153,11 @@ runner = ConceptInterventionRunner(model=cbm)
 
 def coverage_at(p_valid, target=0.95):
     """Share of boards kept when the model abstains until it is right on `target` of the kept boards."""
-    pred, confidence = (p_valid >= 0.5).astype(int), np.abs(p_valid - 0.5)
-    for tau in np.linspace(0, 0.5, 500):
-        keep = confidence >= tau
-        if keep.any() and accuracy_score(test.y[keep], pred[keep]) >= target:
-            return keep.mean()
-    return 0.0
+    confidence = np.abs(p_valid - 0.5)
+    threshold = confidence_threshold(
+        (p_valid >= 0.5).astype(int), test.y, confidence, target
+    )
+    return 0.0 if threshold is None else float(np.mean(confidence >= threshold))
 
 
 rows = []
