@@ -264,14 +264,19 @@ def histogram_transform(board: np.ndarray) -> np.ndarray:
     return feats.astype(np.float32)
 
 
+_REFERENCE_CELL_PX = (
+    50  # boards are drawn at this cell size and resampled to the requested one
+)
+
+
 def image_transform(
     board: np.ndarray,
     *,
     cell_px: int = 40,
     margin_px: int = 2,
-    line_px: int = 1,
-    bold_px: int = 3,
-    font_size: int = 10,
+    line_px: int = 2,
+    bold_px: int = 5,
+    font_size: int = 25,
     standardize: bool = True,
     font_path: str | None = None,
     handwriting: bool = True,
@@ -295,11 +300,19 @@ def image_transform(
 ) -> np.ndarray | str | tuple:
     """Render an NxN Sudoku board to an RGB image with prior-option bubbles (handwritten).
     Each bubble shows *all* options inline in one row (tight kerning). Starters never get bubbles.
+
+    The board is drawn at ``_REFERENCE_CELL_PX`` (50 px per cell, where ``line_px``, ``bold_px`` and
+    ``font_size`` are pixel sizes) and resampled to ``cell_px``, so a board at any resolution is the
+    same picture, only smaller; at 50 px nothing is resampled.
     """
     N = board.shape[0]
     assert board.ndim == 2 and N == board.shape[1], "board must be square"
     n = int(math.isqrt(N))
     assert n * n == N, "board size must be n*n"
+    target_px, target_margin = cell_px, margin_px
+    if cell_px != _REFERENCE_CELL_PX:
+        margin_px = round(margin_px * _REFERENCE_CELL_PX / cell_px)
+        cell_px = _REFERENCE_CELL_PX
     W = H = margin_px * 2 + cell_px * N
 
     img = Image.new("RGB", (W, H), "white")
@@ -529,6 +542,10 @@ def image_transform(
         outline=(0, 0, 0),
         width=bold_px,
     )
+
+    if target_px != cell_px:
+        side = target_margin * 2 + target_px * N
+        img = img.resize((side, side), Image.LANCZOS)
 
     # ----- returns -----
     if outfile:

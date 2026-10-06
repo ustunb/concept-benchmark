@@ -25,7 +25,7 @@ dataset = DatasetGenerator(
     valid_board_ratio=0.5,     # fraction of valid boards
     # ── Rendering (image only) ──
     font_style="handwritten",  # "handwritten" or "printed"
-    font_size=25,              # digit font size in pixels
+    font_size=25,              # printed-digit font size at 50 px per cell; every size is this board scaled
     cell_px=50,                # cell size in pixels
     cell_margin_px=2,          # cell margin in pixels
     gridline_px=2,             # grid line width in pixels

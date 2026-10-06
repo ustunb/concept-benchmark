@@ -26,6 +26,7 @@
 
 ### Fixed
 
+- Sudoku boards at any `cell_px` are the 50 px board resampled: printed starters, candidate bubbles and lines keep their proportions (at 18 px the starters used to overflow their cells and the bubbles covered the digits). Boards at 50 px are unchanged.
 - Sudoku: corruptions that cancelled out left about 1% of the "invalid" boards valid; the generator now redraws until a concept is violated. Datasets regenerated with 0.4.0 differ from 0.3.x in those boards.
 - Abstention follows one rule, `min(p, 1 - p) >= t` (`abstention_mask`), in the threshold fit, the measures and the intervention strategies; the two inequalities used before could disagree by one floating-point ulp.
 - `decision_threshold` returns a threshold inside a run of tied best thresholds and the accuracy at that threshold.
