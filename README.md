@@ -448,7 +448,7 @@ dataset = DatasetGenerator(
 ).generate_splits()
 
 # CBM: board -> 27 validity concepts -> valid; DNN: board -> valid
-cbm = train_cbm(dataset.train, dataset.val, detector=GroupPoolingConceptSudokuCNN(),
+cbm = train_cbm(dataset.train, dataset.val, detector=GroupPoolingConceptSudokuCNN,
                 epochs=100, patience=20, seed=171, should_propagate=True)
 dnn = train_dnn(SudokuValidatorCNN(), dataset.train, dataset.val, seed=171)
 
@@ -679,8 +679,22 @@ from concept_benchmark.evaluation import (
 | `gain(y_pred, y_true, baseline_accuracy)` | Accuracy gain over a baseline model (e.g. DNN) |
 | `selective_accuracy(y_pred, y_true, confidence, threshold)` | Accuracy on non-abstained samples |
 | `coverage(confidence, threshold)` | Fraction of samples where the model does not abstain |
-| `confidence_threshold(y_pred, y_true, confidence, target_accuracy)` | Lowest confidence at which the kept predictions reach a target accuracy; fit it on validation data |
+| `abstention_threshold(y_true, prob_positive, target_accuracy, decision_threshold)` | The paper's abstention rule: the threshold at which the kept predictions reach a target accuracy, and their coverage; fit it on validation predictions |
+| `decision_threshold(y_true, prob_positive)` | The cut on P(positive) with the highest accuracy |
+| `selective_at(y_true, prob_positive, abstention_threshold, decision_threshold)` | Selective accuracy and coverage under those thresholds |
+| `intervention_metrics(mask, concepts_before, concepts_after, y_prob_before, y_prob_after, y_true, accuracy_before)` | What an intervention did: accuracy, gain, predictions and concepts touched |
 | `net_work_automated(confidence, threshold, n_interventions, n_concepts)` | Net fraction of work automated after intervention cost |
+
+**Blocks that need a model** live in `experiments.evaluate` (requires cloning the repo) and are what the pipelines run:
+
+| Function | Returns |
+|----------|---------|
+| `train_cbm(train, validation, detector=..., seed=...)` | The paper's CBM: concept detector plus logistic label predictor |
+| `train_dnn(model, train, validation, seed=...)` | A binary classifier trained with early stopping |
+| `intervention_table(cbm, test, budgets=(1, 3, "max"), ...)` | Accuracy at each budget of corrected concepts (the decision-support table) |
+| `automation_table(cbm, validation, test, budgets, target_accuracy)` | Coverage and checks at each budget under the paper's abstention protocol (the automation table) |
+| `coverage_at_target(model, validation, test, target_accuracy)` | Selective accuracy and coverage of any model at a target |
+| `predict_labels(model, dataset)`, `predict_proba_positive(model, dataset)` | Predictions of a DNN or a CBM |
 
 **Plots** take the results tables that the pipelines write (or your own, with the same columns). Rows from several runs are averaged and drawn with a standard-error band, so pass the concatenated results of all your seeds.
 

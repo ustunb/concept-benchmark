@@ -54,7 +54,7 @@ def train_cbm(
     train,
     validation,
     *,
-    detector: nn.Module | None = None,
+    detector=None,
     input_size: int = 32,
     epochs: int = 50,
     lr: float = 1e-3,
@@ -65,7 +65,8 @@ def train_cbm(
 ) -> ConceptBasedModel:
     """Train the paper's CBM: a concept detector and a logistic label predictor on the true concepts.
 
-    The detector is the robot CNN unless `detector` is given (e.g. ``GroupPoolingConceptSudokuCNN()``).
+    The detector is the robot CNN unless `detector`, a module class or factory, is given (e.g.
+    ``GroupPoolingConceptSudokuCNN``); it is built after seeding, so that the run is repeatable.
     With `should_propagate`, the label predictor reads the detector's probabilities instead of its 0/1 calls
     (the sudoku models of the paper).
     """
@@ -75,11 +76,15 @@ def train_cbm(
         **(loader_config or get_loader_config()),
     }
     torch.manual_seed(seed)
-    detector = detector or RobotConceptClassifier(
-        num_concepts=train.n_concepts, input_size=input_size
+    model = (
+        detector()
+        if detector is not None
+        else RobotConceptClassifier(
+            num_concepts=train.n_concepts, input_size=input_size
+        )
     )
     cbm = ConceptBasedModel(
-        concept_detector=ConceptDetector(model=detector),
+        concept_detector=ConceptDetector(model=model),
         should_propagate=should_propagate,
     )
     cbm.fit(
@@ -401,7 +406,6 @@ def automation_table(
     threshold, _ = abstention_threshold(val_y, val_prob, target_accuracy, val_decision)
     if threshold is None:
         return pd.DataFrame()
-
     runner = ConceptInterventionRunner(model)
     policy = ConceptualSafeguardsStrategy()
     config_k0 = InterventionConfig(

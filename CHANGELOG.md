@@ -15,6 +15,9 @@
 - `DatasetGenerator.generate_splits()`: the train/validation/test split of the paper.
 - `ROBOT_LABEL_RULES`, `label_rule`: the two label rules and the training foot subtypes that go with each.
 - Plots: `plot_intervention_heatmap`, `plot_automation`, `plot_concept_report`, `plot_answer_reliance`, `plot_confidence`.
+- Metrics: `abstention_threshold`, `decision_threshold`, `selective_at` (the paper's selective-classification protocol), `classwise_thresholds`, `intervention_metrics`.
+- `experiments.evaluate`: `train_cbm`, `train_dnn`, `intervention_table`, `automation_table`, `coverage_at_target`; the pipelines and the examples are built from these blocks.
+- `plot_intervention_curve` and `plot_automation` draw the paper's two panels.
 - Robot pipeline: `--label-rule`, `--intervention-encoding`, `--intervention-sources self`, `--dump-interventions`, the `noisy_human_concepts` concept source, and all four architectures on every concept source.
 - Sudoku pipeline: ECBM, the optional `diagnose` stage, and abstention thresholds fitted with the rule that applies them.
 - `experiments/real_data.py`: interventions on Derm7pt and CUB.

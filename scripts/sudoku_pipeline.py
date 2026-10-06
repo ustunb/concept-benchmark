@@ -197,7 +197,7 @@ def train_cs(
         cbm = train_cbm_block(
             data.train,
             data.validation,
-            detector=GroupPoolingConceptSudokuCNN(),
+            detector=GroupPoolingConceptSudokuCNN,
             epochs=config.cs_epochs,
             lr=1e-3,
             patience=config.cs_patience,

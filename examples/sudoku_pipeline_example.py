@@ -34,7 +34,7 @@ print(
 cbm = train_cbm(
     train,
     val,
-    detector=GroupPoolingConceptSudokuCNN(),
+    detector=GroupPoolingConceptSudokuCNN,
     epochs=100,
     patience=20,
     seed=SEED,

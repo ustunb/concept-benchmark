@@ -56,15 +56,29 @@ from concept_benchmark.evaluation import coverage
 cov = coverage(confidence, threshold=0.5)
 ```
 
-### confidence_threshold
+### abstention_threshold, decision_threshold, selective_at
 
-Lowest confidence at which the kept predictions reach a target accuracy. Fit it on validation predictions, then pass it to `selective_accuracy` and `coverage`. Returns `None` when no threshold reaches the target.
+The paper's selective-classification protocol. `decision_threshold` finds the cut on P(positive) with the highest accuracy; `abstention_threshold` finds the largest abstention threshold `t` (the model abstains on `t <= p <= 1 - t`) at which the kept predictions reach the target; `selective_at` scores a test set under both. Fit both thresholds on validation predictions.
 
 ```python
-from concept_benchmark.evaluation import confidence_threshold, coverage
+from concept_benchmark.evaluation import abstention_threshold, decision_threshold, selective_at
 
-threshold = confidence_threshold(y_pred_val, y_true_val, confidence_val, target_accuracy=0.95)
-cov = coverage(confidence_test, threshold)
+decision, _ = decision_threshold(y_val, p_val)
+threshold, _ = abstention_threshold(y_val, p_val, target_acc=0.95, decision_threshold=decision)
+selective_acc, cov = selective_at(y_test, p_test, threshold, decision)
+```
+
+`classwise_thresholds` and `selective_at_classwise` fit one threshold per predicted class instead (an appendix variant).
+
+### intervention_metrics
+
+What one intervention did, from the runner's result: accuracy and gain, how many predictions were intervened on and changed, how many concepts were confirmed and edited.
+
+```python
+from concept_benchmark.evaluation import intervention_metrics
+
+metrics = intervention_metrics(result.mask, result.C_pred, result.C_intervened,
+                               result.y_prob_before, result.y_prob_after, test.y, accuracy_before)
 ```
 
 ### net_work_automated
