@@ -409,8 +409,9 @@ def automation_table(
     The paper's protocol: the decision cut and the abstention threshold are fitted once on the validation
     predictions (the label probabilities the strategy itself works with), the latter so that the kept
     predictions reach `target_accuracy`, with uncertainty measured relative to the cut; a human checks up to
-    k concepts of each board the model would abstain on (conceptual safeguards); the decision cut is refit on
-    validation at every budget and ``accuracy`` is scored at it.
+    k concepts of each board the model would abstain on (conceptual safeguards); after the checks the model is
+    again a selective classifier that must reach the target, so the cut and the abstention threshold are refit
+    on the validation predictions after the same checks, and ``accuracy`` is scored at that cut.
     One row per budget with the columns the sudoku pipeline writes (``coverage_after``,
     ``selective_accuracy_after``, ``total_concept_checks``, ...). Pass it to ``plot_automation``.
     With `concept_groups` (concepts per group, e.g. 9 for sudoku rows/columns/blocks), the checks are also
@@ -484,10 +485,16 @@ def automation_table(
         val_result = runner.run(
             policy, config, validation, y_prob_baseline=val_k0.y_prob_after
         )
-        decision_k, _ = decision_threshold(val_y, val_result.y_prob_after[:, 1])
+        val_after = val_result.y_prob_after[:, 1]
+        decision_k, _ = decision_threshold(val_y, val_after)
+        threshold_k, _ = abstention_threshold(
+            val_y, val_after, target_accuracy, decision_k
+        )
         result = runner.run(policy, config, test, y_prob_baseline=test_k0.y_prob_after)
-        accuracy_k, coverage_k = selective_at(
-            y_test, result.y_prob_after[:, 1], threshold, decision_k
+        accuracy_k, coverage_k = (
+            selective_at(y_test, result.y_prob_after[:, 1], threshold_k, decision_k)
+            if threshold_k is not None
+            else (float("nan"), 0.0)
         )
         edits = (result.C_pred >= 0.5) != (result.C_intervened >= 0.5)
         rows.append(
@@ -503,7 +510,7 @@ def automation_table(
                 "selective_accuracy_after": accuracy_k,
                 "coverage_after": coverage_k,
                 "decision_threshold": decision_k,
-                "abstention_threshold": threshold,
+                "abstention_threshold": threshold_k,
             }
         )
     return pd.DataFrame(rows)
