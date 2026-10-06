@@ -128,6 +128,7 @@ class ConceptNoiseGenerator:
             rng=self.seed,
             config=self.config,
             enable=True,
+            splits=self.splits,
         )
         return ds
 

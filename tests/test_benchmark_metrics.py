@@ -144,3 +144,11 @@ def test_decision_threshold_is_the_midpoint_of_the_best_cuts():
     assert threshold == pytest.approx(
         0.505
     )  # the cuts 0.21 to 0.80 of the 0.01 grid tie
+
+
+def test_intervention_metrics_rejects_no_predictions():
+    from concept_benchmark.evaluation.metrics import intervention_metrics
+
+    empty = np.zeros((0, 2))
+    with pytest.raises(ValueError, match="at least one prediction"):
+        intervention_metrics(empty, empty, empty, empty, empty, np.zeros(0), 0.0)

@@ -106,7 +106,9 @@ def test_abstention_mask_agrees_with_the_fit_on_random_probabilities():
     _, coverage_at_t = selective_at(y, p, t, 0.5)
     assert coverage_at_t == coverage
     assert not abstention_mask(p, t).any()
-    assert np.array_equal(abstention_mask(p, t), abstention_mask(np.column_stack([1 - p, p]), t))
+    assert np.array_equal(
+        abstention_mask(p, t), abstention_mask(np.column_stack([1 - p, p]), t)
+    )
 
 
 def test_abstention_mask_uses_the_same_margin_for_both_classes():

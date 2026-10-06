@@ -57,8 +57,11 @@ def test_set_cvindices_and_split(tab_small_cv):
 
 def test_split_rejects_same_fold(tab_small_cv):
     ds, fid = tab_small_cv
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match="must differ"):
         ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=1)
+    ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
+    with pytest.raises(ValueError, match="must differ"):
+        ds.split(fold_id=fid, fold_num_test=1)
 
 
 # ---------- Equality robustness ----------
@@ -582,3 +585,94 @@ def test_x_is_an_alias_of_inputs(tab_small_cv):
     ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
     assert ds.X is ds.inputs
     assert ds.train.X is ds.train.inputs
+
+
+# ---------- Noise draws, masks and splits ----------
+def test_split_noise_is_the_full_draw_sliced(tab_small_cv):
+    ds, fid = tab_small_cv
+    ds.split(fold_id=fid, fold_num_validation=1, fold_num_test=2)
+    labels = ds.sample_label_noise(p=0.5, rng=3)
+    noise = ds.sample_concept_noise(p=0.5, rng=4)
+    missing = ds.sample_concept_missingness(p=0.5, rng=5)
+    for name, sample in (
+        ("train", ds.train),
+        ("validation", ds.validation),
+        ("test", ds.test),
+    ):
+        rows = sample.indices
+        np.testing.assert_array_equal(labels[name], labels["full"][rows])
+        np.testing.assert_array_equal(noise[name], ds._full.concept_noise_mask[rows])
+        np.testing.assert_array_equal(
+            missing[name], ds._full.concept_missing_mask[rows]
+        )
+
+
+def test_sample_keeps_the_noise_masks(tab_small):
+    ds = tab_small
+    ds.sample_concept_noise(p=1.0, rng=0, enable=True)
+    ds.sample_label_noise(p=1.0, rng=0, enable=True)
+    ds.sample(test_size=0.25, val_size=0.25, seed=1)
+    assert ds.has_concept_noise and ds.train.concept_noise_mask is not None
+    np.testing.assert_array_equal(ds.train.C, 1 - ds.train.base_concepts)
+    np.testing.assert_array_equal(ds.test.y, 1 - ds.test.base_labels)
+
+
+def test_embed_and_copy_keep_raw_labels_and_masks(tab_small):
+    ds = tab_small
+    ds.sample(test_size=0.25, val_size=0.25, seed=1)
+    ds.sample_concept_noise(p=1.0, rng=0, enable=True)
+    ds.sample_label_noise(p=1.0, rng=0, enable=True)
+    for other in (ds.embed(MeanEmbedder(), batch_size=4), ds.__copy__()):
+        assert other.has_concept_noise and other.has_label_noise
+        np.testing.assert_array_equal(other._full.base_concepts, ds._full.base_concepts)
+        np.testing.assert_array_equal(other._full.base_labels, ds._full.base_labels)
+        np.testing.assert_array_equal(other.train.C, ds.train.C)
+        np.testing.assert_array_equal(other.train.y, ds.train.y)
+        assert other.test.n == ds.test.n
+
+
+def test_equality_sees_the_noise_masks(tab_small):
+    ds = tab_small
+    cpy = ds.__copy__()
+    assert cpy == ds
+    cpy.sample_concept_noise(p=1.0, rng=0)
+    assert cpy != ds
+
+
+def test_filter_slices_row_index(tab_small):
+    ds = tab_small
+    ds._full.meta["row_index"] = np.arange(ds.n) * 10
+    ds.sample(test_size=0.25, val_size=0.25, seed=1)
+    np.testing.assert_array_equal(
+        ds.test.meta["row_index"], np.where(ds.test.indices)[0] * 10
+    )
+
+
+class TestSampleValidation:
+    @pytest.fixture(autouse=True)
+    def _import_factory(self):
+        from tests.conftest import make_tabular_dataset
+
+        self._make = make_tabular_dataset
+
+    def test_group_split_with_zero_test_size_has_no_test_group(self):
+        ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
+        ds.sample(test_size=0, val_size=0.2, groups=np.arange(100) // 5, seed=1)
+        assert ds.test.n == 0 and ds.validation.n == 20
+
+    def test_sampling_constraints_reject_stratify_and_groups(self):
+        ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
+        constraints = [{"concepts": {"z0": 1}, "min_fraction": 0.5}]
+        with pytest.raises(ValueError, match="sampling_constraints"):
+            ds.sample(sampling_constraints=constraints, stratify=ds.y, seed=1)
+        with pytest.raises(ValueError, match="sampling_constraints"):
+            ds.sample(sampling_constraints=constraints, groups=np.arange(100), seed=1)
+
+    def test_negative_sizes_raise(self):
+        ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
+        with pytest.raises(ValueError, match="non-negative"):
+            ds.sample(test_size=-1, seed=1)
+        with pytest.raises(ValueError, match="non-negative"):
+            ds.sample(train_size=-5, seed=1)
+        with pytest.raises(ValueError, match="Float size"):
+            ds.sample(val_size=-0.2, seed=1)

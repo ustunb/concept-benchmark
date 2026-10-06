@@ -184,18 +184,23 @@ def intervention_metrics(
     """
     mask = np.asarray(mask, dtype=bool)
     y_true = np.asarray(y_true).astype(int)
+    n_samples = len(y_true)
+    if n_samples == 0:
+        raise ValueError("intervention_metrics needs at least one prediction, got none")
     y_pred_before = np.argmax(y_prob_before, axis=1)
     y_pred_after = np.argmax(y_prob_after, axis=1)
     edits = (np.asarray(concepts_before) >= 0.5) != (np.asarray(concepts_after) >= 0.5)
-    n_samples = len(y_true)
+    n_intervened = int(np.sum(np.any(mask, axis=1)))
     accuracy_after = float((y_pred_after == y_true).mean())
     return {
         "accuracy": accuracy_after,
         "accuracy_gain": accuracy_after - accuracy_before,
-        "predictions_intervened_on": int(np.sum(np.any(mask, axis=1))),
-        "interventions_rate": float(np.sum(np.any(mask, axis=1)) / n_samples),
+        "predictions_intervened_on": n_intervened,
+        "interventions_rate": n_intervened / n_samples,
         "predictions_changed": int(np.sum(y_pred_after != y_pred_before)),
-        "avg_edits_per_intervention": float(edits.sum()) / n_samples,
+        "avg_edits_per_intervention": (
+            float(edits.sum()) / n_intervened if n_intervened else 0.0
+        ),
         "total_concept_confirmations": int(mask.sum()),
         "total_concept_edits_made": int(edits.sum()),
     }
@@ -342,7 +347,9 @@ def decision_threshold(
     return best_t, _accuracy_at(y_true, prob_positive, best_t)
 
 
-def _accuracy_at(y_true: np.ndarray, prob_positive: np.ndarray, threshold: float) -> float:
+def _accuracy_at(
+    y_true: np.ndarray, prob_positive: np.ndarray, threshold: float
+) -> float:
     return float(((prob_positive >= threshold).astype(int) == y_true).mean())
 
 

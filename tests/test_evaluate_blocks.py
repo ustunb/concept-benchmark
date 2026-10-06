@@ -81,7 +81,7 @@ def test_intervention_metrics_counts_edits_confirmations_and_changed_predictions
         "predictions_intervened_on": 1,
         "interventions_rate": 0.5,
         "predictions_changed": 1,
-        "avg_edits_per_intervention": 0.5,
+        "avg_edits_per_intervention": 1.0,  # per intervened-on prediction
         "total_concept_confirmations": 2,
         "total_concept_edits_made": 1,
     }
