@@ -174,3 +174,72 @@ def test_selective_kept_matches_the_fitted_coverage():
     accuracy, coverage = selective_kept(y, prob, threshold, 0.5)
     assert (accuracy, coverage) == (1.0, pytest.approx(fitted_coverage))
     assert selective_kept(y, prob, None) == (None, 0.0)
+
+
+class _UnderconfidentAnd:
+    """A sudoku-like model: the label is the AND of the concepts, the detector is right but only 80% sure.
+
+    Propagating 6 concepts at 0.8 gives P ~ 0.26 for every positive, so Platt scaling moves the label
+    probabilities a lot; a scaling applied twice to unchecked boards would flip their predictions.
+    """
+
+    class _Detector:
+        n_concepts = 6
+
+        def predict_proba(self, dataset):
+            # 80% sure about every concept, and plainly wrong about one concept of a tenth of the rows
+            C = np.asarray(dataset.C)
+            p = np.where(C > 0.5, 0.8, 0.2)
+            rng = np.random.default_rng(len(C))
+            wrong = rng.random(len(C)) < 0.1
+            p[wrong, rng.integers(0, 6, len(C))[wrong]] = 0.2
+            return p
+
+    def __init__(self):
+        self.concept_detector = self._Detector()
+
+    def predict_proba_from_concepts(self, C):
+        p = np.prod(np.asarray(C, dtype=float), axis=1)
+        return np.column_stack([1 - p, p])
+
+
+def _and_splits(n=400, seed=0):
+    from concept_benchmark.data import ConceptDataset
+
+    rng = np.random.default_rng(seed)
+    C = np.ones((n, 6), dtype=np.int32)
+    negatives = rng.random(n) < 0.5
+    C[negatives, rng.integers(0, 6, n)[negatives]] = 0
+    y = C.all(axis=1).astype(int)
+    dataset = ConceptDataset(
+        inputs=rng.random((n, 3)).astype(np.float32),
+        C=C,
+        y=y,
+        meta={"concepts": [f"c{i}" for i in range(6)]},
+        input_type="tabular",
+        classes=(0, 1),
+    )
+    dataset.sample(test_size=0.25, val_size=0.25, stratify=dataset.y, seed=seed)
+    return dataset.val, dataset.test
+
+
+def test_only_checked_boards_can_change_their_prediction():
+    val, test = _and_splits()
+    table = automation_table(
+        _UnderconfidentAnd(),
+        val,
+        test,
+        budgets=(1, "max"),
+        target_accuracy=0.95,
+        seed=0,
+    )
+    accuracy_0 = table["accuracy"].iloc[0]
+    assert (
+        table["coverage_after"].iloc[0] > 0.8
+    )  # calibration makes the positives confident
+    # only the checked boards (the abstained ones) can change: coverage never drops and at most that
+    # many predictions change
+    assert table["coverage_after"].is_monotonic_increasing
+    for _, row in table.iloc[1:].iterrows():
+        changed = round(abs(row["accuracy"] - accuracy_0) * test.n)
+        assert changed <= row["predictions_intervened_on"]
