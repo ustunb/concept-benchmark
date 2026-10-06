@@ -191,10 +191,10 @@ class InterventionConfig:
       ``use_per_instance_ordering``.
 
     Attributes:
-        abstention_threshold: Uncertainty level at which conceptual safeguards
-            abstain (:func:`concept_benchmark.evaluation.abstention_mask`).
-        decision_threshold: Cut on P(positive) that defines the predicted class
-            of a two-class model; the uncertainty is measured relative to it.
+        abstention_threshold: Confidence margin used by conceptual safeguards
+            to detect abstentions.  Interventions trigger when the predicted
+            class confidence lies within
+            ``[abstention_threshold, 1 - abstention_threshold]``.
         concept_budget: Maximum number of concept corrections allowed across
             the entire batch.  Integers are treated as counts; floats in
             ``(0, 1]`` are interpreted as fractions of all possible
@@ -231,7 +231,6 @@ class InterventionConfig:
     """
 
     abstention_threshold: float | None = None
-    decision_threshold: float = 0.5
     concept_budget: float | None = None
     instance_budget: float | None = None
     per_instance_budget: int | None = None
@@ -250,8 +249,6 @@ class InterventionConfig:
             0.0 <= self.abstention_threshold <= 0.5
         ):
             raise ValueError("abstention_threshold must lie within [0, 0.5].")
-        if not (0.0 < self.decision_threshold < 1.0):
-            raise ValueError("decision_threshold must lie strictly inside (0, 1).")
         if not (0.0 <= self.score_threshold <= 1.0):
             raise ValueError("score_threshold must lie within [0, 1].")
         self._rng = np.random.default_rng(self.random_state)
@@ -456,10 +453,8 @@ class ConceptualSafeguardsStrategy(InterventionStrategy):
                 y_prob = model.predict_proba_from_concepts(batch.C_pred)
             else:
                 y_prob = model.propagate_predict_proba(batch.C_pred)
-        predicted = _predict_classes(y_prob, config.decision_threshold)
-        abstain_mask = abstention_mask(
-            y_prob, config.abstention_threshold, config.decision_threshold
-        )
+        predicted = np.argmax(y_prob, axis=1)
+        abstain_mask = abstention_mask(y_prob, config.abstention_threshold)
 
         non_abstained = ~abstain_mask
         if batch.y_true is not None:
@@ -588,9 +583,7 @@ class OrderedCBMStrategy(InterventionStrategy):
                 row_indices=row_indices if supports_aligned else None,
                 baseline_concepts=batch.C_pred if supports_aligned else None,
             )
-            abstain_mask = abstention_mask(
-                y_prob, config.abstention_threshold, config.decision_threshold
-            )
+            abstain_mask = abstention_mask(y_prob, config.abstention_threshold)
             candidate_ids = np.nonzero(abstain_mask)[0]
         else:
             candidate_ids = np.arange(batch.n_samples)
@@ -633,9 +626,7 @@ class RandomInterventionStrategy(InterventionStrategy):
                 row_indices=row_indices if supports_aligned else None,
                 baseline_concepts=batch.C_pred if supports_aligned else None,
             )
-            abstain_mask = abstention_mask(
-                y_prob, config.abstention_threshold, config.decision_threshold
-            )
+            abstain_mask = abstention_mask(y_prob, config.abstention_threshold)
             candidate_ids = np.nonzero(abstain_mask)[0]
         else:
             candidate_ids = np.arange(batch.n_samples)
@@ -1021,7 +1012,7 @@ class ConceptInterventionRunner:
         intervened_rows = np.any(overwrite_mask, axis=1)
         y_prob_after[~intervened_rows] = y_prob_before[~intervened_rows]
 
-        y_pred_after = _predict_classes(y_prob_after, config.decision_threshold)
+        y_pred_after = np.argmax(y_prob_after, axis=1)
 
         # Conceptual Safeguards results
         strategy_metrics = {}
@@ -1032,17 +1023,13 @@ class ConceptInterventionRunner:
             abstain_pre = proposal.details.get("abstain_mask")
             if abstain_pre is None:
                 abstain_pre = abstention_mask(
-                    y_prob_before,
-                    config.abstention_threshold,
-                    config.decision_threshold,
+                    y_prob_before, config.abstention_threshold
                 )
             strategy_metrics["coverage_before"] = (
                 1 - abstain_pre.mean() if batch.n_samples > 0 else 0.0
             )
 
-            abstain_post = abstention_mask(
-                y_prob_after, config.abstention_threshold, config.decision_threshold
-            )
+            abstain_post = abstention_mask(y_prob_after, config.abstention_threshold)
 
             if batch.y_true is not None:
                 strategy_metrics["selective_acc_after"] = (
@@ -1116,14 +1103,6 @@ class ConceptInterventionRunner:
             instance_ids=instance_ids,
             concept_costs=ds_concept_costs,
         )
-
-
-def _predict_classes(y_prob: np.ndarray, decision_threshold: float) -> np.ndarray:
-    """Predicted classes: P(positive) against the cut for two classes, argmax otherwise."""
-    y_prob = np.asarray(y_prob)
-    if y_prob.ndim == 2 and y_prob.shape[1] == 2:
-        return (y_prob[:, 1] >= decision_threshold).astype(int)
-    return np.argmax(y_prob, axis=1)
 
 
 __all__ = [

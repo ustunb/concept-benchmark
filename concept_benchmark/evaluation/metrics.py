@@ -211,43 +211,20 @@ def intervention_metrics(
 _TIE_MARGIN = 1e-6  # see abstention_threshold
 
 
-def uncertainty(
-    prob_positive: np.ndarray, decision_threshold: float = 0.5
-) -> np.ndarray:
-    """How far each P(positive) is from a confident decision, on the scale of ``min(p, 1 - p)``.
-
-    The distance to the decision cut is rescaled so that the cut maps to 0.5 and the two ends of [0, 1]
-    map to 0: ``0.5 * (1 - |m|)`` with ``m = (p - cut) / cut`` below the cut and ``(p - cut) / (1 - cut)``
-    above it. At ``decision_threshold=0.5`` this is exactly ``min(p, 1 - p)``. A model whose positive
-    class sits at low probabilities (a 27-concept AND, say) is then judged uncertain near its own cut,
-    not near 0.5.
-    """
-    p = np.asarray(prob_positive, dtype=float)
-    cut = float(decision_threshold)
-    if not 0.0 < cut < 1.0:
-        raise ValueError(
-            f"decision_threshold must lie strictly inside (0, 1), got {cut}"
-        )
-    m = np.where(p < cut, (p - cut) / cut, (p - cut) / (1.0 - cut))
-    return 0.5 * (1.0 - np.abs(np.clip(m, -1.0, 1.0)))
-
-
-def abstention_mask(
-    y_prob: np.ndarray, threshold: float, decision_threshold: float = 0.5
-) -> np.ndarray:
+def abstention_mask(y_prob: np.ndarray, threshold: float) -> np.ndarray:
     """Which predictions a model with abstention threshold ``threshold`` abstains on.
 
     ``y_prob`` is either P(positive) of shape (N,) or class probabilities of shape (N, K). A prediction is
-    abstained on when its uncertainty, :func:`uncertainty` relative to ``decision_threshold`` for two classes
-    and ``1 - max_k p_k`` otherwise, is at least ``threshold``. This is the one rule shared by the fit, the
-    measures and the intervention strategies.
+    abstained on when its margin to the decision, ``min(p, 1 - p)`` for two classes and ``1 - max_k p_k``
+    otherwise, is at least ``threshold``. This is the one rule shared by the fit, the measures and the
+    intervention strategies.
     """
     y_prob = np.asarray(y_prob, dtype=float)
     if y_prob.ndim == 2 and y_prob.shape[1] > 2:
         margin = 1.0 - y_prob.max(axis=1)
     else:
         prob_positive = y_prob[:, 1] if y_prob.ndim == 2 else y_prob
-        margin = uncertainty(prob_positive, decision_threshold)
+        margin = np.minimum(prob_positive, 1.0 - prob_positive)
     return margin >= threshold
 
 
@@ -259,14 +236,13 @@ def abstention_threshold(
 ) -> tuple[float | None, float | None]:
     """Abstention threshold at which the kept predictions reach ``target_accuracy``, and their coverage.
 
-    A model abstains when its :func:`uncertainty` relative to ``decision_threshold`` is at least ``t`` (see
-    :func:`abstention_mask`). The threshold is the largest ``t`` whose kept predictions, scored with
-    ``decision_threshold``, reach the target; fit it on validation predictions. Returns ``(None, None)``
-    when no threshold reaches the target.
+    A model abstains on ``min(p, 1 - p) >= t`` (see :func:`abstention_mask`). The threshold is the largest ``t``
+    whose kept predictions, scored with ``decision_threshold``, reach the target; fit it on validation
+    predictions. Returns ``(None, None)`` when no threshold reaches the target.
     """
     y_true = np.asarray(y_true).astype(int)
     prob_positive = np.asarray(prob_positive, dtype=float).reshape(-1)
-    min_prob = uncertainty(prob_positive, decision_threshold)
+    min_prob = np.minimum(prob_positive, 1.0 - prob_positive)
     candidates = np.unique(np.concatenate(([0.0], min_prob)))
     candidates = candidates[(candidates >= 0.0) & (candidates <= 0.5)]
     candidates.sort()
@@ -279,7 +255,7 @@ def abstention_threshold(
         if acc >= target_accuracy:
             coverage = float(mask.mean())
             # Predictions exactly at confidence t are kept here, so the returned threshold must keep them
-            # too under the abstention rule uncertainty >= t used at test time and by the strategies:
+            # too under the abstention rule min(p, 1 - p) >= t used at test time and by the strategies:
             # move it just above t, but never past the next confidence level that this fit dropped.
             dropped = candidates[candidates > t]
             gap = (float(dropped.min()) if dropped.size else 0.5) - float(t)
@@ -383,12 +359,12 @@ def selective_kept(
     threshold: float | None,
     decision_threshold: float = 0.5,
 ) -> tuple[float | None, float]:
-    """Selective accuracy and coverage of the predictions with ``uncertainty <= threshold``, the rule the fit uses."""
+    """Selective accuracy and coverage of the predictions with ``min(p, 1 - p) <= threshold``, the rule the fit uses."""
     if threshold is None:
         return None, 0.0
     y_true = np.asarray(y_true).astype(int)
     prob_positive = np.asarray(prob_positive, dtype=float).reshape(-1)
-    min_prob = uncertainty(prob_positive, decision_threshold)
+    min_prob = np.minimum(prob_positive, 1.0 - prob_positive)
     mask = min_prob <= threshold
     if not np.any(mask):
         return None, 0.0
@@ -399,15 +375,14 @@ def selective_kept(
 
 
 def selective_at(y_true, prob_positive, abstention_threshold, decision_threshold):
-    """Selective accuracy and coverage of a model that abstains when its uncertainty is at least ``t``.
+    """Selective accuracy and coverage of a model that abstains on ``min(p, 1 - p) >= t``.
 
-    Uncertainty is measured relative to ``decision_threshold`` (see :func:`abstention_mask`, the rule of the
-    intervention strategies) and the kept predictions are scored with that same cut. Coverage is 0 and
-    accuracy ``nan`` when nothing is kept.
+    The kept predictions (see :func:`abstention_mask`, the rule of the intervention strategies) are scored
+    with ``decision_threshold``, not with a 0.5 cut. Coverage is 0 and accuracy ``nan`` when nothing is kept.
     """
     y_true = np.asarray(y_true).astype(int)
     prob_positive = np.asarray(prob_positive, dtype=float).reshape(-1)
-    covered = ~abstention_mask(prob_positive, abstention_threshold, decision_threshold)
+    covered = ~abstention_mask(prob_positive, abstention_threshold)
     if not covered.any():
         return float("nan"), 0.0
     preds = (prob_positive[covered] >= decision_threshold).astype(int)

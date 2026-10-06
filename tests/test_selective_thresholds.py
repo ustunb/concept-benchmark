@@ -10,7 +10,6 @@ from concept_benchmark.evaluation import (
     decision_threshold,
     selective_at,
     selective_at_classwise,
-    uncertainty,
 )
 
 
@@ -139,31 +138,3 @@ def test_decision_threshold_prefers_the_longest_run_of_tied_thresholds():
     p = np.array([0.9, 0.2])
     t, acc = decision_threshold(y, p, thresholds=np.array([0.1, 0.3, 0.4, 0.5, 0.95]))
     assert (t, acc) == (0.4, 1.0)
-
-
-def test_uncertainty_is_min_prob_at_a_half_cut():
-    p = np.array([0.0, 0.1, 0.5, 0.8, 1.0])
-    assert np.allclose(uncertainty(p), np.minimum(p, 1 - p))
-
-
-def test_uncertainty_peaks_at_the_decision_cut():
-    p = np.array([0.0, 0.05, 0.1, 0.5, 1.0])
-    u = uncertainty(p, decision_threshold=0.05)
-    assert u[1] == 0.5 and u[0] == 0.0 and u[-1] == 0.0
-    assert u[2] > u[3]  # 0.1 is nearer the cut than 0.5
-
-
-def test_abstention_near_a_low_cut_keeps_the_confident_positives():
-    # an AND of many concepts: valid boards sit at 0.3-0.6, invalid at ~0, the cut at 0.05
-    y = np.array([1] * 6 + [0] * 6)
-    p = np.array([0.3, 0.4, 0.5, 0.6, 0.06, 0.04, 0.0, 0.0, 0.01, 0.02, 0.07, 0.0])
-    cut = 0.05
-    t, coverage = abstention_threshold(
-        y, p, target_accuracy=1.0, decision_threshold=cut
-    )
-    # the two mistakes straddle the cut (0.04, 0.07); dropping them drops 0.06 as well, which is even nearer
-    assert coverage == 9 / 12
-    assert not abstention_mask(p, t, cut)[:4].any()
-    assert abstention_mask(p, t, cut)[[4, 5, 10]].all()
-    acc, cov = selective_at(y, p, t, cut)
-    assert (acc, cov) == (1.0, 9 / 12)

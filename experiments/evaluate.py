@@ -406,11 +406,9 @@ def automation_table(
 ) -> pd.DataFrame:
     """Coverage and the checks it costs with 0, then each budget of concept checks per instance: the automation table.
 
-    The paper's protocol: the decision cut and the abstention threshold are fitted once on the validation
-    predictions (the label probabilities the strategy itself works with), the latter so that the kept
-    predictions reach `target_accuracy`, with uncertainty measured relative to the cut; a human checks up to
-    k concepts of each board the model would abstain on (conceptual safeguards); the decision cut is refit on
-    validation at every budget and ``accuracy`` is scored at it.
+    The paper's protocol: the abstention threshold is fitted once on the validation predictions (the label
+    probabilities the strategy itself works with) so that the kept predictions reach `target_accuracy`; the decision threshold is refit on validation at every budget;
+    a human checks up to k concepts of each board the model would abstain on (conceptual safeguards).
     One row per budget with the columns the sudoku pipeline writes (``coverage_after``,
     ``selective_accuracy_after``, ``total_concept_checks``, ...). Pass it to ``plot_automation``.
     With `concept_groups` (concepts per group, e.g. 9 for sudoku rows/columns/blocks), the checks are also
@@ -454,16 +452,14 @@ def automation_table(
             ]
         )
 
-    decision_0 = val_decision
+    decision_0, _ = decision_threshold(val_y, val_prob)
     accuracy_0, coverage_0 = selective_at(
         y_test, test_k0.y_prob_after[:, 1], threshold, decision_0
     )
     rows = [
         {
             "budget": 0,
-            "accuracy": _accuracy_at_cut(
-                y_test, test_k0.y_prob_after[:, 1], decision_0
-            ),
+            "accuracy": float((test_k0.y_pred_after == y_test).mean()),
             "predictions_intervened_on": 0,
             "total_concept_checks": 0,
             **_group_checks(np.zeros_like(test_k0.mask), concept_groups),
@@ -476,10 +472,7 @@ def automation_table(
     ]
     for k in all_budgets:
         config = InterventionConfig(
-            abstention_threshold=threshold,
-            decision_threshold=decision_0,
-            per_instance_budget=k,
-            random_state=seed,
+            abstention_threshold=threshold, per_instance_budget=k, random_state=seed
         )
         val_result = runner.run(
             policy, config, validation, y_prob_baseline=val_k0.y_prob_after
@@ -493,9 +486,7 @@ def automation_table(
         rows.append(
             {
                 "budget": k,
-                "accuracy": _accuracy_at_cut(
-                    y_test, result.y_prob_after[:, 1], decision_k
-                ),
+                "accuracy": float((result.y_pred_after == y_test).mean()),
                 "predictions_intervened_on": int(np.sum(np.any(result.mask, axis=1))),
                 "total_concept_checks": int(np.sum(result.mask)),
                 **_group_checks(result.mask, concept_groups),
@@ -507,12 +498,6 @@ def automation_table(
             }
         )
     return pd.DataFrame(rows)
-
-
-def _accuracy_at_cut(
-    y_true: np.ndarray, prob_positive: np.ndarray, cut: float
-) -> float:
-    return float(((np.asarray(prob_positive) >= cut).astype(int) == y_true).mean())
 
 
 def _budgets(budgets, n_concepts: int) -> list[int]:
