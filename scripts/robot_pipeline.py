@@ -28,8 +28,6 @@ logger = logging.getLogger(__name__)
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
-from tqdm import tqdm
 
 from concept_benchmark.utils import (
     compute_accuracy,
@@ -44,6 +42,7 @@ from concept_benchmark.config import (
     ROBOT_LABEL_RULES,
     RobotBenchmarkConfig,
 )
+from concept_benchmark.evaluation import intervention_metrics
 from concept_benchmark.generators import DatasetGenerator
 from concept_benchmark.types import CBMTrainingMode
 from concept_benchmark.ext.fileutils import load, save
@@ -55,10 +54,14 @@ from experiments.cem_integration import (
 )
 from experiments.models import (
     ConceptBasedModel,
-    ConceptDetector,
     FrontEndModel,
     RobotClassifierCNN,
-    RobotConceptClassifier,
+)
+from experiments.evaluate import (
+    intervene,
+    predict_after_intervention,
+    train_cbm as train_cbm_block,
+    train_dnn as train_dnn_block,
 )
 from experiments.utils import run_alignment
 from concept_benchmark.paths import data_dir, results_dir
@@ -331,32 +334,20 @@ def train_cbm(
         )
         data.train.has_concept_missing = True
 
-    _macos = platform.system() == "Darwin"
-    loader_config = {
-        "device": device,
-        "batch_size": config.batch_size,
-        "num_workers": 0 if _macos else min(12, os.cpu_count() or 1),
-        "pin_memory": not _macos,
-    }
-    torch.manual_seed(config.seed)
-
-    cd = ConceptDetector(
-        model=RobotConceptClassifier(
-            num_concepts=data.train.n_concepts,
-            input_size=config.input_size,
-        )
-    )
-    cbm = ConceptBasedModel(concept_detector=cd)
-    cbm.fit(
-        train_dataset=data.train,
-        valid_dataset=data.validation,
-        freeze_backbone=False,
-        concept_embed_params={"shuffle": False, **loader_config},
-        concept_fit_params={
-            "epochs": config.epochs,
-            "lr": config.learning_rate,
-            "patience": config.patience,
-            **loader_config,
+    cbm = train_cbm_block(
+        data.train,
+        data.validation,
+        input_size=config.input_size,
+        epochs=config.epochs,
+        lr=config.learning_rate,
+        patience=config.patience,
+        seed=config.seed,
+        loader_config={
+            "batch_size": config.batch_size,
+            "num_workers": 0
+            if platform.system() == "Darwin"
+            else min(12, os.cpu_count() or 1),
+            "pin_memory": platform.system() != "Darwin",
         },
     )
 
@@ -628,61 +619,20 @@ def train_dnn(
         data = load(config.get_dataset_path())
 
     torch.manual_seed(config.seed)
-    model = RobotClassifierCNN(input_size=config.input_size)
-
-    criterion = nn.BCELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-
     loader_config = get_loader_config()
+    model = train_dnn_block(
+        RobotClassifierCNN(input_size=config.input_size),
+        data.train,
+        data.validation,
+        device=device,
+        epochs=config.epochs,
+        lr=config.learning_rate,
+        patience=config.patience,
+        loader_config=loader_config,
+    )
     train_loader = data.train.loader(shuffle=True, **loader_config)
     valid_loader = data.validation.loader(shuffle=False, **loader_config)
     test_loader = data.test.loader(shuffle=False, **loader_config)
-
-    model.to(device)
-
-    best_val_loss = float("inf")
-    best_state_dict = None
-    epochs_no_improve = 0
-
-    for epoch in tqdm(range(config.epochs), desc="Epochs"):
-        model.train()
-        for X, _, y in train_loader:
-            optimizer.zero_grad()
-            X, y = X.to(device), y.to(device)
-            outputs = model(X)
-            loss = criterion(outputs.squeeze(), y.float())
-            loss.backward()
-            optimizer.step()
-
-        model.eval()
-        val_loss_sum = 0.0
-        val_batches = 0
-        with torch.no_grad():
-            for X, _, y in valid_loader:
-                X, y = X.to(device), y.to(device)
-                outputs = model(X)
-                batch_loss = criterion(outputs.squeeze(), y.float())
-                val_loss_sum += batch_loss.item()
-                val_batches += 1
-        avg_val_loss = val_loss_sum / max(val_batches, 1)
-
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
-            best_state_dict = copy.deepcopy(model.state_dict())
-            epochs_no_improve = 0
-        else:
-            epochs_no_improve += 1
-            if config.patience > 0 and epochs_no_improve >= config.patience:
-                logger.info(
-                    "Early stopping at epoch %d with best val loss %.6f",
-                    epoch + 1,
-                    best_val_loss,
-                )
-                break
-
-    if best_state_dict is not None:
-        model.load_state_dict(best_state_dict)
-
     train_acc = compute_accuracy(model, train_loader, device=device)
     valid_acc = compute_accuracy(model, valid_loader, device=device)
     test_acc = compute_accuracy(model, test_loader, device=device)
@@ -690,62 +640,13 @@ def train_dnn(
     logger.info("Validation Accuracy: %.2f%%", valid_acc * 100)
     logger.info("Test Accuracy: %.2f%%", test_acc * 100)
 
-    weights = best_state_dict if best_state_dict is not None else model.state_dict()
     # Move tensors to CPU before saving for cross-device portability
-    weights = {k: v.cpu() for k, v in weights.items()}
+    weights = {k: v.cpu() for k, v in model.state_dict().items()}
     save(weights, config.get_model_path("dnn"), overwrite=True)
     return weights
 
 
 # ── Intervention helper ───────────────────────────────────────────────
-
-
-def _encode_revealed_concepts(C, mask, low, high):
-    """Set revealed concepts to `high` (present) or `low` (absent); the rest keep their predicted values."""
-    C_encoded = np.asarray(C, dtype=float).copy()
-    high = np.broadcast_to(np.asarray(high, dtype=float), C_encoded.shape)
-    low = np.broadcast_to(np.asarray(low, dtype=float), C_encoded.shape)
-    is_present = mask & (C_encoded >= 0.5)
-    is_absent = mask & (C_encoded < 0.5)
-    C_encoded[is_present] = high[is_present]
-    C_encoded[is_absent] = low[is_absent]
-    return C_encoded
-
-
-def _predict_after_intervention(
-    cbm,
-    fe,
-    C_after,
-    C_before,
-    mask,
-    *,
-    supports_aligned,
-    encoding,
-    low_values,
-    high_values,
-):
-    """Label probabilities once the concepts in `mask` hold the intervener's answers.
-
-    Models with their own concept replay (CEM, ProbCBM, ECBM) receive the answers directly. Otherwise
-    `encoding` decides what the label predictor reads: `binary` thresholds every concept, `percentile` sets
-    revealed concepts to the 5th/95th percentile of their training values (label-free CBMs), and
-    `binary_revealed` sets revealed concepts to 0/1; the last two leave the other concepts continuous.
-    """
-    if supports_aligned:
-        return predict_label_proba_from_concepts(
-            cbm,
-            C_after,
-            row_indices=np.arange(C_after.shape[0], dtype=int),
-            baseline_concepts=C_before,
-            intervention_mask=mask,
-        )
-    if encoding == "percentile" and low_values is not None:
-        return fe.predict_proba(
-            _encode_revealed_concepts(C_after, mask, low_values, high_values)
-        )
-    if encoding == "binary_revealed":
-        return fe.predict_proba(_encode_revealed_concepts(C_after, mask, 0.0, 1.0))
-    return fe.predict_proba((C_after >= 0.5).astype(int))
 
 
 def _measure_concept_percentiles(train_proba) -> tuple[np.ndarray, np.ndarray]:
@@ -962,7 +863,7 @@ def _test_interventions(
                 mask = result.mask
                 C_after = result.C_intervened.copy()
 
-                result.y_prob_after = _predict_after_intervention(
+                result.y_prob_after = predict_after_intervention(
                     cbm,
                     fe,
                     result.C_intervened,
@@ -1473,7 +1374,7 @@ def _test_interventions(
 
             overwrite_mask = mask & ~np.isnan(C_true_llm)
             C_after = np.where(overwrite_mask, C_true_llm, C_before)
-            y_prob_after = _predict_after_intervention(
+            y_prob_after = predict_after_intervention(
                 cbm,
                 fe,
                 C_after,
@@ -1497,54 +1398,30 @@ def _test_interventions(
 
         else:
             # ── Standard (non-LLM) path ──
-            result = runner.run(
-                strategy=strategy,
-                config=config,
-                dataset=test,
-                concept_proba=prob_test,
-                labels=test.y.astype(int),
-            )
-
-            mask = result.mask
-            C_gt = test.C.astype(np.float32)
-            C_after = result.C_intervened.copy()
-
-            mistake_draw = rng.random(C_after.shape) < err_prob
-            mistakes = mask & mistake_draw
-            C_after[mistakes] = 1.0 - C_gt[mistakes]
-            result.C_intervened = C_after
-
-            # predict again, now with the intervener's mistakes
-            result.y_prob_after = _predict_after_intervention(
-                cbm,
-                fe,
-                result.C_intervened,
-                result.C_pred,
-                result.mask,
-                supports_aligned=supports_aligned,
+            result = intervene(
+                runner,
+                test,
+                prob_test,
+                budget,
+                rng=rng,
+                seed=settings.seed,
+                intervention_accuracy=human_acc,
+                score_threshold=settings.intervention_threshold,
+                strategy=settings.intervention_strategy,
                 encoding=settings.encoding,
                 low_values=low_values,
                 high_values=high_values,
             )
-            result.y_pred_after = np.argmax(result.y_prob_after, axis=1)
 
-        # Extract intervention statistics
-        acc_intervened = float((result.y_pred_after == test.y.astype(int)).mean())
-
-        n_intervened = int(np.sum(result.mask))
-        n_samples = prob_test.shape[0]
-
-        intervened_concepts = np.any(result.mask, axis=0)
-        C_pred_binary = (result.C_pred >= 0.5).astype(int)
-        C_final_binary = (result.C_intervened >= 0.5).astype(int)
-        actual_edits_mask = C_pred_binary != C_final_binary
-        prediction_num_concepts_intervened_on = {
-            int(i): int(np.sum(actual_edits_mask[i])) for i in range(n_samples)
-        }
-
-        y_pred_before = np.argmax(result.y_prob_before, axis=1)
-        num_preds_change = int(np.sum(result.y_pred_after != y_pred_before))
-
+        metrics = intervention_metrics(
+            result.mask,
+            result.C_pred,
+            result.C_intervened,
+            result.y_prob_before,
+            result.y_prob_after,
+            test.y,
+            acc_det,
+        )
         if settings.records_dir:
             _save_intervention_records(
                 settings.records_dir,
@@ -1553,33 +1430,17 @@ def _test_interventions(
                 concept_names,
                 result,
                 test,
-                y_pred_before,
+                np.argmax(result.y_prob_before, axis=1),
             )
-
-        concept_intervention_counts = {
-            c: f"{int(np.sum(result.mask[:, i]))} ({int(np.sum(actual_edits_mask[:, i]))})"
-            for i, c in enumerate(concept_names)
-            if i < intervened_concepts.shape[0] and intervened_concepts[i]
-        }
-
+        edits = (result.C_pred >= 0.5) != (result.C_intervened >= 0.5)
         key = f"top_{budget}_human_acc_{int(human_acc * 100)}"
         intervention_results[key] = {
-            "accuracy": acc_intervened,
-            "accuracy_gain": acc_intervened - acc_det,
-            "predictions_intervened_on": int(np.sum(np.any(result.mask, axis=1))),
-            "interventions_rate": float(
-                np.sum(np.any(result.mask, axis=1)) / n_samples
-            ),
-            "predictions_changed": num_preds_change,
-            "avg_edits_per_intervention": float(
-                sum(prediction_num_concepts_intervened_on.values())
-            )
-            / n_samples,
-            "total_concept_confirmations": int(n_intervened),
-            "total_concept_edits_made": int(
-                sum(prediction_num_concepts_intervened_on.values())
-            ),
-            "concept_interventions": concept_intervention_counts,
+            **metrics,
+            "concept_interventions": {
+                c: f"{int(np.sum(result.mask[:, i]))} ({int(np.sum(edits[:, i]))})"
+                for i, c in enumerate(concept_names)
+                if i < result.mask.shape[1] and np.any(result.mask[:, i])
+            },
             "human_accuracy": human_acc,
         }
 

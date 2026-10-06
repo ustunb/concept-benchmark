@@ -1,13 +1,15 @@
 """Thresholds for selective classification in the sudoku pipeline."""
 
-import sys
-from pathlib import Path
-
 import numpy as np
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-sudoku_pipeline = pytest.importorskip("sudoku_pipeline")
+from concept_benchmark.evaluation import (
+    abstention_threshold,
+    classwise_thresholds,
+    decision_threshold,
+    selective_at,
+    selective_at_classwise,
+)
 
 
 def _two_level_model(n_valid=50, n_invalid=50, n_wrong_low=0, p_valid=0.9, rng=None):
@@ -23,12 +25,10 @@ def _two_level_model(n_valid=50, n_invalid=50, n_wrong_low=0, p_valid=0.9, rng=N
 @pytest.mark.parametrize("p_valid", [0.6, 0.9, 0.97])
 def test_fitted_threshold_keeps_what_the_fit_kept(n_wrong_low, p_valid):
     y, p = _two_level_model(n_wrong_low=n_wrong_low, p_valid=p_valid)
-    decision, _ = sudoku_pipeline._decision_threshold_sweep(y, p)
-    t, fitted_coverage = sudoku_pipeline._selective_accuracy_threshold(
-        y, p, 0.95, decision
-    )
+    decision, _ = decision_threshold(y, p)
+    t, fitted_coverage = abstention_threshold(y, p, 0.95, decision)
     assert t is not None
-    accuracy, coverage = sudoku_pipeline._selective_at_thresholds(y, p, t, decision)
+    accuracy, coverage = selective_at(y, p, t, decision)
     assert coverage == pytest.approx(
         fitted_coverage
     )  # ties at the threshold are kept by both rules
@@ -40,8 +40,8 @@ def test_fitted_threshold_never_keeps_the_next_confidence_level():
     p = np.array(
         [1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 2e-7, 4e-7]
     )  # last board is wrong and nearly as confident
-    t, fitted_coverage = sudoku_pipeline._selective_accuracy_threshold(y, p, 1.0, 0.5)
-    _, coverage = sudoku_pipeline._selective_at_thresholds(y, p, t, 0.5)
+    t, fitted_coverage = abstention_threshold(y, p, 1.0, 0.5)
+    _, coverage = selective_at(y, p, t, 0.5)
     assert coverage == pytest.approx(fitted_coverage) == pytest.approx(0.9)
 
 
@@ -51,14 +51,10 @@ def test_classwise_thresholds_keep_the_clean_class():
     y = np.array([1] * 50 + [0] * 50)
     p = np.array([0.9] * 40 + [0.02] * 10 + [0.001] * 50)
     decision = 0.5
-    single_t, _ = sudoku_pipeline._selective_accuracy_threshold(y, p, 0.95, decision)
-    _, single_coverage = sudoku_pipeline._selective_at_thresholds(
-        y, p, single_t, decision
-    )
-    t_pos, t_neg = sudoku_pipeline._classwise_accuracy_thresholds(y, p, 0.95, decision)
-    accuracy, coverage = sudoku_pipeline._selective_at_classwise_thresholds(
-        y, p, t_pos, t_neg, decision
-    )
+    single_t, _ = abstention_threshold(y, p, 0.95, decision)
+    _, single_coverage = selective_at(y, p, single_t, decision)
+    t_pos, t_neg = classwise_thresholds(y, p, 0.95, decision)
+    accuracy, coverage = selective_at_classwise(y, p, t_pos, t_neg, decision)
     assert single_coverage == pytest.approx(
         0.5
     )  # one threshold must also defer every accepted board
@@ -73,22 +69,17 @@ def test_classwise_thresholds_return_none_for_a_side_that_cannot_reach_the_targe
     p = np.array(
         [0.9, 0.9, 0.9, 0.9, 0.1, 0.1]
     )  # called valid: 50% right; called invalid: 0% right
-    t_pos, t_neg = sudoku_pipeline._classwise_accuracy_thresholds(y, p, 0.95, 0.5)
+    t_pos, t_neg = classwise_thresholds(y, p, 0.95, 0.5)
     assert t_pos is None and t_neg is None
-    assert (
-        sudoku_pipeline._selective_at_classwise_thresholds(y, p, t_pos, t_neg, 0.5)[1]
-        == 0.0
-    )
+    assert selective_at_classwise(y, p, t_pos, t_neg, 0.5)[1] == 0.0
 
 
 def test_classwise_threshold_keeps_the_predictions_it_was_fitted_on():
     # 1 - (1 - 0.1) is not 0.1 in floating point: the threshold must be the probability itself
     y = np.array([0, 0, 0, 0, 0, 1])
     p = np.array([0.1, 0.1, 0.1, 0.1, 0.1, 0.4])
-    t_pos, t_neg = sudoku_pipeline._classwise_accuracy_thresholds(y, p, target_acc=1.0)
-    accuracy, coverage = sudoku_pipeline._selective_at_classwise_thresholds(
-        y, p, t_pos, t_neg, 0.5
-    )
+    t_pos, t_neg = classwise_thresholds(y, p, target_acc=1.0)
+    accuracy, coverage = selective_at_classwise(y, p, t_pos, t_neg, 0.5)
     assert t_neg == 0.1
     assert accuracy == 1.0
     assert coverage == pytest.approx(5 / 6)
@@ -99,11 +90,7 @@ def test_classwise_fit_and_evaluation_agree_on_random_probabilities():
     for _ in range(200):
         y = rng.integers(0, 2, size=40)
         p = np.round(rng.random(40), 2)
-        t_pos, t_neg = sudoku_pipeline._classwise_accuracy_thresholds(
-            y, p, target_acc=0.9
-        )
-        accuracy, coverage = sudoku_pipeline._selective_at_classwise_thresholds(
-            y, p, t_pos, t_neg, 0.5
-        )
+        t_pos, t_neg = classwise_thresholds(y, p, target_acc=0.9)
+        accuracy, coverage = selective_at_classwise(y, p, t_pos, t_neg, 0.5)
         if coverage > 0:
             assert accuracy >= 0.9 - 1e-12

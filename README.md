@@ -329,45 +329,25 @@ Quickstart: one command trains the paper's models for one seed and draws the fig
 python scripts/robot_pipeline.py --seed 1014 --concept-preset ground_truth --stages setup cbm dnn intervene collect plot
 ```
 
-The same in code, to swap in your own model or plot your own results (requires cloning the repo):
+The same in code (requires cloning the repo); each call is a block the pipeline runs, so swap in your own model or your own results:
 
 ```python
-import numpy as np
 import pandas as pd
 from concept_benchmark.robots import DatasetGenerator
-from concept_benchmark.evaluation import plot_intervention_curve
-from concept_benchmark.utils import set_deterministic_seed
-from experiments.models import ConceptDetector, ConceptBasedModel, RobotClassifierCNN, RobotConceptClassifier
-from experiments.intervention import ConceptInterventionRunner, InterventionConfig
-from experiments.kflip import KFlipInterventionStrategy
-from experiments.utils import determine_device, get_loader_config, train_dnn
+from concept_benchmark.evaluation import accuracy, plot_intervention_curve
+from experiments.evaluate import intervention_table, predict_labels, train_cbm, train_dnn
+from experiments.models import RobotClassifierCNN
 
-def train_and_intervene(concept_preset, name):
-    """Generate data, train a CBM and return its accuracy with k = 0, 1, 3 and all concepts corrected."""
-    set_deterministic_seed(1014)
-    ds = DatasetGenerator(seed=1014, concept_preset=concept_preset).generate_splits()
-    cd = ConceptDetector(model=RobotConceptClassifier(num_concepts=ds.train.n_concepts, input_size=32))
-    cbm = ConceptBasedModel(concept_detector=cd)
-    cbm.fit(ds.train, ds.val, freeze_backbone=False,  # False: train the concept detector too
-            concept_fit_params={"epochs": 50, "lr": 1e-3, "patience": 10})
-    rows = [{"budget": 0, "accuracy": np.mean(cbm.predict(ds.test) == ds.test.y)}]
-    runner = ConceptInterventionRunner(model=cbm)
-    for k in (1, 3, ds.test.n_concepts):
-        config = InterventionConfig(per_instance_budget=k, score_threshold=0.2)
-        result = runner.run(KFlipInterventionStrategy(), config, ds.test)
-        rows.append({"budget": k, "accuracy": np.mean(result.y_pred_after == ds.test.y)})
-    return pd.DataFrame(rows).assign(model=name), ds
-
-true_results, ds = train_and_intervene("ground_truth", "CBM, true_concepts")
-human_results, _ = train_and_intervene("foot_subtypes", "CBM, human_concepts")
-results = pd.concat([true_results, human_results])
+tables = []
+for preset, name in (("ground_truth", "CBM, true_concepts"), ("foot_subtypes", "CBM, human_concepts")):
+    ds = DatasetGenerator(seed=1014, concept_preset=preset).generate_splits()
+    cbm = train_cbm(ds.train, ds.val, seed=1014)
+    tables.append(intervention_table(cbm, ds.test, budgets=(1, 3, "max"), seed=1014).assign(model=name))
+results = pd.concat(tables)
 print(results.pivot(index="model", columns="budget", values="accuracy").round(3))
 
-# DNN: image -> label, without concepts
-set_deterministic_seed(1014)
-dnn_accuracy = train_dnn(RobotClassifierCNN(input_size=32), ds.train, ds.val, ds.test,
-                         determine_device(), loader_config=get_loader_config())
-print(f"DNN: {dnn_accuracy:.3f}")
+dnn = train_dnn(RobotClassifierCNN(input_size=32), ds.train, ds.val, seed=1014)  # image -> label, no concepts
+dnn_accuracy = accuracy(predict_labels(dnn, ds.test), ds.test.y)
 
 fig, ax = plot_intervention_curve(results, group="model", baseline_accuracy=dnn_accuracy)
 fig.savefig("robot_example.png", dpi=150, bbox_inches="tight")
@@ -455,59 +435,30 @@ Quickstart: one command trains the paper's models on the handwritten boards of o
 python scripts/sudoku_pipeline.py --seed 171 --cell-px 18 --target-accuracy 0.95 --stages setup ocr cs dnn intervene selective collect plot
 ```
 
-The same in code, on the digits of each board instead of its image (requires cloning the repo):
+The same in code, on the digits of each board instead of its image (requires cloning the repo); the blocks are the ones the pipeline runs:
 
 ```python
 from concept_benchmark.sudoku import DatasetGenerator
-from concept_benchmark.evaluation import confidence_threshold, plot_automation
-from experiments.models import (
-    ConceptBasedModel, ConceptDetector, FrontEndModel, GroupPoolingConceptSudokuCNN, SudokuValidatorCNN,
-)
-from experiments.intervention import ConceptInterventionRunner, InterventionConfig
-from experiments.kflip import KFlipInterventionStrategy
-from experiments.utils import determine_device, get_loader_config, train_dnn
-import numpy as np
-import pandas as pd
-import torch
+from concept_benchmark.evaluation import plot_automation
+from experiments.evaluate import automation_table, coverage_at_target, train_cbm, train_dnn
+from experiments.models import GroupPoolingConceptSudokuCNN, SudokuValidatorCNN
 
 dataset = DatasetGenerator(
     seed=171, n_boards=1000, max_cell_swaps=9, data_type="tabular",  # the digits of each board, not its image
 ).generate_splits()
-train, val, test = dataset.train, dataset.val, dataset.test
-device, loader_config = determine_device(), get_loader_config()
 
-# CBM: a concept detector (board -> 27 validity concepts) and a label predictor (concepts -> valid)
-cd = ConceptDetector(model=GroupPoolingConceptSudokuCNN())
-cd.fit(train, val, fit_params={"epochs": 100, "lr": 1e-3, "patience": 20, "device": str(device), **loader_config})
-fe = FrontEndModel()
-fe.fit(train.C, train.y)
-cbm = ConceptBasedModel(concept_detector=cd, label_predictor=fe)
+# CBM: board -> 27 validity concepts -> valid; DNN: board -> valid
+cbm = train_cbm(dataset.train, dataset.val, detector=GroupPoolingConceptSudokuCNN(),
+                epochs=100, patience=20, seed=171, should_propagate=True)
+dnn = train_dnn(SudokuValidatorCNN(), dataset.train, dataset.val, seed=171)
 
-# DNN: board -> valid, without concepts
-dnn = SudokuValidatorCNN()
-train_dnn(dnn, train, val, test, device, loader_config=loader_config)
-with torch.no_grad():
-    boards = torch.as_tensor(np.asarray(test.X), dtype=torch.long, device=device)
-    p_dnn = torch.sigmoid(dnn.to(device)(boards)).squeeze().cpu().numpy()
+# both abstain until they are right on 95% of the boards they keep; a human checks up to k concepts of a board the CBM would defer
+results = automation_table(cbm, dataset.val, dataset.test, budgets=(1, 3, "max"), target_accuracy=0.95, seed=171)
+_, dnn_coverage = coverage_at_target(dnn, dataset.val, dataset.test, target_accuracy=0.95)
+print(results[["budget", "coverage_after", "total_concept_checks"]], f"\nDNN coverage: {dnn_coverage:.3f}")
 
-def coverage(p_valid, target=0.95):
-    """Share of boards a model keeps when it abstains until it is right on `target` of the boards it keeps."""
-    confidence = np.abs(p_valid - 0.5)
-    threshold = confidence_threshold((p_valid >= 0.5).astype(int), test.y, confidence, target)
-    return 0.0 if threshold is None else np.mean(confidence >= threshold)
-
-# a human checks up to k concepts of a board; each check costs 1/27 of the work on that board
-runner = ConceptInterventionRunner(model=cbm)
-rows = [{"budget": 0, "coverage_after": coverage(cbm.predict_proba(test)[:, 1]), "total_concept_checks": 0}]
-for k in (1, 3, test.n_concepts):
-    config = InterventionConfig(per_instance_budget=k, score_threshold=0.2)
-    result = runner.run(KFlipInterventionStrategy(), config, test)
-    rows.append({"budget": k, "coverage_after": coverage(result.y_prob_after[:, 1]),
-                 "total_concept_checks": int(result.mask.sum())})
-results = pd.DataFrame(rows)
-print(results, f"\nDNN coverage: {coverage(p_dnn):.3f}")
-
-fig, ax = plot_automation(results, n_instances=test.n, n_concepts=test.n_concepts, baseline_coverage=coverage(p_dnn))
+fig, ax = plot_automation(results, n_instances=dataset.test.n, n_concepts=27,
+                          baseline_coverage=dnn_coverage, target_accuracy=0.95)
 fig.savefig("sudoku_example.png", dpi=150, bbox_inches="tight")
 ```
 
