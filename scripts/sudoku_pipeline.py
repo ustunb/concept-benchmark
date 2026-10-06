@@ -22,6 +22,7 @@ import torch
 import torch.nn as nn
 
 from concept_benchmark.evaluation import (
+    PlattScaling,
     abstention_threshold,
     selective_kept,
 )
@@ -40,11 +41,7 @@ from experiments.cem_integration import (
     train_ecbm_model,
     train_probcbm_model,
 )
-from experiments.evaluate import (
-    automation_table,
-    calibrate_concepts,
-    predict_proba_positive,
-)
+from experiments.evaluate import automation_table, predict_proba_positive
 from experiments.evaluate import train_cbm as train_cbm_block
 from experiments.evaluate import train_dnn as train_dnn_block
 from experiments.models import (
@@ -103,16 +100,6 @@ def train_ocr(config: SudokuBenchmarkConfig) -> None:
         str(config.cell_px),
     ]
     subprocess.run(cmd, check=True)
-
-
-def _calibrate_if_needed(config: SudokuBenchmarkConfig, cs_model, data) -> None:
-    """Platt-scale the concepts of a saved CBM on validation when the config asks for it and the model has none."""
-    detector = getattr(cs_model, "concept_detector", None)
-    if not config.calibrate_concepts or not hasattr(detector, "calibrate"):
-        return
-    if getattr(detector, "calibration_params", None) is None:
-        logger.info("Calibrating the concept probabilities on the validation split")
-        calibrate_concepts(cs_model, data.validation)
 
 
 def _selected_cs_key(config: SudokuBenchmarkConfig) -> str:
@@ -215,7 +202,6 @@ def train_cs(
             seed=config.seed,
             loader_config={k: v for k, v in loader_config.items() if k != "device"},
             should_propagate=True,
-            should_calibrate=config.calibrate_concepts,
         )
 
     test_pred = cbm.predict(data.test)
@@ -337,7 +323,6 @@ def diagnose_confidence(
             config.get_model_path(_selected_cs_key(config), data_type="tabular")
         )
         cs_model._random_state = config.seed
-        _calibrate_if_needed(config, cs_model, data)
 
     saved = {}
     for name, split in (("val", data.validation), ("test", data.test)):
@@ -411,7 +396,6 @@ def run_interventions(
             config.get_model_path(_selected_cs_key(config), data_type="tabular")
         )
         cs_model._random_state = config.seed
-        _calibrate_if_needed(config, cs_model, data)
 
     budgets = [data.n_concepts if b == -1 else b for b in config.intervention_budgets]
     cs_intervention_df = automation_table(
@@ -422,6 +406,7 @@ def run_interventions(
         target_accuracy=config.target_accuracy,
         seed=config.seed,
         concept_groups=config.block_size**2,
+        calibrate=config.calibrate,
     )
     if (
         "abstention_threshold" not in cs_intervention_df.columns
@@ -784,7 +769,6 @@ def run(
         if cs_path.exists():
             _shared_cs = load(cs_path)
             _shared_cs._random_state = config.seed
-            _calibrate_if_needed(config, _shared_cs, _shared_data)
 
         dnn_path = config.get_model_path("dnn", data_type="tabular")
         if dnn_path.exists():
@@ -895,6 +879,9 @@ def compute_selective_results(
         predict_proba_positive(dnn, data.test, device=device),
         np.asarray(data.test.y),
     )
+    if config.calibrate:
+        scale = PlattScaling().fit(dnn_val_probs, dnn_val_y)
+        dnn_val_probs, dnn_test_probs = scale(dnn_val_probs), scale(dnn_test_probs)
     dnn_raw_acc = float(
         ((dnn_test_probs >= 0.5).astype(int) == dnn_test_y.astype(int)).mean()
     )
@@ -918,7 +905,6 @@ def compute_selective_results(
             config.get_model_path(_selected_cs_key(config), data_type="tabular")
         )
         cs_model._random_state = config.seed
-        _calibrate_if_needed(config, cs_model, data)
 
     cs_val_probs, cs_val_y = (
         predict_proba_positive(cs_model, data.validation),
@@ -928,6 +914,9 @@ def compute_selective_results(
         predict_proba_positive(cs_model, data.test),
         np.asarray(data.test.y),
     )
+    if config.calibrate:
+        scale = PlattScaling().fit(cs_val_probs, cs_val_y)
+        cs_val_probs, cs_test_probs = scale(cs_val_probs), scale(cs_test_probs)
     cs_raw_acc = float(
         ((cs_test_probs >= 0.5).astype(int) == cs_test_y.astype(int)).mean()
     )

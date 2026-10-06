@@ -14,6 +14,7 @@ import torch
 from torch import nn
 
 from concept_benchmark.evaluation import (
+    PlattScaling,
     abstention_threshold,
     intervention_metrics,
     selective_at,
@@ -205,23 +206,25 @@ def predict_labels(model, dataset, *, device=None) -> np.ndarray:
 
 
 def coverage_at_target(
-    model, validation, test, target_accuracy: float
+    model, validation, test, target_accuracy: float, *, calibrate: bool = True
 ) -> tuple[float, float]:
     """Selective accuracy and coverage on `test` of a model that abstains until it reaches `target_accuracy`.
 
-    The abstention threshold is fitted on `validation` as in the paper; the model predicts the positive
-    class above 0.5. Returns ``(nan, 0.0)`` when no threshold reaches the target.
+    The label probability is Platt-scaled on `validation` (``calibrate``), the abstention threshold is
+    fitted there as in the paper, and the model predicts the positive class above 0.5. Returns
+    ``(nan, 0.0)`` when no threshold reaches the target.
     """
     val_prob, val_y = (
         predict_proba_positive(model, validation),
         np.asarray(validation.y).astype(int),
     )
-    threshold, _ = abstention_threshold(val_y, val_prob, target_accuracy)
+    scale = PlattScaling().fit(val_prob, val_y) if calibrate else PlattScaling()
+    threshold, _ = abstention_threshold(val_y, scale(val_prob), target_accuracy)
     if threshold is None:
         return float("nan"), 0.0
     return selective_at(
         np.asarray(test.y).astype(int),
-        predict_proba_positive(model, test),
+        scale(predict_proba_positive(model, test)),
         threshold,
         0.5,
     )
@@ -417,14 +420,16 @@ def automation_table(
     target_accuracy: float,
     seed: int,
     concept_groups: int | None = None,
+    calibrate: bool = True,
 ) -> pd.DataFrame:
     """Coverage and the checks it costs with 0, then each budget of concept checks per instance: the automation table.
 
-    The paper's protocol (conceptual safeguards): the model predicts a valid board above 0.5 and abstains
-    on ``t <= p <= 1 - t``, with the threshold ``t`` fitted once on the validation predictions (the label
-    probabilities the strategy itself works with) so that the kept predictions reach `target_accuracy`;
-    a human then checks up to k concepts of each board the model abstains on, and the same gate is applied
-    to the probabilities after the checks.
+    The paper's protocol (conceptual safeguards): the label probability the strategy works with is
+    Platt-scaled on the validation predictions (``calibrate``); the model predicts a valid board above 0.5
+    and abstains on ``t <= p <= 1 - t``, with the threshold ``t`` fitted once on those validation
+    predictions so that the kept predictions reach `target_accuracy`; a human then checks up to k concepts
+    of each board the model abstains on, and the same scaling and gate are applied to the probabilities
+    after the checks.
     One row per budget with the columns the sudoku pipeline writes (``coverage_after``,
     ``selective_accuracy_after``, ``total_concept_checks``, ...). Pass it to ``plot_automation``.
     With `concept_groups` (concepts per group, e.g. 9 for sudoku rows/columns/blocks), the checks are also
@@ -439,16 +444,25 @@ def automation_table(
     val_k0 = runner.run(
         policy, probe, validation
     )  # k=0: the probabilities before any check
-    val_prob = val_k0.y_prob_after[:, 1]
     val_y = np.asarray(validation.y).astype(int)
+    scale = (
+        PlattScaling().fit(val_k0.y_prob_after[:, 1], val_y)
+        if calibrate
+        else PlattScaling()
+    )
+
+    def scaled(y_prob: np.ndarray) -> np.ndarray:
+        p = scale(y_prob[:, 1])
+        return np.column_stack([1.0 - p, p])
+
+    val_prob = scaled(val_k0.y_prob_after)[:, 1]
     threshold, _ = abstention_threshold(val_y, val_prob, target_accuracy)
     y_test = np.asarray(test.y).astype(int)
     all_budgets = _budgets(budgets, test.n_concepts)
     test_k0 = runner.run(policy, probe, test)
+    test_prob_0 = scaled(test_k0.y_prob_after)
     if threshold is None:
-        raw_accuracy = float(
-            ((test_k0.y_prob_after[:, 1] >= 0.5).astype(int) == y_test).mean()
-        )
+        raw_accuracy = float(((test_prob_0[:, 1] >= 0.5).astype(int) == y_test).mean())
         return pd.DataFrame(
             [
                 {
@@ -467,13 +481,13 @@ def automation_table(
             ]
         )
 
-    accuracy_0, coverage_0 = selective_at(
-        y_test, test_k0.y_prob_after[:, 1], threshold, 0.5
-    )
+    accuracy_0, coverage_0 = selective_at(y_test, test_prob_0[:, 1], threshold, 0.5)
     rows = [
         {
             "budget": 0,
-            "accuracy": float((test_k0.y_pred_after == y_test).mean()),
+            "accuracy": float(
+                ((test_prob_0[:, 1] >= 0.5).astype(int) == y_test).mean()
+            ),
             "predictions_intervened_on": 0,
             "total_concept_checks": 0,
             **_group_checks(np.zeros_like(test_k0.mask), concept_groups),
@@ -487,15 +501,18 @@ def automation_table(
         config = InterventionConfig(
             abstention_threshold=threshold, per_instance_budget=k, random_state=seed
         )
-        result = runner.run(policy, config, test, y_prob_baseline=test_k0.y_prob_after)
-        accuracy_k, coverage_k = selective_at(
-            y_test, result.y_prob_after[:, 1], threshold, 0.5
-        )
+        # the strategy defers on the scaled probabilities (passed as the baseline) and the checked
+        # boards' new probabilities are scaled the same way before the gate
+        result = runner.run(policy, config, test, y_prob_baseline=test_prob_0)
+        test_prob_k = scaled(result.y_prob_after)
+        accuracy_k, coverage_k = selective_at(y_test, test_prob_k[:, 1], threshold, 0.5)
         edits = (result.C_pred >= 0.5) != (result.C_intervened >= 0.5)
         rows.append(
             {
                 "budget": k,
-                "accuracy": float((result.y_pred_after == y_test).mean()),
+                "accuracy": float(
+                    ((test_prob_k[:, 1] >= 0.5).astype(int) == y_test).mean()
+                ),
                 "predictions_intervened_on": int(np.sum(np.any(result.mask, axis=1))),
                 "total_concept_checks": int(np.sum(result.mask)),
                 **_group_checks(result.mask, concept_groups),

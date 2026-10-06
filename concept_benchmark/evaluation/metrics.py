@@ -211,6 +211,40 @@ def intervention_metrics(
 _TIE_MARGIN = 1e-6  # see abstention_threshold
 
 
+class PlattScaling:
+    """Platt scaling of a label probability: ``p -> sigmoid(a * logit(p) + b)``, fitted on validation.
+
+    Abstention with a guarantee (conceptual safeguards, Proposition 1) needs a calibrated label
+    probability. A concept bottleneck that propagates concept uncertainty through an AND of many concepts
+    is underconfident about the positive class; this one-parameter-pair fit on validation corrects that
+    before the gate ``[t, 1 - t]`` is applied. ``fit`` returns the object; ``__call__`` applies it.
+    """
+
+    def __init__(self) -> None:
+        self.a = 1.0
+        self.b = 0.0
+
+    @staticmethod
+    def _logit(prob_positive: np.ndarray) -> np.ndarray:
+        p = np.clip(np.asarray(prob_positive, dtype=float).reshape(-1), 1e-6, 1 - 1e-6)
+        return np.log(p / (1.0 - p))
+
+    def fit(self, prob_positive: np.ndarray, y_true: np.ndarray) -> "PlattScaling":
+        from sklearn.linear_model import LogisticRegression
+
+        y = np.asarray(y_true).astype(int)
+        if np.unique(y).size < 2:
+            return self
+        model = LogisticRegression(C=1e6, solver="lbfgs", max_iter=1000)
+        model.fit(self._logit(prob_positive)[:, None], y)
+        self.a, self.b = float(model.coef_[0, 0]), float(model.intercept_[0])
+        return self
+
+    def __call__(self, prob_positive: np.ndarray) -> np.ndarray:
+        z = self.a * self._logit(prob_positive) + self.b
+        return 1.0 / (1.0 + np.exp(-z))
+
+
 def abstention_mask(y_prob: np.ndarray, threshold: float) -> np.ndarray:
     """Which predictions a model with abstention threshold ``threshold`` abstains on.
 
