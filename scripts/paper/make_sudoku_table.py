@@ -33,15 +33,17 @@ ARCHS = [
 ]
 RESOLUTIONS = (50, 18)
 N_TEST_BOARDS, N_CONCEPTS = 200, 27
-TAU = "0.95"
+TAU = "0.99"  # the main text; the appendix sweeps the target
 
 
-def read_cells(res: int, arch: str) -> tuple[list[list[float]], list[list[float]]]:
+def read_cells(
+    res: int, arch: str, tau: str = TAU
+) -> tuple[list[list[float]], list[list[float]]]:
     """Per-seed net work automated and coverage (percent) at k = 0, 1, 3, max."""
     net, coverage = [], []
     for f in sorted(
         PAPER.sudoku_cells.glob(
-            f"sudoku__arch-{arch}__res-{res}px__tau-{TAU}__threshold-per-budget__seed-*__interventions.csv"
+            f"sudoku__arch-{arch}__res-{res}px__tau-{tau}__threshold-per-budget__seed-*__interventions.csv"
         )
     ):
         rows = read_budget_rows(f)
@@ -59,7 +61,7 @@ def read_cells(res: int, arch: str) -> tuple[list[list[float]], list[list[float]
     return net, coverage
 
 
-def dnn_coverage(res: int) -> list[float]:
+def dnn_coverage(res: int, tau: str = TAU) -> list[float]:
     """Per-seed coverage of the DNN at the selective-accuracy target (percent)."""
     values = []
     for f in sorted(
@@ -72,7 +74,7 @@ def dnn_coverage(res: int) -> list[float]:
             for r in csv.DictReader(f.open())
             if r["model"] == "dnn"
             and r["selective_cov"]
-            and abs(float(r["target_accuracy"]) - float(TAU)) < 1e-9
+            and abs(float(r["target_accuracy"]) - float(tau)) < 1e-9
         ]
     return values
 
@@ -80,6 +82,9 @@ def dnn_coverage(res: int) -> list[float]:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument(
+        "--tau", default=TAU, help="Selective-accuracy target of the cells to tabulate."
+    )
     add_results_root(ap)
     args = ap.parse_args()
     use_results_root(args)
@@ -93,7 +98,7 @@ def main() -> None:
         r"\textbf{Resolution} & \textbf{Model} & $k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$ & $k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$ \\",
     ]
     for res in RESOLUTIONS:
-        data = {arch: read_cells(res, arch) for arch, _ in ARCHS}
+        data = {arch: read_cells(res, arch, args.tau) for arch, _ in ARCHS}
         seeds = {len(net) for net, _ in data.values()}
         if len(seeds) != 1:
             raise SystemExit(
@@ -109,7 +114,7 @@ def main() -> None:
             for a, _ in ARCHS
         }
         best = [max(v for a, _ in ARCHS for v in means[a][m]) for m in (0, 1)]
-        dnn = dnn_coverage(res)
+        dnn = dnn_coverage(res, args.tau)
         if len(dnn) != n:
             raise SystemExit(
                 f"{res}px: {len(dnn)} DNN seeds, {n} for the architectures"

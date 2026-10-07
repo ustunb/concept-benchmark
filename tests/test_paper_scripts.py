@@ -167,3 +167,102 @@ def test_collecting_never_overwrites_other_content(pipeline_output, tmp_path):
     )
     result = run_script("collect_pipeline_runs.py", *arguments)
     assert result.returncode != 0 and "exists with other content" in result.stderr
+
+
+def _sudoku_cell(budgets: list[tuple[int, float, int]]) -> str:
+    """Rows of a sudoku intervention cell: (budget, coverage_after, total_concept_checks)."""
+    lines = [
+        "budget,accuracy,total_concept_checks,selective_accuracy_after,coverage_after"
+    ]
+    lines += [f"{k},0.9,{checks},0.99,{cov}" for k, cov, checks in budgets]
+    return "\n".join(lines) + "\n"
+
+
+@pytest.fixture
+def sudoku_results(tmp_path):
+    """Two seeds: a cell per architecture, resolution and target, the DNN selective files, detection rows and k-sweeps."""
+    root = tmp_path / "results"
+    cells, selective, ksweep = (
+        root / "sudoku" / d for d in ("cells", "selective", "ksweep")
+    )
+    for d in (cells, selective, ksweep):
+        d.mkdir(parents=True)
+    budgets = [(0, 0.0, 0), (1, 0.0, 10), (3, 0.0, 30), (27, 1.0, 270)]
+    for seed in (7, 8):
+        for res in (50, 18):
+            for tau, cov in (("0.95", 0.9), ("0.99", 0.6)):
+                for arch in ("cbm", "cem", "probcbm", "ecbm"):
+                    (
+                        cells
+                        / f"sudoku__arch-{arch}__res-{res}px__tau-{tau}__threshold-per-budget__seed-{seed}__interventions.csv"
+                    ).write_text(
+                        _sudoku_cell([(k, c or cov, n) for k, c, n in budgets])
+                    )
+            (
+                selective
+                / f"sudoku__arch-cbm-and-dnn__res-{res}px__threshold-per-budget__seed-{seed}__selective-all-tau.csv"
+            ).write_text(
+                "model,target_accuracy,selective_cov\ndnn,0.95,0.2\ndnn,0.99,0.05\n"
+            )
+            for split, peak in (("validation", 0.7), ("test", 0.65)):
+                (
+                    ksweep
+                    / f"sudoku__arch-cbm__res-{res}px__tau-0.99__{split}__seed-{seed}__ksweep.csv"
+                ).write_text(
+                    "budget,net_work\n"
+                    + "\n".join(
+                        f"{k},{peak if k == 3 else 0.6}"
+                        for k in (0, 1, 2, 3, 5, 8, 13, 27)
+                    )
+                    + "\n"
+                )
+    (root / "sudoku" / "detection.csv").write_text(
+        "px,seed,cell_acc_test,boards_misread_test,concept_acc_test,boards_concept_error_test\n"
+        "50,7,0.995,0.25,0.96,0.3\n50,8,0.995,0.25,0.96,0.3\n"
+        "18,7,0.99,0.5,0.9,0.6\n18,8,0.99,0.5,0.9,0.6\n"
+    )
+    return root
+
+
+def test_sudoku_table_reads_the_cells_of_the_given_target(sudoku_results, tmp_path):
+    out = tmp_path / "table.tex"
+    for tau, cbm, dnn in (("0.95", "90.0", "20.0"), ("0.99", "60.0", "5.0")):
+        result = run_script(
+            "make_sudoku_table.py",
+            "--results-root",
+            sudoku_results,
+            "--out",
+            out,
+            "--tau",
+            tau,
+        )
+        assert result.returncode == 0, result.stderr[-2000:]
+        text = out.read_text()
+        assert f"{cbm}\\%" in text and f"{dnn}\\%" in text
+
+
+def test_detection_table_reports_both_resolutions(sudoku_results, tmp_path):
+    out = tmp_path / "detection.tex"
+    result = run_script(
+        "make_sudoku_detection_table.py", "--results-root", sudoku_results, "--out", out
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    text = out.read_text()
+    assert (
+        "99.5\\%" in text
+        and "25.0\\%" in text
+        and "90.0\\%" in text
+        and "60.0\\%" in text
+    )
+
+
+def test_ksweep_plot_reports_the_validation_chosen_budget(sudoku_results, tmp_path):
+    out = tmp_path / "ksweep.pdf"
+    result = run_script(
+        "plot_sudoku_ksweep.py", "--results-root", sudoku_results, "--out", out
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert out.exists()
+    assert (
+        "50px: n=2" in result.stdout and "regret on test 0.00 points" in result.stdout
+    )
