@@ -101,6 +101,13 @@ The sudoku pipeline calibrates each model's label probability on the validation 
 
 Data generation (`setup`, `ocr`) takes about five minutes per seed; skip it on later runs with `--stages cs dnn intervene selective collect`.
 
+Two appendix inputs come from a finished run's data and CBM: the budget sweep (net work automated at every budget, on validation and test) and the detection quality of the digit recognizer and the concept detectors:
+
+```bash
+python scripts/paper/sweep_sudoku_budgets.py --seed 171 --cell-px 50 --tau 0.99 --out my_results/sudoku/ksweep
+python scripts/paper/measure_sudoku_detection.py --seeds 171 --cell-px 50 10 --out my_results/sudoku/detection.csv
+```
+
 ## Generating Datasets Only
 
 ```python
