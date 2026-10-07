@@ -22,8 +22,8 @@ import torch
 import torch.nn as nn
 
 from concept_benchmark.evaluation import (
+    PlattScaling,
     abstention_threshold,
-    decision_threshold,
     selective_kept,
 )
 from concept_benchmark.utils import (
@@ -98,6 +98,10 @@ def train_ocr(config: SudokuBenchmarkConfig) -> None:
         str(config.max_cell_swaps),
         "--cell-px",
         str(config.cell_px),
+        "--epochs",
+        str(config.ocr_epochs),
+        "--patience",
+        str(config.ocr_patience),
     ]
     subprocess.run(cmd, check=True)
 
@@ -325,9 +329,12 @@ def diagnose_confidence(
         cs_model._random_state = config.seed
 
     saved = {}
+    scale = PlattScaling()
+    if config.calibrate:
+        scale.fit(predict_proba_positive(cs_model, data.validation), data.validation.y)
     for name, split in (("val", data.validation), ("test", data.test)):
         prob_pos, y_true = predict_proba_positive(cs_model, split), np.asarray(split.y)
-        saved[f"p_{name}"] = np.asarray(prob_pos, dtype=np.float64)
+        saved[f"p_{name}"] = np.asarray(scale(prob_pos), dtype=np.float64)
         saved[f"y_{name}"] = np.asarray(y_true).astype(int)
         saved[f"C_{name}"] = np.asarray(split.C).astype(int)
         saved[f"Cp_{name}"] = np.asarray(
@@ -355,7 +362,7 @@ def diagnose_confidence(
             "expected every concept of every test board to be intervened on"
         )
     saved["p_test_true_concepts"] = np.asarray(
-        after.y_prob_after[:, 1], dtype=np.float64
+        scale(after.y_prob_after[:, 1]), dtype=np.float64
     )
 
     path = config.get_results_path(
@@ -406,6 +413,7 @@ def run_interventions(
         target_accuracy=config.target_accuracy,
         seed=config.seed,
         concept_groups=config.block_size**2,
+        calibrate=config.calibrate,
     )
     if (
         "abstention_threshold" not in cs_intervention_df.columns
@@ -874,20 +882,20 @@ def compute_selective_results(
         predict_proba_positive(dnn, data.validation, device=device),
         np.asarray(data.validation.y),
     )
-    dnn_dt, _ = decision_threshold(dnn_val_y, dnn_val_probs)
     dnn_test_probs, dnn_test_y = (
         predict_proba_positive(dnn, data.test, device=device),
         np.asarray(data.test.y),
     )
+    if config.calibrate:
+        scale = PlattScaling().fit(dnn_val_probs, dnn_val_y)
+        dnn_val_probs, dnn_test_probs = scale(dnn_val_probs), scale(dnn_test_probs)
     dnn_raw_acc = float(
-        ((dnn_test_probs >= dnn_dt).astype(int) == dnn_test_y.astype(int)).mean()
+        ((dnn_test_probs >= 0.5).astype(int) == dnn_test_y.astype(int)).mean()
     )
 
     for tau in target_accuracies:
-        confidence_t, _ = abstention_threshold(dnn_val_y, dnn_val_probs, tau, dnn_dt)
-        sel_acc, sel_cov = selective_kept(
-            dnn_test_y, dnn_test_probs, confidence_t, dnn_dt
-        )
+        confidence_t, _ = abstention_threshold(dnn_val_y, dnn_val_probs, tau)
+        sel_acc, sel_cov = selective_kept(dnn_test_y, dnn_test_probs, confidence_t)
         rows.append(
             {
                 "model": "dnn",
@@ -909,18 +917,20 @@ def compute_selective_results(
         predict_proba_positive(cs_model, data.validation),
         np.asarray(data.validation.y),
     )
-    cs_dt, _ = decision_threshold(cs_val_y, cs_val_probs)
     cs_test_probs, cs_test_y = (
         predict_proba_positive(cs_model, data.test),
         np.asarray(data.test.y),
     )
+    if config.calibrate:
+        scale = PlattScaling().fit(cs_val_probs, cs_val_y)
+        cs_val_probs, cs_test_probs = scale(cs_val_probs), scale(cs_test_probs)
     cs_raw_acc = float(
-        ((cs_test_probs >= cs_dt).astype(int) == cs_test_y.astype(int)).mean()
+        ((cs_test_probs >= 0.5).astype(int) == cs_test_y.astype(int)).mean()
     )
 
     for tau in target_accuracies:
-        confidence_t, _ = abstention_threshold(cs_val_y, cs_val_probs, tau, cs_dt)
-        sel_acc, sel_cov = selective_kept(cs_test_y, cs_test_probs, confidence_t, cs_dt)
+        confidence_t, _ = abstention_threshold(cs_val_y, cs_val_probs, tau)
+        sel_acc, sel_cov = selective_kept(cs_test_y, cs_test_probs, confidence_t)
         rows.append(
             {
                 "model": "cs",

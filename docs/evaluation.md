@@ -56,20 +56,25 @@ from concept_benchmark.evaluation import coverage
 cov = coverage(confidence, threshold=0.5)
 ```
 
-### abstention_threshold, decision_threshold, selective_at
+### PlattScaling, abstention_threshold, selective_at
 
-The paper's selective-classification protocol. `decision_threshold` finds the cut on P(positive) with the highest accuracy; `abstention_threshold` finds the largest abstention threshold `t` (the model abstains on `t <= p <= 1 - t`) at which the kept predictions reach the target; `selective_at` scores a test set under both. Fit both thresholds on validation predictions.
+The paper's selective-classification protocol (conceptual safeguards). A concept-based model's label probability
+comes from propagating concept uncertainty, which is underconfident when many concepts must hold at once, so it is
+first Platt-scaled on validation predictions (`PlattScaling`). The model then predicts the positive class above 0.5
+and abstains on `t <= p <= 1 - t`; `abstention_threshold` finds the largest `t` at which the kept validation
+predictions reach the target, and `selective_at` scores a test set under it.
 
 ```python
-from concept_benchmark.evaluation import abstention_threshold, decision_threshold, selective_at
+from concept_benchmark.evaluation import PlattScaling, abstention_threshold, selective_at
 
-decision, _ = decision_threshold(y_val, p_val)
-threshold, _ = abstention_threshold(y_val, p_val, target_accuracy=0.95, decision_threshold=decision)
-selective_acc, cov = selective_at(y_test, p_test, threshold, decision)
+scale = PlattScaling().fit(p_val, y_val)
+threshold, _ = abstention_threshold(y_val, scale(p_val), target_accuracy=0.95)
+selective_acc, cov = selective_at(y_test, scale(p_test), threshold, 0.5)
 ```
 
 `abstention_threshold` returns `(None, None)` when no threshold reaches the target; `coverage_at_target` and
-`automation_table` report coverage 0 in that case.
+`automation_table` report coverage 0 in that case. `decision_threshold` (the cut with the highest validation
+accuracy) is available for models whose probabilities cannot be calibrated; the pipelines do not use it.
 
 `classwise_thresholds` and `selective_at_classwise` fit one threshold per predicted class instead (an appendix variant).
 

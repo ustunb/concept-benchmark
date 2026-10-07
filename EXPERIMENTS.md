@@ -84,7 +84,7 @@ python experiments/real_data.py --out results/paper/real_datasets \
 ## Sudoku Benchmark
 
 ```bash
-for px in 50 18; do
+for px in 50 10; do
     for family in cbm cem probcbm ecbm; do
         python scripts/sudoku_pipeline.py --seed 171 --cell-px $px --cbm-family $family --target-accuracy 0.95
     done
@@ -94,10 +94,10 @@ done
 The paper reports a selective-accuracy target of 0.95 (`--target-accuracy`; the default is 0.90). The `selective` stage also scores every model without interventions at the targets 0.90 to 0.99. Add the optional `diagnose` stage to save each model's confidence:
 
 ```bash
-python scripts/sudoku_pipeline.py --seed 171 --cell-px 18 --target-accuracy 0.95 --stages cs intervene selective diagnose
+python scripts/sudoku_pipeline.py --seed 171 --cell-px 10 --target-accuracy 0.95 --stages cs intervene selective diagnose
 ```
 
-Single sudoku seeds can change a lot across GPU models (coverage can halve at 18px), so compare means over the ten seeds. ProbCBM also samples at prediction time, and these samples are not seeded when the evaluation stages run on their own, so its sudoku numbers vary by a few boards between runs.
+The sudoku pipeline calibrates each model's label probability on the validation split before abstaining (`calibrate: true` in the config); the automation numbers depend on it. Training the same seed on another GPU model gives a slightly different model (raw sudoku accuracy moves by one or two points), so compare means over the ten seeds rather than single seeds. ProbCBM also samples at prediction time, and these samples are not seeded when the evaluation stages run on their own, so its sudoku numbers vary by a few boards between runs.
 
 Data generation (`setup`, `ocr`) takes about five minutes per seed; skip it on later runs with `--stages cs dnn intervene selective collect`.
 

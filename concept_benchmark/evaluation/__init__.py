@@ -17,6 +17,7 @@ Plots::
 from .metrics import (
     accuracy,
     abstention_mask,
+    PlattScaling,
     abstention_threshold,
     classwise_thresholds,
     decision_threshold,
@@ -47,6 +48,7 @@ __all__ = [
     # metrics
     "accuracy",
     "abstention_mask",
+    "PlattScaling",
     "abstention_threshold",
     "classwise_thresholds",
     "decision_threshold",

@@ -115,7 +115,7 @@ def create_sudoku_dataset(
         board_list.append(b.copy())
         if data_type == "image":
             img_path = ds_path / f"valid_{i}.png"
-            transform(b, outfile=img_path)
+            transform(b, outfile=img_path, board_index=i)
             X_list.append(img_path)
         else:
             X_list.append(transform(b))
@@ -150,7 +150,7 @@ def create_sudoku_dataset(
 
         if data_type == "image":
             img_path = ds_path / f"invalid_{i}.png"
-            transform(b, outfile=img_path)
+            transform(b, outfile=img_path, board_index=n_valid + i)
             X_list.append(img_path)
         else:
             X_list.append(transform(b))
@@ -264,14 +264,22 @@ def histogram_transform(board: np.ndarray) -> np.ndarray:
     return feats.astype(np.float32)
 
 
+RENDER_VERSION = (
+    2  # 2: boards drawn at 50 px and resampled, handwriting seeded per board (Oct 2026)
+)
+_REFERENCE_CELL_PX = (
+    50  # boards are drawn at this cell size and resampled to the requested one
+)
+
+
 def image_transform(
     board: np.ndarray,
     *,
     cell_px: int = 40,
     margin_px: int = 2,
-    line_px: int = 1,
-    bold_px: int = 3,
-    font_size: int = 10,
+    line_px: int = 2,
+    bold_px: int = 5,
+    font_size: int = 25,
     standardize: bool = True,
     font_path: str | None = None,
     handwriting: bool = True,
@@ -292,14 +300,28 @@ def image_transform(
     outfile: str | None = None,
     # NEW: if True, also return (starters, candidates) alongside the image
     return_meta: bool = False,
+    board_index: int | None = None,
 ) -> np.ndarray | str | tuple:
     """Render an NxN Sudoku board to an RGB image with prior-option bubbles (handwritten).
     Each bubble shows *all* options inline in one row (tight kerning). Starters never get bubbles.
+
+    The board is drawn at ``_REFERENCE_CELL_PX`` (50 px per cell, where ``line_px``, ``bold_px`` and
+    ``font_size`` are pixel sizes) and resampled to ``cell_px``, so a board at any resolution is the
+    same picture, only smaller; at 50 px nothing is resampled.
+
+    ``board_index`` seeds the handwriting: with it, every board is written in its own strokes (a digit
+    in a cell is drawn differently on every board); without it, a digit in a cell is always drawn the
+    same way, so a dataset holds only 9 x N x N distinct glyphs.
     """
+    hand_seed = 0 if board_index is None else int(board_index) * 7919
     N = board.shape[0]
     assert board.ndim == 2 and N == board.shape[1], "board must be square"
     n = int(math.isqrt(N))
     assert n * n == N, "board size must be n*n"
+    target_px, target_margin = cell_px, margin_px
+    if cell_px != _REFERENCE_CELL_PX:
+        margin_px = round(margin_px * _REFERENCE_CELL_PX / cell_px)
+        cell_px = _REFERENCE_CELL_PX
     W = H = margin_px * 2 + cell_px * N
 
     img = Image.new("RGB", (W, H), "white")
@@ -423,7 +445,11 @@ def image_transform(
             tries = 0
             while mini >= 4 and tries < 6:
                 seq_img = _render_inline_candidates(
-                    generator, opts, fill_color, size=mini, seed_base=(r * N + c) * 997
+                    generator,
+                    opts,
+                    fill_color,
+                    size=mini,
+                    seed_base=hand_seed + (r * N + c) * 997,
                 )
                 bubble_w = seq_img.width + 2 * pad
                 bubble_h = seq_img.height + 2 * pad
@@ -505,7 +531,7 @@ def image_transform(
                 # Non-starters: handwritten if possible, otherwise printed
                 if text.isdigit() and (generator is not None):
                     hand_size_main = max(8, int(cell_px * 0.82))
-                    rng_seed = (r * N + c) * 131 + v
+                    rng_seed = hand_seed + (r * N + c) * 131 + v
                     digit_img = generator.generate(
                         digit=int(text),
                         size=hand_size_main,
@@ -529,6 +555,10 @@ def image_transform(
         outline=(0, 0, 0),
         width=bold_px,
     )
+
+    if target_px != cell_px:
+        side = target_margin * 2 + target_px * N
+        img = img.resize((side, side), Image.LANCZOS)
 
     # ----- returns -----
     if outfile:

@@ -385,7 +385,7 @@ dataset = DatasetGenerator(
     valid_board_ratio=0.5,     # fraction of valid boards
     # ── Rendering (image only) ──
     font_style="handwritten",  # "handwritten" or "printed"
-    font_size=25,              # digit font size in pixels
+    font_size=25,              # printed-digit font size at 50 px per cell; every size is this board scaled
     cell_px=50,                # cell size in pixels
     cell_margin_px=2,          # cell margin in pixels
     gridline_px=2,             # grid line width in pixels
@@ -411,8 +411,8 @@ print(df[show_cols])
 python scripts/sudoku_pipeline.py --seed 171
 python scripts/sudoku_pipeline.py --seed 171 --cbm-family cem
 
-# Harder concept detection: 18 pixels per cell instead of 50
-python scripts/sudoku_pipeline.py --seed 171 --cell-px 18
+# Harder concept detection: 10 pixels per cell instead of 50
+python scripts/sudoku_pipeline.py --seed 171 --cell-px 10
 
 # Save each model's confidence for plot_confidence (optional stage)
 python scripts/sudoku_pipeline.py --seed 171 --stages cs intervene selective diagnose plot
@@ -421,7 +421,7 @@ python scripts/sudoku_pipeline.py --seed 171 --stages cs intervene selective dia
 | Option | Description |
 |--------|-------------|
 | `--cbm-family` | `cbm`, `cem`, `probcbm` or `ecbm` |
-| `--cell-px` | Pixels per cell (50 by default; 18 blurs the handwritten digits) |
+| `--cell-px` | Pixels per cell (50 by default; at 10 the recognizer misreads a digit on half the boards) |
 | `--target-accuracy` | Selective accuracy that kept predictions must reach (0.90 by default; the paper uses 0.95) |
 | `--stages` | `setup ocr cs dnn intervene selective align collect plot`, plus the optional `diagnose` |
 
@@ -429,10 +429,10 @@ Run `python scripts/sudoku_pipeline.py --help` for the full list of options (inc
 
 #### Training and evaluation
 
-Quickstart: one command trains the paper's models on the handwritten boards of one seed (18 px per cell, the paper's hard setting) and draws the figure below:
+Quickstart: one command trains the paper's models on the handwritten boards of one seed (10 px per cell, where the recognizer misreads a digit on half the boards) and draws the figure below:
 
 ```bash
-python scripts/sudoku_pipeline.py --seed 171 --cell-px 18 --target-accuracy 0.95 --stages setup ocr cs dnn intervene selective collect plot
+python scripts/sudoku_pipeline.py --seed 171 --cell-px 10 --target-accuracy 0.95 --stages setup ocr cs dnn intervene selective collect plot
 ```
 
 The same in code, on the digits of each board instead of its image (requires cloning the repo); the blocks are the ones the pipeline is built from:
@@ -466,10 +466,13 @@ fig.savefig("sudoku_example.png", dpi=150, bbox_inches="tight")
   <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/sudoku_example.png" width="480" alt="Coverage and net work automated against the intervention budget for the CBM and the DNN, one run">
 </p>
 
-One run of the pipeline command. On this run the CBM meets the 95% target by keeping 46% of the boards (the DNN 15%),
-and checking all 27 concepts costs more work than it saves, so net work automated turns negative at k=max. A single
-run can land on either side of the target; over the paper's 10 seeds the CBM keeps 83% of the boards and net work
-automated falls to 68% at k=max. With the digits instead of the images, as in the code block, the CBM keeps every board.
+One run of the pipeline command. At 10 px per cell the recognizer misreads a digit on about half the boards, so the
+CBM answers 64% of the boards on its own (the DNN 7%). Checking up to 3 concepts on the boards it defers raises the
+boards answered to 77% and the net work automated to 73%; checking all 27 raises the boards answered to 95% but costs
+more work than it recovers, and the net work automated falls to 59%. The abstention threshold is fitted on the
+validation boards; on the test boards of this run the answered predictions are 95% correct without checks and 94%
+with all 27, since a misread digit makes the model confidently wrong on a few boards that it never defers. With the
+digits instead of the images, as in the code block, the CBM keeps every board.
 
 For a complete walkthrough including selective classification and interventions, see [`examples/sudoku_pipeline_example.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/sudoku_pipeline_example.py).
 
@@ -679,9 +682,9 @@ from concept_benchmark.evaluation import (
 | `gain(y_pred, y_true, baseline_accuracy)` | Accuracy gain over a baseline model (e.g. DNN) |
 | `selective_accuracy(y_pred, y_true, confidence, threshold)` | Accuracy on non-abstained samples |
 | `coverage(confidence, threshold)` | Fraction of samples where the model does not abstain |
-| `abstention_threshold(y_true, prob_positive, target_accuracy, decision_threshold)` | The paper's abstention rule: the threshold at which the kept predictions reach a target accuracy, and their coverage; fit it on validation predictions |
-| `decision_threshold(y_true, prob_positive)` | The cut on P(positive) with the highest accuracy |
-| `selective_at(y_true, prob_positive, abstention_threshold, decision_threshold)` | Selective accuracy and coverage under those thresholds |
+| `PlattScaling().fit(prob_positive, y_true)` | Calibrates a label probability on validation predictions, as the abstention rule requires |
+| `abstention_threshold(y_true, prob_positive, target_accuracy)` | The paper's abstention rule: the threshold at which the kept predictions reach a target accuracy, and their coverage; fit it on validation predictions |
+| `selective_at(y_true, prob_positive, abstention_threshold, 0.5)` | Selective accuracy and coverage under that threshold |
 | `intervention_metrics(mask, concepts_before, concepts_after, y_prob_before, y_prob_after, y_true, accuracy_before)` | What an intervention did: accuracy, gain, predictions and concepts touched |
 | `net_work_automated(confidence, threshold, n_interventions, n_concepts)` | Net fraction of work automated after intervention cost |
 
@@ -692,7 +695,7 @@ from concept_benchmark.evaluation import (
 | `train_cbm(train, validation, seed=..., detector=...)` | The paper's CBM: concept detector plus logistic label predictor |
 | `train_dnn(model, train, validation, seed=...)` | A binary classifier trained with early stopping |
 | `intervention_table(cbm, test, budgets=(1, 3, "max"), seed=...)` | Accuracy at each budget of corrected concepts (the decision-support table) |
-| `automation_table(cbm, validation, test, budgets=(1, 3, "max"), target_accuracy=0.95, seed=171)` | Coverage and checks at each budget under the paper's abstention protocol (the automation table) |
+| `automation_table(cbm, validation, test, budgets=(1, 3, "max"), target_accuracy=0.95, seed=171)` | Coverage and checks at each budget under the paper's abstention protocol, label probability calibrated on validation (the automation table) |
 | `coverage_at_target(model, validation, test, target_accuracy)` | Selective accuracy and coverage of any model at a target |
 | `predict_labels(model, dataset)`, `predict_proba_positive(model, dataset)` | Predictions of a DNN or a CBM |
 

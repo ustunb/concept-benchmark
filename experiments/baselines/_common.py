@@ -90,6 +90,10 @@ def require_cem_dependencies(
 
     _ensure_local_cem_checkout_on_path()
     _patch_reduce_on_plateau_for_torch_compat()
+    if not hasattr(np, "Inf"):
+        np.Inf = (
+            np.inf
+        )  # pytorch-lightning 1.9 (the version the CEM code needs) still reads np.Inf
 
     try:
         pl = importlib.import_module("pytorch_lightning")
@@ -722,14 +726,21 @@ class _OfficialBenchmarkModelBase(ConceptBasedModel):
             ),
             "pin_memory": bool(
                 self.eval_config.get("pin_memory", defaults["pin_memory"])
-            ),
+            )
+            and self._inference_device().type == "cuda",
         }
 
     def _inference_device(self) -> torch.device:
+        # The device a model was trained on is not necessarily available where it is loaded.
         configured = self.eval_config.get("device")
         if configured is None:
             return _effective_pl_device(determine_device())
-        return _effective_pl_device(torch.device(configured))
+        device = torch.device(configured)
+        if device.type == "cuda" and not torch.cuda.is_available():
+            return _effective_pl_device(determine_device())
+        if device.type == "mps" and not torch.backends.mps.is_available():
+            return _effective_pl_device(determine_device())
+        return _effective_pl_device(device)
 
     def predict_proba(
         self,

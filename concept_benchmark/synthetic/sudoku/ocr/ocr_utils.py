@@ -91,6 +91,7 @@ class SudokuCellDataset(Dataset):
         margin_px: int = 2,
         dump_debug: bool = True,
         max_debug: int = 150,
+        exclude_images: set[str] | None = None,
     ):
         self.dataset_dir = dataset_dir
         self.cell_px = cell_px
@@ -100,6 +101,8 @@ class SudokuCellDataset(Dataset):
         self.samples: list[tuple[Path, int, int, int]] = []
         for rec in self.records:
             img_name = rec["img"]
+            if exclude_images and img_name in exclude_images:
+                continue  # the test boards: the recognizer must not see their handwriting
             board = np.array(rec["board"], dtype=np.int32)
             img_path = dataset_dir / img_name
             assert board.shape == (9, 9)

@@ -68,6 +68,14 @@ class PaperResults:
         return self.root / "sudoku/confidence"
 
     @property
+    def sudoku_ksweep(self) -> Path:
+        return self.root / "sudoku/ksweep"
+
+    @property
+    def sudoku_detection(self) -> Path:
+        return self.root / "sudoku/detection.csv"
+
+    @property
     def real_datasets(self) -> Path:
         return self.root / "real_datasets"
 

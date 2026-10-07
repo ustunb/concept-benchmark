@@ -138,3 +138,20 @@ def test_decision_threshold_prefers_the_longest_run_of_tied_thresholds():
     p = np.array([0.9, 0.2])
     t, acc = decision_threshold(y, p, thresholds=np.array([0.1, 0.3, 0.4, 0.5, 0.95]))
     assert (t, acc) == (0.4, 1.0)
+
+
+def test_platt_scaling_corrects_an_underconfident_positive_class():
+    from concept_benchmark.evaluation import PlattScaling
+
+    rng = np.random.default_rng(0)
+    y = np.array([1] * 100 + [0] * 100)
+    # an AND of many concepts: valid boards at 0.2-0.4, invalid near 0
+    p = np.where(y == 1, rng.uniform(0.2, 0.4, 200), rng.uniform(0.0, 0.05, 200))
+    scale = PlattScaling().fit(p, y)
+    assert ((scale(p) >= 0.5).astype(int) == y).mean() == 1.0
+    assert scale(p)[y == 1].min() > 0.9
+    # the identity when the probabilities are already calibrated
+    q = rng.uniform(0, 1, 2000)
+    yq = (rng.uniform(0, 1, 2000) < q).astype(int)
+    identity = PlattScaling().fit(q, yq)
+    assert abs(identity.a - 1.0) < 0.1 and abs(identity.b) < 0.1

@@ -10,7 +10,7 @@ This benchmark targets automation settings where the system handles routine case
 
 ## Parameters
 
-All parameters can be passed to `DatasetGenerator(...)` (imported from `concept_benchmark.sudoku`) or as CLI flags to `sudoku_pipeline.py`:
+All parameters can be passed to `DatasetGenerator(...)` (imported from `concept_benchmark.sudoku`); `sudoku_pipeline.py` takes the common ones as flags and the rest through `--config`:
 
 ```python
 from concept_benchmark.sudoku import DatasetGenerator
@@ -25,7 +25,7 @@ dataset = DatasetGenerator(
     valid_board_ratio=0.5,     # fraction of valid boards
     # ── Rendering (image only) ──
     font_style="handwritten",  # "handwritten" or "printed"
-    font_size=25,              # digit font size in pixels
+    font_size=25,              # printed-digit font size at 50 px per cell; every size is this board scaled
     cell_px=50,                # cell size in pixels
     cell_margin_px=2,          # cell margin in pixels
     gridline_px=2,             # grid line width in pixels
@@ -43,8 +43,8 @@ To train models and run the full evaluation (selective classification, intervent
 python scripts/sudoku_pipeline.py --seed 171
 python scripts/sudoku_pipeline.py --seed 171 --cbm-family cem
 
-# Harder concept detection: 18 pixels per cell instead of 50
-python scripts/sudoku_pipeline.py --seed 171 --cell-px 18
+# Harder concept detection: 10 pixels per cell instead of 50
+python scripts/sudoku_pipeline.py --seed 171 --cell-px 10
 
 # Save each model's confidence for plot_confidence (optional stage)
 python scripts/sudoku_pipeline.py --seed 171 --stages cs intervene selective diagnose plot
@@ -53,8 +53,9 @@ python scripts/sudoku_pipeline.py --seed 171 --stages cs intervene selective dia
 | Option | Description |
 |--------|-------------|
 | `--cbm-family` | `cbm`, `cem`, `probcbm` or `ecbm` |
-| `--cell-px` | Pixels per cell (50 by default; 18 blurs the handwritten digits) |
+| `--cell-px` | Pixels per cell (50 by default; at 10 the recognizer misreads a digit on half the boards) |
 | `--target-accuracy` | Selective accuracy that kept predictions must reach (0.90 by default; the paper uses 0.95) |
+| `calibrate` (config) | Platt-scale each model's label probability on the validation split before it abstains (on by default; the safeguard rule needs calibrated probabilities) |
 | `--stages` | `setup ocr cs dnn intervene selective align collect plot`, plus the optional `diagnose` |
 
-Run `python scripts/sudoku_pipeline.py --help` for the full list of options (including training, intervention, and evaluation parameters).
+Run `python scripts/sudoku_pipeline.py --help` for the full list of flags; training parameters (`cs_epochs`, `cs_patience`, `ocr_epochs`, `ocr_patience`, `epochs`, `batch_size`) are set in a YAML config passed with `--config`.

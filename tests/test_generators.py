@@ -274,6 +274,46 @@ class TestSudokuDatasetGenerator:
         assert folder == gen.config.get_dataset_path(data_type="image")
         assert folder.name == "sudoku_image_n3_ns10_mc9_px50_seed42"
 
+    def test_boards_at_any_cell_size_are_the_50px_board_scaled(self, tmp_path):
+        import numpy as np
+        from PIL import Image
+        from concept_benchmark.synthetic.sudoku import image_transform
+        from concept_benchmark.synthetic.sudoku.utils import generate_valid_board
+
+        board = generate_valid_board(rng=np.random.default_rng(3))
+        images = {}
+        for px in (18, 50):
+            image_transform(
+                board, cell_px=px, margin_px=2, outfile=tmp_path / f"{px}.png"
+            )
+            images[px] = Image.open(tmp_path / f"{px}.png").convert("L")
+        assert images[18].size == (2 * 2 + 9 * 18,) * 2
+        assert images[50].size == (2 * 2 + 9 * 50,) * 2
+        # the small board is the 50 px drawing (with the margin scaled up alike) resampled
+        image_transform(board, cell_px=50, margin_px=6, outfile=tmp_path / "ref.png")
+        reference = Image.open(tmp_path / "ref.png").convert("L")
+        again = np.asarray(
+            reference.resize(images[18].size, Image.LANCZOS), dtype=float
+        )
+        small = np.asarray(images[18], dtype=float)
+        assert np.abs(again - small).mean() < 1.0
+        # so the share of ink is the same at both sizes: nothing overflows or is dropped
+        assert abs((np.asarray(images[50]) < 128).mean() - (small < 128).mean()) < 0.02
+
+    def test_every_board_has_its_own_handwriting(self, tmp_path):
+        import numpy as np
+        from PIL import Image
+        from concept_benchmark.synthetic.sudoku import image_transform
+        from concept_benchmark.synthetic.sudoku.utils import generate_valid_board
+
+        board = generate_valid_board(rng=np.random.default_rng(5))
+        image_transform(board, cell_px=50, outfile=tmp_path / "a.png", board_index=1)
+        image_transform(board, cell_px=50, outfile=tmp_path / "b.png", board_index=2)
+        a, b = (np.asarray(Image.open(tmp_path / f"{n}.png")) for n in "ab")
+        assert not np.array_equal(a, b)  # same digits, different strokes
+        # the grid and the printed starters are identical, only the handwriting moves
+        assert (a != b).mean() < 0.1
+
     def test_boards_stored_in_meta(self):
         ds = DatasetGenerator(
             "sudoku", seed=42, n_boards=20, data_type="tabular"
