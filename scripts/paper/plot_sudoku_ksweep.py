@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 from _common import PAPER, add_results_root, use_results_root  # noqa: E402
 
 BUDGETS = (0, 1, 2, 3, 5, 8, 13, 27)
-RESOLUTIONS = (50, 18)
+RESOLUTIONS = (50, 10)
 TAU = "0.99"
 COLORS = {"validation": "#4D4D4D", "test": "#3B6FB6"}
 

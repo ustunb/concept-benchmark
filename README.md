@@ -429,10 +429,10 @@ Run `python scripts/sudoku_pipeline.py --help` for the full list of options (inc
 
 #### Training and evaluation
 
-Quickstart: one command trains the paper's models on the handwritten boards of one seed (18 px per cell, where the digits are harder to read) and draws the figure below:
+Quickstart: one command trains the paper's models on the handwritten boards of one seed (10 px per cell, where the recognizer misreads a digit on half the boards) and draws the figure below:
 
 ```bash
-python scripts/sudoku_pipeline.py --seed 171 --cell-px 18 --target-accuracy 0.95 --stages setup ocr cs dnn intervene selective collect plot
+python scripts/sudoku_pipeline.py --seed 171 --cell-px 10 --target-accuracy 0.95 --stages setup ocr cs dnn intervene selective collect plot
 ```
 
 The same in code, on the digits of each board instead of its image (requires cloning the repo); the blocks are the ones the pipeline is built from:
@@ -466,12 +466,13 @@ fig.savefig("sudoku_example.png", dpi=150, bbox_inches="tight")
   <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/sudoku_example.png" width="480" alt="Coverage and net work automated against the intervention budget for the CBM and the DNN, one run">
 </p>
 
-One run of the pipeline command. The CBM answers 97.5% of the boards on its own (the DNN 7%) and 99.5% after a
-human checks up to 27 concepts on the boards it defers; the checks cost about as much work as they recover, so net
-work automated stays at 97%. The abstention threshold is fitted on the validation boards; on the test boards of this
-run the answered predictions are 89% correct, below the 95% target, because a misread digit makes the model
-confidently wrong on a few boards that it never defers. With the digits instead of the images, as in the code block,
-the CBM keeps every board.
+One run of the pipeline command. At 10 px per cell the recognizer misreads a digit on about half the boards, so the
+CBM answers 64% of the boards on its own (the DNN 7%). Checking up to 3 concepts on the boards it defers raises the
+boards answered to 77% and the net work automated to 73%; checking all 27 raises the boards answered to 95% but costs
+more work than it recovers, and the net work automated falls to 59%. The abstention threshold is fitted on the
+validation boards; on the test boards of this run the answered predictions are 95% correct without checks and 94%
+with all 27, since a misread digit makes the model confidently wrong on a few boards that it never defers. With the
+digits instead of the images, as in the code block, the CBM keeps every board.
 
 For a complete walkthrough including selective classification and interventions, see [`examples/sudoku_pipeline_example.py`](https://github.com/ustunb/concept-benchmark/blob/main/examples/sudoku_pipeline_example.py).
 

@@ -92,10 +92,10 @@ def pipeline_output(tmp_path):
         / "cbm__human_concepts__m12_0123abcd__sim100__up_to_k__binary__t0.2__seed7__k12.npz",
         mask=np.zeros((1, 12), dtype=bool),
     )
-    (runs / "sudoku_cem_interventions_tabular_n3_mc9_px18_seed5.csv").write_text(
+    (runs / "sudoku_cem_interventions_tabular_n3_mc9_px10_seed5.csv").write_text(
         "budget,accuracy\n0,0.9\n"
     )
-    (runs / "sudoku_selective_tabular_n3_mc9_px18_seed5.csv").write_text(
+    (runs / "sudoku_selective_tabular_n3_mc9_px10_seed5.csv").write_text(
         "model,target_accuracy\ndnn,0.95\n"
     )
     return runs
@@ -123,8 +123,8 @@ def test_collected_runs_get_the_names_the_paper_scripts_read(pipeline_output, tm
         f"robot/balanced_rule/{BALANCED_TAG}__concepts-true__arch-probcbm__mode-joint__isrc-expert__strategy-upto__seed-7__results.csv",
         f"robot/balanced_rule/{BALANCED_TAG}__concepts-human__arch-cbm-and-dnn__seed-7__results.csv",
         f"robot/balanced_rule/intervention_records/{BALANCED_TAG}__concepts-human__arch-cbm__isrc-perfect__budget-max__seed-7__records.npz",
-        "sudoku/cells/sudoku__arch-cem__res-18px__tau-0.90__threshold-per-budget__seed-5__interventions.csv",
-        "sudoku/selective/sudoku__arch-cbm-and-dnn__res-18px__threshold-per-budget__seed-5__selective-all-tau.csv",
+        "sudoku/cells/sudoku__arch-cem__res-10px__tau-0.90__threshold-per-budget__seed-5__interventions.csv",
+        "sudoku/selective/sudoku__arch-cbm-and-dnn__res-10px__threshold-per-budget__seed-5__selective-all-tau.csv",
     }
     collected = {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()}
     assert collected == expected
@@ -162,7 +162,7 @@ def test_collecting_never_overwrites_other_content(pipeline_output, tmp_path):
         "0.9",
     )
     assert run_script("collect_pipeline_runs.py", *arguments).returncode == 0
-    (pipeline_output / "sudoku_selective_tabular_n3_mc9_px18_seed5.csv").write_text(
+    (pipeline_output / "sudoku_selective_tabular_n3_mc9_px10_seed5.csv").write_text(
         "model,target_accuracy\ndnn,0.99\n"
     )
     result = run_script("collect_pipeline_runs.py", *arguments)
@@ -189,7 +189,7 @@ def sudoku_results(tmp_path):
         d.mkdir(parents=True)
     budgets = [(0, 0.0, 0), (1, 0.0, 10), (3, 0.0, 30), (27, 1.0, 270)]
     for seed in (7, 8):
-        for res in (50, 18):
+        for res in (50, 10):
             for tau, cov in (("0.95", 0.9), ("0.99", 0.6)):
                 for arch in ("cbm", "cem", "probcbm", "ecbm"):
                     (
@@ -219,7 +219,7 @@ def sudoku_results(tmp_path):
     (root / "sudoku" / "detection.csv").write_text(
         "px,seed,cell_acc_test,boards_misread_test,concept_acc_test,boards_concept_error_test\n"
         "50,7,0.995,0.25,0.96,0.3\n50,8,0.995,0.25,0.96,0.3\n"
-        "18,7,0.99,0.5,0.9,0.6\n18,8,0.99,0.5,0.9,0.6\n"
+        "10,7,0.99,0.5,0.9,0.6\n10,8,0.99,0.5,0.9,0.6\n"
     )
     return root
 

@@ -50,8 +50,10 @@ def main() -> None:
         + r" \\",
         r"\midrule",
     ]
-    for res in (50, 18):
+    for res in (50, 10):
         seeds = [r for r in rows if int(r["px"]) == res]
+        if not seeds:
+            raise SystemExit(f"{PAPER.sudoku_detection}: no rows at {res} px")
         cells = [cell([float(r[key]) for r in seeds]) for key, _ in COLUMNS]
         lines.append(rf"\textds{{{res}\,px}} & " + " & ".join(cells) + r" \\")
         print(

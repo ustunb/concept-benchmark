@@ -9,8 +9,8 @@ Reads the installed cells (results/paper/sudoku/cells, per-budget thresholds) an
 
 Cells are mean ± SE over seeds at k = 0, 1, 3, max. Net work automated is the coverage minus the cost of the checks as a
 share of all concepts (cost / (test boards x 27 concepts)). For every setting and architecture, the script prints the
-paired t-tests of the two comparisons made in the text: 18 px against 50 px without interventions, and k = max against
-k = 0 at 18 px.
+paired t-tests of the two comparisons made in the text: 10 px against 50 px without interventions, and k = max against
+k = 0 at 10 px.
 
     python scripts/paper/make_sudoku_sensitivity_tables.py \
         --tau-out ../concept-benchmark-paper/tables/sudoku_tau_sweep.tex \
@@ -119,17 +119,18 @@ def table(
                     print(f"  note: {label} {res}px {arch}: {len(seeds)} seeds")
         print(f"== {first_header} {label}")
         for arch, _ in ARCHS:
-            shared = sorted(set(runs[18, arch]) & set(runs[50, arch]))
-            low, high = runs[18, arch], runs[50, arch]
+            hi, lo = RESOLUTIONS
+            shared = sorted(set(runs[lo, arch]) & set(runs[hi, arch]))
+            low, high = runs[lo, arch], runs[hi, arch]
             print(
-                f"  {arch:8s} 18px vs 50px, net at k=0 (n={len(shared)}): {paired([low[s][0][0] for s in shared], [high[s][0][0] for s in shared])}"
+                f"  {arch:8s} {lo}px vs {hi}px, net at k=0 (n={len(shared)}): {paired([low[s][0][0] for s in shared], [high[s][0][0] for s in shared])}"
             )
             seeds = sorted(low)
             print(
-                f"  {arch:8s} 18px, net at k=max vs k=0:        {paired([low[s][0][3] for s in seeds], [low[s][0][0] for s in seeds])}"
+                f"  {arch:8s} {lo}px, net at k=max vs k=0:        {paired([low[s][0][3] for s in seeds], [low[s][0][0] for s in seeds])}"
             )
             print(
-                f"  {arch:8s} 18px, coverage at k=max vs k=0:   {paired([low[s][1][3] for s in seeds], [low[s][1][0] for s in seeds])}"
+                f"  {arch:8s} {lo}px, coverage at k=max vs k=0:   {paired([low[s][1][3] for s in seeds], [low[s][1][0] for s in seeds])}"
             )
     return lines + [r"\bottomrule", r"\end{tabular}"]
 

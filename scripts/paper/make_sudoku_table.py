@@ -31,7 +31,7 @@ ARCHS = [
     ("probcbm", "\\ProbCBM{}"),
     ("ecbm", "\\ECBM{}"),
 ]
-RESOLUTIONS = (50, 18)
+RESOLUTIONS = (50, 10)
 N_TEST_BOARDS, N_CONCEPTS = 200, 27
 TAU = "0.95"  # the main text; the appendix sweeps the target
 

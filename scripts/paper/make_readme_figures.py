@@ -57,7 +57,6 @@ def main() -> None:
         plot_answer_reliance,
         plot_automation,
         plot_concept_report,
-        plot_confidence,
         plot_intervention_curve,
         plot_intervention_heatmap,
     )
@@ -140,14 +139,14 @@ def main() -> None:
 
     cells = sorted(
         PAPER.sudoku_cells.glob(
-            "sudoku__arch-cbm__res-18px__tau-0.95__*__interventions.csv"
+            "sudoku__arch-cbm__res-10px__tau-0.95__*__interventions.csv"
         )
     )
     sudoku = pd.concat(
         [pd.read_csv(c).assign(seed=i) for i, c in enumerate(cells)], ignore_index=True
     )
     selective = pd.concat(
-        map(pd.read_csv, sorted(PAPER.sudoku_selective.glob("*__res-18px__*.csv")))
+        map(pd.read_csv, sorted(PAPER.sudoku_selective.glob("*__res-10px__*.csv")))
     )
     dnn_coverage = selective.loc[
         (selective["model"] == "dnn") & (selective["target_accuracy"].round(3) == 0.95),
@@ -161,16 +160,6 @@ def main() -> None:
         target_accuracy=0.95,
     )
     save(fig, "automation.png")
-
-    seed = 171
-    confidence = np.load(
-        PAPER.root
-        / f"sudoku/confidence/sudoku__arch-cbm__res-18px__seed-{seed}__confidence.npz"
-    )
-    cell = pd.read_csv(next(c for c in cells if f"seed-{seed}" in c.name))
-    threshold = float(cell.sort_values("budget")["abstention_threshold"].iloc[0])
-    fig, _ = plot_confidence(confidence["p_test"], confidence["y_test"], threshold)
-    save(fig, "confidence.png")
 
 
 if __name__ == "__main__":
