@@ -3,7 +3,7 @@
 Reads the installed cells (results/paper/sudoku/cells, per-budget thresholds) and writes
 
 - `--tau-out`: net work automated and coverage at the selective-accuracy targets tau = 0.90, 0.95, 0.99;
-- `--cost-out`: the same at tau = 0.99 under three costs of a concept check: every check costs the same (`equal`), a
+- `--cost-out`: the same at tau = 0.95 under three costs of a concept check: every check costs the same (`equal`), a
   block check costs twice a row or column check (`2x block`), and each kind of check has its own cost drawn once from
   U(0.5, 1.5) (`random`).
 
@@ -36,7 +36,7 @@ from _common import (
 from make_sudoku_table import ARCHS, N_CONCEPTS, N_TEST_BOARDS, RESOLUTIONS
 
 TAUS = ("0.90", "0.95", "0.99")
-COST_TAU = "0.99"
+COST_TAU = "0.95"
 _draw = random.Random(0)
 # cost of a row, column and block check
 COST_MODELS = [

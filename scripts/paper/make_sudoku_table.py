@@ -33,7 +33,7 @@ ARCHS = [
 ]
 RESOLUTIONS = (50, 18)
 N_TEST_BOARDS, N_CONCEPTS = 200, 27
-TAU = "0.99"  # the main text; the appendix sweeps the target
+TAU = "0.95"  # the main text; the appendix sweeps the target
 
 
 def read_cells(
