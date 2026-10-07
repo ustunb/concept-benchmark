@@ -10,7 +10,7 @@ This benchmark targets automation settings where the system handles routine case
 
 ## Parameters
 
-All parameters can be passed to `DatasetGenerator(...)` (imported from `concept_benchmark.sudoku`) or as CLI flags to `sudoku_pipeline.py`:
+All parameters can be passed to `DatasetGenerator(...)` (imported from `concept_benchmark.sudoku`); `sudoku_pipeline.py` takes the common ones as flags and the rest through `--config`:
 
 ```python
 from concept_benchmark.sudoku import DatasetGenerator
@@ -55,6 +55,7 @@ python scripts/sudoku_pipeline.py --seed 171 --stages cs intervene selective dia
 | `--cbm-family` | `cbm`, `cem`, `probcbm` or `ecbm` |
 | `--cell-px` | Pixels per cell (50 by default; 18 blurs the handwritten digits) |
 | `--target-accuracy` | Selective accuracy that kept predictions must reach (0.90 by default; the paper uses 0.95) |
+| `calibrate` (config) | Platt-scale each model's label probability on the validation split before it abstains (on by default; the safeguard rule needs calibrated probabilities) |
 | `--stages` | `setup ocr cs dnn intervene selective align collect plot`, plus the optional `diagnose` |
 
-Run `python scripts/sudoku_pipeline.py --help` for the full list of options (including training, intervention, and evaluation parameters).
+Run `python scripts/sudoku_pipeline.py --help` for the full list of flags; training parameters (`cs_epochs`, `cs_patience`, `epochs`, `batch_size`) are set in a YAML config passed with `--config`.

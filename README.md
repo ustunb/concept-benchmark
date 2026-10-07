@@ -679,9 +679,9 @@ from concept_benchmark.evaluation import (
 | `gain(y_pred, y_true, baseline_accuracy)` | Accuracy gain over a baseline model (e.g. DNN) |
 | `selective_accuracy(y_pred, y_true, confidence, threshold)` | Accuracy on non-abstained samples |
 | `coverage(confidence, threshold)` | Fraction of samples where the model does not abstain |
-| `abstention_threshold(y_true, prob_positive, target_accuracy, decision_threshold)` | The paper's abstention rule: the threshold at which the kept predictions reach a target accuracy, and their coverage; fit it on validation predictions |
-| `decision_threshold(y_true, prob_positive)` | The cut on P(positive) with the highest accuracy |
-| `selective_at(y_true, prob_positive, abstention_threshold, decision_threshold)` | Selective accuracy and coverage under those thresholds |
+| `PlattScaling().fit(prob_positive, y_true)` | Calibrates a label probability on validation predictions, as the abstention rule requires |
+| `abstention_threshold(y_true, prob_positive, target_accuracy)` | The paper's abstention rule: the threshold at which the kept predictions reach a target accuracy, and their coverage; fit it on validation predictions |
+| `selective_at(y_true, prob_positive, abstention_threshold, 0.5)` | Selective accuracy and coverage under that threshold |
 | `intervention_metrics(mask, concepts_before, concepts_after, y_prob_before, y_prob_after, y_true, accuracy_before)` | What an intervention did: accuracy, gain, predictions and concepts touched |
 | `net_work_automated(confidence, threshold, n_interventions, n_concepts)` | Net fraction of work automated after intervention cost |
 
@@ -692,7 +692,7 @@ from concept_benchmark.evaluation import (
 | `train_cbm(train, validation, seed=..., detector=...)` | The paper's CBM: concept detector plus logistic label predictor |
 | `train_dnn(model, train, validation, seed=...)` | A binary classifier trained with early stopping |
 | `intervention_table(cbm, test, budgets=(1, 3, "max"), seed=...)` | Accuracy at each budget of corrected concepts (the decision-support table) |
-| `automation_table(cbm, validation, test, budgets=(1, 3, "max"), target_accuracy=0.95, seed=171)` | Coverage and checks at each budget under the paper's abstention protocol (the automation table) |
+| `automation_table(cbm, validation, test, budgets=(1, 3, "max"), target_accuracy=0.95, seed=171)` | Coverage and checks at each budget under the paper's abstention protocol, label probability calibrated on validation (the automation table) |
 | `coverage_at_target(model, validation, test, target_accuracy)` | Selective accuracy and coverage of any model at a target |
 | `predict_labels(model, dataset)`, `predict_proba_positive(model, dataset)` | Predictions of a DNN or a CBM |
 
