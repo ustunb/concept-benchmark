@@ -234,7 +234,7 @@ def main():
     ap.add_argument("--n-samples", type=int, default=defaults.n_boards)
     ap.add_argument("--max-corrupt", type=int, default=defaults.max_cell_swaps)
     ap.add_argument("--seed", type=int, default=defaults.seed)
-    ap.add_argument("--epochs", type=int, default=20)
+    ap.add_argument("--epochs", type=int, default=5)
     ap.add_argument(
         "--patience",
         type=int,
