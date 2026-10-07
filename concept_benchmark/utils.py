@@ -65,9 +65,12 @@ def compute_accuracy(
 def get_loader_config() -> dict:
     """Return DataLoader kwargs safe for the current platform."""
     _macos = platform.system() == "Darwin"
+    workers = os.environ.get("CONCEPT_BENCHMARK_NUM_WORKERS")
     return {
         "batch_size": 32,
-        "num_workers": 0 if _macos else min(12, os.cpu_count() or 1),
+        "num_workers": int(workers)
+        if workers is not None
+        else (0 if _macos else min(12, os.cpu_count() or 1)),
         "pin_memory": (not _macos) and torch.cuda.is_available(),
     }
 

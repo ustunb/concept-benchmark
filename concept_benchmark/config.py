@@ -27,7 +27,7 @@ import logging
 import yaml
 
 from concept_benchmark.formula import F, LabelFormula
-from concept_benchmark.paths import data_dir, results_dir
+from concept_benchmark import paths
 from concept_benchmark.types import CBMTrainingMode
 
 logger = logging.getLogger(__name__)
@@ -621,7 +621,7 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
             "data_type": self.data_type,
             "samples_per_instance": self.renders_per_robot,
             "draw": self.render_images,
-            "output_directory": data_dir / "robot_images",
+            "output_directory": paths.data_dir / "robot_images",
             "size": self.image_size,
             "color_mode": self.color_mode,
             "train_dnn": 0,
@@ -767,44 +767,47 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     def get_dataset_path(self) -> Path:
         """Return the path where the dataset file is saved."""
         if self.data_type == "text":
-            return results_dir / f"robot_text{self._text_tag}.data"
+            return paths.results_dir / f"robot_text{self._text_tag}.data"
         filename = f"robot_{self.data_type}_{self.renders_per_robot}{self._preset_suffix}{self._seed_tag}"
-        return results_dir / f"{filename}.data"
+        return paths.results_dir / f"{filename}.data"
 
     def get_model_path(self, model_class: str) -> Path:
         """Return the path where a trained model is saved."""
         if self.data_type == "text":
-            return results_dir / f"robot_text_{model_class}{self._text_tag}.model"
+            return paths.results_dir / f"robot_text_{model_class}{self._text_tag}.model"
         seed_tag = self._seed_tag
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}_{self.renders_per_robot}"
             f"{self._preset_suffix}"
             f"_{model_class}{seed_tag}.model"
         )
-        return results_dir / filename
+        return paths.results_dir / filename
 
     def get_results_path(self, model_class: str = "cbm") -> Path:
         """Return the path where results CSV is saved."""
         if self.data_type == "text":
-            return results_dir / f"robot_text_{model_class}{self._text_tag}_results.csv"
+            return (
+                paths.results_dir
+                / f"robot_text_{model_class}{self._text_tag}_results.csv"
+            )
         filename = f"robot_{self.data_type}_{self._labeling_tag}"
         if model_class in {"cbm", "cem", "probcbm", "ecbm"}:
             filename += self._preset_suffix
         filename += f"_{model_class}{self._seed_tag}_results.csv"
-        return results_dir / filename
+        return paths.results_dir / filename
 
     def get_interpretation_path(self, model_class: str = "ecbm") -> Path:
         """Return the path where probabilistic interpretation JSON is saved."""
         if self.data_type == "text":
             return (
-                results_dir
+                paths.results_dir
                 / f"robot_text_{model_class}{self._text_tag}_interpretation.json"
             )
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}"
             f"{self._preset_suffix}_{model_class}{self._seed_tag}_interpretation.json"
         )
-        return results_dir / filename
+        return paths.results_dir / filename
 
     def get_alignment_constraints(self) -> dict[str, int]:
         """Return monotonicity constraints for alignment.
@@ -821,13 +824,13 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     def get_alignment_results_path(self) -> Path:
         """Return the path where alignment results JSON is saved."""
         if self.data_type == "text":
-            return results_dir / f"robot_text_alignment{self._text_tag}.json"
+            return paths.results_dir / f"robot_text_alignment{self._text_tag}.json"
         filename = (
             f"robot_{self.data_type}_{self._labeling_tag}"
             f"{self._preset_suffix}"
             f"{self._seed_tag}_alignment.json"
         )
-        return results_dir / filename
+        return paths.results_dir / filename
 
     def _config_hash(self) -> str:
         """Short hex hash of all config fields for filename uniqueness."""
@@ -847,12 +850,12 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
         """Return the path for the collect-stage summary CSV."""
         if self.data_type == "text":
             return (
-                results_dir
+                paths.results_dir
                 / f"robot_text{self._text_tag}_{self._config_hash()}_results.csv"
             )
         variant = "subconcept" if self.concept_preset == "foot_subtypes" else "ideal"
         return (
-            results_dir
+            paths.results_dir
             / f"robot_{variant}_seed{self.seed}_{self._config_hash()}_results.csv"
         )
 
@@ -947,7 +950,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
             "max_corrupt": self.max_cell_swaps,
             "seed": self.seed,
             "temp_train_data_path": (
-                data_dir
+                paths.data_dir
                 / "sudoku"
                 / "multimodal_m_21"
                 / "tabular"
@@ -996,13 +999,13 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
         """Return the directory path for the dataset."""
         dt = data_type or self.data_type
         filename = f"sudoku_{dt}_n{self.block_size}_ns{self.n_boards}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}"
-        return data_dir / "sudoku" / filename
+        return paths.data_dir / "sudoku" / filename
 
     def get_model_path(self, model_class: str, data_type: str | None = None) -> Path:
         """Return the path where a trained model is saved."""
         dt = data_type or self.data_type
         filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}"
-        return results_dir / f"{filename}.model"
+        return paths.results_dir / f"{filename}.model"
 
     def get_results_path(
         self, model_class: str = "cbm", data_type: str | None = None
@@ -1010,7 +1013,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
         """Return the path where results are saved."""
         dt = data_type or self.data_type
         filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}"
-        return results_dir / f"{filename}.results"
+        return paths.results_dir / f"{filename}.results"
 
     def get_alignment_weights(self) -> dict[str, float]:
         """Return alignment weights, computing defaults if not explicitly set.
@@ -1032,7 +1035,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
         """Return the path where alignment results JSON is saved."""
         dt = data_type or self.data_type
         filename = f"sudoku_alignment_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}"
-        return results_dir / f"{filename}.json"
+        return paths.results_dir / f"{filename}.json"
 
     def _config_hash(self) -> str:
         """Short hex hash of all config fields for filename uniqueness."""
@@ -1040,4 +1043,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
 
     def get_collect_path(self) -> Path:
         """Return the path for the collect-stage summary CSV."""
-        return results_dir / f"sudoku_seed{self.seed}_{self._config_hash()}_results.csv"
+        return (
+            paths.results_dir
+            / f"sudoku_seed{self.seed}_{self._config_hash()}_results.csv"
+        )

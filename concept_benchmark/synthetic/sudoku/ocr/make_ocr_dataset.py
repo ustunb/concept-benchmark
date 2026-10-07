@@ -22,11 +22,12 @@ from concept_benchmark.synthetic.sudoku import (
     default_transform,
     image_transform,
 )
-from concept_benchmark.synthetic.sudoku.ocr.ocr_utils import DATA_SUDOKU
+from concept_benchmark.synthetic.sudoku.ocr.ocr_utils import data_sudoku_dir
 from concept_benchmark.config import SudokuBenchmarkConfig
 
 
-DIGITS_DIR = DATA_SUDOKU / "digits"
+def digits_dir() -> Path:
+    return data_sudoku_dir() / "digits"
 
 
 # ---------------- image transform wrapper ----------------
@@ -266,7 +267,7 @@ def load_boards_from_jsonl(jsonl_path: Path) -> np.ndarray:
 
 def ensure_digits_dir(args):
     """
-    Ensure that DATA_SUDOKU/digits exists and contains example digits for
+    Ensure that data/sudoku/digits exists and contains example digits for
     the OCR model to train on.
 
     Layout:
@@ -274,18 +275,19 @@ def ensure_digits_dir(args):
       ...
       data/sudoku/digits/9/*.png
     """
-    if DIGITS_DIR.exists() and any(DIGITS_DIR.iterdir()):
-        print(f"Digits directory already exists at {DIGITS_DIR}, not regenerating.")
+    digits = digits_dir()
+    if digits.exists() and any(digits.iterdir()):
+        print(f"Digits directory already exists at {digits}, not regenerating.")
         return
 
-    print(f"Creating example digits for OCR under {DIGITS_DIR}...")
-    DIGITS_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"Creating example digits for OCR under {digits}...")
+    digits.mkdir(parents=True, exist_ok=True)
 
     digits_per_class = getattr(args, "digits_per_class", 64)
     h = w = args.cell_px
 
     for d in range(10):
-        label_dir = DIGITS_DIR / str(d)
+        label_dir = digits / str(d)
         label_dir.mkdir(parents=True, exist_ok=True)
 
         for i in range(digits_per_class):

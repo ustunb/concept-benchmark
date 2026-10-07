@@ -84,6 +84,11 @@ class TestGetLoaderConfig:
         assert "num_workers" in cfg
         assert "pin_memory" in cfg
 
+    def test_workers_from_the_environment(self, monkeypatch):
+        monkeypatch.setenv("CONCEPT_BENCHMARK_NUM_WORKERS", "3")
+        monkeypatch.setattr("concept_benchmark.utils.platform.system", lambda: "Linux")
+        assert get_loader_config()["num_workers"] == 3
+
     def test_macos(self, monkeypatch):
         monkeypatch.setattr("concept_benchmark.utils.platform.system", lambda: "Darwin")
         cfg = get_loader_config()
@@ -91,6 +96,7 @@ class TestGetLoaderConfig:
         assert cfg["pin_memory"] is False
 
     def test_linux(self, monkeypatch):
+        monkeypatch.delenv("CONCEPT_BENCHMARK_NUM_WORKERS", raising=False)
         monkeypatch.setattr("concept_benchmark.utils.platform.system", lambda: "Linux")
         cfg = get_loader_config()
         assert cfg["num_workers"] > 0

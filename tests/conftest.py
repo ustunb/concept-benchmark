@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Callable
 
+import os
+
 import numpy as np
 import pytest
 import torch
@@ -11,6 +13,22 @@ from pathlib import Path
 from PIL import Image
 
 from concept_benchmark.data import ConceptDataset
+
+
+os.environ.setdefault(
+    "CONCEPT_BENCHMARK_NUM_WORKERS", "0"
+)  # tests fork no DataLoader workers
+
+
+@pytest.fixture(scope="session", autouse=True)
+def isolated_data_dir(tmp_path_factory):
+    """Every session (every xdist worker) generates datasets under its own folder, never the repo's data/."""
+    from concept_benchmark import paths
+
+    folder = tmp_path_factory.mktemp("data")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(paths, "data_dir", folder)
+        yield folder
 
 
 @pytest.fixture(scope="session", autouse=True)

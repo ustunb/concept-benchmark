@@ -15,7 +15,9 @@ from tqdm.auto import tqdm
 
 
 from concept_benchmark.data import ConceptDataset
-from concept_benchmark.paths import data_dir
+from pathlib import Path
+
+from concept_benchmark import paths
 from .handwriting import _get_default_font
 from .utils import (
     generate_invalid_board,
@@ -34,7 +36,10 @@ from .handwriting import (
     _draw_wobbly_circle,
 )
 
-SUDOKU_DIR = data_dir / "sudoku"
+
+def sudoku_data_dir() -> Path:
+    """The folder of the sudoku datasets, under the package's data folder at the time of the call."""
+    return paths.data_dir / "sudoku"
 
 
 # Future: label noise, concept noise, concept masking toggles
@@ -87,7 +92,7 @@ def create_sudoku_dataset(
         dataset_name = (
             dataset_name if dataset_name else datetime.now().strftime("%Y%m%d_%H%M%S")
         )
-        ds_path = SUDOKU_DIR / dataset_name
+        ds_path = sudoku_data_dir() / dataset_name
         ds_path.mkdir(parents=True, exist_ok=True)
 
     rng = np.random.default_rng(seed)

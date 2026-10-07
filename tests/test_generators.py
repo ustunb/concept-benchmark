@@ -284,11 +284,11 @@ class TestSudokuDatasetGenerator:
         assert len(ds.train.y) + len(ds.validation.y) + len(ds.test.y) == 10
 
     def test_image_boards_are_written_to_a_parameter_named_folder(self):
-        gen = DatasetGenerator("sudoku", seed=42, n_boards=10, data_type="image")
+        gen = DatasetGenerator("sudoku", seed=43, n_boards=10, data_type="image")
         ds = gen.generate()
         folder = ds.inputs[0].parent
         assert folder == gen.config.get_dataset_path(data_type="image")
-        assert folder.name == "sudoku_image_n3_ns10_mc9_px50_seed42"
+        assert folder.name == "sudoku_image_n3_ns10_mc9_px50_seed43"
 
     def test_boards_at_any_cell_size_are_the_50px_board_scaled(self, tmp_path):
         import numpy as np

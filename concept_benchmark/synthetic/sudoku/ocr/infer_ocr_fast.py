@@ -15,7 +15,7 @@ import torch
 from tqdm.auto import tqdm
 
 from concept_benchmark.synthetic.sudoku.ocr.ocr_utils import (
-    DATA_SUDOKU,
+    data_sudoku_dir,
     TinyResNet,
     load_sidecars,
     predict_board_argmax,
@@ -26,7 +26,7 @@ def main():
     ap = argparse.ArgumentParser(
         description="Run fast argmax OCR on a Sudoku demo dataset."
     )
-    default_dataset = DATA_SUDOKU / "demo_ocr_m_21"
+    default_dataset = data_sudoku_dir() / "demo_ocr_m_21"
     ap.add_argument("--dataset-dir", default=str(default_dataset))
     ap.add_argument(
         "--jsonl",

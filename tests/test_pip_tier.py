@@ -127,8 +127,7 @@ def test_sudoku_paper_split_has_the_documented_shape():
     ]
 
 
-def test_sudoku_image_generate_accepts_every_documented_keyword(tmp_path, monkeypatch):
-    monkeypatch.setenv("CONCEPT_BENCHMARK_DATA_DIR", str(tmp_path))
+def test_sudoku_image_generate_accepts_every_documented_keyword():
     dataset = SudokuGenerator(
         seed=171,
         data_type="image",
@@ -152,7 +151,6 @@ def test_sudoku_image_generate_accepts_every_documented_keyword(tmp_path, monkey
 
 
 @pytest.mark.slow
-def test_hub_card_call_renders_the_published_dataset(tmp_path, monkeypatch):
-    monkeypatch.setenv("CONCEPT_BENCHMARK_DATA_DIR", str(tmp_path))
+def test_hub_card_call_renders_the_published_dataset():
     dataset = SudokuGenerator(seed=171).generate_splits()
     assert (dataset.train.n, dataset.validation.n, dataset.test.n) == (600, 200, 200)

@@ -19,7 +19,15 @@ package_dir = Path(__file__).resolve().parent
 # For non-editable installs (site-packages), fall back to CWD so that
 # users who run from the cloned repo still find data/ and results/.
 _repo_dir = package_dir.parent
-if (_repo_dir / "pyproject.toml").is_file():
+if (
+    "CONCEPT_BENCHMARK_DATA_DIR" in os.environ
+    or "CONCEPT_BENCHMARK_RESULTS_DIR" in os.environ
+):
+    data_dir = Path(os.environ.get("CONCEPT_BENCHMARK_DATA_DIR", _repo_dir / "data"))
+    results_dir = Path(
+        os.environ.get("CONCEPT_BENCHMARK_RESULTS_DIR", _repo_dir / "results")
+    )
+elif (_repo_dir / "pyproject.toml").is_file():
     data_dir = _repo_dir / "data"
     results_dir = _repo_dir / "results"
 else:

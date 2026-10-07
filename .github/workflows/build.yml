@@ -43,6 +43,7 @@ jobs:
     env:
       MODULE_NAME: concept_benchmark
       PYTHONWARNINGS: error
+      OMP_NUM_THREADS: "2"
     strategy:
       fail-fast: false
       matrix:
@@ -82,7 +83,7 @@ jobs:
 
       - name: Run tests
         run: >
-          uv run pytest -q -ra
+          uv run pytest -q -ra -n auto
           --maxfail=1
           --durations=20
           --junitxml=./test-results/pytest.xml
@@ -132,7 +133,7 @@ jobs:
           PY=$(ls ./wheel-env/bin/python 2>/dev/null || ls ./wheel-env/Scripts/python.exe)
           echo "PY=$PY" >> "$GITHUB_ENV"
           WHEEL=$(ls dist/*.whl)
-          $PY -m pip install "$WHEEL${{ matrix.extras }}" pytest scikit-learn
+          $PY -m pip install "$WHEEL${{ matrix.extras }}" pytest pytest-xdist scikit-learn
       - name: Import, version, examples and the documented data API
         shell: bash
         env:
@@ -143,7 +144,7 @@ jobs:
           $PY -c "import concept_benchmark as c, pathlib; print(c.__version__, c.__file__); assert 'site-packages' in c.__file__"
           $PY ../examples/robot_quickstart.py
           $PY ../examples/sudoku_quickstart.py
-          $PY -m pytest -q --import-mode=importlib ../tests/test_pip_tier.py \
+          $PY -m pytest -q -n auto --import-mode=importlib ../tests/test_pip_tier.py \
             ../tests/test_benchmark_metrics.py ../tests/test_benchmark_plots.py \
             ../tests/test_concept_dataset.py ../tests/test_concept_dataset_sample.py \
             ../tests/test_concept_image_dataset_sample.py ../tests/test_config.py \

@@ -11,11 +11,18 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 
-from concept_benchmark.paths import data_dir
+from concept_benchmark import paths
 
 # Base data location reused by both the generator and trainer.
-DATA_SUDOKU = data_dir / "sudoku"
-DEBUG_DIR = DATA_SUDOKU / "demo_ocr_debug"
+
+
+def data_sudoku_dir() -> Path:
+    """The folder of the sudoku datasets, read at call time so it can be redirected."""
+    return paths.data_dir / "sudoku"
+
+
+def debug_dir() -> Path:
+    return data_sudoku_dir() / "demo_ocr_debug"
 
 
 def load_sidecars(jsonl_path: Path) -> list[dict[str, Any]]:
@@ -112,7 +119,7 @@ class SudokuCellDataset(Dataset):
                     self.samples.append((img_path, r, c, label))
 
         if dump_debug:
-            DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+            debug_dir().mkdir(parents=True, exist_ok=True)
             self._dump_debug(max_debug)
 
     def _dump_debug(self, max_debug: int):
@@ -126,11 +133,11 @@ class SudokuCellDataset(Dataset):
             cell = crop_cell(bgr, r, c, cell_px=self.cell_px, margin_px=self.margin_px)
             cell28 = cell_preprocess_28x28(cell)
             cell28_vis = (cell28 * 255.0).astype(np.uint8)
-            outp = DEBUG_DIR / f"{img_path.stem}_r{r}_c{c}_d{label}.png"
+            outp = debug_dir() / f"{img_path.stem}_r{r}_c{c}_d{label}.png"
             cv2.imwrite(str(outp), cell28_vis)
             dumped += 1
         logging.getLogger("sudoku_ocr_demo").info(
-            f"[DEBUG] dumped {dumped} cell crops to {DEBUG_DIR}"
+            f"[DEBUG] dumped {dumped} cell crops to {debug_dir()}"
         )
 
     def __len__(self):
