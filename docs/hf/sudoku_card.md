@@ -22,7 +22,7 @@ Synthetic benchmark for evaluating Concept Bottleneck Models on sudoku validatio
 
 ## Generated from
 
-This dataset is the **exact output** of the [`concept-benchmark`](https://pypi.org/project/concept-benchmark/) Python package, with the train/validation/test split of the paper: 1,000 boards at 50 px per cell (454 x 454 px), each written in its own handwriting, with printed starters and candidate marks. The export is `scripts/export_hf_datasets.py` in the repository.
+This dataset is the **exact output** of the [`concept-benchmark`](https://pypi.org/project/concept-benchmark/) Python package, with the train/validation/test split of the paper: 1,000 boards at 50 px per cell (454 x 454 px), each written in its own handwriting, with printed starters and candidate marks.
 
 ```python
 # pip install concept-benchmark==0.4.0

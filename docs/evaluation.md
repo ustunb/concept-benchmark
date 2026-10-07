@@ -139,6 +139,7 @@ from concept_benchmark.evaluation import plot_intervention_curve
 
 # one results file per seed, as written by scripts/robot_pipeline.py
 results = pd.concat(
+    # results_by_seed: {seed: path to a pipeline's results CSV}; dnn_accuracies: one DNN accuracy per seed
     pd.read_csv(path).assign(seed=seed) for seed, path in results_by_seed.items()
 )
 fig, ax = plot_intervention_curve(results, group="model_family", baseline_accuracy=dnn_accuracies)

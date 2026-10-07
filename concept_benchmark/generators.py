@@ -232,6 +232,7 @@ class DatasetGenerator:
         color_mode: str = ...,
         # ── Text-only ──
         template_complexity: str = ...,
+        corpus_file: str | None = ...,
         # ── Additional config fields (training, intervention, etc.) ──
         **kwargs,
     ) -> None: ...

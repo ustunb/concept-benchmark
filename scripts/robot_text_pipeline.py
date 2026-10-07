@@ -357,7 +357,7 @@ def train_lfcbm(
 
     Returns a ConceptBasedModel with LabelFreeDetector as concept source.
     """
-    from concept_benchmark.synthetic.robot.text.lfcbm import LabelFreeDetector
+    from experiments.text_lfcbm import LabelFreeDetector
 
     set_deterministic_seed(config.seed)
 
@@ -370,7 +370,7 @@ def train_lfcbm(
         default = (
             package_dir
             / "synthetic"
-            / "helper"
+            / "robot"
             / "static"
             / "text_templates"
             / "concepts.csv"
@@ -451,7 +451,7 @@ def _run_text_regime(config, regime, model, data, budgets, threshold):
         regime_model = load(config.get_model_path("cbm_subjective"))
         human_acc = config.subjective_intervention_accuracy
     elif regime == "machine":
-        # Use existing LabelFreeDetector from robot_text/lfcbm.py
+        # Use existing LabelFreeDetector from experiments/text_lfcbm.py
         regime_model = load(config.get_model_path("lfcbm"))
         human_acc = config.intervention_accuracy
     else:

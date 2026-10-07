@@ -16,7 +16,7 @@ from concept_benchmark.robots import DatasetGenerator, LabelFormula, F
 
 dataset = DatasetGenerator(
     # ── Common (image + text) ──
-    seed=1014,                       # random seed (default: 1014 for image, 1337 for text)
+    seed=1014,                       # random seed (default: 1014; the text pipeline uses 1337)
     data_type="image",               # "image" (default) or "text"
     concepts={                           # 9 features (default: ROBOT_CONCEPTS)
         "head_shape": ["square", "round"],
@@ -44,8 +44,11 @@ dataset = DatasetGenerator(
     render_images=True,              # set False to skip rendering PNGs (faster)
     # ── Text-only (data_type="text") ──
     template_complexity="high",      # template complexity level
+    corpus_file=None,                # a caption corpus of your own, see below
 ).generate()
 ```
+
+The captions come from a corpus of templates: `hard_corpus.jsonl` (`template_complexity="high"`), `templates.txt` (`"medium"`) or `templates_simple.txt` (`"low"`), all under `concept_benchmark/synthetic/robot/static/text_templates/`. `corpus_file` names another file from that folder, or a path of your own, and the folder holds variants in which a concept is not stated in the text: `templates_foot_generic.jsonl` and `templates_simple_foot_generic.jsonl` say that the robot has feet but not their shape, `hard_corpus_foot_generic.jsonl` does the same in the harder style, `hard_corpus_ears_generic.jsonl` leaves the ears vague, `hard_corpus_no_antenna.jsonl` never mentions antennae, and `templates_simple_v2.txt` is a plainer phrasing. A concept that the captions never state cannot be detected from the text, which is the text-modality counterpart of a concept that is not visible in an image.
 
 `generate()` returns the unsplit dataset with every concept; `generate_splits()` returns the train/val/test split of the paper (3,800 / validation / 10,000 robots with the preset's concepts).
 
@@ -55,7 +58,7 @@ A robot is a Glorp with probability `σ(4.2 × score)`, where the score comes fr
 
 | Rule | Score | What it models |
 |------|-------|----------------|
-| **balanced** (default) | `6·[mouth closed] + 6·[body round] + 6·[head round] + 6·[antennae] + 6·[ears triangle] + 8·[foot pointy] − 3·[knees] − 2·[elbows] − 16.5` | No single concept decides the label and both classes are equally likely. `has_elbows` drives the label but is not a concept, so it is visible in the image and cannot be intervened on. Used for the main results of the paper. |
+| **balanced** (default) | `6·[mouth closed] + 6·[body round] + 6·[head round] + 6·[antennae] + 6·[ears triangle] + 8·[foot pointy] − 3·[knees] − 2·[elbows] − 16.5` | No single concept decides the label and both classes are equally likely. `has_elbows` drives the label but is not a concept, so it cannot be intervened on; its dot is drawn on every robot below 120 px, so it cannot be read from the 32 px images either. Used for the main results of the paper. |
 | **sparse** | `5·[mouth closed] + 8·[foot pointy] − 5·[knees] + 2` | Three concepts decide the label and 87.5% of robots are Glorps. Models a task where the class of interest is rare. |
 
 Each rule also sets which foot subtypes the training split of `generate_splits()` holds: six of the ten subtypes, at 30%/10% shares under the balanced rule and 49%/0.5% under the sparse rule (`concept_benchmark.config.ROBOT_LABEL_RULES`). To use your own rule, pass a `LabelFormula`:

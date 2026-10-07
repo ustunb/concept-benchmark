@@ -91,7 +91,7 @@ python -m pip install -r third_party/cem/requirements.txt
 python -m pip install -e third_party/cem
 ```
 
-Once installed, use `--cbm-family` to select the model in any pipeline script:
+Once installed, use `--cbm-family` to select the model in the robot and sudoku pipelines (the text pipeline trains the CBM only):
 
 ```bash
 # Train and evaluate a CEM on the robot benchmark
@@ -120,7 +120,7 @@ Key configuration options (fields of the config dataclass):
 Notes:
 
 - Existing CBM / DNN / conceptual-safeguards paths do not require these packages.
-- Every family runs on both benchmarks.
+- Every family runs on the robot and sudoku benchmarks.
 - Alignment remains on the original `cbm` path.
 
 </details>
@@ -194,7 +194,7 @@ from concept_benchmark.robots import DatasetGenerator, LabelFormula, F
 
 dataset = DatasetGenerator(
     # ── Common (image + text) ──
-    seed=1014,                       # random seed (default: 1014 for image, 1337 for text)
+    seed=1014,                       # random seed (default: 1014; the text pipeline uses 1337)
     data_type="image",               # "image" (default) or "text"
     concepts={                           # 9 features (default: ROBOT_CONCEPTS)
         "head_shape": ["square", "round"],
@@ -231,7 +231,7 @@ A robot is a Glorp with probability `σ(4.2 × score)`, where the score comes fr
 
 | Rule | Score | What it models |
 |------|-------|----------------|
-| **balanced** (default) | `6·[mouth closed] + 6·[body round] + 6·[head round] + 6·[antennae] + 6·[ears triangle] + 8·[foot pointy] − 3·[knees] − 2·[elbows] − 16.5` | No single concept decides the label and both classes are equally likely. `has_elbows` drives the label but is not a concept, so it cannot be intervened on; like `has_knees`, it is drawn as a dot too small to read at 32 px, so the labels of small images are partly unpredictable. Used for the main results of the paper. |
+| **balanced** (default) | `6·[mouth closed] + 6·[body round] + 6·[head round] + 6·[antennae] + 6·[ears triangle] + 8·[foot pointy] − 3·[knees] − 2·[elbows] − 16.5` | No single concept decides the label and both classes are equally likely. `has_elbows` drives the label but is not a concept, so it cannot be intervened on; its dot is drawn on every robot below 120 px, so it cannot be read from the 32 px images either. |
 | **sparse** | `5·[mouth closed] + 8·[foot pointy] − 5·[knees] + 2` | Three concepts decide the label and 87.5% of robots are Glorps. Models a task where the class of interest is rare. |
 
 Each rule also sets which foot subtypes the training split of `generate_splits()` holds: six of the ten subtypes, at 30%/10% shares under the balanced rule and 49%/0.5% under the sparse rule (`concept_benchmark.config.ROBOT_LABEL_RULES`). To use your own rule, pass a `LabelFormula`:
@@ -648,6 +648,7 @@ fe.fit(train.C, train.y)
 Combine your concept detector and label predictor into a `ConceptBasedModel`:
 
 ```python
+import numpy as np
 from experiments.models import ConceptBasedModel
 
 cbm = ConceptBasedModel(
@@ -711,6 +712,7 @@ Outcome plots show *what* happens:
 | `plot_automation(results, n_instances, n_concepts, baseline_coverage=..., target_accuracy=...)` | The paper's automation panel: Coverage and NetWorkAutomated against the intervention budget, with the DNN's coverage and the target in the title |
 | `plot_selective_classification(dnn_metrics, cbm_metrics)` | DNN against CBM on selective accuracy and coverage |
 | `plot_concept_discovery(ideal_df, subconcept_df, dnn_accuracy)` | True against human concepts at each budget |
+| `plot_model_comparison(results, dnn_accuracy)` | Models × concept sets at each budget |
 
 Diagnostic plots show *why*:
 
@@ -726,6 +728,7 @@ from concept_benchmark.evaluation import plot_intervention_curve, plot_intervent
 
 # one results file per seed, as written by scripts/robot_pipeline.py
 results = pd.concat(
+    # results_by_seed: {seed: path to a pipeline's results CSV}; dnn_accuracies: one DNN accuracy per seed
     pd.read_csv(path).assign(seed=seed) for seed, path in results_by_seed.items()
 )
 fig, ax = plot_intervention_curve(results, group="model_family", baseline_accuracy=dnn_accuracies)
@@ -906,6 +909,9 @@ Override `prepare()` if your strategy needs a validation pass before inference �
 
 ```python
 class MyStrategy(InterventionStrategy):
+    def __init__(self):
+        super().__init__(name="my_strategy")
+
     def prepare(self, model, batch, config):
         """Called once on the validation set before run()."""
         # Compute concept importance from validation data

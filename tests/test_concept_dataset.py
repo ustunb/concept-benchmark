@@ -411,10 +411,8 @@ class TestSample:
     """Tests for ConceptDataset.sample()."""
 
     @pytest.fixture(autouse=True)
-    def _import_factory(self):
-        from tests.conftest import make_tabular_dataset
-
-        self._make = make_tabular_dataset
+    def _import_factory(self, tabular_factory):
+        self._make = tabular_factory
 
     def test_basic_random_split_fractions(self):
         ds, _ = self._make(n=100, d=4, k=3, n_classes=2)
@@ -650,10 +648,8 @@ def test_filter_slices_row_index(tab_small):
 
 class TestSampleValidation:
     @pytest.fixture(autouse=True)
-    def _import_factory(self):
-        from tests.conftest import make_tabular_dataset
-
-        self._make = make_tabular_dataset
+    def _import_factory(self, tabular_factory):
+        self._make = tabular_factory
 
     def test_group_split_with_zero_test_size_has_no_test_group(self):
         ds, _ = self._make(n=100, d=4, k=3, n_classes=2)

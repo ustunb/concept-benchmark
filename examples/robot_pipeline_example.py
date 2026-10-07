@@ -3,7 +3,7 @@
 Requires cloning the repo (uses ``experiments/``). Each step is one block of the benchmark; the pipeline
 ``scripts/robot_pipeline.py`` runs the same blocks.
 
-    ./venv/bin/python examples/robot_pipeline_example.py
+    uv run python examples/robot_pipeline_example.py
 
 About ten minutes on a laptop.
 """

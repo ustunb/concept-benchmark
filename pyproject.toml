@@ -38,7 +38,6 @@ dependencies = [
     "tqdm>=4.67.1",
     "dill>=0.3.8",
     "matplotlib>=3.10.3",
-    "psutil>=7.0.0",
     "pillow>=10.0.0",
     "colorir>=2.0.0",
     "pero>=0.18.0",
@@ -49,6 +48,7 @@ dependencies = [
 
 [project.optional-dependencies]
 explore = ["renumics-spotlight>=1.6"]
+llm = ["google-genai>=1.0.0", "openai>=1.0.0", "anthropic>=0.30.0"]
 
 [project.urls]
 Repository = "https://github.com/ustunb/concept-benchmark"
@@ -67,6 +67,7 @@ dev = [
     "google-genai>=1.0.0",
 ]
 explore = ["renumics-spotlight>=1.6"]
+docs = ["sphinx>=7.0", "furo>=2024.1.29", "myst-parser>=2.0", "sphinx-copybutton>=0.5"]
 
 [tool.uv]
 default-groups = ["dev"]

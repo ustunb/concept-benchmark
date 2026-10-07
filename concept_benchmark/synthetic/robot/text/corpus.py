@@ -397,9 +397,19 @@ def concept_vector_from_row(
 
 
 def get_corpus_path(config: RobotBenchmarkConfig) -> Path:
-    """Resolve the corpus path based on difficulty setting."""
+    """The corpus file of `config.corpus_file`, else the default of its template complexity."""
     from concept_benchmark.paths import package_dir
 
+    templates = package_dir / "synthetic" / "robot" / "static" / "text_templates"
+    if config.corpus_file:
+        p = Path(config.corpus_file)
+        p = p if p.is_absolute() else templates / p
+        if not p.is_file():
+            raise FileNotFoundError(
+                f"corpus_file {config.corpus_file!r} not found; the files in "
+                f"{templates} are: {sorted(f.name for f in templates.iterdir())}"
+            )
+        return p
     if config.template_complexity == "high":
         p = (
             package_dir

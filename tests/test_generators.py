@@ -216,6 +216,22 @@ def test_text_corpus_fills_every_placeholder(complexity):
     assert not [text for text in ds.inputs if "{" in text or "}" in text]
 
 
+def test_corpus_file_selects_a_corpus_that_hides_the_feet():
+    ds = DatasetGenerator(
+        "robot", data_type="text", corpus_file="templates_foot_generic.jsonl", seed=3
+    ).generate()
+    assert all("feet" in text for text in ds.inputs)
+    assert not [text for text in ds.inputs if "pointy" in text or "flat" in text]
+    assert not [text for text in ds.inputs if "{" in text or "}" in text]
+
+
+def test_unknown_corpus_file_names_the_available_files():
+    with pytest.raises(FileNotFoundError, match="templates.txt"):
+        DatasetGenerator(
+            "robot", data_type="text", corpus_file="no_such_corpus.jsonl", seed=3
+        ).generate()
+
+
 # ── Sudoku via DatasetGenerator ──────────────────────────────────────
 
 

@@ -3,7 +3,7 @@ message: "If you use this software, please cite it as below."
 title: "Measuring What Matters: Synthetic Benchmarks for Concept Bottleneck Models"
 type: software
 version: 0.4.0
-date-released: 2026-10-05
+date-released: 2026-10-08
 url: "https://github.com/ustunb/concept-benchmark"
 repository-code: "https://github.com/ustunb/concept-benchmark"
 license: MIT
@@ -18,6 +18,22 @@ authors:
     given-names: "Meredith"
   - family-names: "Ustun"
     given-names: "Berk"
+preferred-citation:
+  type: conference-paper
+  title: "Measuring What Matters: Synthetic Benchmarks for Concept Bottleneck Models"
+  authors:
+    - family-names: "Skirzyński"
+      given-names: "Julian"
+    - family-names: "Cheon"
+      given-names: "Harry"
+    - family-names: "Kadekodi"
+      given-names: "Shreyas"
+    - family-names: "Stewart"
+      given-names: "Meredith"
+    - family-names: "Ustun"
+      given-names: "Berk"
+  collection-title: "Advances in Neural Information Processing Systems"
+  year: 2026
 keywords:
   - Concept Bottleneck Models
   - Safety

@@ -23,10 +23,10 @@ if (_repo_dir / "pyproject.toml").is_file():
     data_dir = _repo_dir / "data"
     results_dir = _repo_dir / "results"
 else:
-    logging.getLogger(__name__).warning(
-        "Running from site-packages install; data_dir=%s, results_dir=%s "
-        "default to CWD. Set CONCEPT_BENCHMARK_DATA_DIR / "
-        "CONCEPT_BENCHMARK_RESULTS_DIR to override.",
+    logging.getLogger(__name__).info(
+        "Installed package: datasets are written under data_dir=%s and results under "
+        "results_dir=%s (the current directory). Set CONCEPT_BENCHMARK_DATA_DIR / "
+        "CONCEPT_BENCHMARK_RESULTS_DIR to choose other folders.",
         Path.cwd() / "data",
         Path.cwd() / "results",
     )

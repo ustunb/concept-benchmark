@@ -10,7 +10,7 @@ This benchmark targets automation settings where the system handles routine case
 
 ## Parameters
 
-All parameters can be passed to `DatasetGenerator(...)` (imported from `concept_benchmark.sudoku`); `sudoku_pipeline.py` takes the common ones as flags and the rest through `--config`:
+All parameters can be passed to `DatasetGenerator(...)` (imported from `concept_benchmark.sudoku`); `sudoku_pipeline.py` takes `seed`, `cell_px`, `target_accuracy` and `cbm_family` as flags and every other parameter (`n_boards`, `max_cell_swaps`, `valid_board_ratio`, ...) through a YAML `--config`:
 
 ```python
 from concept_benchmark.sudoku import DatasetGenerator
@@ -57,5 +57,10 @@ python scripts/sudoku_pipeline.py --seed 171 --stages cs intervene selective dia
 | `--target-accuracy` | Selective accuracy that kept predictions must reach (0.90 by default; the paper uses 0.95) |
 | `calibrate` (config) | Platt-scale each model's label probability on the validation split before it abstains (on by default; the safeguard rule needs calibrated probabilities) |
 | `--stages` | `setup ocr cs dnn intervene selective align collect plot`, plus the optional `diagnose` |
+| `--budgets` | Intervention budgets to evaluate (`1 3 max` by default) |
+| `--data-type` | `image` (default) or `tabular` (the digits of each board, no recognizer) |
+| `--no-handwriting` | Printed digits instead of handwritten ones (`--handwriting` restores the default) |
+| `--direct-image` | A ViT on the board images instead of the digit recognizer |
+| `--force-setup` | Regenerate the dataset even if one with the same parameters exists |
 
 Run `python scripts/sudoku_pipeline.py --help` for the full list of flags; training parameters (`cs_epochs`, `cs_patience`, `ocr_epochs`, `ocr_patience`, `epochs`, `batch_size`) are set in a YAML config passed with `--config`.

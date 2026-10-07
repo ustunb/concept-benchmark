@@ -345,6 +345,12 @@ def make_image_dataset(
 
 
 @pytest.fixture
+def tabular_factory():
+    """The `make_tabular_dataset` helper, for tests that build datasets of their own sizes."""
+    return make_tabular_dataset
+
+
+@pytest.fixture
 def tab_small() -> ConceptDataset:
     """Tiny balanced dataset: n=12, d=3, k=4, classes=2."""
     ds, _ = make_tabular_dataset(n=12, d=3, k=4, n_classes=2, with_cv=False)

@@ -403,6 +403,9 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
 
     # ── Text generation (data_type="text" only) ──────────────────────
     template_complexity: str = field(default="high", metadata={"scope": "text"})
+    corpus_file: str | None = field(
+        default=None, metadata={"scope": "text"}
+    )  # a file in static/text_templates (or a path) instead of the complexity's default
 
     # ── Text CBM training ────────────────────────────────────────────
     detector_epochs: int = field(default=6, metadata={"scope": "text"})
@@ -568,7 +571,10 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
     @property
     def _text_tag(self) -> str:
         """Concept preset, label rule, template complexity and seed for text filenames."""
-        return f"{self._preset_suffix}_{self.template_complexity}{self._seed_tag}"
+        corpus = f"_{Path(self.corpus_file).stem}" if self.corpus_file else ""
+        return (
+            f"{self._preset_suffix}_{self.template_complexity}{corpus}{self._seed_tag}"
+        )
 
     @property
     def pixel_resolution(self) -> int:

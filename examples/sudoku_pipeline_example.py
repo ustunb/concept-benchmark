@@ -4,7 +4,7 @@ Requires cloning the repo (uses ``experiments/``). Each step is one block of the
 ``scripts/sudoku_pipeline.py`` runs the same blocks on the images of the boards (through the digit
 recognizer); this example reads the digits of each board directly.
 
-    ./venv/bin/python examples/sudoku_pipeline_example.py
+    uv run python examples/sudoku_pipeline_example.py
 
 About a minute.
 """

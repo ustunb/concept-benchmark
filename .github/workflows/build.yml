@@ -73,13 +73,6 @@ jobs:
       - name: Install the project (dev deps)
         run: uv sync --locked --all-extras --dev
 
-      - name: Patch pero invalid escape sequences (upstream bug)
-        env:
-          PYTHONWARNINGS: default
-        run: |
-          PERO_DIR=$(uv run python -c "import pero, os; print(os.path.dirname(pero.__file__))")
-          find "$PERO_DIR" -name '*.py' -exec sed -i 's/re\.compile("/re.compile(r"/g' {} +
-
       - name: Run tests
         run: >
           uv run pytest -q -ra
@@ -93,3 +86,60 @@ jobs:
         with:
           name: pytest-${{ matrix.os }}-py${{ matrix.python-version }}
           path: test-results/pytest.xml
+
+  wheel:
+    # The package as pip users get it: the built wheel, no extras, run from an empty directory.
+    needs: lint
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.10"
+            extras: ""
+          - os: ubuntu-latest
+            python-version: "3.12"
+            extras: "[explore]"
+          - os: windows-latest
+            python-version: "3.12"
+            extras: ""
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cairo (pycairo builds from source on Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcairo2-dev pkg-config
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Build the wheel
+        run: uv build --wheel
+      - name: Install the wheel into a clean environment
+        shell: bash
+        run: |
+          python -m venv wheel-env
+          PY=$(ls ./wheel-env/bin/python 2>/dev/null || ls ./wheel-env/Scripts/python.exe)
+          echo "PY=$PY" >> "$GITHUB_ENV"
+          WHEEL=$(ls dist/*.whl)
+          $PY -m pip install "$WHEEL${{ matrix.extras }}" pytest scikit-learn
+      - name: Import, version, examples and the documented data API
+        shell: bash
+        env:
+          CONCEPT_BENCHMARK_DATA_DIR: ${{ github.workspace }}/wheel-data
+        run: |
+          PY=../$PY
+          mkdir -p empty && cd empty
+          $PY -c "import concept_benchmark as c, pathlib; print(c.__version__, c.__file__); assert 'site-packages' in c.__file__"
+          $PY ../examples/robot_quickstart.py
+          $PY ../examples/sudoku_quickstart.py
+          $PY -m pytest -q --import-mode=importlib ../tests/test_pip_tier.py \
+            ../tests/test_benchmark_metrics.py ../tests/test_benchmark_plots.py \
+            ../tests/test_concept_dataset.py ../tests/test_concept_dataset_sample.py \
+            ../tests/test_concept_image_dataset_sample.py ../tests/test_config.py \
+            ../tests/test_generators.py ../tests/test_label_rules.py ../tests/test_ocr_training.py \
+            ../tests/test_robot_hierarchy.py ../tests/test_selective_thresholds.py \
+            ../tests/test_to_dataframe_explore.py ../tests/test_transforms.py ../tests/test_utils.py

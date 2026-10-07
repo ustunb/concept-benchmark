@@ -602,6 +602,19 @@ def _to_label(arr, label_map: dict | None):
     return s.map(lambda v: label_map.get(v, v)).astype(int).to_numpy()
 
 
+def _llm_sdk(module: str):
+    """Import one provider's SDK on demand; they are the `llm` extra of the package."""
+    import importlib
+
+    try:
+        return importlib.import_module(module)
+    except ImportError as e:
+        raise ImportError(
+            f"{module.split('.')[0]} is not installed; LLM captions need "
+            "`pip install 'concept-benchmark[llm]'`"
+        ) from e
+
+
 def unstructured_caption_via_llm(
     concepts: dict,
     *,
@@ -614,10 +627,6 @@ def unstructured_caption_via_llm(
     temperature: float = 0.7,
 ):
     import os
-    from google import genai
-    from google.genai import types as genai_types
-    import openai
-    import anthropic
 
     api_key = api_key or os.getenv("LM_API_KEY")
     if not api_key:
@@ -642,6 +651,7 @@ def unstructured_caption_via_llm(
     out = []
 
     if prov == "openai":
+        openai = _llm_sdk("openai")
         client = openai.OpenAI(api_key=api_key)
         resp = client.chat.completions.create(
             model=model,
@@ -657,6 +667,7 @@ def unstructured_caption_via_llm(
         return out
 
     elif prov in ("anthropic", "claude"):
+        anthropic = _llm_sdk("anthropic")
         client = anthropic.Anthropic(api_key=api_key)
         msg = client.messages.create(
             model=model,
@@ -688,6 +699,8 @@ def unstructured_caption_via_llm(
         return out
 
     elif prov in ("gemini", "google", "googleai", "google-genai"):
+        genai = _llm_sdk("google.genai")
+        genai_types = _llm_sdk("google.genai.types")
         client = genai.Client(api_key=api_key)
         gen_cfg = genai_types.GenerateContentConfig(
             temperature=temperature,
