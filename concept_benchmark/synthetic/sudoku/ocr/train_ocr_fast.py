@@ -198,13 +198,19 @@ def build_ocr_concept_dataset(
     logger.info("[INFO] saved OCR-inferred ConceptDataset to %s", out_path)
 
 
-def _test_board_images(dataset_dir: Path, seed: int) -> set[str]:
-    """Image names of the boards the pipeline holds out as its test split (the same split it draws later)."""
+def _held_out_board_images(dataset_dir: Path, seed: int) -> set[str]:
+    """Image names of the validation and test boards of the split the pipeline draws later.
+
+    The recognizer trains on the training boards only, so the validation boards (where the thresholds are
+    fitted) and the test boards carry handwriting it has never seen.
+    """
     from concept_benchmark.ext.fileutils import load
 
     data = load(dataset_dir / "sudoku_dataset.pkl")
     data.sample(test_size=0.2, val_size=0.2, stratify=data.y, seed=seed)
-    return {Path(str(x)).name for x in data.test.inputs}
+    return {
+        Path(str(x)).name for x in list(data.validation.inputs) + list(data.test.inputs)
+    }
 
 
 def main():
@@ -263,8 +269,10 @@ def main():
     logger = setup_logging(log_file)
 
     logger.info(f"[INFO] loading dataset from {dataset_dir} using {jsonl_path}")
-    test_images = _test_board_images(dataset_dir, cfg.seed)
-    logger.info(f"[INFO] {len(test_images)} test boards left out of OCR training")
+    test_images = _held_out_board_images(dataset_dir, cfg.seed)
+    logger.info(
+        f"[INFO] {len(test_images)} validation and test boards left out of OCR training"
+    )
     sudoku_ds = SudokuCellDataset(
         dataset_dir,
         jsonl_path,

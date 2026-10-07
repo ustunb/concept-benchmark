@@ -264,6 +264,9 @@ def histogram_transform(board: np.ndarray) -> np.ndarray:
     return feats.astype(np.float32)
 
 
+RENDER_VERSION = (
+    2  # 2: boards drawn at 50 px and resampled, handwriting seeded per board (Oct 2026)
+)
 _REFERENCE_CELL_PX = (
     50  # boards are drawn at this cell size and resampled to the requested one
 )

@@ -895,7 +895,6 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
         default_factory=lambda: [0.2, 0.4, 0.6, 0.8]
     )
     target_accuracy: float = 0.9
-    decision_threshold: float = 0.5
 
     # Alignment
     alignment_weights: dict[str, float] | None = None
@@ -951,10 +950,14 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
         }
 
     def setup_fingerprint(self) -> str:
-        """Hash of all parameters that affect data generation."""
+        """Hash of all parameters that affect data generation, and of the renderer's version."""
+        from concept_benchmark.synthetic.sudoku import RENDER_VERSION
+
         d = self._prepare_asdict()
         data_fields = self._scoped_field_names("data")
-        return _dict_sha256({k: v for k, v in d.items() if k in data_fields})
+        d = {k: v for k, v in d.items() if k in data_fields}
+        d["render_version"] = RENDER_VERSION
+        return _dict_sha256(d)
 
     def model_fingerprint(self, model_class: str | None = None) -> str:
         """Hash of all parameters that affect model training."""
@@ -964,7 +967,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
             "render_images",
             "intervention_thresholds",
             "target_accuracy",
-            "decision_threshold",
+            "calibrate",
             "alignment_weights",
         ):
             d.pop(k, None)

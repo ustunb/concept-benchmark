@@ -69,7 +69,7 @@ def train_cbm(
     The detector is the robot CNN unless `detector`, a module class or factory, is given (e.g.
     ``GroupPoolingConceptSudokuCNN``); it is built after seeding, so that the run is repeatable.
     With `should_calibrate`, each concept's probabilities are Platt-scaled on `validation` after training,
-    so that the label probabilities that abstention relies on are calibrated (:func:`calibrate_concepts`).
+    so that the label probabilities that abstention relies on are calibrated.
     With `should_propagate`, the label predictor reads the detector's probabilities instead of its 0/1 calls
     (the sudoku models of the paper). `patience` 0 disables early stopping. `seed` fixes the weights, the
     batches and the model's own sampling.
@@ -106,18 +106,6 @@ def train_cbm(
         should_calibrate=should_calibrate,
     )
     return cbm
-
-
-def calibrate_concepts(model: ConceptBasedModel, validation) -> ConceptBasedModel:
-    """Platt-scale each concept's probabilities on `validation` (a saved model can be calibrated afterwards).
-
-    Conceptual safeguards abstain on the propagated label probability, which is only as calibrated as the
-    concept probabilities it is built from; an underconfident detector makes every valid sudoku board look
-    uncertain. The scaling is fitted on the validation split, applied to every later prediction, and
-    changes nothing about the detector's weights.
-    """
-    model.concept_detector.calibrate(validation)
-    return model
 
 
 def train_dnn(
@@ -497,6 +485,9 @@ def automation_table(
             "abstention_threshold": threshold,
         }
     ]
+    known = ~np.isnan(
+        np.asarray(test.C, dtype=float)
+    )  # a check needs the true value of the concept
     for k in all_budgets:
         config = InterventionConfig(
             abstention_threshold=threshold, per_instance_budget=k, random_state=seed
@@ -504,7 +495,7 @@ def automation_table(
         # the strategy defers on the scaled probabilities (passed as the baseline); the checked boards'
         # new probabilities are scaled the same way, the others keep their k=0 values
         result = runner.run(policy, config, test, y_prob_baseline=test_prob_0)
-        checked = np.any(result.mask, axis=1)
+        checked = np.any(result.mask & known, axis=1)  # the rows the runner rewrote
         test_prob_k = test_prob_0.copy()
         test_prob_k[checked] = scaled(result.y_prob_after)[checked]
         accuracy_k, coverage_k = selective_at(y_test, test_prob_k[:, 1], threshold, 0.5)

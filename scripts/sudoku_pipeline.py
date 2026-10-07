@@ -325,9 +325,12 @@ def diagnose_confidence(
         cs_model._random_state = config.seed
 
     saved = {}
+    scale = PlattScaling()
+    if config.calibrate:
+        scale.fit(predict_proba_positive(cs_model, data.validation), data.validation.y)
     for name, split in (("val", data.validation), ("test", data.test)):
         prob_pos, y_true = predict_proba_positive(cs_model, split), np.asarray(split.y)
-        saved[f"p_{name}"] = np.asarray(prob_pos, dtype=np.float64)
+        saved[f"p_{name}"] = np.asarray(scale(prob_pos), dtype=np.float64)
         saved[f"y_{name}"] = np.asarray(y_true).astype(int)
         saved[f"C_{name}"] = np.asarray(split.C).astype(int)
         saved[f"Cp_{name}"] = np.asarray(
@@ -355,7 +358,7 @@ def diagnose_confidence(
             "expected every concept of every test board to be intervened on"
         )
     saved["p_test_true_concepts"] = np.asarray(
-        after.y_prob_after[:, 1], dtype=np.float64
+        scale(after.y_prob_after[:, 1]), dtype=np.float64
     )
 
     path = config.get_results_path(

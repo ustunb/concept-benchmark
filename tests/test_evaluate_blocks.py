@@ -230,13 +230,13 @@ def test_only_checked_boards_can_change_their_prediction():
         val,
         test,
         budgets=(1, "max"),
-        target_accuracy=0.95,
+        target_accuracy=0.99,
         seed=0,
     )
     accuracy_0 = table["accuracy"].iloc[0]
-    assert (
-        table["coverage_after"].iloc[0] > 0.8
-    )  # calibration makes the positives confident
+    # calibrated, the model is confident on most boards and defers some, which then get checked
+    assert 0.5 < table["coverage_after"].iloc[0] < 1.0
+    assert (table["predictions_intervened_on"].iloc[1:] > 0).all()
     # only the checked boards (the abstained ones) can change: coverage never drops and at most that
     # many predictions change
     assert table["coverage_after"].is_monotonic_increasing
