@@ -872,6 +872,8 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     batch_size: int = 32
     cs_epochs: int = 100
     cs_patience: int = 20
+    ocr_epochs: int = 20
+    ocr_patience: int = 3
     calibrate: bool = (
         True  # Platt-scale the label probability on validation before abstention
     )

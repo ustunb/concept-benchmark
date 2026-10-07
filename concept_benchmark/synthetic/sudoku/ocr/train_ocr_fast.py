@@ -70,12 +70,19 @@ def train_resnet_tiny(
     epochs: int,
     class_weights: torch.Tensor | None,
     logger: logging.Logger,
+    patience: int | None = None,
 ) -> dict:
+    """Train up to `epochs` epochs and keep the weights of the best validation cell accuracy.
+
+    With `patience`, training stops after that many epochs without an improvement, so a run that
+    has not converged by the last epoch does not go unnoticed.
+    """
     model = TinyResNet(num_classes=10).to(device)
     crit = nn.CrossEntropyLoss(weight=class_weights)
     opt = optim.Adam(model.parameters(), lr=1e-3)
     best_val_acc = 0.0
     best_state = None
+    best_epoch = 0
 
     for ep in range(1, epochs + 1):
         model.train()
@@ -96,10 +103,15 @@ def train_resnet_tiny(
         logger.info(f"[VAL] resnet_tiny ep={ep} loss={val_loss:.4f} acc={val_acc:.4f}")
         if val_acc > best_val_acc:
             best_val_acc = val_acc
+            best_epoch = ep
             best_state = {k: v.cpu() for k, v in model.state_dict().items()}
+        elif patience is not None and ep - best_epoch >= patience:
+            logger.info(f"[VAL] no improvement for {patience} epochs; stopping")
+            break
 
     return {
         "best_val_acc": float(best_val_acc),
+        "best_epoch": best_epoch,
         "best_state": best_state,
     }
 
@@ -222,7 +234,13 @@ def main():
     ap.add_argument("--n-samples", type=int, default=defaults.n_boards)
     ap.add_argument("--max-corrupt", type=int, default=defaults.max_cell_swaps)
     ap.add_argument("--seed", type=int, default=defaults.seed)
-    ap.add_argument("--epochs", type=int, default=2)
+    ap.add_argument("--epochs", type=int, default=20)
+    ap.add_argument(
+        "--patience",
+        type=int,
+        default=3,
+        help="Stop after this many epochs without a better validation accuracy.",
+    )
     ap.add_argument("--batch-size", type=int, default=256)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument(
@@ -333,13 +351,18 @@ def main():
             epochs=args.epochs,
             class_weights=class_weights,
             logger=logger,
+            patience=args.patience,
         )
         t1 = time.time()
 
         torch.save(res["best_state"], model_out)
         with meta_out.open("w") as f:
             json.dump(
-                {"name": "resnet_tiny", "val_acc": float(res["best_val_acc"])},
+                {
+                    "name": "resnet_tiny",
+                    "val_acc": float(res["best_val_acc"]),
+                    "best_epoch": res["best_epoch"],
+                },
                 f,
                 indent=2,
             )

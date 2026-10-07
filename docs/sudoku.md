@@ -58,4 +58,4 @@ python scripts/sudoku_pipeline.py --seed 171 --stages cs intervene selective dia
 | `calibrate` (config) | Platt-scale each model's label probability on the validation split before it abstains (on by default; the safeguard rule needs calibrated probabilities) |
 | `--stages` | `setup ocr cs dnn intervene selective align collect plot`, plus the optional `diagnose` |
 
-Run `python scripts/sudoku_pipeline.py --help` for the full list of flags; training parameters (`cs_epochs`, `cs_patience`, `epochs`, `batch_size`) are set in a YAML config passed with `--config`.
+Run `python scripts/sudoku_pipeline.py --help` for the full list of flags; training parameters (`cs_epochs`, `cs_patience`, `ocr_epochs`, `ocr_patience`, `epochs`, `batch_size`) are set in a YAML config passed with `--config`.

@@ -98,6 +98,10 @@ def train_ocr(config: SudokuBenchmarkConfig) -> None:
         str(config.max_cell_swaps),
         "--cell-px",
         str(config.cell_px),
+        "--epochs",
+        str(config.ocr_epochs),
+        "--patience",
+        str(config.ocr_patience),
     ]
     subprocess.run(cmd, check=True)
 
