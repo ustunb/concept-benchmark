@@ -234,11 +234,11 @@ def main():
     ap.add_argument("--n-samples", type=int, default=defaults.n_boards)
     ap.add_argument("--max-corrupt", type=int, default=defaults.max_cell_swaps)
     ap.add_argument("--seed", type=int, default=defaults.seed)
-    ap.add_argument("--epochs", type=int, default=5)
+    ap.add_argument("--epochs", type=int, default=defaults.ocr_epochs)
     ap.add_argument(
         "--patience",
         type=int,
-        default=3,
+        default=defaults.ocr_patience,
         help="Stop after this many epochs without a better validation accuracy.",
     )
     ap.add_argument("--batch-size", type=int, default=256)

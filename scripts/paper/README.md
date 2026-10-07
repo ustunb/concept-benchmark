@@ -26,6 +26,8 @@ root with `PYTHONPATH=.` and the project's Python. `_common.py` holds the paths 
 |---|---|---|
 | Robot table (accuracy by concept set, architecture, intervention source, budget) | `python scripts/paper/make_robot_big_table.py --rule balanced --out <paper>/tables/robot_big_table.tex` (`--rule sparse` for the appendix table) | `robot/balanced_rule/`, `robot/grid/` |
 | Sudoku table | `python scripts/paper/make_sudoku_table.py --out <paper>/tables/sudoku_px_sweep.tex` | `sudoku/cells/`, `sudoku/selective/` |
+| Sudoku detection-quality table | `python scripts/paper/make_sudoku_detection_table.py --out <paper>/tables/sudoku_detection.tex` | `sudoku/detection.csv` (written by `measure_sudoku_detection.py` from a pipeline run's data and CBM) |
+| Sudoku budget sweep figure | `python scripts/paper/plot_sudoku_ksweep.py --out <paper>/figures/sudoku_ksweep.pdf` | `sudoku/ksweep/` (written by `sweep_sudoku_budgets.py` from a pipeline run's data and CBM) |
 | Sudoku sensitivity tables (accuracy target, cost of a check) and their tests | `python scripts/paper/make_sudoku_sensitivity_tables.py --tau-out <paper>/tables/sudoku_tau_sweep.tex --cost-out <paper>/tables/sudoku_cost_models.tex` | `sudoku/cells/` |
 | Sudoku confidence tables and error breakdown | `python scripts/paper/make_sudoku_confidence_tables.py --classwise-out <paper>/tables/sudoku_classwise_threshold.tex --confirmed-out <paper>/tables/sudoku_confirmed_confidence.tex` | `sudoku/confidence/`, `sudoku/cells/` |
 | Real-dataset table (Derm7pt, CUB-25) | `python experiments/real_data.py --out results/paper/real_datasets --derm-root <Derm7pt> --cub-root <CUB_200_2011>` then `python scripts/paper/make_real_data_table.py --out <paper>/tables/real_datasets.tex` | `real_datasets/` |

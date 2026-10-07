@@ -1,7 +1,7 @@
 """Net work automated of the CBM against the intervention budget, on validation and on test (the budget sweep).
 
-Reads results/paper/sudoku/ksweep (one CSV per seed, resolution and split, written by `automation_table` over the
-budgets 1, 2, 3, 5, 8, 13, max) and draws one panel per resolution: mean ± SE over seeds, the best budget of each
+Reads results/paper/sudoku/ksweep (one CSV per seed, resolution and split, written by `sweep_sudoku_budgets.py` over
+the budgets 1, 2, 3, 5, 8, 13, max) and draws one panel per resolution: mean ± SE over seeds, the best budget of each
 curve marked. Prints, per seed, the budget chosen on validation, the best budget on test, and the net work lost on
 test by using the validation choice (the regret).
 

@@ -1,6 +1,6 @@
 """Write the detection-quality table of the sudoku automation results.
 
-Reads `results/paper/sudoku/detection.csv` (one row per resolution and seed) and writes, per resolution, the digit
+Reads `results/paper/sudoku/detection.csv` (one row per resolution and seed, written by `measure_sudoku_detection.py`) and writes, per resolution, the digit
 recognizer's cell accuracy on the test boards, the share of test boards with at least one misread digit, the CBM's
 concept accuracy on the test boards and the share of test boards with at least one wrong concept. Cells are mean ± SE
 over seeds, in percent.
