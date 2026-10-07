@@ -44,6 +44,7 @@ dependencies = [
     "pero>=0.18.0",
     "pycairo>=1.28.0",
     "pyyaml>=6.0",
+    "opencv-python-headless>=4.10",
 ]
 
 [project.optional-dependencies]
