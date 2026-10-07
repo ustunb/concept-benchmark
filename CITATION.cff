@@ -3,7 +3,7 @@ message: "If you use this software, please cite it as below."
 title: "Measuring What Matters: Synthetic Benchmarks for Concept Bottleneck Models"
 type: software
 version: 0.4.0
-date-released: 2026-10-08
+date-released: 2026-10-07
 url: "https://github.com/ustunb/concept-benchmark"
 repository-code: "https://github.com/ustunb/concept-benchmark"
 license: MIT
