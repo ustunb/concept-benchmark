@@ -33,8 +33,8 @@ class KFlipInterventionStrategy(InterventionStrategy):
     with the largest gain while the flip probability rises. An instance whose label no single concept can
     flip is then left alone, even if several concepts together could flip it.
 
-    Flip probability. It sums over all 2^|S| value combinations of the subset's concepts while there are at most
-    ``n_samples`` of them (|S| <= 12 by default) and is otherwise estimated from ``n_samples`` combinations drawn
+    Flip probability. It sums over all ``2^|S|`` value combinations of the subset's concepts while there are at most
+    ``n_samples`` of them (``|S| <= 12`` by default) and is otherwise estimated from ``n_samples`` combinations drawn
     from the concept probabilities. The same draws serve every subset, and a subset is re-estimated from them
     before it is compared with its extensions, so a concept's gain compares like with like.
 

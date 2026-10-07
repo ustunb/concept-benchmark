@@ -73,7 +73,7 @@ def setup(app):
 # -- Myst settings -----------------------------------------------------------
 suppress_warnings = ["myst.xref_missing"]
 
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "hf"]
 
 import os
 import sys

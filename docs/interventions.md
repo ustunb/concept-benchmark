@@ -201,7 +201,7 @@ python scripts/robot_pipeline.py --seed 1014 --concept-preset foot_subtypes \
 
 LLM interventions need an API key (`--llm-api-key` or `GEMINI_API_KEY`); `--llm-cache-only` reuses saved answers.
 
-#### Regimes
+### Regimes
 
 A regime names one pairing of concept source and intervention source, as in the first version of the benchmark:
 

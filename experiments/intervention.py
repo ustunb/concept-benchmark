@@ -935,7 +935,6 @@ class ConceptInterventionRunner:
         instance_ids: np.ndarray | None = None,
         y_prob_baseline: np.ndarray | None = None,
     ) -> InterventionResult:
-
         # NOTE: config.intervention_noise_rate is not consumed here — intervention
         # noise is applied post-hoc by the pipeline (see _test_interventions in
         # robot_pipeline.py).
