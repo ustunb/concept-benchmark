@@ -470,6 +470,11 @@ class TextConceptDetector(ConceptDetector):
             return hard
         return prob_all
 
+    def predict_proba(self, dataset: ConceptDatasetSample, **kwargs) -> np.ndarray:
+        """The concept probabilities of the captions (the thresholded 0/1 calls in ``hard`` output mode,
+        so that a label predictor thresholding at 0.5 sees the group-exclusive calls of :meth:`predict`)."""
+        return self.predict(dataset, **kwargs)
+
     @property
     def n_concepts(self) -> int:
         if self._n_concepts is None:

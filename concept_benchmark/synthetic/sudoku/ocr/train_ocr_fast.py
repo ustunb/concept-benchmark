@@ -104,7 +104,10 @@ def train_resnet_tiny(
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             best_epoch = ep
-            best_state = {k: v.cpu() for k, v in model.state_dict().items()}
+            # a copy: on a CPU or MPS model `.cpu()` returns the live tensors, which later epochs overwrite
+            best_state = {
+                k: v.detach().cpu().clone() for k, v in model.state_dict().items()
+            }
         elif patience is not None and ep - best_epoch >= patience:
             logger.info(f"[VAL] no improvement for {patience} epochs; stopping")
             break
