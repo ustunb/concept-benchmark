@@ -57,6 +57,7 @@ def main() -> None:
         plot_answer_reliance,
         plot_automation,
         plot_concept_report,
+        plot_confidence,
         plot_intervention_curve,
         plot_intervention_heatmap,
     )
@@ -160,6 +161,16 @@ def main() -> None:
         target_accuracy=0.95,
     )
     save(fig, "automation.png")
+
+    seed = 171
+    confidence = np.load(
+        PAPER.root
+        / f"sudoku/confidence/sudoku__arch-cbm__res-10px__seed-{seed}__confidence.npz"
+    )
+    cell = pd.read_csv(next(c for c in cells if f"seed-{seed}" in c.name))
+    threshold = float(cell.sort_values("budget")["abstention_threshold"].iloc[0])
+    fig, _ = plot_confidence(confidence["p_test"], confidence["y_test"], threshold)
+    save(fig, "confidence.png")
 
 
 if __name__ == "__main__":
