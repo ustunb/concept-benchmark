@@ -241,7 +241,7 @@ class PlattScaling:
         return self
 
     def __call__(self, prob_positive: np.ndarray) -> np.ndarray:
-        z = self.a * self._logit(prob_positive) + self.b
+        z = np.clip(self.a * self._logit(prob_positive) + self.b, -500.0, 500.0)
         return 1.0 / (1.0 + np.exp(-z))
 
 
