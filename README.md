@@ -411,8 +411,8 @@ print(df[show_cols])
 python scripts/sudoku_pipeline.py --seed 171
 python scripts/sudoku_pipeline.py --seed 171 --cbm-family cem
 
-# Harder concept detection: 18 pixels per cell instead of 50
-python scripts/sudoku_pipeline.py --seed 171 --cell-px 18
+# Harder concept detection: 10 pixels per cell instead of 50
+python scripts/sudoku_pipeline.py --seed 171 --cell-px 10
 
 # Save each model's confidence for plot_confidence (optional stage)
 python scripts/sudoku_pipeline.py --seed 171 --stages cs intervene selective diagnose plot
@@ -421,7 +421,7 @@ python scripts/sudoku_pipeline.py --seed 171 --stages cs intervene selective dia
 | Option | Description |
 |--------|-------------|
 | `--cbm-family` | `cbm`, `cem`, `probcbm` or `ecbm` |
-| `--cell-px` | Pixels per cell (50 by default; 18 blurs the handwritten digits) |
+| `--cell-px` | Pixels per cell (50 by default; at 10 the recognizer misreads a digit on half the boards) |
 | `--target-accuracy` | Selective accuracy that kept predictions must reach (0.90 by default; the paper uses 0.95) |
 | `--stages` | `setup ocr cs dnn intervene selective align collect plot`, plus the optional `diagnose` |
 
