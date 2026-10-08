@@ -1,8 +1,8 @@
 """Write the detection-quality table of the sudoku automation results.
 
-Reads `results/paper/sudoku/detection.csv` (one row per resolution and seed, written by `measure_sudoku_detection.py`) and writes, per resolution, the digit
-recognizer's cell accuracy on the test boards, the share of test boards with at least one misread digit, the CBM's
-concept accuracy on the test boards and the share of test boards with at least one wrong concept. Cells are mean ± SE
+Reads `results/paper/sudoku/detection.csv` (one row per resolution and seed, written by `measure_sudoku_detection.py`) and writes, per resolution, the
+accuracy of the cell and concept detectors on the test boards and the share of test boards with at least one wrong
+cell or concept. Cells are mean ± SE
 over seeds, in percent.
 
     python scripts/paper/make_sudoku_detection_table.py --out ../concept-benchmark-paper/tables/sudoku_detection.tex
@@ -19,10 +19,10 @@ import numpy as np
 from _common import PAPER, add_results_root, use_results_root
 
 COLUMNS = (
-    ("cell_acc_test", "Cell accuracy"),
-    ("boards_misread_test", "Boards with a misread digit"),
-    ("concept_acc_test", "Concept accuracy"),
-    ("boards_concept_error_test", "Boards with a wrong concept"),
+    ("cell_acc_test", "Accuracy"),
+    ("boards_misread_test", "Boards with an error"),
+    ("concept_acc_test", "Accuracy"),
+    ("boards_concept_error_test", "Boards with an error"),
 )
 
 
@@ -43,7 +43,7 @@ def main() -> None:
     lines = [
         r"\begin{tabular}{@{}l rr|rr@{}}",
         r"\toprule",
-        r"& \multicolumn{2}{c|}{\textbf{Digit recognizer}} & \multicolumn{2}{c}{\textbf{\CBM{} concept detectors}} \\",
+        r"& \multicolumn{2}{c|}{\textbf{Cells}} & \multicolumn{2}{c}{\textbf{Concepts}} \\",
         r"\cmidrule(lr){2-3} \cmidrule(lr){4-5}",
         r"\textbf{Resolution} & "
         + " & ".join(f"\\textsf{{{name}}}" for _, name in COLUMNS)
