@@ -19,6 +19,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.ticker import PercentFormatter  # noqa: E402
 
 from _common import PAPER, add_results_root, use_results_root  # noqa: E402
 
@@ -110,7 +111,8 @@ def main() -> None:
         ax.set_title(f"CBM, {res} px, τ = {TAU}")
         ax.set_xlabel("Intervention budget k")
         ax.grid(alpha=0.3)
-    axes[0].set_ylabel("Net work automated (%)")
+    axes[0].set_ylabel("NetWorkAutomated", family="sans-serif")
+    axes[0].yaxis.set_major_formatter(PercentFormatter(decimals=0))
     axes[0].legend(loc="lower left")
     fig.tight_layout()
     args.out.parent.mkdir(parents=True, exist_ok=True)
