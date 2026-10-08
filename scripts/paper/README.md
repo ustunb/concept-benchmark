@@ -8,10 +8,10 @@ entry points are one level up (`scripts/robot_pipeline.py`, `scripts/sudoku_pipe
 Every table, figure and test in the results section is produced by a script from one results folder. The folder is
 not part of the repository. Get one in either way:
 
-- **The paper's results.** Download `paper-results.zip` from the
+- **The paper's results.** Download `paper-results.zip` (14 MB) from the
   [releases page](https://github.com/ustunb/concept-benchmark/releases) and unpack it. It holds every file the tables,
-  figures and tests read. `paper-results-large.zip` adds the intervention records, datasets, models, LLM answers and
-  224 px images that the answer-exchange table, the alignment evaluation and the diagnostics read.
+  figures and tests read. The intervention records, datasets, models, LLM answers and 224 px images that the
+  answer-exchange table, the alignment evaluation and the diagnostics read are available on request.
 - **Your own runs.** Run the pipelines (see [`EXPERIMENTS.md`](../../EXPERIMENTS.md)), then copy their output into the
   same layout: `python scripts/paper/collect_pipeline_runs.py --runs results --results-root my_results`.
 
@@ -29,7 +29,6 @@ root with `PYTHONPATH=.` and the project's Python. `_common.py` holds the paths 
 | Sudoku detection-quality table | `python scripts/paper/make_sudoku_detection_table.py --out <paper>/tables/sudoku_detection.tex` | `sudoku/detection.csv` (written by `measure_sudoku_detection.py` from a pipeline run's data and CBM) |
 | Sudoku budget sweep figure | `python scripts/paper/plot_sudoku_ksweep.py --out <paper>/figures/sudoku_ksweep.pdf` | `sudoku/ksweep/` (written by `sweep_sudoku_budgets.py` from a pipeline run's data and CBM) |
 | Sudoku sensitivity tables (accuracy target, cost of a check) and their tests | `python scripts/paper/make_sudoku_sensitivity_tables.py --tau-out <paper>/tables/sudoku_tau_sweep.tex --cost-out <paper>/tables/sudoku_cost_models.tex` | `sudoku/cells/` |
-| Sudoku confidence tables and error breakdown | `python scripts/paper/make_sudoku_confidence_tables.py --classwise-out <paper>/tables/sudoku_classwise_threshold.tex --confirmed-out <paper>/tables/sudoku_confirmed_confidence.tex` | `sudoku/confidence/`, `sudoku/cells/` |
 | Real-dataset table (Derm7pt, CUB-25) | `python experiments/real_data.py --out results/paper/real_datasets --derm-root <Derm7pt> --cub-root <CUB_200_2011>` then `python scripts/paper/make_real_data_table.py --out <paper>/tables/real_datasets.tex` | `real_datasets/` |
 | Own-answers table | `python scripts/paper/make_own_answers_table.py --out <paper>/tables/own_answers.tex` | `robot/balanced_rule/` (`isrc-self`, `isrc-perfect`) |
 | Answer-exchange table | `python scripts/paper/make_answer_exchange_table.py --out <paper>/tables/answer_exchange.tex` | `robot/balanced_rule/intervention_records/`, CBM models |
@@ -44,7 +43,7 @@ The `plot_*` scripts write `<out>.tex` and compile `<out>.pdf` with pdflatex.
 | Architectures figure | `python scripts/paper/plot_architecture_response.py --rule balanced --concepts human --out results/paper/figures/fig_architecture_response_balanced_human` | `robot/balanced_rule/` |
 | Concept-source heatmap | `python scripts/paper/plot_delta_accuracy_pipelines.py --layout E --rule balanced --out results/paper/figures/fig_delta_accuracy_balanced_E` | `robot/balanced_rule/` |
 | Alignment figure | `python scripts/paper/plot_alignment.py --out results/paper/figures/fig_alignment` | `robot/alignment/` |
-| Example plots of the documentation (`docs/assets/*.png`, drawn with `concept_benchmark.evaluation`) | `python scripts/paper/make_readme_figures.py [--out <dir>]` | `robot/balanced_rule/`, `robot/alignment/`, `sudoku/cells/`, `sudoku/confidence/` |
+| Example plots of the documentation (`docs/assets/*.png`, drawn with `concept_benchmark.evaluation`) | `python scripts/paper/make_readme_figures.py [--out <dir>]` | `robot/balanced_rule/` (incl. `intervention_records/`), `robot/alignment/`, `sudoku/cells/`, `sudoku/confidence/` |
 
 ## Tests
 

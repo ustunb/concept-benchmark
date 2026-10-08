@@ -1036,6 +1036,8 @@ For a complete end-to-end example with training, interventions, and alignment, s
 
 [`EXPERIMENTS.md`](https://github.com/ustunb/concept-benchmark/blob/main/EXPERIMENTS.md) lists the commands behind each experiment, and [`scripts/paper/README.md`](https://github.com/ustunb/concept-benchmark/blob/main/scripts/paper/README.md) maps every table, figure and test of the paper to the script that produces it.
 
+The paper's results (`paper-results.zip`, 14 MB) are attached to the [v0.4.0 release](https://github.com/ustunb/concept-benchmark/releases/tag/v0.4.0); unpack them and pass the folder to any paper script as `--results-root`.
+
 ## Citation
 
 If you use this package in your research, please cite:
