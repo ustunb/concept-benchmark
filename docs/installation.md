@@ -40,3 +40,14 @@ The datasets of the paper are also on the Hugging Face Hub ([`robots-true-concep
 from datasets import load_dataset
 ds = load_dataset("juliannski/robots-human-concepts")
 ```
+
+## CEM, ProbCBM and ECBM
+
+`./scripts/install_cem_repo.sh` installs the official [`mateoespinosa/cem`](https://github.com/mateoespinosa/cem) package that CEM and ProbCBM need; ECBM is included. Select a family with `--cbm-family cem|probcbm|ecbm` in the robot and sudoku pipelines (the text pipeline trains the CBM only; alignment runs on the CBM only). Their settings are fields of the config:
+
+| Parameter | Default | Description |
+|---|---|---|
+| `cem_emb_size` | 16 | Concept embedding dimension for CEM |
+| `cem_training_intervention_prob` | 0.25 | Intervention probability during CEM training |
+| `training_mode` | `independent` | How the concept and label parts are trained: `independent`, `sequential` or `joint` (CLI: `--training-mode`) |
+| `probcbm_n_samples_inference` | 50 | Monte Carlo samples during ProbCBM inference |

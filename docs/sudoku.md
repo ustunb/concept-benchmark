@@ -50,6 +50,8 @@ python scripts/sudoku_pipeline.py --seed 171 --cell-px 10
 python scripts/sudoku_pipeline.py --seed 171 --stages cs intervene selective diagnose plot
 ```
 
+At 10 px the abstention threshold is fitted on the validation boards; on the test boards of seed 171 the answered predictions are 95% correct without checks and 94% with all 27, since a misread digit makes the model confidently wrong on a few boards that it never defers.
+
 | Option | Description |
 |--------|-------------|
 | `--cbm-family` | `cbm`, `cem`, `probcbm` or `ecbm` |
