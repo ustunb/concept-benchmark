@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 — 2026-10-14
+
+### Fixed
+
+- **Sudoku board images no longer reveal the label through their layout.** The cells drawn in the printed font were chosen with a seed equal to the weighted digit sum of the board, which is the same number for every valid board (each row and column sums to 45), so all valid boards shared one printed/handwritten layout and invalid boards did not; a logistic regression on the layout alone told them apart with 97% accuracy without reading a digit (reported by a user who trained an image model on the Hub dataset). The seed is now a hash of the board, so every board gets its own layout and the same board still gets the same one. Present in the images of every release before 0.4.1. No result in the paper reads pixels: every model is trained on the true digits and evaluated on the digits the recognizer reads cell by cell, so the layout could not reach them. The paper's boards are those of `v0.4.0` (`git checkout v0.4.0`); `RENDER_VERSION` is 3, image dataset folders carry it (`…_seed171_r3`), and the Hub dataset `juliannski/sudoku` was regenerated (the 0.4.0 images remain at revision `e0a31cfb`).
+
 ## 0.4.0 — 2026-10-07
 
 ### Changed

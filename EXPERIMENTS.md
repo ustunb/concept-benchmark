@@ -83,7 +83,10 @@ python experiments/real_data.py --out results/paper/real_datasets \
 
 ## Sudoku Benchmark
 
+The paper's boards are those of release `v0.4.0`; 0.4.1 gives every board its own layout of printed digits (see the CHANGELOG), which moves the recognizer's accuracy within its seed-to-seed noise. For a byte-exact rerun, check out the tag first:
+
 ```bash
+git checkout v0.4.0 && uv sync   # the paper's sudoku images; skip for the current renderer
 for px in 50 10; do
     for family in cbm cem probcbm ecbm; do
         python scripts/sudoku_pipeline.py --seed 171 --cell-px $px --cbm-family $family --target-accuracy 0.95

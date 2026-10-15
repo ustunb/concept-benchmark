@@ -13,6 +13,7 @@ def _get_default_font(size):
 import random
 import os
 import glob
+import hashlib
 import math
 from scipy import ndimage
 from scipy.ndimage import gaussian_filter, map_coordinates
@@ -239,11 +240,14 @@ def _build_given_mask(
         return mask
 
     if starters_seed is None:
-        # Derive a deterministic seed from board contents so that
-        # the same board always produces the same starters mask.
-        starters_seed = int(
-            np.sum(board * np.arange(1, board.size + 1).reshape(board.shape)) % (2**31)
-        )
+        # Derive a deterministic seed from the board contents so that the same board always
+        # produces the same starters mask. A hash, not a sum: every row and column of a valid
+        # board sums to 45, so a weighted digit sum is the same number for every valid board,
+        # and the layout would then tell valid boards from invalid ones.
+        digest = hashlib.blake2b(
+            np.ascontiguousarray(board, dtype=np.int64).tobytes(), digest_size=4
+        ).digest()
+        starters_seed = int.from_bytes(digest, "little")
     rng = np.random.default_rng(starters_seed)
 
     if starters_count is not None:

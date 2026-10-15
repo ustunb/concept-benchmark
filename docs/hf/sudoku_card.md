@@ -25,10 +25,12 @@ Synthetic benchmark for evaluating Concept Bottleneck Models on sudoku validatio
 This dataset is the **exact output** of the [`concept-benchmark`](https://pypi.org/project/concept-benchmark/) Python package, with the train/validation/test split of the paper: 1,000 boards at 50 px per cell (454 x 454 px), each written in its own handwriting, with printed starters and candidate marks.
 
 ```python
-# pip install concept-benchmark==0.4.0
+# pip install concept-benchmark==0.4.1
 from concept_benchmark.sudoku import DatasetGenerator
 dataset = DatasetGenerator(seed=171).generate_splits()
 ```
+
+The images were regenerated with 0.4.1, which gives every board its own layout of printed digits; in the 0.4.0 images (revision `e0a31cfb950230abcc253a545ac260514d1ca2c7`) every valid board shared one layout, so an image model could tell valid from invalid boards without reading a digit. Digits, concepts, labels and splits are the same in both.
 
 📓 **[Quickstart notebook](./quickstart.ipynb)** — load from the Hub and train a model, end-to-end in one notebook.
 

@@ -66,3 +66,5 @@ At 10 px the abstention threshold is fitted on the validation boards; on the tes
 | `--force-setup` | Regenerate the dataset even if one with the same parameters exists |
 
 Run `python scripts/sudoku_pipeline.py --help` for the full list of flags; training parameters (`cs_epochs`, `cs_patience`, `ocr_epochs`, `ocr_patience`, `epochs`, `batch_size`) are set in a YAML config passed with `--config`.
+
+Image datasets are written to `data/sudoku/sudoku_image_…_seed<seed>_r<RENDER_VERSION>`; the suffix changes when the renderer changes (3 since 0.4.1, which gives every board its own layout of printed digits), so boards from different renderers never share a folder. The paper's boards are those of `v0.4.0`.

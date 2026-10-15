@@ -270,7 +270,8 @@ def histogram_transform(board: np.ndarray) -> np.ndarray:
 
 
 RENDER_VERSION = (
-    2  # 2: boards drawn at 50 px and resampled, handwriting seeded per board (Oct 2026)
+    3  # 2: boards drawn at 50 px and resampled, handwriting seeded per board (Oct 2026);
+    # 3: printed-digit layout seeded by a hash of the board, not its digit sum (Oct 2026)
 )
 _REFERENCE_CELL_PX = (
     50  # boards are drawn at this cell size and resampled to the requested one

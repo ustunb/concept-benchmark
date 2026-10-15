@@ -999,6 +999,10 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
         """Return the directory path for the dataset."""
         dt = data_type or self.data_type
         filename = f"sudoku_{dt}_n{self.block_size}_ns{self.n_boards}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}"
+        if dt == "image":
+            from concept_benchmark.synthetic.sudoku import RENDER_VERSION
+
+            filename += f"_r{RENDER_VERSION}"  # the pictures change with the renderer; the digits do not
         return paths.data_dir / "sudoku" / filename
 
     def get_model_path(self, model_class: str, data_type: str | None = None) -> Path:

@@ -288,7 +288,7 @@ class TestSudokuDatasetGenerator:
         ds = gen.generate()
         folder = ds.inputs[0].parent
         assert folder == gen.config.get_dataset_path(data_type="image")
-        assert folder.name == "sudoku_image_n3_ns10_mc9_px50_seed43"
+        assert folder.name == "sudoku_image_n3_ns10_mc9_px50_seed43_r3"
 
     def test_boards_at_any_cell_size_are_the_50px_board_scaled(self, tmp_path):
         import numpy as np
@@ -329,6 +329,20 @@ class TestSudokuDatasetGenerator:
         assert not np.array_equal(a, b)  # same digits, different strokes
         # the grid and the printed starters are identical, only the handwriting moves
         assert (a != b).mean() < 0.1
+
+    def test_printed_digit_layout_differs_between_valid_boards(self):
+        """Which cells are typeset must not reveal the label: every valid board gets its own layout."""
+        import numpy as np
+        from concept_benchmark.synthetic.sudoku.handwriting import _build_given_mask
+        from concept_benchmark.synthetic.sudoku.utils import generate_valid_board
+
+        rng = np.random.default_rng(11)
+        boards = [generate_valid_board(rng=rng) for _ in range(6)]
+        masks = [_build_given_mask(b, None, 0.35, None, None) for b in boards]
+        assert len({m.tobytes() for m in masks}) == 6
+        assert np.array_equal(
+            masks[0], _build_given_mask(boards[0], None, 0.35, None, None)
+        )
 
     def test_boards_stored_in_meta(self):
         ds = DatasetGenerator(
