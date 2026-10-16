@@ -84,17 +84,14 @@ def main() -> None:
     n_seeds, label, suffix = RULES[args.rule]
     cells = read_grid(args.rule)
 
+    # the bare tabular: the paper wraps it in its own table environment and caption
     lines = [
-        r"\begin{table*}[t]",
-        r"\centering",
-        r"\small",
-        r"\resizebox{1.0\textwidth}{!}{",
         r"\renewcommand{\arraystretch}{1.1}",
-        r"\begin{tabular}{@{}ll rrrr|rrrr|rrrr@{}}",
-        r"\toprule",
+        r"\begin{tabular}{@{}ll rrrr rrrr rrrr@{}}",
+        r"%\toprule",
         r"& & \multicolumn{12}{c}{\textbf{Intervention}} \\",
         r"\cmidrule(lr){3-14}",
-        r"& & \multicolumn{4}{c|}{\textds{perfect}} & \multicolumn{4}{c|}{\textds{expert}} & \multicolumn{4}{c}{\textds{llm}} \\",
+        r"& & \multicolumn{4}{c}{\textds{perfect}} & \multicolumn{4}{c}{\textds{expert}} & \multicolumn{4}{c}{\textds{llm}} \\",
         r"\cmidrule(lr){3-6} \cmidrule(lr){7-10} \cmidrule(lr){11-14}",
         r"\textbf{Dataset} & \textbf{Model} & $k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$ & $k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$ & $k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$ \\",
     ]
@@ -137,23 +134,7 @@ def main() -> None:
                     for k in range(4)
                 ]
             lines.append(f" & {macro:<11}& " + " & ".join(row) + r" \\")
-    lines += [
-        r"\bottomrule",
-        r"\end{tabular}",
-        r"}",
-        r"\caption{Accuracy of concept-based models in the decision-support benchmark under each concept set and "
-        r"intervention regime with $k$ interventions"
-        rf"{suffix}{' (mean $' + chr(92) + 'pm$ SE, $n{=}4$ seeds)' if args.rule == 'sparse' else ''}."
-        + (
-            r" With \textds{human\_concepts}, every architecture is less accurate after all interventions than with "
-            r"\textds{true\_concepts}."
-            if args.rule == "sparse"
-            else ""
-        )
-        + "}",
-        rf"\label{{{label}}}",
-        r"\end{table*}",
-    ]
+    lines += [r"\bottomrule", r"\end{tabular}%"]
     args.out.write_text("\n".join(lines) + "\n")
     print(f"wrote {args.out} ({len(CONCEPT_SETS) * len(ARCHS)} rows)")
 
