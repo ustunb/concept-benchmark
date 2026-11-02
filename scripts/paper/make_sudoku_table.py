@@ -93,6 +93,8 @@ def main() -> None:
         r"\setlength{\tabcolsep}{3pt}",
         r"\begin{tabular}{@{}ll rrrr rrrr@{}}",
         r"%\toprule",
+        r"& & \multicolumn{8}{c}{\textbf{Interventions}} \\",
+        r"\cmidrule(lr){3-10}",
         r"& & \multicolumn{4}{c}{$\wrk$} & \multicolumn{4}{c}{\textsf{Coverage}} \\",
         r"\cmidrule(lr){3-6} \cmidrule(lr){7-10}",
         r"\textbf{Resolution} & \textbf{Model} & $k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$ & $k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$ \\",
