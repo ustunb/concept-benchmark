@@ -32,11 +32,11 @@ RULES = {  # rule -> (seeds per cell, table label, caption suffix)
 }
 AUTOMATED = {"machine_annotation", "llm_concepts", "clip_concepts"}
 CONCEPT_SETS = [
-    ("ground_truth", "true\\_concepts", 7),
-    ("human_concepts", "human\\_concepts", 12),
-    ("machine_annotation", "machine\\_annotation", 12),
-    ("llm_concepts", "llm\\_concepts", 12),
-    ("clip_concepts", "clip\\_concepts", 12),
+    ("ground_truth", "oracle", 7),
+    ("human_concepts", "discovered", 12),
+    ("machine_annotation", "machine\\_labeled", 12),
+    ("llm_concepts", "llm\\_written", 12),
+    ("clip_concepts", "clip\\_words", 12),
 ]
 ARCHS = [
     ("cbm", "\\CBM{}"),

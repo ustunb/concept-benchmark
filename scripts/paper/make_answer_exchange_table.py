@@ -26,6 +26,7 @@ from concept_benchmark.ext.fileutils import load  # noqa: E402
 
 SEEDS = tuple(range(1014, 1024))
 MODEL_TAG = {"true": "ideal", "human": "subconcept"}
+PAPER_NAME = {"true": "oracle", "human": "discovered"}
 BUDGETS = ("1", "3", "max")
 NAMES = {"llm": "LLM", "expert": "Expert", "perfect": "True values"}
 CONCEPT_MACRO = {
@@ -162,7 +163,7 @@ def main() -> None:
         r"\toprule",
         "& "
         + " & ".join(
-            rf"\multicolumn{{3}}{{c}}{{\textds{{{c}\_concepts}}}}"
+            rf"\multicolumn{{3}}{{c}}{{\textds{{{PAPER_NAME[c]}}}}}"
             for c in args.concept_sets
         )
         + r" \\",

@@ -31,11 +31,11 @@ ARCHS = [
     ("ecbm", "arch-ecbm", "\\ECBM{}"),
 ]
 CONCEPT_SETS = [
-    ("true", "true\\_concepts"),
-    ("human", "human\\_concepts"),
-    ("machine", "machine\\_annotation"),
-    ("llm", "llm\\_concepts"),
-    ("clip", "clip\\_concepts"),
+    ("true", "oracle"),
+    ("human", "discovered"),
+    ("machine", "machine\\_labeled"),
+    ("llm", "llm\\_written"),
+    ("clip", "clip\\_words"),
 ]
 AUTOMATED = {"machine", "llm", "clip"}
 # the installed perfect cell of this run comes from a retrained model; its own-answer cell was run on the replaced
