@@ -34,7 +34,7 @@ AUTOMATED = {"machine_annotation", "llm_concepts", "clip_concepts"}
 CONCEPT_SETS = [
     ("ground_truth", "oracle", 7),
     ("human_concepts", "discovered", 12),
-    ("machine_annotation", "machine\\_labeled", 12),
+    ("machine_annotation", "machine\\_|labeled", 12),
     ("llm_concepts", "llm\\_written", 12),
     ("clip_concepts", "clip\\_words", 12),
 ]
@@ -96,10 +96,10 @@ def main() -> None:
         r"\textbf{Dataset} & \textbf{Model} & $k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$ & $k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$ & $k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$ \\",
     ]
     for i, (source, name, m) in enumerate(CONCEPT_SETS):
+        # '|' marks a line break inside a long concept-set name
+        name_cell = r"\\".join(rf"\textds{{{part}}}" for part in name.split("|"))
         lines.append(r"\midrule")
-        lines.append(
-            rf"\multirow{{4}}{{*}}{{\cell{{l}}{{\textds{{{name}}}\\$m{{=}}{m}$}}}}"
-        )
+        lines.append(rf"\multirow{{4}}{{*}}{{\cell{{l}}{{{name_cell}\\$m{{=}}{m}$}}}}")
         runs = {}
         for family, _ in ARCHS:
             for isrc in SOURCES:
