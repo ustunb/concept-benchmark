@@ -144,7 +144,10 @@ def main() -> None:
     use_results_root(args)
     args.tau_out.write_text(
         "\n".join(
-            table([(f"${tau}$", tau, COST_MODELS[0][1]) for tau in TAUS], r"$\alpha_{\textrm{target}}$")
+            table(
+                [(f"${tau}$", tau, COST_MODELS[0][1]) for tau in TAUS],
+                r"$\alpha_{\textrm{target}}$",
+            )
         )
         + "\n"
     )
