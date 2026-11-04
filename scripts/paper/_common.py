@@ -122,6 +122,40 @@ for _path in (str(REPO), str(REPO / "scripts")):
         sys.path.append(_path)
 
 
+BUDGETS = (0, 1, 3, "max")
+
+
+def budget_label(budget: int | str) -> str:
+    """Column label for an intervention budget: none, an upper bound such as $\\leq 3$ concepts, or all concepts."""
+    if str(budget) == "0":
+        return "none"
+    if str(budget) == "max":
+        return "all concepts"
+    return rf"$\leq {budget}$ concept" + ("" if str(budget) == "1" else "s")
+
+
+def budget_columns(budgets: Sequence[int | str]) -> str:
+    """Budget labels centered over their columns, one column each."""
+    return " & ".join(rf"\multicolumn{{1}}{{c}}{{{budget_label(b)}}}" for b in budgets)
+
+
+def intervention_headers(groups: Sequence[str]) -> list[str]:
+    """Three header rows: Interventions, then the budget (none, shared; then <= 1, <= 3, all concepts), then `groups`
+    under each nonzero budget. Two leading columns hold the row labels; the last row starts with their names."""
+    n = len(groups)
+    last = 3 + 3 * n
+    spans = [rf"\multicolumn{{{n}}}{{c}}{{{budget_label(b)}}}" for b in BUDGETS[1:]]
+    rules = " ".join(
+        rf"\cmidrule(lr){{{4 + n * i}-{3 + n * (i + 1)}}}" for i in range(3)
+    )
+    return [
+        rf"& & \multicolumn{{{last - 2}}}{{c}}{{\textbf{{Interventions}}}} \\",
+        rf"\cmidrule(lr){{3-{last}}}",
+        rf"& & {budget_columns(BUDGETS[:1])} & " + " & ".join(spans) + r" \\",
+        r"\cmidrule(lr){3-3} " + rules,
+    ]
+
+
 def mean_se(values: Sequence[float]) -> tuple[float, float]:
     """Mean and standard error (sample standard deviation / sqrt(n))."""
     return st.mean(values), st.stdev(values) / len(values) ** 0.5

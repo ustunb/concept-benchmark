@@ -19,6 +19,8 @@ from pathlib import Path
 from _common import (
     PAPER,
     add_results_root,
+    budget_columns,
+    BUDGETS,
     latex_cell,
     mean_se,
     read_budget_rows,
@@ -31,6 +33,7 @@ ARCHS = [
     ("probcbm", "\\ProbCBM{}"),
     ("ecbm", "\\ECBM{}"),
 ]
+METRICS = (r"$\wrk$", r"\textsf{Coverage}")
 RESOLUTIONS = (50, 10)
 N_TEST_BOARDS, N_CONCEPTS = 200, 27
 TAU = "0.95"  # the main text; the appendix sweeps the target
@@ -95,9 +98,13 @@ def main() -> None:
         r"%\toprule",
         r"& & \multicolumn{8}{c}{\textbf{Interventions}} \\",
         r"\cmidrule(lr){3-10}",
-        r"& & \multicolumn{4}{c}{$\wrk$} & \multicolumn{4}{c}{\textsf{Coverage}} \\",
+        r"& & "
+        + " & ".join(rf"\multicolumn{{4}}{{c}}{{{m}}}" for m in METRICS)
+        + r" \\",
         r"\cmidrule(lr){3-6} \cmidrule(lr){7-10}",
-        r"\textbf{Resolution} & \textbf{Model} & $k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$ & $k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$ \\",
+        r"\textbf{Resolution} & \textbf{Model} & "
+        + budget_columns(BUDGETS * 2)
+        + r" \\",
     ]
     for res in RESOLUTIONS:
         data = {arch: read_cells(res, arch, args.tau) for arch, _ in ARCHS}

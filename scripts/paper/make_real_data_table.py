@@ -14,7 +14,7 @@ import csv
 import statistics as st
 from pathlib import Path
 
-from _common import PAPER, add_results_root, use_results_root
+from _common import PAPER, add_results_root, budget_columns, use_results_root
 
 DATASETS = [("derm7pt", r"\textds{Derm7pt}"), ("cub", r"\textds{CUB}")]
 CONCEPTS = [
@@ -26,13 +26,13 @@ CONCEPTS = [
 def tabular(name: str, title: str) -> list[str]:
     rows = list(csv.DictReader((PAPER.real_datasets / f"{name}.csv").open()))
     budgets = list(dict.fromkeys(r["budget"] for r in rows))
-    head = " & ".join(
-        r"$k{=}\text{max}$" if b == "max" else f"$k{{=}}{b}$" for b in budgets
-    )
+    n = len(budgets)
     lines = [
-        rf"\begin{{tabular}}{{@{{}}l{'r' * (len(budgets) + 1)}@{{}}}}",
+        rf"\begin{{tabular}}{{@{{}}l{'r' * (n + 1)}@{{}}}}",
         r"\toprule",
-        rf"{title} & {head} & \textheader{{Change}} \\",
+        rf"& \multicolumn{{{n}}}{{c}}{{\textbf{{Interventions}}}} & \\",
+        rf"\cmidrule(lr){{2-{n + 1}}}",
+        rf"{title} & {budget_columns(budgets)} & \textheader{{Change}} \\",
         r"\midrule",
     ]
     for keys, label in CONCEPTS:

@@ -19,7 +19,13 @@ from pathlib import Path
 
 import numpy as np
 
-from _common import BALANCED_TAG, PAPER, add_results_root, use_results_root
+from _common import (
+    BALANCED_TAG,
+    PAPER,
+    add_results_root,
+    budget_columns,
+    use_results_root,
+)
 
 warnings.filterwarnings("ignore")
 from concept_benchmark.ext.fileutils import load  # noqa: E402
@@ -168,9 +174,7 @@ def main() -> None:
         )
         + r" \\",
         " ".join(rf"\cmidrule(lr){{{2 + 3 * i}-{4 + 3 * i}}}" for i in range(n)),
-        r"\textheader{Answers} & "
-        + " & ".join([r"$k{=}1$ & $k{=}3$ & $k{=}\text{max}$"] * n)
-        + r" \\",
+        r"\textheader{Answers} & " + " & ".join([budget_columns(BUDGETS)] * n) + r" \\",
         r"\midrule",
     ]
     for i, (key, label) in enumerate(labels):

@@ -1,7 +1,7 @@
 """Write the robots big table (accuracy by concept set x intervention source x architecture x budget).
 
 Reads the installed results of one labeling rule and writes the table in the paper's layout: rows = concept set x
-architecture, column blocks = perfect / expert / llm interventions at k = 0, 1, 3, max. Cells are mean ± SE over
+architecture, columns = k = 0 (shared by the sources), then perfect / expert / llm interventions at k = 1, 3, max. Cells are mean ± SE over
 seeds (accuracy, %); every cell must have all seeds of its rule (balanced: 1014-1023, results/paper/robot/balanced_rule;
 sparse: 1014-1017, results/paper/robot/grid). LLM interventions use the Gemini 2.5 Flash-Lite caches at 224 px. Under
 the balanced rule, interventions on the label-free CBM set a concept to its 5th/95th-percentile score.
@@ -21,6 +21,7 @@ from _common import (
     PAPER,
     add_results_root,
     filename_fields,
+    intervention_headers,
     latex_cell,
     read_budget_rows,
     use_results_root,
@@ -85,15 +86,15 @@ def main() -> None:
     cells = read_grid(args.rule)
 
     # the bare tabular: the paper wraps it in its own table environment and caption
+    # columns: k = 0 (the same for every source), then the three sources at each of k = 1, 3, max
     lines = [
         r"\renewcommand{\arraystretch}{1.1}",
-        r"\begin{tabular}{@{}ll rrrr rrrr rrrr@{}}",
+        r"\begin{tabular}{@{}ll r rrr rrr rrr@{}}",
         r"%\toprule",
-        r"& & \multicolumn{12}{c}{\textbf{Intervention}} \\",
-        r"\cmidrule(lr){3-14}",
-        r"& & \multicolumn{4}{c}{\textds{perfect}} & \multicolumn{4}{c}{\textds{expert}} & \multicolumn{4}{c}{\textds{llm}} \\",
-        r"\cmidrule(lr){3-6} \cmidrule(lr){7-10} \cmidrule(lr){11-14}",
-        r"\textbf{Dataset} & \textbf{Model} & $k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$ & $k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$ & $k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$ \\",
+        *intervention_headers(SOURCES),
+        r"\textbf{Dataset} & \textbf{Model} & & "
+        + " & ".join([" & ".join(rf"\textds{{{s}}}" for s in SOURCES)] * 3)
+        + r" \\",
     ]
     for i, (source, name, m) in enumerate(CONCEPT_SETS):
         # '|' marks a line break inside a long concept-set name
@@ -118,21 +119,36 @@ def main() -> None:
             for isrc in SOURCES
         }
         for family, macro in ARCHS:
-            row = []
+            first_best = {}
             for isrc in SOURCES:
                 means = [
                     round(st.mean([r[k] for r in runs[family, isrc]]), 1)
                     for k in range(4)
                 ]
-                first_best = (
+                first_best[isrc] = (
                     means.index(best[isrc]) if best[isrc] in means else None
                 )  # earliest budget only
-                row += [
-                    latex_cell(
-                        [r[k] for r in runs[family, isrc]], is_best=k == first_best
-                    )
-                    for k in range(4)
-                ]
+            # k = 0 is one column: the sources must print the same cell (separate evaluations can differ by 0.01 pp)
+            no_intervention = {
+                latex_cell([r[0] for r in runs[family, isrc]]) for isrc in SOURCES
+            }
+            if len(no_intervention) != 1:
+                raise SystemExit(
+                    f"{source} x {family}: accuracy at k = 0 differs across sources"
+                )
+            row = [
+                latex_cell(
+                    [r[0] for r in runs[family, SOURCES[0]]],
+                    is_best=0 in first_best.values(),
+                )
+            ]
+            row += [
+                latex_cell(
+                    [r[k] for r in runs[family, isrc]], is_best=k == first_best[isrc]
+                )
+                for k in range(1, 4)
+                for isrc in SOURCES
+            ]
             lines.append(f" & {macro:<11}& " + " & ".join(row) + r" \\")
     lines += [r"\bottomrule", r"\end{tabular}%"]
     args.out.write_text("\n".join(lines) + "\n")

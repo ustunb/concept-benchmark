@@ -27,8 +27,10 @@ from pathlib import Path
 from scipy import stats
 
 from _common import (
+    BUDGETS,
     PAPER,
     add_results_root,
+    budget_columns,
     latex_cell,
     read_budget_rows,
     use_results_root,
@@ -84,12 +86,14 @@ def table(
 ) -> list[str]:
     """One block of rows per setting (label, tau, costs); prints the tests of each setting."""
     lines = [
-        r"\begin{tabular}{@{}lll rrrr|rrrr@{}}",
+        r"\begin{tabular}{@{}lll rrrr rrrr@{}}",
         r"\toprule",
-        r"& & & \multicolumn{4}{c|}{$\wrk$} & \multicolumn{4}{c}{\textsf{Coverage}} \\",
+        r"& & & \multicolumn{8}{c}{\textbf{Interventions}} \\",
+        r"\cmidrule(lr){4-11}",
+        r"& & & \multicolumn{4}{c}{$\wrk$} & \multicolumn{4}{c}{\textsf{Coverage}} \\",
         r"\cmidrule(lr){4-7} \cmidrule(lr){8-11}",
         rf"\textbf{{{first_header}}} & \textbf{{Resolution}} & \textbf{{Model}} & "
-        + " & ".join([r"$k{=}0$ & $k{=}1$ & $k{=}3$ & $k{=}\text{max}$"] * 2)
+        + budget_columns(BUDGETS * 2)
         + r" \\",
     ]
     for label, tau, costs in settings:
