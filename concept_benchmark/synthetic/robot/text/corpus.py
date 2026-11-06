@@ -27,6 +27,7 @@ _NAT_KEY_OF_FEATURE = {
 }
 _COLORS = ["red", "blue", "green", "yellow", "orange", "purple", "grey", "white"]
 _PLACEHOLDER = re.compile(r"\{([A-Za-z_]+)(?:~(not|syn))?\}")
+_SENTENCE_START = re.compile(r"(^|[.!?]\s+)([a-z])")
 
 if TYPE_CHECKING:
     from concept_benchmark.config import RobotBenchmarkConfig
@@ -257,6 +258,16 @@ def nat_from_tokens(row: dict, seed: int) -> dict:
         "ELBOWS_NAT": "has elbows"
         if str(row["has_elbows"]).lower() == "true"
         else "no elbows",
+        # whole clauses for templates in which the "has/no" phrases above do not read as English
+        "ANT_CLAUSE": "there are antennae"
+        if str(row["has_antennae"]).lower() == "true"
+        else "there are no antennae",
+        "KNEES_CLAUSE": "it has knees"
+        if str(row["has_knees"]).lower() == "true"
+        else "it has no knees",
+        "ELBOWS_CLAUSE": "its arms bend at the elbows"
+        if str(row["has_elbows"]).lower() == "true"
+        else "its arms have no elbows",
     }
 
 
@@ -300,7 +311,9 @@ def render_from_corpus(row: dict, corpus: list[dict], seed: int) -> str:
         others = [str(v) for v in ROBOT_CONCEPTS[name] if str(v) != value]
         return pick(others, match.group(0))
 
-    return _PLACEHOLDER.sub(fill, txt)
+    return _SENTENCE_START.sub(
+        lambda m: m.group(1) + m.group(2).upper(), _PLACEHOLDER.sub(fill, txt)
+    )
 
 
 def core_vector_from_row(row: dict) -> np.ndarray:

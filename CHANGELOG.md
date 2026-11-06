@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Sudoku interventions follow conceptual safeguards.** `automation_table` verifies the concepts of a deferred board one at a time, in order of the expected change in the label probability per unit of cost (Joren et al., 2024), and stops once the board leaves the abstention band, when no concept can change the label probability, or after the budget. It used to verify the first `b` concepts in index order on every deferred board. `automation_table` takes `concept_costs`. The paper's Sudoku results were re-scored from the stored models with this policy, at the selective-accuracy target 0.99 in the main text; the earlier cells are archived in `results/paper/sudoku/archive/index_order/`.
+- The robot text corpus capitalizes the first letter of every sentence, and the hard corpus states antennas, knees, and elbows in one clause each.
+
+### Added
+
+- `scripts/paper/reevaluate_sudoku_checks.py` (re-score the stored Sudoku models), `measure_intervention_ceiling.py` and `make_sudoku_ceiling_table.py` (deferred boards with every concept verified), `make_robot_text_table.py`.
+
 ## 0.4.1 — 2026-10-14
 
 ### Fixed

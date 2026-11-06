@@ -18,7 +18,7 @@ from experiments.evaluate import (
     train_cbm,
     train_dnn,
 )
-from experiments.intervention import ConceptInterventionRunner
+from experiments.intervention import ConceptInterventionRunner, run_safeguard_checks
 from tests.conftest import make_tabular_dataset
 
 D, K = 3, 4
@@ -243,3 +243,60 @@ def test_only_checked_boards_can_change_their_prediction():
     for _, row in table.iloc[1:].iterrows():
         changed = round(abs(row["accuracy"] - accuracy_0) * test.n)
         assert changed <= row["predictions_intervened_on"]
+
+
+def _deferring_table(cbm, val, test, budgets):
+    """A table at a target that defers some boards, so that concept checks happen."""
+    for target in (0.9, 0.8, 0.7, 0.6):
+        table = automation_table(
+            cbm, val, test, budgets=budgets, target_accuracy=target, seed=0
+        )
+        if "abstention_threshold" in table and table["total_concept_checks"].iloc[-1]:
+            return table
+    pytest.skip("no target defers a board on this fixture")
+
+
+def test_checks_stop_within_the_budget(cbm, splits):
+    _, val, test = splits
+    table = _deferring_table(cbm, val, test, budgets=(1, 2, "max"))
+    by_budget = table.set_index("budget")
+    for k in (1, 2, K):
+        intervened = by_budget.loc[k, "predictions_intervened_on"]
+        assert by_budget.loc[k, "total_concept_checks"] <= k * intervened
+    # more budget never means fewer checks or lower coverage
+    assert table["total_concept_checks"].is_monotonic_increasing
+    assert table["coverage_after"].is_monotonic_increasing
+
+
+def test_first_check_takes_the_concept_with_the_highest_gain(cbm, splits):
+    _, val, test = splits
+    runner = ConceptInterventionRunner(cbm)
+    batch = runner._build_batch(
+        dataset=test,
+        concept_proba=None,
+        concept_true=test.base_concepts,
+        labels=None,
+        instance_ids=None,
+    )
+    q = batch.C_pred.astype(float)
+    prob = cbm.propagate_predict_proba(q)
+    snapshots = run_safeguard_checks(
+        cbm,
+        test,
+        threshold=0.49,  # nearly every board is in the band
+        scale=lambda p: p,
+        y_prob_baseline=prob,
+        budgets=[1],
+    )
+    mask = snapshots[1][0]
+    for i in np.flatnonzero(mask.any(axis=1))[:5]:
+        gains = []
+        for k in range(K):
+            hi, lo = q[i : i + 1].copy(), q[i : i + 1].copy()
+            hi[0, k], lo[0, k] = 1.0, 0.0
+            diff = (
+                cbm.propagate_predict_proba(hi)[0, 1]
+                - cbm.propagate_predict_proba(lo)[0, 1]
+            )
+            gains.append(q[i, k] * (1 - q[i, k]) * abs(diff))
+        assert np.flatnonzero(mask[i])[0] == int(np.argmax(gains))

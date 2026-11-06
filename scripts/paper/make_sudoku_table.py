@@ -1,6 +1,6 @@
 """Write the sudoku automation table (net work automated and coverage by resolution x architecture x budget).
 
-Reads the installed cells (results/paper/sudoku/cells, selective-accuracy target tau = 0.95, per-budget thresholds)
+Reads the installed cells (results/paper/sudoku/cells, selective-accuracy target tau = 0.99, per-budget thresholds)
 and writes `tables/sudoku_px_sweep.tex`: mean ± SE over seeds at k = 0, 1, 3, max. Net work automated is the coverage
 minus the share of concepts checked (checks / (test boards x 27 concepts)). The highest value of each metric per
 resolution is bold, once per row at the earliest budget. The DNN row is its coverage at the same target (the DNN takes no
@@ -36,7 +36,7 @@ ARCHS = [
 METRICS = (r"$\wrk$", r"\textsf{Coverage}")
 RESOLUTIONS = (50, 10)
 N_TEST_BOARDS, N_CONCEPTS = 200, 27
-TAU = "0.95"  # the main text; the appendix sweeps the target
+TAU = "0.99"  # the main text; the appendix sweeps the target
 
 
 def read_cells(

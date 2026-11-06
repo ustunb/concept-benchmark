@@ -3,7 +3,8 @@
 Reads the installed cells (results/paper/sudoku/cells, per-budget thresholds) and writes
 
 - `--tau-out`: net work automated and coverage at the selective-accuracy targets tau = 0.90, 0.95, 0.99;
-- `--cost-out`: the same at tau = 0.95 under three costs of a concept check: every check costs the same (`equal`), a
+- `--cost-out`: the same at tau = 0.99 under three costs of a concept check, each read from its own cells (the cost
+  changes which concept is verified first): every check costs the same (`equal`), a
   block check costs twice a row or column check (`2x block`), and each kind of check has its own cost drawn once from
   U(0.5, 1.5) (`random`).
 
@@ -38,22 +39,26 @@ from _common import (
 from make_sudoku_table import ARCHS, N_CONCEPTS, N_TEST_BOARDS, RESOLUTIONS
 
 TAUS = ("0.90", "0.95", "0.99")
-COST_TAU = "0.95"
+COST_TAU = "0.99"
 _draw = random.Random(0)
-# cost of a row, column and block check
+# label, cost of a row, column and block check, and the tag of its cells (`reevaluate_sudoku_checks.py`)
 COST_MODELS = [
-    ("equal", (1.0, 1.0, 1.0)),
-    ("2$\\times$ block", (1.0, 1.0, 2.0)),
-    ("random", tuple(round(_draw.uniform(0.5, 1.5), 2) for _ in range(3))),
+    ("equal", (1.0, 1.0, 1.0), ""),
+    ("2$\\times$ block", (1.0, 1.0, 2.0), "__cost-2xblock"),
+    (
+        "random",
+        tuple(round(_draw.uniform(0.5, 1.5), 2) for _ in range(3)),
+        "__cost-random",
+    ),
 ]
 
 
 def read_cells(
-    res: int, arch: str, tau: str, costs: tuple[float, float, float]
+    res: int, arch: str, tau: str, costs: tuple[float, float, float], tag: str = ""
 ) -> dict[int, tuple[list[float], list[float]]]:
     """seed -> (net work automated, coverage) in percent at k = 0, 1, 3, max."""
     runs = {}
-    pattern = f"sudoku__arch-{arch}__res-{res}px__tau-{tau}__threshold-per-budget__seed-*__interventions.csv"
+    pattern = f"sudoku__arch-{arch}__res-{res}px__tau-{tau}{tag}__threshold-per-budget__seed-*__interventions.csv"
     for f in sorted(PAPER.sudoku_cells.glob(pattern)):
         rows = read_budget_rows(f)
         if len(rows) != 4 or any(not r.get("coverage_after") for r in rows):
@@ -82,9 +87,9 @@ def paired(a: list[float], b: list[float]) -> str:
 
 
 def table(
-    settings: list[tuple[str, str, tuple[float, float, float]]], first_header: str
+    settings: list[tuple[str, str, tuple[float, float, float], str]], first_header: str
 ) -> list[str]:
-    """One block of rows per setting (label, tau, costs); prints the tests of each setting."""
+    """One block of rows per setting (label, tau, costs, cell tag); prints the tests of each setting."""
     lines = [
         r"\begin{tabular}{@{}lll rrrr rrrr@{}}",
         r"\toprule",
@@ -96,13 +101,18 @@ def table(
         + budget_columns(BUDGETS * 2)
         + r" \\",
     ]
-    for label, tau, costs in settings:
+    for label, tau, costs, tag in settings:
         lines.append(r"\midrule")
         runs = {
-            (res, arch): read_cells(res, arch, tau, costs)
+            (res, arch): read_cells(res, arch, tau, costs, tag)
             for res in RESOLUTIONS
             for arch, _ in ARCHS
         }
+        if tag:  # no intervention, no cost: every cost reports the equal-cost run without interventions
+            for (res, arch), seeds in runs.items():
+                equal = read_cells(res, arch, tau, COST_MODELS[0][1])
+                for s, (net, coverage) in seeds.items():
+                    net[0], coverage[0] = equal[s][0][0], equal[s][1][0]
         for i, res in enumerate(RESOLUTIONS):
             for j, (arch, macro) in enumerate(ARCHS):
                 seeds = sorted(runs[res, arch])
@@ -149,7 +159,7 @@ def main() -> None:
     args.tau_out.write_text(
         "\n".join(
             table(
-                [(f"${tau}$", tau, COST_MODELS[0][1]) for tau in TAUS],
+                [(f"${tau}$", tau, COST_MODELS[0][1], "") for tau in TAUS],
                 r"$\alpha_{\textrm{target}}$",
             )
         )
@@ -158,11 +168,14 @@ def main() -> None:
     print(f"wrote {args.tau_out}")
     print(
         "cost of a row, column and block check:",
-        {name: costs for name, costs in COST_MODELS},
+        {name: costs for name, costs, _ in COST_MODELS},
     )
     args.cost_out.write_text(
         "\n".join(
-            table([(name, COST_TAU, costs) for name, costs in COST_MODELS], "Cost")
+            table(
+                [(name, COST_TAU, costs, tag) for name, costs, tag in COST_MODELS],
+                "Cost",
+            )
         )
         + "\n"
     )

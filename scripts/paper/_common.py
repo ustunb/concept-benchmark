@@ -72,6 +72,10 @@ class PaperResults:
         return self.root / "sudoku/ksweep"
 
     @property
+    def sudoku_ceiling(self) -> Path:
+        return self.root / "sudoku/ceiling"
+
+    @property
     def sudoku_detection(self) -> Path:
         return self.root / "sudoku/detection.csv"
 

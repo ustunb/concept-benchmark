@@ -41,9 +41,9 @@ def main() -> None:
     with PAPER.sudoku_detection.open() as f:
         rows = list(csv.DictReader(f))
     lines = [
-        r"\begin{tabular}{@{}l rr|rr@{}}",
+        r"\begin{tabular}{@{}l rr rr@{}}",
         r"\toprule",
-        r"& \multicolumn{2}{c|}{\textbf{Cells}} & \multicolumn{2}{c}{\textbf{Concepts}} \\",
+        r"& \multicolumn{2}{c}{\textbf{Digits (81 cells)}} & \multicolumn{2}{c}{\textbf{Concepts (27 constraints)}} \\",
         r"\cmidrule(lr){2-3} \cmidrule(lr){4-5}",
         r"\textbf{Resolution} & "
         + " & ".join(f"\\textsf{{{name}}}" for _, name in COLUMNS)

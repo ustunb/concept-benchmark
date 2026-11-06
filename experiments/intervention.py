@@ -393,6 +393,147 @@ class InterventionStrategy:
         return total_applied
 
 
+def _label_proba_on_rows(
+    model: ConceptBasedModel,
+    batch: "InterventionBatch",
+    concepts: np.ndarray,
+    mask: np.ndarray,
+    rows: np.ndarray,
+) -> np.ndarray:
+    """Label probabilities of the boards `rows` from `concepts`, with the concepts in `mask` confirmed."""
+    if _supports_aligned_concept_replay(model):
+        return predict_label_proba_from_concepts(
+            model,
+            concepts[rows],
+            row_indices=_aligned_replay_row_indices(batch)[rows],
+            baseline_concepts=batch.C_pred[rows],
+            intervention_mask=mask[rows],
+        )
+    if hasattr(model, "predict_proba_from_concepts"):
+        return model.predict_proba_from_concepts(concepts[rows])
+    return model.propagate_predict_proba(concepts[rows])
+
+
+def _uses_monte_carlo(model: ConceptBasedModel, n_concepts: int) -> bool:
+    """Whether the model propagates concept uncertainty by Monte Carlo sampling (a CBM with many concepts)."""
+    should_use_exact = getattr(model, "_should_use_exact", None)
+    return (
+        not _supports_aligned_concept_replay(model)
+        and should_use_exact is not None
+        and not should_use_exact(n_concepts)
+    )
+
+
+def _gain_monte_carlo(
+    model: ConceptBasedModel, concepts: np.ndarray, scale, rng: np.random.Generator
+) -> np.ndarray:
+    """|f(q; q_k <- 1) - f(q; q_k <- 0)| for every board and concept, from one shared set of sampled concept vectors.
+
+    Sampling the concepts once per board and setting concept k to 1 and to 0 in those same samples (common random
+    numbers) estimates both expectations at the cost of one propagation per concept, instead of two fresh ones.
+    """
+    n, m = concepts.shape
+    s = max(1, int(getattr(model, "_mc_samples", 1024)))
+    q = np.clip(concepts, 0.0, 1.0)
+    Z = (rng.random((n, s, m)) < q[:, None, :]).astype(np.float32)
+    diff = np.zeros((n, m))
+    for k in range(m):
+        means = []
+        for v in (1.0, 0.0):
+            Zk = Z.copy()
+            Zk[:, :, k] = v
+            flat = Zk.reshape(-1, m)
+            uniq, inv = np.unique(flat, axis=0, return_inverse=True)
+            y = model.label_predictor.predict_proba(uniq)[inv.ravel(), 1]
+            means.append(scale(y.reshape(n, s).mean(axis=1)))
+        diff[:, k] = np.abs(means[0] - means[1])
+    return diff
+
+
+def run_safeguard_checks(
+    model: ConceptBasedModel,
+    dataset: ConceptDatasetSample,
+    *,
+    threshold: float,
+    scale,
+    y_prob_baseline: np.ndarray,
+    budgets: Sequence[int],
+    concept_costs: np.ndarray | None = None,
+) -> dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """Check concepts one at a time on the boards the model abstains on, as in conceptual safeguards.
+
+    At each step, every board that is still in the abstention band gets one more check: the unchecked concept with
+    the highest gain per cost, where the gain of concept k is q_k (1 - q_k) |f(q; q_k <- 1) - f(q; q_k <- 0)| (Joren
+    et al., 2024, Eq. 5) and f is the scaled label probability. The checked concept takes its true value. A board
+    stops as soon as it leaves the abstention band, when no unchecked concept can change its prediction, or after
+    the largest budget. Because a board's checks do not depend on the budget, one pass gives every budget.
+
+    Returns {budget: (checked mask, scaled label probabilities, concept values)} after at most `budget` checks.
+    """
+    runner = ConceptInterventionRunner(model)
+    batch = runner._build_batch(
+        dataset=dataset,
+        concept_proba=None,
+        concept_true=dataset.base_concepts,
+        labels=None,
+        instance_ids=None,
+    )
+    _prime_aligned_replay_context(model, dataset, batch)
+    n, m = batch.C_pred.shape
+    costs = np.ones(m) if concept_costs is None else np.asarray(concept_costs, float)
+    known = ~np.isnan(batch.C_true)
+    concepts = batch.C_pred.astype(float).copy()
+    mask = np.zeros((n, m), dtype=bool)
+    prob = np.asarray(y_prob_baseline, dtype=float).copy()
+    active = abstention_mask(prob, threshold) & known.any(axis=1)
+    snapshots = {}
+    monte_carlo = _uses_monte_carlo(model, m)
+    rng = np.random.default_rng(getattr(model, "_random_state", None) or 0)
+    for step in range(1, max(budgets) + 1):
+        rows = np.flatnonzero(active)
+        if rows.size:
+            if monte_carlo:
+                diff = _gain_monte_carlo(model, concepts[rows], scale, rng)
+            else:
+                diff = np.zeros((rows.size, m))
+                for k in range(m):
+                    values = []
+                    for v in (1.0, 0.0):
+                        trial = concepts.copy()
+                        trial[rows, k] = v
+                        trial_mask = mask.copy()
+                        trial_mask[rows, k] = True
+                        values.append(
+                            scale(
+                                _label_proba_on_rows(
+                                    model, batch, trial, trial_mask, rows
+                                )[:, 1]
+                            )
+                        )
+                    diff[:, k] = np.abs(values[0] - values[1])
+            q = batch.C_pred[rows]
+            gain = np.where(
+                ~mask[rows] & known[rows], q * (1 - q) * diff / costs, -np.inf
+            )
+            best = np.argmax(gain, axis=1)
+            stuck = (
+                gain[np.arange(rows.size), best] <= 0
+            )  # no check can change the prediction
+            active[rows[stuck]] = False
+            rows, best = rows[~stuck], best[~stuck]
+            concepts[rows, best] = batch.C_true[rows, best]
+            mask[rows, best] = True
+            if rows.size:
+                p = scale(
+                    _label_proba_on_rows(model, batch, concepts, mask, rows)[:, 1]
+                )
+                prob[rows] = np.column_stack([1.0 - p, p])
+                active[rows] = abstention_mask(prob[rows], threshold)
+        if step in budgets:
+            snapshots[step] = (mask.copy(), prob.copy(), concepts.copy())
+    return snapshots
+
+
 class ConceptualSafeguardsStrategy(InterventionStrategy):
     """Intervene on abstaining predictions by overwriting selected concepts."""
 

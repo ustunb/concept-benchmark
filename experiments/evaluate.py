@@ -29,6 +29,7 @@ from experiments.intervention import (
     ConceptualSafeguardsStrategy,
     InterventionConfig,
     predict_label_proba_from_concepts,
+    run_safeguard_checks,
 )
 from experiments.kflip import KFlipInterventionStrategy
 from experiments.models import (
@@ -409,6 +410,7 @@ def automation_table(
     seed: int,
     concept_groups: int | None = None,
     calibrate: bool = True,
+    concept_costs: np.ndarray | None = None,
 ) -> pd.DataFrame:
     """Coverage and the checks it costs with 0, then each budget of concept checks per instance: the automation table.
 
@@ -416,8 +418,9 @@ def automation_table(
     Platt-scaled on the validation predictions (``calibrate``); the model predicts a valid board above 0.5
     and abstains on ``t <= p <= 1 - t``, with the threshold ``t`` fitted once on those validation
     predictions so that the kept predictions reach `target_accuracy`; a human then checks up to k concepts
-    of each board the model abstains on, and the same scaling and gate are applied to the probabilities
-    after the checks.
+    of each board the model abstains on, one at a time, choosing the concept with the highest gain per cost
+    (`concept_costs`, default equal) and stopping once the board leaves the abstention band (see
+    ``run_safeguard_checks``); the same scaling and gate apply to the probabilities after the checks.
     One row per budget with the columns the sudoku pipeline writes (``coverage_after``,
     ``selective_accuracy_after``, ``total_concept_checks``, ...). Pass it to ``plot_automation``.
     With `concept_groups` (concepts per group, e.g. 9 for sudoku rows/columns/blocks), the checks are also
@@ -485,30 +488,32 @@ def automation_table(
             "abstention_threshold": threshold,
         }
     ]
-    known = ~np.isnan(
-        np.asarray(test.C, dtype=float)
-    )  # a check needs the true value of the concept
+    torch.manual_seed(
+        seed
+    )  # models that sample (ProbCBM) give the same checks on every run
+    snapshots = run_safeguard_checks(
+        model,
+        test,
+        threshold=threshold,
+        scale=scale,
+        y_prob_baseline=test_prob_0,
+        budgets=all_budgets,
+        concept_costs=concept_costs,
+    )
+    C_pred = np.asarray(test_k0.C_pred, dtype=float)
     for k in all_budgets:
-        config = InterventionConfig(
-            abstention_threshold=threshold, per_instance_budget=k, random_state=seed
-        )
-        # the strategy defers on the scaled probabilities (passed as the baseline); the checked boards'
-        # new probabilities are scaled the same way, the others keep their k=0 values
-        result = runner.run(policy, config, test, y_prob_baseline=test_prob_0)
-        checked = np.any(result.mask & known, axis=1)  # the rows the runner rewrote
-        test_prob_k = test_prob_0.copy()
-        test_prob_k[checked] = scaled(result.y_prob_after)[checked]
+        mask, test_prob_k, concepts = snapshots[k]
         accuracy_k, coverage_k = selective_at(y_test, test_prob_k[:, 1], threshold, 0.5)
-        edits = (result.C_pred >= 0.5) != (result.C_intervened >= 0.5)
+        edits = mask & ((C_pred >= 0.5) != (concepts >= 0.5))
         rows.append(
             {
                 "budget": k,
                 "accuracy": float(
                     ((test_prob_k[:, 1] >= 0.5).astype(int) == y_test).mean()
                 ),
-                "predictions_intervened_on": int(np.sum(np.any(result.mask, axis=1))),
-                "total_concept_checks": int(np.sum(result.mask)),
-                **_group_checks(result.mask, concept_groups),
+                "predictions_intervened_on": int(np.sum(np.any(mask, axis=1))),
+                "total_concept_checks": int(np.sum(mask)),
+                **_group_checks(mask, concept_groups),
                 "total_concept_edits_made": int(np.sum(edits)),
                 "selective_accuracy_after": accuracy_k,
                 "coverage_after": coverage_k,

@@ -125,7 +125,7 @@ def main() -> None:
         r"\toprule",
         r"& & \multicolumn{2}{c}{\textheader{Change in accuracy upon interventions}} \\",
         r"\cmidrule(lr){3-4}",
-        r"\textheader{Dataset} & \textheader{Model} & \textheader{Own concept predictions} & \textheader{True concept values} \\",
+        r"\textheader{Dataset} & \textheader{Model} & \textheader{Own concept predictions} & \textheader{Ground-truth labels} \\",
     ]
     for concepts, name in CONCEPT_SETS:
         lines.append(r"\midrule")
