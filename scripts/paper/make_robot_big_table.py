@@ -90,7 +90,6 @@ def main() -> None:
     lines = [
         r"\renewcommand{\arraystretch}{1.1}",
         r"\begin{tabular}{@{}ll r rrr rrr rrr@{}}",
-        r"%\toprule",
         *intervention_headers(SOURCES),
         r"\textbf{Dataset} & \textbf{Model} & & "
         + " & ".join([" & ".join(rf"\textds{{{s}}}" for s in SOURCES)] * 3)

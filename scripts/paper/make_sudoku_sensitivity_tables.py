@@ -95,7 +95,7 @@ def table(
         r"\toprule",
         r"& & & \multicolumn{8}{c}{\textbf{Interventions}} \\",
         r"\cmidrule(lr){4-11}",
-        r"& & & \multicolumn{4}{c}{$\wrk$} & \multicolumn{4}{c}{\textsf{Coverage}} \\",
+        r"& & & \multicolumn{4}{c}{$\wrk$} & \multicolumn{4}{c}{$\cov$} \\",
         r"\cmidrule(lr){4-7} \cmidrule(lr){8-11}",
         rf"\textbf{{{first_header}}} & \textbf{{Resolution}} & \textbf{{Model}} & "
         + budget_columns(BUDGETS * 2)

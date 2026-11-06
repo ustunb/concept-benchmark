@@ -33,7 +33,7 @@ ARCHS = [
     ("probcbm", "\\ProbCBM{}"),
     ("ecbm", "\\ECBM{}"),
 ]
-METRICS = (r"$\wrk$", r"\textsf{Coverage}")
+METRICS = (r"$\wrk$", r"$\cov$")
 RESOLUTIONS = (50, 10)
 N_TEST_BOARDS, N_CONCEPTS = 200, 27
 TAU = "0.99"  # the main text; the appendix sweeps the target
@@ -95,7 +95,6 @@ def main() -> None:
         r"\renewcommand{\arraystretch}{1.05}",
         r"\setlength{\tabcolsep}{3pt}",
         r"\begin{tabular}{@{}ll rrrr rrrr@{}}",
-        r"%\toprule",
         r"& & \multicolumn{8}{c}{\textbf{Interventions}} \\",
         r"\cmidrule(lr){3-10}",
         r"& & "
