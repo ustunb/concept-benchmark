@@ -29,7 +29,6 @@ def tabular(name: str, title: str) -> list[str]:
     n = len(budgets)
     lines = [
         rf"\begin{{tabular}}{{@{{}}l{'r' * (n + 1)}@{{}}}}",
-        r"\toprule",
         rf"& \multicolumn{{{n}}}{{c}}{{\textbf{{Interventions}}}} & \\",
         rf"\cmidrule(lr){{2-{n + 1}}}",
         rf"{title} & {budget_columns(budgets)} & \textheader{{Change}} \\",

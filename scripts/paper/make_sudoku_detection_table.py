@@ -42,7 +42,6 @@ def main() -> None:
         rows = list(csv.DictReader(f))
     lines = [
         r"\begin{tabular}{@{}l rr rr@{}}",
-        r"\toprule",
         r"& \multicolumn{2}{c}{\textbf{Digits (81 cells)}} & \multicolumn{2}{c}{\textbf{Concepts (27 constraints)}} \\",
         r"\cmidrule(lr){2-3} \cmidrule(lr){4-5}",
         r"\textbf{Resolution} & "

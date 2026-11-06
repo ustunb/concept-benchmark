@@ -85,7 +85,8 @@ def main() -> None:
         r"\small",
         r"\renewcommand{\arraystretch}{1.2}",
         rf"\begin{{tabular}}{{{columns}}}",
-        r"\toprule",
+        r"& & \multicolumn{3}{c}{\textbf{Caption Format}} \\",
+        r"\cmidrule(lr){3-5}",
         r"\multicolumn{2}{@{}l}{\textbf{Robot}} & "
         + " & ".join(rf"\textbf{{{name}}}" for _, name in LEVELS)
         + r" \\",

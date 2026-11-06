@@ -25,7 +25,6 @@ _NAT_KEY_OF_FEATURE = {
     "has_knees": "KNEES_NAT",
     "has_elbows": "ELBOWS_NAT",
 }
-_COLORS = ["red", "blue", "green", "yellow", "orange", "purple", "grey", "white"]
 _PLACEHOLDER = re.compile(r"\{([A-Za-z_]+)(?:~(not|syn))?\}")
 _SENTENCE_START = re.compile(r"(^|[.!?]\s+)([a-z])")
 
@@ -299,8 +298,6 @@ def render_from_corpus(row: dict, corpus: list[dict], seed: int) -> str:
         name, modifier = match.group(1), match.group(2)
         if name in nat:
             return nat[name]
-        if name == "color":
-            return pick(_COLORS, name)
         if name not in _NAT_KEY_OF_FEATURE:
             raise ValueError(f"Unknown placeholder {match.group(0)!r} in {txt!r}")
         value = str(row[name])

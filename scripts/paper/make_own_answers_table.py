@@ -122,7 +122,6 @@ def main() -> None:
     summary = summarize()
     lines = [
         r"\begin{tabular}{@{}llrr@{}}",
-        r"\toprule",
         r"& & \multicolumn{2}{c}{\textheader{Change in accuracy upon interventions}} \\",
         r"\cmidrule(lr){3-4}",
         r"\textheader{Dataset} & \textheader{Model} & \textheader{Own concept predictions} & \textheader{Ground-truth labels} \\",

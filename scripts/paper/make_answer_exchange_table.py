@@ -166,7 +166,8 @@ def main() -> None:
     n = len(args.concept_sets)
     lines = [
         rf"\begin{{tabular}}{{@{{}}l{'rrr' * n}@{{}}}}",
-        r"\toprule",
+        rf"& \multicolumn{{{3 * n}}}{{c}}{{\textbf{{Interventions}}}} \\",
+        rf"\cmidrule(lr){{2-{1 + 3 * n}}}",
         "& "
         + " & ".join(
             rf"\multicolumn{{3}}{{c}}{{\textds{{{PAPER_NAME[c]}}}}}"

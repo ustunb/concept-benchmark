@@ -44,7 +44,6 @@ def main() -> None:
     boards = read_boards()
     lines = [
         r"\begin{tabular}{@{}l rr rrr@{}}",
-        r"\toprule",
         r"& \multicolumn{2}{c}{\textbf{Remain deferred}} & \multicolumn{3}{c}{\textbf{Probability of a valid board}} \\",
         r"\cmidrule(lr){2-3} \cmidrule(lr){4-6}",
         r"\textbf{Model} & "

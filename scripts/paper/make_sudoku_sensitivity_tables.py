@@ -92,7 +92,6 @@ def table(
     """One block of rows per setting (label, tau, costs, cell tag); prints the tests of each setting."""
     lines = [
         r"\begin{tabular}{@{}lll rrrr rrrr@{}}",
-        r"\toprule",
         r"& & & \multicolumn{8}{c}{\textbf{Interventions}} \\",
         r"\cmidrule(lr){4-11}",
         r"& & & \multicolumn{4}{c}{$\wrk$} & \multicolumn{4}{c}{$\cov$} \\",

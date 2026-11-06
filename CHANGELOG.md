@@ -5,7 +5,7 @@
 ### Changed
 
 - **Sudoku interventions follow conceptual safeguards.** `automation_table` verifies the concepts of a deferred board one at a time, in order of the expected change in the label probability per unit of cost (Joren et al., 2024), and stops once the board leaves the abstention band, when no concept can change the label probability, or after the budget. It used to verify the first `b` concepts in index order on every deferred board. `automation_table` takes `concept_costs`. The paper's Sudoku results were re-scored from the stored models with this policy, at the selective-accuracy target 0.99 in the main text; the earlier cells are archived in `results/paper/sudoku/archive/index_order/`.
-- The robot text corpus capitalizes the first letter of every sentence, and the hard corpus states antennas, knees, and elbows in one clause each.
+- The robot text corpus capitalizes the first letter of every sentence, the hard corpus states antennas, knees, and elbows in one clause each, and the semi-structured templates no longer name a color (it was drawn at random, unrelated to the robot).
 
 ### Added
 
