@@ -1,0 +1,257 @@
+{
+  "@context": {
+    "@language": "en",
+    "@vocab": "https://schema.org/",
+    "arrayShape": "cr:arrayShape",
+    "citeAs": "cr:citeAs",
+    "column": "cr:column",
+    "conformsTo": "dct:conformsTo",
+    "containedIn": "cr:containedIn",
+    "cr": "http://mlcommons.org/croissant/",
+    "data": {
+      "@id": "cr:data",
+      "@type": "@json"
+    },
+    "dataBiases": "cr:dataBiases",
+    "dataCollection": "cr:dataCollection",
+    "dataType": {
+      "@id": "cr:dataType",
+      "@type": "@vocab"
+    },
+    "dct": "http://purl.org/dc/terms/",
+    "extract": "cr:extract",
+    "field": "cr:field",
+    "fileProperty": "cr:fileProperty",
+    "fileObject": "cr:fileObject",
+    "fileSet": "cr:fileSet",
+    "format": "cr:format",
+    "includes": "cr:includes",
+    "isArray": "cr:isArray",
+    "isLiveDataset": "cr:isLiveDataset",
+    "jsonPath": "cr:jsonPath",
+    "key": "cr:key",
+    "md5": "cr:md5",
+    "parentField": "cr:parentField",
+    "path": "cr:path",
+    "personalSensitiveInformation": "cr:personalSensitiveInformation",
+    "recordSet": "cr:recordSet",
+    "references": "cr:references",
+    "regex": "cr:regex",
+    "repeated": "cr:repeated",
+    "replace": "cr:replace",
+    "sc": "https://schema.org/",
+    "separator": "cr:separator",
+    "source": "cr:source",
+    "subField": "cr:subField",
+    "transform": "cr:transform",
+    "rai": "http://mlcommons.org/croissant/RAI/",
+    "prov": "http://www.w3.org/ns/prov#"
+  },
+  "@type": "sc:Dataset",
+  "distribution": [
+    {
+      "@type": "cr:FileObject",
+      "@id": "repo",
+      "name": "repo",
+      "description": "The Hugging Face git repository.",
+      "contentUrl": "https://huggingface.co/datasets/juliannski/sudoku/tree/refs%2Fconvert%2Fparquet",
+      "encodingFormat": "git+https",
+      "sha256": "https://github.com/mlcommons/croissant/issues/80"
+    },
+    {
+      "@type": "cr:FileSet",
+      "@id": "parquet-files-for-config-default",
+      "containedIn": {
+        "@id": "repo"
+      },
+      "encodingFormat": "application/x-parquet",
+      "includes": "default/*/*.parquet"
+    }
+  ],
+  "recordSet": [
+    {
+      "@type": "cr:RecordSet",
+      "dataType": "cr:Split",
+      "key": {
+        "@id": "default_splits/split_name"
+      },
+      "@id": "default_splits",
+      "name": "default_splits",
+      "description": "Splits for the default config.",
+      "field": [
+        {
+          "@type": "cr:Field",
+          "@id": "default_splits/split_name",
+          "dataType": "sc:Text"
+        }
+      ],
+      "data": [
+        {
+          "default_splits/split_name": "train"
+        },
+        {
+          "default_splits/split_name": "validation"
+        },
+        {
+          "default_splits/split_name": "test"
+        }
+      ]
+    },
+    {
+      "@type": "cr:RecordSet",
+      "@id": "default",
+      "description": "juliannski/sudoku - 'default' subset\n\nAdditional information:\n- 3 splits: train, validation, test",
+      "field": [
+        {
+          "@type": "cr:Field",
+          "@id": "default/split",
+          "dataType": "sc:Text",
+          "source": {
+            "fileSet": {
+              "@id": "parquet-files-for-config-default"
+            },
+            "extract": {
+              "fileProperty": "fullpath"
+            },
+            "transform": {
+              "regex": "default/(?:partial-)?(train|validation|test)/.+parquet$"
+            }
+          },
+          "references": {
+            "field": {
+              "@id": "default_splits/split_name"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "default/input",
+          "dataType": "sc:ImageObject",
+          "source": {
+            "fileSet": {
+              "@id": "parquet-files-for-config-default"
+            },
+            "extract": {
+              "column": "input"
+            },
+            "transform": {
+              "jsonPath": "bytes"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "default/concepts",
+          "dataType": "cr:Int8",
+          "source": {
+            "fileSet": {
+              "@id": "parquet-files-for-config-default"
+            },
+            "extract": {
+              "column": "concepts"
+            }
+          },
+          "isArray": true,
+          "arrayShape": "27"
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "default/label",
+          "dataType": "cr:Int64",
+          "source": {
+            "fileSet": {
+              "@id": "parquet-files-for-config-default"
+            },
+            "extract": {
+              "column": "label"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "default/label_name",
+          "dataType": "sc:Text",
+          "source": {
+            "fileSet": {
+              "@id": "parquet-files-for-config-default"
+            },
+            "extract": {
+              "column": "label_name"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "conformsTo": "http://mlcommons.org/croissant/1.1",
+  "name": "sudoku",
+  "description": "\n\t\n\t\t\n\t\n\t\n\t\tSudoku Validation\n\t\n\nSynthetic benchmark for evaluating Concept Bottleneck Models on sudoku validation. Each example is an image of a 9x9 board; the label says whether the board is valid. The 27 binary concepts encode the validity of each row, column and block.\n\n\t\n\t\t\n\t\n\t\n\t\tGenerated from\n\t\n\nThis dataset is the exact output of the concept-benchmark Python package, with the train/validation/test split of the paper: 1,000 boards at 50 px per cell (454 x 454 px), each written in its… See the full description on the dataset page: https://huggingface.co/datasets/juliannski/sudoku.",
+  "alternateName": [
+    "juliannski/sudoku",
+    "Sudoku Validation"
+  ],
+  "creator": [
+    {
+      "@type": "Person",
+      "name": "Julian Skirzyński"
+    },
+    {
+      "@type": "Person",
+      "name": "Harry Cheon"
+    },
+    {
+      "@type": "Person",
+      "name": "Shreyas Kadekodi"
+    },
+    {
+      "@type": "Person",
+      "name": "Meredith Stewart"
+    },
+    {
+      "@type": "Person",
+      "name": "Berk Ustun"
+    }
+  ],
+  "keywords": [
+    "image-classification",
+    "original",
+    "English",
+    "mit",
+    "1K - 10K",
+    "parquet",
+    "Image",
+    "Text",
+    "Datasets",
+    "pandas",
+    "Polars",
+    "Croissant",
+    "🇺🇸 Region: US",
+    "concept-bottleneck-models",
+    "interpretability",
+    "benchmark",
+    "Synthetic"
+  ],
+  "license": "https://choosealicense.com/licenses/mit/",
+  "url": "https://huggingface.co/datasets/juliannski/sudoku",
+  "rai:hasSyntheticData": true,
+  "rai:personalSensitiveInformation": "None. The dataset is fully synthetic: every image is rendered by a program from a known set of features, and no data was collected from people. It contains no information about gender, age, health, geography, or any other personal attribute.",
+  "rai:dataSocialImpact": "The dataset can help researchers find brittle designs of concept-based models early, before spending effort on concept labels or deploying a model. The main risk is that good performance on this dataset is read as evidence that a model is safe to deploy. Results on this dataset should complement validation on real data, not replace it.",
+  "prov:wasDerivedFrom": [],
+  "rai:dataUseCases": "Evaluating concept-based models for automation, i.e., selective classifiers that label routine boards and defer uncertain ones to a person, measured as the share of work automated after concept checks (WorkSaved) at a fixed selective-accuracy target. The board is valid only if all 27 constraints hold, which mirrors document checks where a decision requires many conditions to hold at once.",
+  "rai:dataLimitations": "The boards are a simplification of real automation tasks: the rule is known exactly and the handwriting is rendered from fonts, not written by people. Absolute savings on this dataset may therefore overestimate performance on real data. With 1,000 boards, the validation and test splits have 200 boards each.",
+  "rai:dataBiases": "Classes are balanced by construction (50% valid). Invalid boards are produced by a specific corruption process, which may not reflect how errors arise in real documents. The dataset has no demographic content.",
+  "prov:wasGeneratedBy": [
+    {
+      "@type": "prov:Activity",
+      "prov:type": {
+        "@id": "https://www.wikidata.org/wiki/Q4929239"
+      },
+      "prov:label": "Synthetic data generation",
+      "sc:description": "Generated with concept-benchmark (seed 171). Valid boards are obtained by solving a mixed-integer program and applying symmetries; invalid boards by corrupting valid boards with up to nine cell changes. 1,000 boards (50% valid), rendered at 50 pixels per cell with printed starter digits, handwritten-style entries drawn from fonts with a different handwriting per board, and candidate marks. The 27 binary concepts state whether each row, column, and block is valid. Splits: 600 training, 200 validation, and 200 test boards."
+    }
+  ],
+  "rai:dataCollection": "None. The dataset is not derived from any existing dataset; it is generated from scratch by the concept-benchmark Python package (https://github.com/ustunb/concept-benchmark).",
+  "citeAs": "Skirzynski et al., Measuring What Matters: Synthetic Benchmarks for Concept Bottleneck Models, NeurIPS 2026 (Evaluations and Datasets Track).",
+  "version": "0.4.1",
+  "datePublished": "2026-10-14"
+}

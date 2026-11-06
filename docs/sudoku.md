@@ -50,13 +50,13 @@ python scripts/sudoku_pipeline.py --seed 171 --cell-px 10
 python scripts/sudoku_pipeline.py --seed 171 --stages cs intervene selective diagnose plot
 ```
 
-At 10 px the abstention threshold is fitted on the validation boards; on the test boards of seed 171 the answered predictions are 95% correct without checks and 94% with all 27, since a misread digit makes the model confidently wrong on a few boards that it never defers.
+At 10 px and the paper's target of 0.99, the abstention threshold is fitted on the validation boards; on the test boards of seed 171 the answered predictions are 99% correct without checks and 98% with all 27, since a misread digit makes the model confidently wrong on a few boards that it never defers.
 
 | Option | Description |
 |--------|-------------|
 | `--cbm-family` | `cbm`, `cem`, `probcbm` or `ecbm` |
 | `--cell-px` | Pixels per cell (50 by default; at 10 the recognizer misreads a digit on half the boards) |
-| `--target-accuracy` | Selective accuracy that kept predictions must reach (0.90 by default; the paper uses 0.95) |
+| `--target-accuracy` | Selective accuracy that kept predictions must reach (0.90 by default; the paper uses 0.99) |
 | `calibrate` (config) | Platt-scale each model's label probability on the validation split before it abstains (on by default; the safeguard rule needs calibrated probabilities) |
 | `--stages` | `setup ocr cs dnn intervene selective align collect plot`, plus the optional `diagnose` |
 | `--budgets` | Intervention budgets to evaluate (`1 3 max` by default) |

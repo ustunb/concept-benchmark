@@ -387,7 +387,7 @@ python scripts/sudoku_pipeline.py --seed 171 --stages cs intervene selective dia
 |--------|-------------|
 | `--cbm-family` | `cbm`, `cem`, `probcbm` or `ecbm` |
 | `--cell-px` | Pixels per cell (50 by default; at 10 the recognizer misreads a digit on half the boards) |
-| `--target-accuracy` | Selective accuracy that kept predictions must reach (0.90 by default; the paper uses 0.95) |
+| `--target-accuracy` | Selective accuracy that kept predictions must reach (0.90 by default; the paper uses 0.99) |
 | `--stages` | `setup ocr cs dnn intervene selective align collect plot`, plus the optional `diagnose` |
 
 Run `python scripts/sudoku_pipeline.py --help` for the full list of options (including training, intervention, and evaluation parameters).
@@ -397,7 +397,7 @@ Run `python scripts/sudoku_pipeline.py --help` for the full list of options (inc
 Quickstart: one command trains the paper's models on the handwritten boards of one seed (10 px per cell, where the recognizer misreads a digit on half the boards) and draws the figure below:
 
 ```bash
-python scripts/sudoku_pipeline.py --seed 171 --cell-px 10 --target-accuracy 0.95 --stages setup ocr cs dnn intervene selective collect plot
+python scripts/sudoku_pipeline.py --seed 171 --cell-px 10 --target-accuracy 0.99 --stages setup ocr cs dnn intervene selective collect plot
 ```
 
 The same in code, on the digits of each board instead of its image (requires cloning the repo); the blocks are the ones the pipeline is built from:
@@ -417,13 +417,13 @@ cbm = train_cbm(dataset.train, dataset.val, detector=GroupPoolingConceptSudokuCN
                 epochs=100, patience=20, seed=171, should_propagate=True)
 dnn = train_dnn(SudokuValidatorCNN, dataset.train, dataset.val, seed=171)
 
-# both abstain until they are right on 95% of the boards they keep; a human checks up to k concepts of a board the CBM would defer
-results = automation_table(cbm, dataset.val, dataset.test, budgets=(1, 3, "max"), target_accuracy=0.95, seed=171)
-_, dnn_coverage = coverage_at_target(dnn, dataset.val, dataset.test, target_accuracy=0.95)
+# both abstain until they are right on 99% of the boards they keep; a human checks up to k concepts of a board the CBM would defer
+results = automation_table(cbm, dataset.val, dataset.test, budgets=(1, 3, "max"), target_accuracy=0.99, seed=171)
+_, dnn_coverage = coverage_at_target(dnn, dataset.val, dataset.test, target_accuracy=0.99)
 print(results[["budget", "coverage_after", "total_concept_checks"]], f"\nDNN coverage: {dnn_coverage:.3f}")
 
 fig, ax = plot_automation(results, n_instances=dataset.test.n, n_concepts=27,
-                          baseline_coverage=dnn_coverage, target_accuracy=0.95)
+                          baseline_coverage=dnn_coverage, target_accuracy=0.99)
 fig.savefig("sudoku_example.png", dpi=150, bbox_inches="tight")
 ```
 
@@ -431,10 +431,10 @@ fig.savefig("sudoku_example.png", dpi=150, bbox_inches="tight")
   <img src="https://raw.githubusercontent.com/ustunb/concept-benchmark/main/docs/assets/sudoku_example.png" width="480" alt="Coverage and net work automated against the intervention budget for the CBM and the DNN, one run">
 </p>
 
-One run of the command above. At 10 px per cell the recognizer misreads a digit on about half the boards, so the
-CBM answers 64% of the boards on its own (the DNN 7%). Checking up to 3 concepts on the deferred boards raises the
-boards answered to 77% and the net work automated to 73%; checking all 27 answers 95% of the boards but costs more
-work than it recovers, and the net work automated falls to 59%. The code block runs on the digits rather than the
+Seed 171 of the paper's run of the command above. At 10 px per cell the recognizer misreads a digit on about half
+the boards, so the CBM answers 58% of the boards on its own (the DNN 5%). Checking up to 3 concepts on the deferred
+boards raises the boards answered to 72% and the net work automated to 67%; checking all 27 answers 88% of the
+boards, but the net work automated rises only to 68%, because many deferred boards stay deferred after every check. The code block runs on the digits rather than the
 images, so detection is perfect there and the CBM answers every board.
 
 <details>
@@ -649,7 +649,7 @@ from pathlib import Path
 import pandas as pd
 from concept_benchmark.evaluation import plot_intervention_curve
 
-# the paper's results: paper-results.zip from the v0.4.0 release; the CBM corrected with the true values
+# the paper's results: paper-results.zip from the v0.5.0 release; the CBM corrected with the true values
 files = Path("paper-results/robot/balanced_rule").glob("*__arch-cbm__isrc-perfect__*__results.csv")
 results = pd.concat(pd.read_csv(f) for f in files)
 results = results[results["concept_source"].isin(["ground_truth", "human_concepts"])]  # true and human concepts
@@ -681,7 +681,7 @@ fig, ax = plot_intervention_curve(results, group="concept_source", baseline_accu
 | `train_cbm(train, validation, seed=..., detector=...)` | The paper's CBM: concept detector plus logistic label predictor |
 | `train_dnn(model, train, validation, seed=...)` | A binary classifier trained with early stopping |
 | `intervention_table(cbm, test, budgets=(1, 3, "max"), seed=...)` | Accuracy at each budget of corrected concepts (the decision-support table) |
-| `automation_table(cbm, validation, test, budgets=(1, 3, "max"), target_accuracy=0.95, seed=171)` | Coverage and checks at each budget under the paper's abstention protocol, label probability calibrated on validation (the automation table) |
+| `automation_table(cbm, validation, test, budgets=(1, 3, "max"), target_accuracy=0.99, seed=171)` | Coverage and checks at each budget under the paper's abstention protocol, label probability calibrated on validation (the automation table) |
 | `coverage_at_target(model, validation, test, target_accuracy)` | Selective accuracy and coverage of any model at a target |
 | `predict_labels(model, dataset)`, `predict_proba_positive(model, dataset)` | Predictions of a DNN or a CBM |
 
@@ -1004,7 +1004,7 @@ For a complete end-to-end example with training, interventions, and alignment, s
 
 [`EXPERIMENTS.md`](https://github.com/ustunb/concept-benchmark/blob/main/EXPERIMENTS.md) lists the commands behind each experiment, and [`scripts/paper/README.md`](https://github.com/ustunb/concept-benchmark/blob/main/scripts/paper/README.md) maps every table, figure and test of the paper to the script that produces it.
 
-The paper's results (`paper-results.zip`, 14 MB) are attached to the [v0.4.0 release](https://github.com/ustunb/concept-benchmark/releases/tag/v0.4.0); unpack them and pass the folder to any paper script as `--results-root`.
+The paper's results (`paper-results.zip`, 14 MB) are attached to the [v0.5.0 release](https://github.com/ustunb/concept-benchmark/releases/tag/v0.5.0); unpack them and pass the folder to any paper script as `--results-root`.
 
 ## Citation
 

@@ -62,7 +62,9 @@ The paper's selective-classification protocol (conceptual safeguards). A concept
 comes from propagating concept uncertainty, which is underconfident when many concepts must hold at once, so it is
 first Platt-scaled on validation predictions (`PlattScaling`). The model then predicts the positive class above 0.5
 and abstains on `t <= p <= 1 - t`; `abstention_threshold` finds the largest `t` at which the kept validation
-predictions reach the target, and `selective_at` scores a test set under it.
+predictions reach the target, and `selective_at` scores a test set under it. With interventions, `automation_table` (in `experiments/evaluate.py`) verifies the concepts of each deferred
+instance one at a time, in order of the expected change in the label probability per unit of cost, and stops once the
+instance leaves the abstention band, when no concept can change the label probability, or after the budget.
 
 ```python
 from concept_benchmark.evaluation import PlattScaling, abstention_threshold, selective_at
@@ -198,7 +200,7 @@ Line plot of coverage and net work automated against the number of concept check
 ```python
 from concept_benchmark.evaluation import plot_automation
 
-fig, ax = plot_automation(results, n_instances=len(test), n_concepts=27, baseline_coverage=dnn_coverage, target_accuracy=0.95)
+fig, ax = plot_automation(results, n_instances=len(test), n_concepts=27, baseline_coverage=dnn_coverage, target_accuracy=0.99)
 ```
 
 ```{image} assets/automation.png

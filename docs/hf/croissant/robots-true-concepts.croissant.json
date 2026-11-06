@@ -1,0 +1,257 @@
+{
+  "@context": {
+    "@language": "en",
+    "@vocab": "https://schema.org/",
+    "arrayShape": "cr:arrayShape",
+    "citeAs": "cr:citeAs",
+    "column": "cr:column",
+    "conformsTo": "dct:conformsTo",
+    "containedIn": "cr:containedIn",
+    "cr": "http://mlcommons.org/croissant/",
+    "data": {
+      "@id": "cr:data",
+      "@type": "@json"
+    },
+    "dataBiases": "cr:dataBiases",
+    "dataCollection": "cr:dataCollection",
+    "dataType": {
+      "@id": "cr:dataType",
+      "@type": "@vocab"
+    },
+    "dct": "http://purl.org/dc/terms/",
+    "extract": "cr:extract",
+    "field": "cr:field",
+    "fileProperty": "cr:fileProperty",
+    "fileObject": "cr:fileObject",
+    "fileSet": "cr:fileSet",
+    "format": "cr:format",
+    "includes": "cr:includes",
+    "isArray": "cr:isArray",
+    "isLiveDataset": "cr:isLiveDataset",
+    "jsonPath": "cr:jsonPath",
+    "key": "cr:key",
+    "md5": "cr:md5",
+    "parentField": "cr:parentField",
+    "path": "cr:path",
+    "personalSensitiveInformation": "cr:personalSensitiveInformation",
+    "recordSet": "cr:recordSet",
+    "references": "cr:references",
+    "regex": "cr:regex",
+    "repeated": "cr:repeated",
+    "replace": "cr:replace",
+    "sc": "https://schema.org/",
+    "separator": "cr:separator",
+    "source": "cr:source",
+    "subField": "cr:subField",
+    "transform": "cr:transform",
+    "rai": "http://mlcommons.org/croissant/RAI/",
+    "prov": "http://www.w3.org/ns/prov#"
+  },
+  "@type": "sc:Dataset",
+  "distribution": [
+    {
+      "@type": "cr:FileObject",
+      "@id": "repo",
+      "name": "repo",
+      "description": "The Hugging Face git repository.",
+      "contentUrl": "https://huggingface.co/datasets/juliannski/robots-true-concepts/tree/refs%2Fconvert%2Fparquet",
+      "encodingFormat": "git+https",
+      "sha256": "https://github.com/mlcommons/croissant/issues/80"
+    },
+    {
+      "@type": "cr:FileSet",
+      "@id": "parquet-files-for-config-default",
+      "containedIn": {
+        "@id": "repo"
+      },
+      "encodingFormat": "application/x-parquet",
+      "includes": "default/*/*.parquet"
+    }
+  ],
+  "recordSet": [
+    {
+      "@type": "cr:RecordSet",
+      "dataType": "cr:Split",
+      "key": {
+        "@id": "default_splits/split_name"
+      },
+      "@id": "default_splits",
+      "name": "default_splits",
+      "description": "Splits for the default config.",
+      "field": [
+        {
+          "@type": "cr:Field",
+          "@id": "default_splits/split_name",
+          "dataType": "sc:Text"
+        }
+      ],
+      "data": [
+        {
+          "default_splits/split_name": "train"
+        },
+        {
+          "default_splits/split_name": "validation"
+        },
+        {
+          "default_splits/split_name": "test"
+        }
+      ]
+    },
+    {
+      "@type": "cr:RecordSet",
+      "@id": "default",
+      "description": "juliannski/robots-true-concepts - 'default' subset\n\nAdditional information:\n- 3 splits: train, validation, test",
+      "field": [
+        {
+          "@type": "cr:Field",
+          "@id": "default/split",
+          "dataType": "sc:Text",
+          "source": {
+            "fileSet": {
+              "@id": "parquet-files-for-config-default"
+            },
+            "extract": {
+              "fileProperty": "fullpath"
+            },
+            "transform": {
+              "regex": "default/(?:partial-)?(train|validation|test)/.+parquet$"
+            }
+          },
+          "references": {
+            "field": {
+              "@id": "default_splits/split_name"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "default/image",
+          "dataType": "sc:ImageObject",
+          "source": {
+            "fileSet": {
+              "@id": "parquet-files-for-config-default"
+            },
+            "extract": {
+              "column": "image"
+            },
+            "transform": {
+              "jsonPath": "bytes"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "default/concepts",
+          "dataType": "cr:Int8",
+          "source": {
+            "fileSet": {
+              "@id": "parquet-files-for-config-default"
+            },
+            "extract": {
+              "column": "concepts"
+            }
+          },
+          "isArray": true,
+          "arrayShape": "7"
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "default/label",
+          "dataType": "sc:Integer",
+          "source": {
+            "fileSet": {
+              "@id": "parquet-files-for-config-default"
+            },
+            "extract": {
+              "column": "label"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "default/label_name",
+          "dataType": "sc:Text",
+          "source": {
+            "fileSet": {
+              "@id": "parquet-files-for-config-default"
+            },
+            "extract": {
+              "column": "label_name"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "conformsTo": "http://mlcommons.org/croissant/1.1",
+  "name": "robots-true-concepts",
+  "description": "\n\t\n\t\t\n\t\n\t\n\t\tRobots — True Concepts\n\t\n\nSynthetic benchmark for evaluating Concept Bottleneck Models (CBMs) with the true concepts. Robot images are generated deterministically; foot_shape is the binary pointy/flat concept that the labeling rule uses.\n\n\t\n\t\t\n\t\n\t\n\t\tGenerated from\n\t\n\nThis dataset is the exact output of the concept-benchmark Python package, with the train/validation/test split of the paper.\n# pip install concept-benchmark==0.4.0\nfrom concept_benchmark.robots import DatasetGenerator… See the full description on the dataset page: https://huggingface.co/datasets/juliannski/robots-true-concepts.",
+  "alternateName": [
+    "juliannski/robots-true-concepts",
+    "Robots — True Concepts"
+  ],
+  "creator": [
+    {
+      "@type": "Person",
+      "name": "Julian Skirzyński"
+    },
+    {
+      "@type": "Person",
+      "name": "Harry Cheon"
+    },
+    {
+      "@type": "Person",
+      "name": "Shreyas Kadekodi"
+    },
+    {
+      "@type": "Person",
+      "name": "Meredith Stewart"
+    },
+    {
+      "@type": "Person",
+      "name": "Berk Ustun"
+    }
+  ],
+  "keywords": [
+    "image-classification",
+    "original",
+    "English",
+    "mit",
+    "10K - 100K",
+    "parquet",
+    "Image",
+    "Text",
+    "Datasets",
+    "pandas",
+    "Polars",
+    "Croissant",
+    "🇺🇸 Region: US",
+    "concept-bottleneck-models",
+    "interpretability",
+    "benchmark",
+    "Synthetic"
+  ],
+  "license": "https://choosealicense.com/licenses/mit/",
+  "url": "https://huggingface.co/datasets/juliannski/robots-true-concepts",
+  "rai:hasSyntheticData": true,
+  "rai:personalSensitiveInformation": "None. The dataset is fully synthetic: every image is rendered by a program from a known set of features, and no data was collected from people. It contains no information about gender, age, health, geography, or any other personal attribute.",
+  "rai:dataSocialImpact": "The dataset can help researchers find brittle designs of concept-based models early, before spending effort on concept labels or deploying a model. The main risk is that good performance on this dataset is read as evidence that a model is safe to deploy. Results on this dataset should complement validation on real data, not replace it.",
+  "prov:wasDerivedFrom": [],
+  "rai:dataUseCases": "Evaluating concept-based models for decision support, i.e., how much an expert gains by correcting a model's predicted concepts, measured as the change in accuracy after interventions. The dataset represents a classification task in which an expert can verify every concept by looking at the input. It is intended for controlled comparisons of models and intervention policies, not as a proxy for any specific real-world task.",
+  "rai:dataLimitations": "The task is a simplification of real decision-support tasks: the concepts are well defined, the images are cartoon renderings, and the labeling rule is known. Absolute accuracies on this dataset may therefore overestimate performance on real data. HasElbows enters the labeling rule but is not among the concepts, so the concept set is incomplete by design.",
+  "rai:dataBiases": "The training split deliberately covers only six of the ten foot subtypes to mimic a finite annotation process; models trained on it see unseen foot types at test time. Labels are drawn from the labeling rule with label noise, so a small share of robots carries the label their features disfavor. The dataset has no demographic content.",
+  "prov:wasGeneratedBy": [
+    {
+      "@type": "prov:Activity",
+      "prov:type": {
+        "@id": "https://www.wikidata.org/wiki/Q4929239"
+      },
+      "prov:label": "Synthetic data generation",
+      "sc:description": "Generated with concept-benchmark (seed 1014). Each robot is drawn from a finite set of 7,680 robots defined by 9 binary body parts, where FootShape has 10 subtypes and HandShape has 6, and is rendered in one of 71 color schemes. Labels (Glorp or Drent) are drawn from a known probabilistic rule over the body parts (the balanced rule), under which no single concept decides the label. Splits: 3,800 training, 3,384 validation, and 10,000 test images; the training split covers only six of the ten foot subtypes. Concepts: 7 binary concepts, with FootShape binarized to flat vs. pointy (the oracle concept set)."
+    }
+  ],
+  "rai:dataCollection": "None. The dataset is not derived from any existing dataset; it is generated from scratch by the concept-benchmark Python package (https://github.com/ustunb/concept-benchmark).",
+  "citeAs": "Skirzynski et al., Measuring What Matters: Synthetic Benchmarks for Concept Bottleneck Models, NeurIPS 2026 (Evaluations and Datasets Track).",
+  "version": "0.4.0",
+  "datePublished": "2026-10-07"
+}

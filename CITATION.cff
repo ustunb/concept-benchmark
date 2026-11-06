@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 title: "Measuring What Matters: Synthetic Benchmarks for Concept Bottleneck Models"
 type: software
-version: 0.4.1
-date-released: 2026-10-14
+version: 0.5.0
+date-released: 2026-11-06
 url: "https://github.com/ustunb/concept-benchmark"
 repository-code: "https://github.com/ustunb/concept-benchmark"
 license: MIT

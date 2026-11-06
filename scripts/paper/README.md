@@ -14,6 +14,8 @@ not part of the repository. Get one in either way:
   answer-exchange table, the alignment evaluation and the diagnostics read are available on request.
 - **Your own runs.** Run the pipelines (see [`EXPERIMENTS.md`](../../EXPERIMENTS.md)), then copy their output into the
   same layout: `python scripts/paper/collect_pipeline_runs.py --runs results --results-root my_results`.
+  The Sudoku cells, budget sweep and deferred-board files come from scoring the trained models with
+  `reevaluate_sudoku_checks.py` and `measure_intervention_ceiling.py` (see [`EXPERIMENTS.md`](../../EXPERIMENTS.md)).
 
 Pass the folder to any script as `--results-root <folder>`, or set `CONCEPT_BENCHMARK_PAPER_RESULTS` once. Without
 either, the scripts read `results/paper/`. The "Reads" columns below are paths inside that folder. Run from the repository
@@ -25,10 +27,12 @@ root with `PYTHONPATH=.` and the project's Python. `_common.py` holds the paths 
 | Exhibit | Command | Reads |
 |---|---|---|
 | Robot table (accuracy by concept set, architecture, intervention source, budget) | `python scripts/paper/make_robot_big_table.py --rule balanced --out <paper>/tables/robot_big_table.tex` (`--rule sparse` for the appendix table) | `robot/balanced_rule/`, `robot/grid/` |
-| Sudoku table | `python scripts/paper/make_sudoku_table.py --out <paper>/tables/sudoku_px_sweep.tex` | `sudoku/cells/`, `sudoku/selective/` |
+| Sudoku table (selective-accuracy target 0.99) | `python scripts/paper/make_sudoku_table.py --out <paper>/tables/sudoku_px_sweep.tex` | `sudoku/cells/`, `sudoku/selective/` |
 | Sudoku detection-quality table | `python scripts/paper/make_sudoku_detection_table.py --out <paper>/tables/sudoku_detection.tex` | `sudoku/detection.csv` (written by `measure_sudoku_detection.py` from a pipeline run's data and CBM) |
-| Sudoku budget sweep figure (the paper's `figures/tikz/sudoku_k_sweep.tex` is a TikZ conversion of this PDF; redo the conversion after regenerating it) | `python scripts/paper/plot_sudoku_ksweep.py --out <paper>/figures/sudoku_ksweep.pdf` | `sudoku/ksweep/` (written by `sweep_sudoku_budgets.py` from a pipeline run's data and CBM) |
-| Sudoku sensitivity tables (accuracy target, cost of a check) and their tests | `python scripts/paper/make_sudoku_sensitivity_tables.py --tau-out <paper>/tables/sudoku_tau_sweep.tex --cost-out <paper>/tables/sudoku_cost_models.tex` | `sudoku/cells/` |
+| Sudoku budget sweep figure (the paper's `figures/tikz/sudoku_k_sweep.tex` is a TikZ conversion of this PDF; redo the conversion after regenerating it) | `python scripts/paper/plot_sudoku_ksweep.py --out <paper>/figures/sudoku_ksweep.pdf` | `sudoku/ksweep/` (written by `reevaluate_sudoku_checks.py --sweep` from the stored models) |
+| Sudoku sensitivity tables (accuracy target, cost of an intervention) and their tests | `python scripts/paper/make_sudoku_sensitivity_tables.py --tau-out <paper>/tables/sudoku_tau_sweep.tex --cost-out <paper>/tables/sudoku_cost_models.tex` | `sudoku/cells/` (costs from the `__cost-*` cells) |
+| Deferred boards with every concept verified | `python scripts/paper/make_sudoku_ceiling_table.py --out <paper>/tables/sudoku_ceiling.tex` | `sudoku/ceiling/` (written by `measure_intervention_ceiling.py` from the stored models) |
+| Robot text-modality table (Table 6) | `python scripts/paper/make_robot_text_table.py --out <paper>/tables/robot_modalities.tex --figures-dir <paper>/figures` | none (generates the captions and images) |
 | Real-dataset table (Derm7pt, CUB-25) | `python experiments/real_data.py --out results/paper/real_datasets --derm-root <Derm7pt> --cub-root <CUB_200_2011>` then `python scripts/paper/make_real_data_table.py --out <paper>/tables/real_datasets.tex` | `real_datasets/` |
 | Own-answers table | `python scripts/paper/make_own_answers_table.py --out <paper>/tables/own_answers.tex` | `robot/balanced_rule/` (`isrc-self`, `isrc-perfect`) |
 | Answer-exchange table | `python scripts/paper/make_answer_exchange_table.py --out <paper>/tables/answer_exchange.tex` | `robot/balanced_rule/intervention_records/`, CBM models |

@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-11-06
+
+The camera-ready release of the paper. **`automation_table` gives different numbers than 0.4.x for the same model**, because it verifies concepts in a new order and stops early (first item below); the paper's main selective-accuracy target is now 0.99 (0.90 and 0.95 in the appendix).
 
 ### Changed
 
@@ -9,6 +11,8 @@
 
 ### Added
 
+- Croissant metadata with the Responsible AI fields for the three Hugging Face datasets (`docs/hf/croissant/`).
+- `paper-results.zip` of this release holds the re-scored Sudoku cells (`sudoku/cells/`, with `__cost-*` cells at τ = 0.95 and 0.99), the budget sweep, the deferred boards with every concept verified (`sudoku/ceiling/`), and the cells of 0.4.x (`sudoku/archive/index_order/`).
 - `scripts/paper/reevaluate_sudoku_checks.py` (re-score the stored Sudoku models), `measure_intervention_ceiling.py` and `make_sudoku_ceiling_table.py` (deferred boards with every concept verified), `make_robot_text_table.py`.
 
 ## 0.4.1 — 2026-10-14

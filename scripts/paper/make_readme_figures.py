@@ -140,7 +140,7 @@ def main() -> None:
 
     cells = sorted(
         PAPER.sudoku_cells.glob(
-            "sudoku__arch-cbm__res-10px__tau-0.95__*__interventions.csv"
+            "sudoku__arch-cbm__res-10px__tau-0.99__*__interventions.csv"
         )
     )
     sudoku = pd.concat(
@@ -150,7 +150,7 @@ def main() -> None:
         map(pd.read_csv, sorted(PAPER.sudoku_selective.glob("*__res-10px__*.csv")))
     )
     dnn_coverage = selective.loc[
-        (selective["model"] == "dnn") & (selective["target_accuracy"].round(3) == 0.95),
+        (selective["model"] == "dnn") & (selective["target_accuracy"].round(3) == 0.99),
         "selective_cov",
     ]
     fig, _ = plot_automation(
@@ -158,7 +158,7 @@ def main() -> None:
         n_instances=200,
         n_concepts=27,
         baseline_coverage=list(dnn_coverage),
-        target_accuracy=0.95,
+        target_accuracy=0.99,
     )
     save(fig, "automation.png")
 

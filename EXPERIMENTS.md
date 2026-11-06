@@ -83,31 +83,39 @@ python experiments/real_data.py --out results/paper/real_datasets \
 
 ## Sudoku Benchmark
 
-The paper's boards are those of release `v0.4.0`; 0.4.1 gives every board its own layout of printed digits (see the CHANGELOG), which moves the recognizer's accuracy within its seed-to-seed noise. For a byte-exact rerun, check out the tag first:
+The paper's boards and models are those of release `v0.4.0`; 0.4.1 gives every board its own layout of printed digits (see the CHANGELOG), which moves the recognizer's accuracy within its seed-to-seed noise. The paper's numbers come from scoring these models with the intervention policy of 0.5.0, which verifies the concepts of a deferred board in order of their expected effect on the label probability and stops once the board is decided. For a byte-exact rerun, train at `v0.4.0`, then score with this release:
 
 ```bash
-git checkout v0.4.0 && uv sync   # the paper's sudoku images; skip for the current renderer
+git checkout v0.4.0 && uv sync   # the paper's sudoku images and models; skip for the current renderer
 for px in 50 10; do
     for family in cbm cem probcbm ecbm; do
-        python scripts/sudoku_pipeline.py --seed 171 --cell-px $px --cbm-family $family --target-accuracy 0.95
+        python scripts/sudoku_pipeline.py --seed 171 --cell-px $px --cbm-family $family --target-accuracy 0.99 --stages setup ocr cs dnn selective
+    done
+done
+git checkout v0.5.0 && uv sync   # the paper's intervention policy
+for px in 50 10; do
+    for arch in cbm cem probcbm ecbm; do
+        python scripts/paper/reevaluate_sudoku_checks.py --arch $arch --cell-px $px --seed 171 \
+            --models results --data data/sudoku --out my_results/sudoku/cells --sweep my_results/sudoku/ksweep
+        python scripts/paper/measure_intervention_ceiling.py --arch $arch --cell-px $px --seed 171 \
+            --models results --data data/sudoku --out my_results/sudoku/ceiling
     done
 done
 ```
 
-The paper reports a selective-accuracy target of 0.95 (`--target-accuracy`; the default is 0.90). The `selective` stage also scores every model without interventions at the targets 0.90 to 0.99. Add the optional `diagnose` stage to save each model's confidence:
+`reevaluate_sudoku_checks.py` writes the intervention cells at the selective-accuracy targets 0.90 to 0.99 and, at 0.99, under the three costs of an intervention; with `--sweep` it also writes the budget sweep of the CBM. `measure_intervention_ceiling.py` scores every test board with all concepts set to their true values (the appendix on deferred boards). The paper reports a selective-accuracy target of 0.99 (`--target-accuracy`; the default is 0.90), and 0.90 and 0.95 in the appendix. The `selective` stage also scores every model without interventions at the targets 0.90 to 0.99. Add the optional `diagnose` stage to save each model's confidence:
 
 ```bash
-python scripts/sudoku_pipeline.py --seed 171 --cell-px 10 --target-accuracy 0.95 --stages cs intervene selective diagnose
+python scripts/sudoku_pipeline.py --seed 171 --cell-px 10 --target-accuracy 0.99 --stages cs intervene selective diagnose
 ```
 
 The sudoku pipeline calibrates each model's label probability on the validation split before abstaining (`calibrate: true` in the config); the automation numbers depend on it. Training the same seed on another GPU model gives a slightly different model (raw sudoku accuracy moves by one or two points), so compare means over the ten seeds rather than single seeds. ProbCBM also samples at prediction time, and these samples are not seeded when the evaluation stages run on their own, so its sudoku numbers vary by a few boards between runs.
 
 Data generation (`setup`, `ocr`) takes about five minutes per seed; skip it on later runs with `--stages cs dnn intervene selective collect`.
 
-Two appendix inputs come from a finished run's data and CBM: the budget sweep (net work automated at every budget, on validation and test) and the detection quality of the digit recognizer and the concept detectors:
+The detection quality of the digit recognizer and the concept detectors comes from a finished run's data and CBM:
 
 ```bash
-python scripts/paper/sweep_sudoku_budgets.py --seed 171 --cell-px 50 --tau 0.99 --out my_results/sudoku/ksweep
 python scripts/paper/measure_sudoku_detection.py --seeds 171 --cell-px 50 10 --out my_results/sudoku/detection.csv
 ```
 
