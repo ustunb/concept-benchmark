@@ -863,6 +863,33 @@ class RobotBenchmarkConfig(_BenchmarkConfigBase):
 # ── Sudoku Benchmark Config ──────────────────────────────────────────
 
 
+# Board options added after the paper; left out of hashes and paths at their defaults.
+_SUDOKU_BOARD_OPTION_FIELDS = frozenset(
+    {
+        "pencil_mark_ratio",
+        "pencil_mark_sizes",
+        "printed_digit_ratio",
+        "blank_cell_ratio",
+        "symbol_cell_ratio",
+        "render_options",
+    }
+)
+# ``image_transform`` arguments set by named config fields, so not allowed in ``render_options``.
+_SUDOKU_NAMED_RENDER_ARGS = frozenset(
+    {
+        "cell_px",
+        "margin_px",
+        "line_px",
+        "bold_px",
+        "font_size",
+        "handwriting",
+        "prior_groups_ratio",
+        "prior_group_sizes",
+        "starters_ratio",
+    }
+)
+
+
 @dataclass
 class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     """Configuration for the sudoku validation benchmark."""
@@ -919,8 +946,59 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     font_style: str = field(
         default="handwritten", metadata={"scope": "data"}
     )  # "handwritten" or "printed"
+    pencil_mark_ratio: float = field(
+        default=0.22, metadata={"scope": "data"}
+    )  # share of cells with pencil marks
+    pencil_mark_sizes: tuple[int, ...] = field(
+        default=(2,), metadata={"scope": "data"}
+    )  # candidate digits per pencil mark
+    printed_digit_ratio: float = field(
+        default=0.35, metadata={"scope": "data"}
+    )  # share of digits printed as givens
+    blank_cell_ratio: float = field(
+        default=0.0, metadata={"scope": "data"}
+    )  # share of cells left blank on invalid boards
+    symbol_cell_ratio: float = field(
+        default=0.0, metadata={"scope": "data"}
+    )  # share of cells holding a letter on invalid boards
+    render_options: dict[str, Any] | None = field(
+        default=None, metadata={"scope": "data"}
+    )  # other keyword arguments for ``image_transform``
 
     def __post_init__(self):
+        for name in (
+            "pencil_mark_ratio",
+            "printed_digit_ratio",
+            "blank_cell_ratio",
+            "symbol_cell_ratio",
+        ):
+            if not 0.0 <= getattr(self, name) <= 1.0:
+                raise ValueError(f"{name} must be in [0, 1], got {getattr(self, name)}")
+        if self.blank_cell_ratio + self.symbol_cell_ratio > 1.0:
+            raise ValueError("blank_cell_ratio + symbol_cell_ratio must be at most 1")
+        self.pencil_mark_sizes = tuple(int(s) for s in self.pencil_mark_sizes)
+        if not self.pencil_mark_sizes or min(self.pencil_mark_sizes) < 1:
+            raise ValueError(
+                f"pencil_mark_sizes must be positive, got {self.pencil_mark_sizes}"
+            )
+        if self.render_options:
+            import inspect
+
+            from concept_benchmark.synthetic.sudoku import image_transform
+
+            allowed = set(inspect.signature(image_transform).parameters) - {
+                "board",
+                "outfile",
+                "return_meta",
+                "board_index",
+                *_SUDOKU_NAMED_RENDER_ARGS,
+            }
+            unknown = sorted(set(self.render_options) - allowed)
+            if unknown:
+                raise ValueError(
+                    f"render_options has unknown or reserved keys {unknown}; "
+                    f"allowed: {sorted(allowed)}"
+                )
         if self.font_style not in ("handwritten", "printed"):
             raise ValueError(
                 f"font_style must be 'handwritten' or 'printed', got {self.font_style!r}"
@@ -960,19 +1038,62 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
             "patience": self.patience,
         }
 
+    def render_kwargs(self) -> dict[str, Any]:
+        """Keyword arguments for ``image_transform`` beyond the board geometry."""
+        return {
+            "prior_groups_ratio": self.pencil_mark_ratio,
+            "prior_group_sizes": self.pencil_mark_sizes,
+            "starters_ratio": self.printed_digit_ratio,
+            **(self.render_options or {}),
+        }
+
+    def _board_option_overrides(self) -> dict[str, Any]:
+        """Board options set away from their defaults (empty for the paper's boards)."""
+        overrides = {}
+        for f in fields(self):
+            if f.name in _SUDOKU_BOARD_OPTION_FIELDS:
+                value = getattr(self, f.name)
+                if value != f.default:
+                    overrides[f.name] = value
+        return _enums_to_strings(overrides)
+
+    def _stable_asdict(self) -> dict:
+        """Fields as a dict, with board options listed only when they differ from their defaults.
+
+        Keeps every fingerprint, hash and path of the paper's configs unchanged.
+        """
+        d = self._prepare_asdict()
+        for k in _SUDOKU_BOARD_OPTION_FIELDS:
+            d.pop(k, None)
+        overrides = self._board_option_overrides()
+        if overrides:
+            d["board_options"] = overrides
+        return d
+
+    @property
+    def _board_option_tag(self) -> str:
+        """Path suffix for non-default board options ("" for the paper's boards)."""
+        overrides = self._board_option_overrides()
+        return f"_bo{_dict_sha256(overrides, truncate=8)}" if overrides else ""
+
     def setup_fingerprint(self) -> str:
         """Hash of all parameters that affect data generation, and of the renderer's version."""
-        from concept_benchmark.synthetic.sudoku import RENDER_VERSION
+        from concept_benchmark.synthetic.sudoku import (
+            PRINTED_RENDER_VERSION,
+            RENDER_VERSION,
+        )
 
-        d = self._prepare_asdict()
-        data_fields = self._scoped_field_names("data")
+        d = self._stable_asdict()
+        data_fields = self._scoped_field_names("data") | {"board_options"}
         d = {k: v for k, v in d.items() if k in data_fields}
         d["render_version"] = RENDER_VERSION
+        if self.font_style == "printed":
+            d["printed_render_version"] = PRINTED_RENDER_VERSION
         return _dict_sha256(d)
 
     def model_fingerprint(self, model_class: str | None = None) -> str:
         """Hash of all parameters that affect model training."""
-        d = self._prepare_asdict()
+        d = self._stable_asdict()
         # Remove params that don't affect training
         for k in (
             "render_images",
@@ -998,7 +1119,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     def get_dataset_path(self, data_type: str | None = None) -> Path:
         """Return the directory path for the dataset."""
         dt = data_type or self.data_type
-        filename = f"sudoku_{dt}_n{self.block_size}_ns{self.n_boards}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}"
+        filename = f"sudoku_{dt}_n{self.block_size}_ns{self.n_boards}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}{self._board_option_tag}"
         if dt == "image":
             from concept_benchmark.synthetic.sudoku import RENDER_VERSION
 
@@ -1008,7 +1129,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     def get_model_path(self, model_class: str, data_type: str | None = None) -> Path:
         """Return the path where a trained model is saved."""
         dt = data_type or self.data_type
-        filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}"
+        filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}{self._board_option_tag}"
         return paths.results_dir / f"{filename}.model"
 
     def get_results_path(
@@ -1016,7 +1137,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     ) -> Path:
         """Return the path where results are saved."""
         dt = data_type or self.data_type
-        filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}"
+        filename = f"sudoku_{model_class}_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}{self._board_option_tag}"
         return paths.results_dir / f"{filename}.results"
 
     def get_alignment_weights(self) -> dict[str, float]:
@@ -1038,12 +1159,12 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
     def get_alignment_results_path(self, data_type: str | None = None) -> Path:
         """Return the path where alignment results JSON is saved."""
         dt = data_type or self.data_type
-        filename = f"sudoku_alignment_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}"
+        filename = f"sudoku_alignment_{dt}_n{self.block_size}_mc{self.max_cell_swaps}_px{self.cell_px}_seed{self.seed}{self._board_option_tag}"
         return paths.results_dir / f"{filename}.json"
 
     def _config_hash(self) -> str:
         """Short hex hash of all config fields for filename uniqueness."""
-        return _dict_sha256(self._prepare_asdict(), truncate=8)
+        return _dict_sha256(self._stable_asdict(), truncate=8)
 
     def get_collect_path(self) -> Path:
         """Return the path for the collect-stage summary CSV."""

@@ -58,6 +58,7 @@ def make_image_transform(args):
             handwriting=args.handwriting,
             outfile=outfile,
             return_meta=True,
+            **getattr(args, "render_kwargs", {}),
         )
 
         # ensure numpy arrays
@@ -346,6 +347,7 @@ def generate_sudoku_pipeline_data(
         sigma = 0.0
         angle = 98
         digits_per_class = 64
+        render_kwargs = config.render_kwargs()
 
     args = _Args()
 
@@ -376,6 +378,8 @@ def generate_sudoku_pipeline_data(
             seed=config.seed,
             transform=transform,
             dataset_name=dataset_name,
+            blank_cell_ratio=config.blank_cell_ratio,
+            symbol_cell_ratio=config.symbol_cell_ratio,
         )
 
     X, C, y = ds.inputs, ds.C, ds.y

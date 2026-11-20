@@ -91,6 +91,7 @@ def generate_sudoku_dataset(config: SudokuBenchmarkConfig) -> ConceptDataset:
             bold_px=config.block_border_px,
             font_size=config.font_size,
             handwriting=config.font_style == "handwritten",
+            **config.render_kwargs(),
         )
     elif data_type == "image" and not config.render_images:
         # Image mode but skip rendering — use tabular transform internally,
@@ -103,6 +104,8 @@ def generate_sudoku_dataset(config: SudokuBenchmarkConfig) -> ConceptDataset:
         valid_ratio=config.valid_board_ratio,
         max_corrupt=config.max_cell_swaps,
         seed=config.seed,
+        blank_cell_ratio=config.blank_cell_ratio,
+        symbol_cell_ratio=config.symbol_cell_ratio,
         data_type=data_type if config.render_images else "tabular",
         **kwargs,
     )
@@ -256,6 +259,12 @@ class DatasetGenerator:
         block_border_px: int = ...,
         font_size: int = ...,
         font_style: str = ...,
+        pencil_mark_ratio: float = ...,
+        pencil_mark_sizes: tuple[int, ...] = ...,
+        printed_digit_ratio: float = ...,
+        blank_cell_ratio: float = ...,
+        symbol_cell_ratio: float = ...,
+        render_options: dict | None = ...,
         # ── Additional config fields (training, intervention, etc.) ──
         **kwargs,
     ) -> None: ...

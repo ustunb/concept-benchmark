@@ -348,6 +348,8 @@ dataset = DatasetGenerator(
     n_boards=1000,             # number of boards to generate
     max_cell_swaps=9,          # corruptions applied to each invalid board, 1 to 9 (each swaps or duplicates digits)
     valid_board_ratio=0.5,     # fraction of valid boards
+    blank_cell_ratio=0.0,      # share of cells left blank on each invalid board (breaks its row, column, block)
+    symbol_cell_ratio=0.0,     # share of cells holding a letter on each invalid board (breaks them too)
     # ── Rendering (image only) ──
     font_style="handwritten",  # "handwritten" or "printed"
     font_size=25,              # printed-digit font size at 50 px per cell; every size is this board scaled
@@ -355,8 +357,14 @@ dataset = DatasetGenerator(
     cell_margin_px=2,          # cell margin in pixels
     gridline_px=2,             # grid line width in pixels
     block_border_px=5,         # block border width in pixels
+    pencil_mark_ratio=0.22,    # share of cells with pencil marks (candidate digits)
+    pencil_mark_sizes=(2,),    # candidate digits per pencil mark
+    printed_digit_ratio=0.35,  # share of digits printed as givens; the rest are handwritten
+    render_options=None,       # other image_transform arguments, e.g. {"fill_color": (0, 0, 0)}
 ).generate()
 ```
+
+Blank cells and letters appear only on invalid boards, so the share of valid boards stays as set. In tabular data and for the OCR recognizer, both are the value 0 ("other").
 
 #### Inspecting the data
 
@@ -387,6 +395,8 @@ python scripts/sudoku_pipeline.py --seed 171 --stages cs intervene selective dia
 |--------|-------------|
 | `--cbm-family` | `cbm`, `cem`, `probcbm` or `ecbm` |
 | `--cell-px` | Pixels per cell (50 by default; at 10 the recognizer misreads a digit on half the boards) |
+| `--pencil-mark-ratio`, `--printed-digit-ratio` | Share of cells with pencil marks (0.22) and of printed givens (0.35) |
+| `--blank-cell-ratio`, `--symbol-cell-ratio` | Share of cells left blank or holding a letter on invalid boards (0); the recognizer reads both as "other" |
 | `--target-accuracy` | Selective accuracy that kept predictions must reach (0.90 by default; the paper uses 0.99) |
 | `--stages` | `setup ocr cs dnn intervene selective align collect plot`, plus the optional `diagnose` |
 

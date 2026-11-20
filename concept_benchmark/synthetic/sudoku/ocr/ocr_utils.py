@@ -116,6 +116,8 @@ class SudokuCellDataset(Dataset):
             for r in range(9):
                 for c in range(9):
                     label = int(board[r, c])
+                    if not 1 <= label <= 9:
+                        label = 0  # "other": a blank cell or a stray symbol
                     self.samples.append((img_path, r, c, label))
 
         if dump_debug:

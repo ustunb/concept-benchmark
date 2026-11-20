@@ -407,24 +407,24 @@ def get_concepts(board, return_label=False):
     concepts = {}
     N, n = _assert_board_size(board)
 
-    row_valid = []
-    for i in range(N):
-        unique = np.unique(board[i, :])
-        row_valid.append(int(len(unique) == N))
+    digits = set(range(1, N + 1))
+
+    def unit_valid(cells) -> int:
+        # Exactly the digits 1..N: a repeat, a blank (0) or a symbol (> N) breaks the rule.
+        return int(set(np.asarray(cells).reshape(-1).tolist()) == digits)
+
+    row_valid = [unit_valid(board[i, :]) for i in range(N)]
     concepts["row_valid"] = row_valid
 
-    col_valid = []
-    for j in range(N):
-        unique = np.unique(board[:, j])
-        col_valid.append(int(len(unique) == N))
+    col_valid = [unit_valid(board[:, j]) for j in range(N)]
     concepts["col_valid"] = col_valid
 
     block_valid = []
     for bi in range(n):
         for bj in range(n):
-            block = board[bi * n : (bi + 1) * n, bj * n : (bj + 1) * n].reshape(-1)
-            unique = np.unique(block)
-            block_valid.append(int(len(unique) == N))
+            block_valid.append(
+                unit_valid(board[bi * n : (bi + 1) * n, bj * n : (bj + 1) * n])
+            )
     concepts["block_valid"] = block_valid
 
     if return_label:

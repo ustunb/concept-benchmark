@@ -388,6 +388,69 @@ class TestFingerprintsAndPaths:
         ):
             assert other.setup_fingerprint() != base.setup_fingerprint()
 
+    def test_sudoku_board_options_leave_the_paper_config_unchanged(self):
+        cfg = SudokuBenchmarkConfig()
+        assert (
+            cfg.setup_fingerprint()
+            == "46624e367f30c7770bbb9d52512fa1af52e374ac0dac26d1b5219e488d61ade8"
+        )
+        assert cfg.get_dataset_path("image").name == (
+            "sudoku_image_n3_ns1000_mc9_px50_seed171_r3"
+        )
+        assert cfg.get_model_path("cs", "tabular").name == (
+            "sudoku_cs_tabular_n3_mc9_px50_seed171.model"
+        )
+        assert cfg.get_collect_path().name == "sudoku_seed171_fa6e2d04_results.csv"
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            {"pencil_mark_ratio": 0.5},
+            {"pencil_mark_sizes": (2, 3)},
+            {"printed_digit_ratio": 0.6},
+            {"blank_cell_ratio": 0.05},
+            {"symbol_cell_ratio": 0.05},
+            {"render_options": {"prior_allow_diagonal": True}},
+        ],
+    )
+    def test_sudoku_board_options_get_their_own_fingerprint_and_paths(self, change):
+        base = SudokuBenchmarkConfig()
+        other = SudokuBenchmarkConfig(**change)
+        assert other.setup_fingerprint() != base.setup_fingerprint()
+        assert other.model_fingerprint() != base.model_fingerprint()
+        for path in (
+            other.get_dataset_path("image"),
+            other.get_dataset_path("tabular"),
+            other.get_model_path("cs", "tabular"),
+            other.get_results_path(),
+        ):
+            assert "_bo" in path.name
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            {"pencil_mark_ratio": 1.5},
+            {"blank_cell_ratio": -0.1},
+            {"blank_cell_ratio": 0.6, "symbol_cell_ratio": 0.6},
+            {"pencil_mark_sizes": (0,)},
+            {"render_options": {"cell_px": 10}},
+            {"render_options": {"no_such_option": 1}},
+        ],
+    )
+    def test_sudoku_board_options_are_validated(self, bad):
+        with pytest.raises(ValueError):
+            SudokuBenchmarkConfig(**bad)
+
+    def test_sudoku_board_options_survive_yaml(self, tmp_path):
+        cfg = SudokuBenchmarkConfig(
+            pencil_mark_sizes=(2, 3),
+            blank_cell_ratio=0.05,
+            render_options={"prior_allow_diagonal": True},
+        )
+        loaded = SudokuBenchmarkConfig.from_yaml(cfg.to_yaml(tmp_path / "c.yaml"))
+        assert loaded.pencil_mark_sizes == (2, 3)
+        assert loaded.setup_fingerprint() == cfg.setup_fingerprint()
+
     def test_sudoku_alignment_path_has_the_seed(self):
         name = (
             SudokuBenchmarkConfig(seed=172, cell_px=18)
