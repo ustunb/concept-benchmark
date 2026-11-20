@@ -53,6 +53,8 @@ def create_sudoku_dataset(
     seed: int = 42,
     transform: Callable[[np.ndarray], np.ndarray] | None = None,
     dataset_name: str | None = None,
+    blank_cell_ratio: float = 0.0,
+    symbol_cell_ratio: float = 0.0,
     add_cell_digit_concepts: bool = False,
     positions_subset: Sequence[tuple[int, int]] | None = None,
     digits_subset: Sequence[int] | None = None,
@@ -73,6 +75,11 @@ def create_sudoku_dataset(
             (e.g., "tabular" or "image"). Defaults to "tabular".
         seed (int, optional): Random seed for reproducibility.
             Defaults to 42.
+        blank_cell_ratio (float, optional): Share of cells left blank (0) on each
+            invalid board. A blank breaks its row, column and block. Defaults to 0.
+        symbol_cell_ratio (float, optional): Share of cells on each invalid board
+            that hold a letter (stored as 10..35, drawn as A..Z) instead of a digit.
+            A letter breaks its row, column and block. Defaults to 0.
         transform (Callable[[np.ndarray], np.ndarray], optional):
             Should take a board (N x N numpy array) and
             return a transformed representation as a np.ndarray.
@@ -149,6 +156,8 @@ def create_sudoku_dataset(
             num_actions=num_actions,
             seed=inv_seed,
         )
+        if blank_cell_ratio > 0 or symbol_cell_ratio > 0:
+            b = replace_cells(b, blank_cell_ratio, symbol_cell_ratio, seed=inv_seed)
         board_list.append(b.copy())
         concepts = get_concepts(b, return_label=False)
         c_base = np.array(list(concepts.values()), dtype=np.int32).flatten()
@@ -233,9 +242,40 @@ def create_sudoku_dataset(
     )
 
 
+SYMBOL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+def replace_cells(
+    board: np.ndarray,
+    blank_ratio: float,
+    symbol_ratio: float,
+    *,
+    seed: int,
+) -> np.ndarray:
+    """Return a copy of ``board`` with a share of cells blank (0) and a share holding letters.
+
+    Letters are stored as ``10 + i`` for the i-th letter of ``SYMBOL_ALPHABET``. The random draws
+    use their own generator, so boards made without blanks or letters are unchanged.
+    """
+    rng = np.random.default_rng([seed, 1])
+    out = board.copy()
+    cells = rng.permutation(out.size)
+    n_blank = int(round(blank_ratio * out.size))
+    n_symbol = int(round(symbol_ratio * out.size))
+    flat = out.reshape(-1)
+    flat[cells[:n_blank]] = 0
+    flat[cells[n_blank : n_blank + n_symbol]] = 10 + rng.integers(
+        0, len(SYMBOL_ALPHABET), size=n_symbol
+    )
+    return out
+
+
 def default_transform(board: np.ndarray) -> np.ndarray:
-    """Flattens an N×N board to a vector of length N*N."""
-    return board.astype(np.float32).reshape(-1)
+    """Flattens an N×N board to a vector of length N*N; blanks and letters become 0 ("other")."""
+    N = board.shape[0]
+    flat = board.astype(np.float32).reshape(-1)
+    flat[(flat < 1) | (flat > N)] = 0
+    return flat
 
 
 def onehot_transform(board: np.ndarray) -> np.ndarray:
@@ -272,6 +312,10 @@ def histogram_transform(board: np.ndarray) -> np.ndarray:
 RENDER_VERSION = (
     3  # 2: boards drawn at 50 px and resampled, handwriting seeded per board (Oct 2026);
     # 3: printed-digit layout seeded by a hash of the board, not its digit sum (Oct 2026)
+)
+# Bumped when only printed-style boards change, so handwritten caches (the paper's) stay valid.
+PRINTED_RENDER_VERSION = (
+    2  # 2: non-given digits drawn in print, not left blank (Nov 2026)
 )
 _REFERENCE_CELL_PX = (
     50  # boards are drawn at this cell size and resampled to the requested one
@@ -422,9 +466,9 @@ def image_transform(
             opts = {
                 int(d)
                 for d in prior_options.get((r, c), [])
-                if isinstance(d, (int, np.integer)) and int(d) > 0
+                if isinstance(d, (int, np.integer)) and 0 < int(d) <= N
             }
-            if own > 0:
+            if 0 < own <= N:
                 opts.add(own)
 
             opts = sorted(opts)
@@ -554,6 +598,16 @@ def image_transform(
                     tx = x0 + (cell_px - dw) // 2
                     ty = y0 + (cell_px - dh) // 2
                     img.paste(digit_img, (int(tx), int(ty)), digit_img)
+                else:
+                    # Printed style, or a stray symbol: printed type in the player's ink
+                    tb = draw.textbbox((0, 0), text, font=_get_default_font(font_size))
+                    tw, th = tb[2] - tb[0], tb[3] - tb[1]
+                    draw.text(
+                        (x0 + (cell_px - tw) / 2, y0 + (cell_px - th) / 2),
+                        text,
+                        fill=fill_color,
+                        font=_get_default_font(font_size),
+                    )
 
     # Outer border
     draw.rectangle(

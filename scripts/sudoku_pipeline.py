@@ -103,6 +103,12 @@ def train_ocr(config: SudokuBenchmarkConfig) -> None:
         "--patience",
         str(config.ocr_patience),
     ]
+    if config._board_option_overrides():
+        # The recognizer must find the same boards: hand it the whole config
+        config_path = config.to_yaml(
+            config.get_dataset_path(data_type="image") / "ocr_config.yaml"
+        )
+        cmd += ["--config", str(config_path)]
     subprocess.run(cmd, check=True)
 
 
@@ -1098,6 +1104,19 @@ def _parse_args(argv=None):
         default=None,
         help="Pixels per cell for OCR rendering (default: 50)",
     )
+    for flag, help_text in (
+        ("--pencil-mark-ratio", "share of cells with pencil marks (default 0.22)"),
+        ("--printed-digit-ratio", "share of digits printed as givens (default 0.35)"),
+        (
+            "--blank-cell-ratio",
+            "share of cells left blank on invalid boards (default 0)",
+        ),
+        (
+            "--symbol-cell-ratio",
+            "share of cells holding a letter on invalid boards (default 0)",
+        ),
+    ):
+        parser.add_argument(flag, type=float, default=None, help=help_text)
     parser.add_argument("--force-setup", action="store_true")
     return parser.parse_args(argv)
 
@@ -1127,6 +1146,15 @@ def main(argv=None):
     config.cbm_family = args.cbm_family
     if args.cell_px is not None:
         config.cell_px = args.cell_px
+    for name in (
+        "pencil_mark_ratio",
+        "printed_digit_ratio",
+        "blank_cell_ratio",
+        "symbol_cell_ratio",
+    ):
+        if getattr(args, name) is not None:
+            setattr(config, name, getattr(args, name))
+    config.__post_init__()  # validate the values set above
     if args.target_accuracy is not None:
         config.target_accuracy = args.target_accuracy
     if args.direct_image:

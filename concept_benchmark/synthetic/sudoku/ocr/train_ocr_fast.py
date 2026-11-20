@@ -268,15 +268,29 @@ def main():
         help="Skip training and use existing model.",
     )
 
-    args, _ = ap.parse_known_args()
-    set_deterministic_seed(args.seed)
-    cfg = SudokuBenchmarkConfig(
-        block_size=args.n,
-        n_boards=args.n_samples,
-        max_cell_swaps=args.max_corrupt,
-        seed=args.seed,
-        cell_px=args.cell_px,
+    ap.add_argument(
+        "--config",
+        default=None,
+        help="Sudoku config YAML; overrides the board flags above (used by the pipeline).",
     )
+
+    args, _ = ap.parse_known_args()
+    if args.config:
+        cfg = SudokuBenchmarkConfig.from_yaml(args.config)
+        args.seed, args.cell_px, args.margin_px = (
+            cfg.seed,
+            cfg.cell_px,
+            cfg.cell_margin_px,
+        )
+    else:
+        cfg = SudokuBenchmarkConfig(
+            block_size=args.n,
+            n_boards=args.n_samples,
+            max_cell_swaps=args.max_corrupt,
+            seed=args.seed,
+            cell_px=args.cell_px,
+        )
+    set_deterministic_seed(args.seed)
 
     dataset_dir = cfg.get_dataset_path(data_type="image")
     tab_dataset_dir = cfg.get_dataset_path(data_type="tabular")

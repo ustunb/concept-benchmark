@@ -373,3 +373,104 @@ def test_every_generated_invalid_sudoku_board_is_invalid():
             base_board=generate_valid_board(rng=rng), num_actions=2, seed=seed
         )
         assert not get_concepts(board, return_label=True)["board_valid"], seed
+
+
+def _array_hash(a) -> str:
+    import hashlib
+
+    return hashlib.sha256(np.ascontiguousarray(a).tobytes()).hexdigest()[:16]
+
+
+def test_default_sudoku_boards_are_unchanged():
+    from concept_benchmark.synthetic.sudoku import create_sudoku_dataset
+
+    ds = create_sudoku_dataset(
+        n=3, n_samples=60, valid_ratio=0.5, max_corrupt=9, data_type="tabular", seed=171
+    )
+    assert _array_hash(ds.inputs) == "8b508e179c8d0c39"
+    assert _array_hash(ds.C) == "8e192f82af709698"
+    assert _array_hash(ds.y) == "e3919bac22ff31b0"
+
+
+def test_blank_and_symbol_cells_break_only_invalid_boards():
+    from concept_benchmark.synthetic.sudoku import create_sudoku_dataset
+    from concept_benchmark.synthetic.sudoku.utils import get_concepts
+
+    ds = create_sudoku_dataset(
+        n=3,
+        n_samples=100,
+        valid_ratio=0.5,
+        max_corrupt=3,
+        data_type="tabular",
+        seed=3,
+        blank_cell_ratio=0.04,
+        symbol_cell_ratio=0.04,
+    )
+    boards, y = ds.meta["boards"], ds.y
+    other = (boards < 1) | (boards > 9)
+    assert y.mean() == 0.5
+    assert not other[y == 1].any()
+    assert other[y == 0].sum(axis=(1, 2)).min() >= 2
+    assert ds.inputs.min() == 0 and ds.inputs.max() == 9  # blanks and letters become 0
+    for board, broken, concepts in zip(boards, other, ds.C):
+        c = get_concepts(board)
+        assert np.array_equal(
+            concepts, np.r_[c["row_valid"], c["col_valid"], c["block_valid"]]
+        )
+        for r in range(9):
+            if broken[r].any():
+                assert c["row_valid"][r] == 0
+
+
+def test_sudoku_render_options_reach_the_image():
+    from concept_benchmark.synthetic.sudoku import image_transform
+    from concept_benchmark.synthetic.sudoku.utils import generate_valid_board
+
+    board = generate_valid_board(rng=np.random.default_rng(0))
+    default = image_transform(board, board_index=0)
+    explicit = image_transform(
+        board,
+        board_index=0,
+        prior_groups_ratio=0.22,
+        prior_group_sizes=(2,),
+        starters_ratio=0.35,
+    )
+    assert np.array_equal(default, explicit)
+    assert not np.array_equal(
+        default, image_transform(board, board_index=0, prior_groups_ratio=0.0)
+    )
+    with_letter = board.copy()
+    with_letter[0, 0] = 10
+    assert not np.array_equal(
+        image_transform(with_letter, board_index=0, starters_ratio=0.0),
+        image_transform(board, board_index=0, starters_ratio=0.0),
+    )
+
+
+def test_ocr_labels_blank_and_symbol_cells_as_other(tmp_path):
+    import json
+
+    from concept_benchmark.synthetic.sudoku.ocr.ocr_utils import SudokuCellDataset
+
+    board = np.tile(np.arange(1, 10), (9, 1))
+    board[0, 0], board[0, 1] = 0, 12
+    (tmp_path / "b.png").write_bytes(b"")
+    jsonl = tmp_path / "s.jsonl"
+    jsonl.write_text(json.dumps({"img": "b.png", "board": board.tolist()}) + "\n")
+    labels = [
+        s[3] for s in SudokuCellDataset(tmp_path, jsonl, dump_debug=False).samples
+    ]
+    assert labels[0] == 0 and labels[1] == 0 and set(labels[2:]) <= set(range(1, 10))
+
+
+def test_printed_style_draws_every_digit():
+    from concept_benchmark.synthetic.sudoku import image_transform
+    from concept_benchmark.synthetic.sudoku.utils import generate_valid_board
+
+    board = generate_valid_board(rng=np.random.default_rng(0))
+    erased = board.copy()
+    erased[4, 4] = 0
+    kwargs = dict(board_index=0, handwriting=False, starters_ratio=0.0)
+    assert not np.array_equal(
+        image_transform(board, **kwargs), image_transform(erased, **kwargs)
+    )
