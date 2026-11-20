@@ -981,6 +981,7 @@ class SudokuBenchmarkConfig(_BenchmarkConfigBase):
             raise ValueError(
                 f"pencil_mark_sizes must be positive, got {self.pencil_mark_sizes}"
             )
+        self.render_options = self.render_options or None  # {} means no options
         if self.render_options:
             import inspect
 

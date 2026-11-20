@@ -401,6 +401,9 @@ class TestFingerprintsAndPaths:
             "sudoku_cs_tabular_n3_mc9_px50_seed171.model"
         )
         assert cfg.get_collect_path().name == "sudoku_seed171_fa6e2d04_results.csv"
+        empty = SudokuBenchmarkConfig(render_options={})
+        assert empty.setup_fingerprint() == cfg.setup_fingerprint()
+        assert empty.get_dataset_path("image") == cfg.get_dataset_path("image")
 
     @pytest.mark.parametrize(
         "change",
