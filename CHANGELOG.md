@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.1 — 2026-11-20
+
+New Sudoku board options; the paper's boards, images, fingerprints and paths are unchanged at the defaults, and the paper's results are those of `v0.5.0` (`paper-results.zip` of that release).
+
+### Added
+
+- **Sudoku board options** in `sudoku.DatasetGenerator` / `SudokuBenchmarkConfig` and `scripts/sudoku_pipeline.py`: `pencil_mark_ratio` (0.22) and `pencil_mark_sizes` ((2,)) for pencil marks, `printed_digit_ratio` (0.35) for printed givens, `blank_cell_ratio` and `symbol_cell_ratio` (0) for blank cells and letters (A–Z) on invalid boards, and `render_options` for any other `image_transform` argument. Blank cells and letters break every row, column and block they are in, appear only on invalid boards (the share of valid boards is unchanged), and are read as 0 ("other") in tabular data and by the digit recognizer. Options away from their defaults get their own fingerprint and `_bo<hash>` paths.
+
+### Fixed
+
+- **Printed Sudoku boards draw every digit.** With `font_style="printed"`, every non-given digit was left blank, so a board showed only its printed givens while its labels described the full board. Printed boards now draw them in print; their fingerprint changes, so cached printed boards are regenerated. Handwritten boards, including the paper's, are unchanged.
+
 ## 0.5.0 — 2026-11-06
 
 The camera-ready release of the paper. **`automation_table` gives different numbers than 0.4.x for the same model**, because it verifies concepts in a new order and stops early (first item below); the paper's main selective-accuracy target is now 0.99 (0.90 and 0.95 in the appendix).
