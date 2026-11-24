@@ -64,10 +64,12 @@ def _image_rows(dataset) -> np.ndarray:
         and {"UC", "unfiltered_concepts"} <= set(meta)
         and "df_indices" in dataset.meta
         and catalog_signature(meta) == CATALOG_SIGNATURE
+        and meta.get("color_mode", "color") == "color"
     ):
         raise ValueError(
-            "The default annotations and answers cover the robots of the default catalog "
-            "(30,720 renders); this dataset was generated from another catalog or modality."
+            "The default annotations and answers cover the color robot images of the default "
+            "catalog (30,720 renders); this dataset was generated from another catalog, "
+            "in grayscale, or in another modality."
         )
     return np.asarray(dataset.meta["df_indices"], dtype=int)
 

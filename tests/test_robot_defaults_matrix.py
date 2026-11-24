@@ -298,10 +298,13 @@ def unsupported() -> dict:
         "other_catalog": DatasetGenerator(
             seed=SEED, renders_per_robot=2, render_images=False
         ).generate(),
+        "grayscale": DatasetGenerator(
+            seed=SEED, color_mode="grayscale", render_images=False
+        ).generate(),
     }
 
 
-@pytest.mark.parametrize("name", ["text", "other_catalog"])
+@pytest.mark.parametrize("name", ["text", "other_catalog", "grayscale"])
 @pytest.mark.parametrize(
     "call",
     [

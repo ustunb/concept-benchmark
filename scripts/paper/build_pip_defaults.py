@@ -46,6 +46,11 @@ NEW_SEED_CACHES = REPO / "results/_incoming/llm_caches_n10"
 SEED_TESTS = NEW_SEED_CACHES / "seed_tests.json"
 OUT_DIR = REPO / "concept_benchmark/data/defaults"
 LFCBM_MODELS = REPO / "results/paper/models/robot/grid"
+ROBOT_IMAGES = REPO / "data/robot_images"
+# `.drawing_signature` of the paper's catalog drawn at 32 px in color (synthetic/robot/catalog.py)
+PAPER_DRAWING_SIGNATURE = (
+    "4eb3bb7594665829feee4be0e8a2332e279f1811dad86395b40879e3895b388f"
+)
 
 
 def read_cache(path: Path, n_concepts: int) -> dict[int, list[int]]:
@@ -127,9 +132,13 @@ def build_llm_answers(missing_dir: Path | None) -> None:
 
 
 def build_ai_concepts(device: str) -> None:
-    images = [
-        REPO / f"data/robot_images/robot_{i:03d}.png" for i in range(CATALOG_SIZE)
-    ]
+    signature = ROBOT_IMAGES / ".drawing_signature"
+    if not signature.exists() or signature.read_text() != PAPER_DRAWING_SIGNATURE:
+        raise ValueError(
+            f"{ROBOT_IMAGES} does not hold the paper's 32 px color robots; draw them with "
+            "DatasetGenerator(seed=1014).generate() first"
+        )
+    images = [ROBOT_IMAGES / f"robot_{i:03d}.png" for i in range(CATALOG_SIZE)]
     arrays = {}
     for source in AI_CONCEPT_SOURCES.values():
         (path,) = LFCBM_MODELS.glob(
