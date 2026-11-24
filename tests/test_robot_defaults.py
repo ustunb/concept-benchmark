@@ -81,6 +81,12 @@ def test_llm_answers_of_a_subset_come_from_the_same_questions(discovered):
     )
 
 
+def test_llm_answers_for_a_dataset_with_every_concept():
+    full = DatasetGenerator(seed=1014).generate()
+    answers = intervention_answers(full, "llm", concepts=["head_shape", "foot_shape"])
+    assert answers.shape == (full.n, 2)
+
+
 def test_llm_answers_on_ai_concepts(discovered):
     _, names, _ = ai_concepts(discovered.test, "llm_written")
     answers = intervention_answers(discovered.test, "llm", concepts=names)

@@ -64,11 +64,20 @@ def ai_concepts(dataset, source: str) -> tuple[np.ndarray, list[str], list[str]]
     return labels, data[f"{key}_concepts"].tolist(), data[f"{key}_texts"].tolist()
 
 
-def _llm_question_list(concepts: list[str]) -> str:
+def _llm_question_list(concepts: list[str], dataset_concepts: list[str]) -> str:
+    """The question list the LLM answered for ``concepts``.
+
+    The dataset's own concept set decides when a list covers it, so a subset of the discovered
+    concepts gets the discovered questions even where the true concepts share a name.
+    """
     data = _load("robot_llm_answers.npz")
-    for questions in LLM_QUESTION_LISTS:
-        if set(concepts) <= set(data[f"{questions}_concepts"].tolist()):
-            return questions
+    candidates = [concepts]
+    if set(concepts) <= set(dataset_concepts):
+        candidates.insert(0, dataset_concepts)
+    for names in candidates:
+        for questions in LLM_QUESTION_LISTS:
+            if set(names) <= set(data[f"{questions}_concepts"].tolist()):
+                return questions
     raise ValueError(
         "The LLM answered only the concept sets of the paper (true, discovered, llm_written, "
         f"clip_words); these concepts are not one of them: {concepts}"
@@ -105,12 +114,7 @@ def intervention_answers(
         )
     concepts = list(dataset.concepts if concepts is None else concepts)
     if source == "llm":
-        # the dataset's concept set says which questions were asked, also for a subset of it
-        questions = _llm_question_list(
-            list(dataset.concepts)
-            if set(concepts) <= set(dataset.concepts)
-            else concepts
-        )
+        questions = _llm_question_list(concepts, list(dataset.concepts))
         data = _load("robot_llm_answers.npz")
         names = data[f"{questions}_concepts"].tolist()
         columns = [names.index(c) for c in concepts]
