@@ -663,6 +663,11 @@ class ConceptDataset:
         return self._full.C
 
     @property
+    def base_concepts(self):
+        """Concept matrix of the full dataset before noise/missingness."""
+        return self._full.base_concepts
+
+    @property
     def y(self):
         """Label vector of the full dataset (with label noise applied)."""
         return self._full.y

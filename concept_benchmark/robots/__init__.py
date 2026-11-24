@@ -10,6 +10,11 @@ Generate datasets of fictional robots (Glorps vs. Drents) from body features::
 from concept_benchmark.config import RobotBenchmarkConfig
 from concept_benchmark.formula import F, LabelFormula
 from concept_benchmark.generators import DatasetGenerator as _BaseGenerator
+from concept_benchmark.robots.defaults import (
+    load_ai_concept_scores,
+    load_ai_concepts,
+    load_intervention_answers,
+)
 from concept_benchmark.robots.hierarchy import (
     HierarchyImplication,
     HierarchyViolation,
@@ -42,4 +47,7 @@ __all__ = [
     "HierarchyImplication",
     "HierarchyViolation",
     "RobotConceptHierarchy",
+    "load_ai_concept_scores",
+    "load_ai_concepts",
+    "load_intervention_answers",
 ]

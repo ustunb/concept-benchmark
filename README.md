@@ -45,7 +45,7 @@ Then install the package:
 pip install concept-benchmark
 ```
 
-**Dataset generation, metrics, and plots** work out of the box with `pip install`. **Model training and interventions** (`experiments/` package and the pipelines in `scripts/`) require cloning the repo:
+**Dataset generation, metrics, plots, and the paper's default automated concept labels and intervention answers** work out of the box with `pip install`. **Model training and the intervention pipelines** (`experiments/` package and the pipelines in `scripts/`) require cloning the repo:
 
 ```bash
 git clone https://github.com/ustunb/concept-benchmark.git
@@ -743,6 +743,38 @@ All plot functions return `(fig, ax)`. The pipelines' `plot` stage draws the one
 ### Interventions
 
 Interventions are the core benefit of concept bottleneck models: at test time, a user (or automated system) can inspect and correct the model's concept predictions before the final label is determined.
+
+#### Default automated concepts and intervention answers (pip)
+
+The paper's automated concept sets and interveners come with the package, for every robot image:
+
+```python
+from concept_benchmark.robots import DatasetGenerator, load_ai_concepts, load_intervention_answers
+
+data = DatasetGenerator(seed=1014, concept_preset="foot_subtypes").generate_splits()
+labels, names, texts = load_ai_concepts(data.train, "llm_written")  # or "machine_labeled", "clip_words"
+answers = load_intervention_answers(data.test, "llm")               # or "expert" (80% accurate), "perfect"
+```
+
+| | pip | repo |
+|---|---|---|
+| Automated concept labels | the paper's three sets | your own concept lists |
+| Intervention answers | `perfect`, `expert`, `llm` (Gemini 2.5 Flash-Lite) | other LLMs or prompts, the model's own answers |
+
+LLM answers are one per robot image and concept, taken from the paper's runs. For an automated concept set, pass its names: `load_intervention_answers(data.test, "llm", concepts=names)`.
+
+**How the automated labels were made, and how to use your own cutoff.** Each label comes from a score in [0, 1] (`load_ai_concept_scores`): the paper's label-free model (seed 1014) projects CLIP similarities onto the concepts, standardizes them over its training robots, and applies a sigmoid. The CBM is the label-free model itself and uses these scores. To train CEM, ProbCBM, and ECBM, which need 0/1 concept labels, the paper labeled a concept 1 when its score is at least 0.5, the training average, so all three trained on the same labels. That one cutoff makes about half the robots positive for every concept, also for rare ones (each foot type is on about 10% of robots), so these labels are noisy. To apply another cutoff, threshold the scores, for example at each concept's share of positives in the true labels:
+
+```python
+import numpy as np
+from concept_benchmark.robots import load_ai_concept_scores
+
+scores, names, _ = load_ai_concept_scores(data.train, "machine_labeled")
+true = np.asarray(data.train.base_concepts)
+share = np.array([true[:, data.train.concepts.index(name)].mean() for name in names])
+cutoffs = [np.quantile(scores[:, j], 1 - s) for j, s in enumerate(share)]
+labels = (scores >= cutoffs).astype(int)  # the same share of 1s as the true labels
+```
 
 #### Oracle interventions (manual approach)
 

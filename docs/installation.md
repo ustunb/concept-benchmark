@@ -19,7 +19,7 @@ Then install the package:
 pip install concept-benchmark
 ```
 
-**Dataset generation, metrics, and plots** work out of the box with `pip install`. **Model training and interventions** (`experiments/` package and the pipelines in `scripts/`) require cloning the repo:
+**Dataset generation, metrics, plots, and the paper's default automated concept labels and intervention answers** work out of the box with `pip install`. **Model training and the intervention pipelines** (`experiments/` package and the pipelines in `scripts/`) require cloning the repo:
 
 ```bash
 git clone https://github.com/ustunb/concept-benchmark.git
