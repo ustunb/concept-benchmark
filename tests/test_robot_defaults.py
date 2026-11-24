@@ -52,6 +52,28 @@ def test_perfect_answers_need_the_dataset_concepts(discovered):
         intervention_answers(discovered.test, "perfect", concepts=["not_a_concept"])
 
 
+def test_perfect_answers_on_the_full_dataset(discovered):
+    assert np.array_equal(
+        intervention_answers(discovered, "perfect"),
+        np.asarray(discovered.base_concepts),
+    )
+
+
+def test_perfect_answers_ignore_concept_noise():
+    data = DatasetGenerator(seed=1014, concept_preset="foot_subtypes").generate_splits()
+    clean = np.asarray(data.test.C).copy()
+    data.sample_concept_noise(p=0.3, rng=0, enable=True)
+    assert not np.array_equal(np.asarray(data.test.C), clean)
+    assert np.array_equal(intervention_answers(data.test, "perfect"), clean)
+
+
+def test_answers_follow_the_rows_not_the_file_names(discovered):
+    test = discovered.test
+    rows = np.asarray(test.meta["df_indices"])
+    names = np.array([image_index(p) for p in test.inputs])
+    assert np.array_equal(rows, names)
+
+
 def test_expert_answers_are_right_at_the_given_rate(discovered):
     test = discovered.test
     answers = intervention_answers(test, "expert", accuracy=0.8, seed=3)

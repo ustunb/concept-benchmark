@@ -54,18 +54,20 @@ def image_index(path: str | Path) -> int:
 
 
 def _image_rows(dataset) -> np.ndarray:
+    """Catalog index of each robot of ``dataset``, after checking it comes from the default catalog."""
     # a split keeps only its own rows of the catalog; the full dataset has all of them
-    meta = getattr(dataset, "parent", dataset).meta
+    full = getattr(dataset, "parent", None) or dataset
+    meta = full.meta
     if not (
         isinstance(meta, dict)
         and "UC" in meta
         and catalog_signature(meta) == CATALOG_SIGNATURE
     ):
         raise ValueError(
-            "The default annotations and answers cover the image robots of the default catalog "
+            "The default annotations and answers cover the robots of the default catalog "
             "(30,720 renders); this dataset was generated from another catalog or modality."
         )
-    return np.array([image_index(p) for p in dataset.inputs], dtype=int)
+    return np.asarray(dataset.meta["df_indices"], dtype=int)
 
 
 def ai_concepts(dataset, source: str) -> tuple[np.ndarray, list[str], list[str]]:
@@ -137,8 +139,8 @@ def intervention_answers(
     Args:
         dataset: image robots, e.g. ``data.test`` of ``DatasetGenerator(...).generate_splits()``.
         source: ``"perfect"`` (the true labels), ``"expert"`` (the true labels, each wrong with
-            probability ``1 - accuracy``), or ``"llm"`` (Gemini 2.5 Flash-Lite looking at a 224 px
-            image of the robot).
+            probability ``1 - accuracy``), or ``"llm"`` (Gemini 2.5 Flash-Lite looking at the
+            default 224 px color image of the robot).
         concepts: concept names, in column order; defaults to ``dataset.concepts``. For an
             automated concept set pass its names from :func:`ai_concepts`.
         accuracy: accuracy of the expert, between 0 and 1 (the paper uses 0.8).
@@ -170,7 +172,7 @@ def intervention_answers(
             f"its own concepts; these are not among them: {unknown}"
         )
     columns = [list(dataset.concepts).index(c) for c in concepts]
-    truth = np.asarray(dataset.C, dtype=int)[:, columns]
+    truth = np.asarray(dataset.base_concepts, dtype=int)[:, columns]
     if source == "perfect":
         return truth
     mistakes = _expert_mistakes(rows, concepts, accuracy, seed)
