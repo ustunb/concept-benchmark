@@ -45,7 +45,7 @@ Then install the package:
 pip install concept-benchmark
 ```
 
-**Dataset generation, metrics, and plots** work out of the box with `pip install`. **Model training and interventions** (`experiments/` package and the pipelines in `scripts/`) require cloning the repo:
+**Dataset generation, metrics, plots, and the paper's default automated concept labels and intervention answers** work out of the box with `pip install`. **Model training and the intervention pipelines** (`experiments/` package and the pipelines in `scripts/`) require cloning the repo:
 
 ```bash
 git clone https://github.com/ustunb/concept-benchmark.git
@@ -743,6 +743,25 @@ All plot functions return `(fig, ax)`. The pipelines' `plot` stage draws the one
 ### Interventions
 
 Interventions are the core benefit of concept bottleneck models: at test time, a user (or automated system) can inspect and correct the model's concept predictions before the final label is determined.
+
+#### Default automated concepts and intervention answers (pip)
+
+The paper's automated concept sets and interveners come with the package, for every robot image:
+
+```python
+from concept_benchmark.robots import DatasetGenerator, ai_concepts, intervention_answers
+
+data = DatasetGenerator(seed=1014, concept_preset="foot_subtypes").generate_splits()
+labels, names, texts = ai_concepts(data.train, "llm_written")  # or "machine_labeled", "clip_words"
+answers = intervention_answers(data.test, "llm")               # or "expert" (80% accurate), "perfect"
+```
+
+| | pip | repo |
+|---|---|---|
+| Automated concept labels | the paper's three sets | your own concept lists |
+| Intervention answers | `perfect`, `expert`, `llm` (Gemini 2.5 Flash-Lite) | other LLMs or prompts, the model's own answers |
+
+LLM answers are one per robot image and concept, taken from the paper's runs. For an automated concept set, pass its names: `intervention_answers(data.test, "llm", concepts=names)`.
 
 #### Oracle interventions (manual approach)
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0 — 2026-11-24
+
+The paper's default automated concept labels and intervention answers now come with the package, so `pip install` covers the automated concept sets and interveners of the paper without CLIP, an LLM, or the repository.
+
+### Added
+
+- **`robots.ai_concepts(dataset, source)`**: labels of the paper's automated concept sets for any split of the image robots: `machine_labeled` (the discovered concepts labeled by CLIP), `llm_written` (concepts written by Gemini 2.5 Pro) and `clip_words` (single words ranked by CLIP), from the paper's seed-1014 label-free models applied to every robot image.
+- **`robots.intervention_answers(dataset, source)`**: answers of the paper's interveners, shaped like the concepts: `perfect` (true labels), `expert` (true labels, each wrong with probability 1 − `accuracy`, 0.2 by default) and `llm` (Gemini 2.5 Flash-Lite on 224 px images). The LLM answers cover every robot image and the true, discovered, `llm_written` and `clip_words` concepts: for each image the first answer of the paper's runs (seeds 1014–1023), and a new query for the 573 images that were never in a test set.
+- `scripts/paper/build_pip_defaults.py` builds both files (`concept_benchmark/data/defaults/`).
+
+Your own concept lists, other LLMs or prompts, the concept selection policy and the models stay in the repository.
+
 ## 0.5.1 — 2026-11-20
 
 New Sudoku board options; the paper's boards, images, fingerprints and paths are unchanged at the defaults, and the paper's results are those of `v0.5.0` (`paper-results.zip` of that release).
