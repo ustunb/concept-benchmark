@@ -9,10 +9,9 @@ import numpy as np
 import pytest
 
 from concept_benchmark.robots import DatasetGenerator, ai_concepts, intervention_answers
-from concept_benchmark.robots.defaults import _load
+from concept_benchmark.robots.defaults import CATALOG_SIZE, _load, image_index
 
 REPO = Path(__file__).resolve().parents[1]
-N_IMAGES = 30720
 
 
 @pytest.fixture(scope="module")
@@ -23,7 +22,7 @@ def discovered():
 @pytest.mark.parametrize("questions", ["true", "human", "llm", "clip"])
 def test_every_robot_image_has_llm_answers(questions):
     answers = _load("robot_llm_answers.npz")[f"{questions}_answers"]
-    assert answers.shape[0] == N_IMAGES
+    assert answers.shape[0] == CATALOG_SIZE
     assert set(np.unique(answers)) <= {0, 1}
 
 
@@ -60,6 +59,27 @@ def test_expert_answers_are_right_at_the_given_rate(discovered):
     assert np.array_equal(
         answers, intervention_answers(test, "expert", accuracy=0.8, seed=3)
     )
+
+
+def test_expert_answers_do_not_depend_on_the_other_concepts(discovered):
+    test = discovered.test
+    full = intervention_answers(test, "expert", seed=5)
+    k = list(test.concepts).index("ears_shape")
+    alone = intervention_answers(test, "expert", concepts=["ears_shape"], seed=5)
+    assert np.array_equal(alone[:, 0], full[:, k])
+
+
+def test_expert_accuracy_must_be_a_fraction(discovered):
+    with pytest.raises(ValueError):
+        intervention_answers(discovered.test, "expert", accuracy=80)
+
+
+def test_another_catalog_is_rejected():
+    other = DatasetGenerator(
+        seed=1014, renders_per_robot=2, render_images=False
+    ).generate()
+    with pytest.raises(ValueError):
+        intervention_answers(other, "perfect")
 
 
 def test_llm_answers_follow_the_concept_order(discovered):
@@ -116,6 +136,6 @@ def test_llm_answers_match_the_paper_on_seed_1014():
     data = _load("robot_llm_answers.npz")
     for line in PAPER_CACHE.read_text().splitlines():
         row = json.loads(line)
-        k = int(inputs[row["i"]].split("_")[1].split(".")[0])
+        k = image_index(inputs[row["i"]])
         votes = [row["votes_idx"][str(j)] for j in range(len(row["votes_idx"]))]
         assert data["human_answers"][k].tolist() == votes

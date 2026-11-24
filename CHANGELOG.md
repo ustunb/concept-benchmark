@@ -6,8 +6,8 @@ The paper's default automated concept labels and intervention answers now come w
 
 ### Added
 
-- **`robots.ai_concepts(dataset, source)`**: labels of the paper's automated concept sets for any split of the image robots: `machine_labeled` (the discovered concepts labeled by CLIP), `llm_written` (concepts written by Gemini 2.5 Pro) and `clip_words` (single words ranked by CLIP), from the paper's seed-1014 label-free models applied to every robot image.
-- **`robots.intervention_answers(dataset, source)`**: answers of the paper's interveners, shaped like the concepts: `perfect` (true labels), `expert` (true labels, each wrong with probability 1 − `accuracy`, 0.2 by default) and `llm` (Gemini 2.5 Flash-Lite on 224 px images). The LLM answers cover every robot image and the true, discovered, `llm_written` and `clip_words` concepts: for each image the first answer of the paper's runs (seeds 1014–1023), and a new query for the 573 images that were never in a test set.
+- **`robots.ai_concepts(dataset, source)`**: labels of the paper's automated concept sets for any split of the image robots of the default catalog: `machine_labeled` (the discovered concepts labeled by CLIP), `llm_written` (concepts written by Gemini 2.5 Pro) and `clip_words` (single words ranked by CLIP), from the paper's seed-1014 label-free models applied to every robot image.
+- **`robots.intervention_answers(dataset, source)`**: answers of the paper's interveners, shaped like the concepts: `perfect` (true labels), `expert` (true labels, each wrong with probability 1 − `accuracy`, 0.2 by default; the same robot and concept always get the same answer for a given seed) and `llm` (Gemini 2.5 Flash-Lite on 224 px images). The LLM answers cover every robot image and the true, discovered, `llm_written` and `clip_words` concepts: for each image the first answer of the paper's runs (seeds 1014–1023), and a new query for the 573 images that were never in a test set.
 - `scripts/paper/build_pip_defaults.py` builds both files (`concept_benchmark/data/defaults/`).
 
 Your own concept lists, other LLMs or prompts, the concept selection policy and the models stay in the repository.
