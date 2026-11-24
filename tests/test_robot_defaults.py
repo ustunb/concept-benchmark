@@ -72,6 +72,15 @@ def test_llm_answers_follow_the_concept_order(discovered):
     assert np.array_equal(reordered, answers[:, ::-1])
 
 
+def test_llm_answers_of_a_subset_come_from_the_same_questions(discovered):
+    test = discovered.test
+    full = intervention_answers(test, "llm")
+    k = list(test.concepts).index("ears_shape")
+    assert np.array_equal(
+        intervention_answers(test, "llm", concepts=["ears_shape"])[:, 0], full[:, k]
+    )
+
+
 def test_llm_answers_on_ai_concepts(discovered):
     _, names, _ = ai_concepts(discovered.test, "llm_written")
     answers = intervention_answers(discovered.test, "llm", concepts=names)

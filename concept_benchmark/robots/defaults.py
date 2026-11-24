@@ -105,7 +105,12 @@ def intervention_answers(
         )
     concepts = list(dataset.concepts if concepts is None else concepts)
     if source == "llm":
-        questions = _llm_question_list(concepts)
+        # the dataset's concept set says which questions were asked, also for a subset of it
+        questions = _llm_question_list(
+            list(dataset.concepts)
+            if set(concepts) <= set(dataset.concepts)
+            else concepts
+        )
         data = _load("robot_llm_answers.npz")
         names = data[f"{questions}_concepts"].tolist()
         columns = [names.index(c) for c in concepts]
