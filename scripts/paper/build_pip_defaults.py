@@ -25,6 +25,8 @@ import numpy as np
 
 from _common import REPO
 from build_llm_caches import build_concept_lists, sha1_of
+from concept_benchmark.ext.fileutils import load
+from experiments.lfcbm import _CLIPEncoder
 
 N_IMAGES = 30720
 SEEDS = [str(s) for s in range(1014, 1024)]
@@ -118,8 +120,6 @@ def llm_answers(missing_dir: Path | None) -> None:
 
 
 def ai_concepts(device: str) -> None:
-    from concept_benchmark.ext.fileutils import load
-
     images = [REPO / f"data/robot_images/robot_{i:03d}.png" for i in range(N_IMAGES)]
     arrays = {}
     for source in AI_SOURCES:
@@ -128,9 +128,10 @@ def ai_concepts(device: str) -> None:
         )
         model = load(path)
         model.cfg.cache_dir = None
-        model.cfg.device = device
-        if hasattr(model, "_encoder") and model._encoder is not None:
-            model._encoder.device = device
+        # set the encoder here: the model would otherwise pick the best available device
+        model.encoder = _CLIPEncoder(
+            model.cfg.clip_model, model.cfg.clip_pretrained, device
+        )
         proba = model.concept_proba(images)
         arrays[f"{source}_proba"] = proba.astype(np.float16)
         arrays[f"{source}_labels"] = (proba >= 0.5).astype(np.uint8)

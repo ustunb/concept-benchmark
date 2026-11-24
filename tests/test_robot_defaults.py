@@ -40,6 +40,19 @@ def test_perfect_answers_are_the_true_labels(discovered):
     assert np.array_equal(intervention_answers(test, "perfect"), np.asarray(test.C))
 
 
+def test_perfect_answers_follow_the_concept_order(discovered):
+    test = discovered.test
+    reordered = intervention_answers(
+        test, "perfect", concepts=list(reversed(test.concepts))
+    )
+    assert np.array_equal(reordered, np.asarray(test.C)[:, ::-1])
+
+
+def test_perfect_answers_need_the_dataset_concepts(discovered):
+    with pytest.raises(ValueError):
+        intervention_answers(discovered.test, "perfect", concepts=["not_a_concept"])
+
+
 def test_expert_answers_are_right_at_the_given_rate(discovered):
     test = discovered.test
     answers = intervention_answers(test, "expert", accuracy=0.8, seed=3)

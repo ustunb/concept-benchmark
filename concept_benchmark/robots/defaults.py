@@ -112,8 +112,15 @@ def intervention_answers(
         return data[f"{questions}_answers"][_image_rows(dataset)][:, columns].astype(
             int
         )
-    truth = np.asarray(dataset.C, dtype=int)
+    unknown = [c for c in concepts if c not in dataset.concepts]
+    if unknown:
+        raise ValueError(
+            f"{source!r} answers need the true labels, which the dataset has only for "
+            f"its own concepts; these are not among them: {unknown}"
+        )
+    columns = [list(dataset.concepts).index(c) for c in concepts]
+    truth = np.asarray(dataset.C, dtype=int)[:, columns]
     if source == "perfect":
-        return truth.copy()
+        return truth
     mistakes = np.random.default_rng(seed).random(truth.shape) < 1 - accuracy
     return np.where(mistakes, 1 - truth, truth)
