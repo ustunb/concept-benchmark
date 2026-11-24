@@ -6,7 +6,7 @@ Writes two files to `concept_benchmark/data/defaults/`:
   and concept, for the four question lists `true`, `human`, `llm`, `clip`. Each answer is the first
   one the paper's caches hold for that image, seeds 1014 to 1023 in order, then the images that were
   never in a test set (`missing-tests` lists them; `build_llm_caches.py` asks about them).
-- `robot_ai_concepts.npz`: concept labels (p >= 0.5) of the three automated concept sets `machine`,
+- `robot_ai_concepts.npz`: concept scores and labels (score >= 0.5) of the three automated concept sets `machine`,
   `llm`, `clip` for every robot image, from the seed-1014 label-free models of the paper's grid
   applied to CLIP embeddings of the 32 px images.
 
@@ -26,11 +26,15 @@ import numpy as np
 from _common import REPO
 from build_llm_caches import build_concept_lists, sha1_of
 from concept_benchmark.ext.fileutils import load
-from concept_benchmark.robots.defaults import CATALOG_SIZE, image_index
+from concept_benchmark.robots.defaults import (
+    AI_CONCEPT_SOURCES,
+    CATALOG_SIZE,
+    LLM_QUESTION_LISTS,
+    image_index,
+)
 from experiments.lfcbm import _CLIPEncoder
 
 SEEDS = [str(s) for s in range(1014, 1024)]
-QUESTION_LISTS = ["true", "human", "llm", "clip"]
 PAPER_CACHE_TAGS = {
     "true": "true",
     "human": "human-and-machine",
@@ -42,7 +46,6 @@ NEW_SEED_CACHES = REPO / "results/_incoming/llm_caches_n10"
 SEED_TESTS = NEW_SEED_CACHES / "seed_tests.json"
 OUT_DIR = REPO / "concept_benchmark/data/defaults"
 LFCBM_MODELS = REPO / "results/paper/models/robot/grid"
-AI_SOURCES = ["machine", "llm", "clip"]
 
 
 def read_cache(path: Path, n_concepts: int) -> dict[int, list[int]]:
@@ -70,7 +73,7 @@ def cache_path(seed: str, questions: str, names: list[str], dsig: str) -> Path:
     return NEW_SEED_CACHES / f"llm_interventions_{sha1_of(names)}_{dsig}.jsonl"
 
 
-def missing_tests(out: Path) -> None:
+def write_missing_tests(out: Path) -> None:
     tests = json.loads(SEED_TESTS.read_text())
     seen = {image_index(p) for test in tests.values() for p in test["inputs"]}
     inputs = [f"robot_{i:03d}.png" for i in range(CATALOG_SIZE) if i not in seen]
@@ -86,7 +89,7 @@ def missing_tests(out: Path) -> None:
     print(f"{len(inputs)} images never in a test set -> {out}")
 
 
-def llm_answers(missing_dir: Path | None) -> None:
+def build_llm_answers(missing_dir: Path | None) -> None:
     tests = json.loads(SEED_TESTS.read_text())
     if missing_dir is not None:
         tests["missing"] = json.loads((missing_dir / "missing_tests.json").read_text())[
@@ -95,7 +98,7 @@ def llm_answers(missing_dir: Path | None) -> None:
     first = tests[SEEDS[0]]
     lists = build_concept_lists(first["true_names"], first["human_names"])
     arrays = {}
-    for questions in QUESTION_LISTS:
+    for questions in LLM_QUESTION_LISTS:
         names = [n for n, _ in lists[questions]]
         answers = np.full((CATALOG_SIZE, len(names)), -1, dtype=np.int8)
         for seed in SEEDS + (["missing"] if missing_dir is not None else []):
@@ -123,12 +126,12 @@ def llm_answers(missing_dir: Path | None) -> None:
     print(f"-> {OUT_DIR / 'robot_llm_answers.npz'}")
 
 
-def ai_concepts(device: str) -> None:
+def build_ai_concepts(device: str) -> None:
     images = [
         REPO / f"data/robot_images/robot_{i:03d}.png" for i in range(CATALOG_SIZE)
     ]
     arrays = {}
-    for source in AI_SOURCES:
+    for source in AI_CONCEPT_SOURCES.values():
         (path,) = LFCBM_MODELS.glob(
             f"robot__rule-sparse__concepts-{source}__arch-lfcbm__*seed-1014__model.pt"
         )
@@ -138,7 +141,8 @@ def ai_concepts(device: str) -> None:
         model.encoder = _CLIPEncoder(
             model.cfg.clip_model, model.cfg.clip_pretrained, device
         )
-        proba = model.concept_proba(images)
+        proba = model.concept_proba(images).astype(np.float32)
+        arrays[f"{source}_scores"] = proba
         arrays[f"{source}_labels"] = (proba >= 0.5).astype(np.uint8)
         arrays[f"{source}_concepts"] = np.array(list(model.concept_set.keys))
         arrays[f"{source}_texts"] = np.array(list(model.concept_set.texts))
@@ -161,11 +165,11 @@ def main() -> None:
     concepts.add_argument("--device", default="cpu")
     args = parser.parse_args()
     if args.cmd == "missing-tests":
-        missing_tests(args.out)
+        write_missing_tests(args.out)
     elif args.cmd == "llm-answers":
-        llm_answers(args.missing_dir)
+        build_llm_answers(args.missing_dir)
     else:
-        ai_concepts(args.device)
+        build_ai_concepts(args.device)
 
 
 if __name__ == "__main__":

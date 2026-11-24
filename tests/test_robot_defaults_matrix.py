@@ -6,11 +6,18 @@ embedding, corruption, column order, or concept subset it is asked through.
 
 from __future__ import annotations
 
+import copy
+
 import numpy as np
 import pytest
 import torch
 
-from concept_benchmark.robots import DatasetGenerator, ai_concepts, intervention_answers
+from concept_benchmark.robots import (
+    DatasetGenerator,
+    load_ai_concept_scores,
+    load_ai_concepts,
+    load_intervention_answers,
+)
 from concept_benchmark.robots.defaults import (
     AI_CONCEPT_SOURCES,
     CATALOG_SIZE,
@@ -118,11 +125,24 @@ SUPPORTED = [
 @pytest.mark.parametrize("name", SUPPORTED)
 def test_ai_concepts_are_the_shipped_labels_of_each_robot(datasets, name, source):
     data = datasets[name]
-    labels, names, texts = ai_concepts(data, source)
+    labels, names, texts = load_ai_concepts(data, source)
     shipped = _load("robot_ai_concepts.npz")[f"{AI_CONCEPT_SOURCES[source]}_labels"]
     assert labels.shape == (data.n, 12) and len(names) == len(texts) == 12
     assert _is_binary(labels)
     assert np.array_equal(labels, shipped[_rows(data)])
+
+
+@pytest.mark.parametrize("source", sorted(AI_CONCEPT_SOURCES))
+@pytest.mark.parametrize("name", SUPPORTED)
+def test_ai_concept_scores_give_the_labels_at_one_half(datasets, name, source):
+    data = datasets[name]
+    scores, names, _ = load_ai_concept_scores(data, source)
+    labels, label_names, _ = load_ai_concepts(data, source)
+    shipped = _load("robot_ai_concepts.npz")[f"{AI_CONCEPT_SOURCES[source]}_scores"]
+    assert scores.shape == labels.shape and names == label_names
+    assert scores.min() >= 0 and scores.max() <= 1
+    assert np.array_equal((scores >= 0.5).astype(int), labels)
+    assert np.array_equal(scores, shipped[_rows(data)])
 
 
 # ---------------------------------------------------------------- perfect
@@ -131,7 +151,7 @@ def test_ai_concepts_are_the_shipped_labels_of_each_robot(datasets, name, source
 @pytest.mark.parametrize("name", SUPPORTED)
 def test_perfect_answers_are_the_clean_labels(datasets, clean_concepts, name):
     data = datasets[name]
-    answers = intervention_answers(data, "perfect")
+    answers = load_intervention_answers(data, "perfect")
     expected = np.stack([clean_concepts[c][_rows(data)] for c in data.concepts], axis=1)
     assert answers.shape == (data.n, len(data.concepts))
     assert _is_binary(answers)
@@ -141,14 +161,14 @@ def test_perfect_answers_are_the_clean_labels(datasets, clean_concepts, name):
 @pytest.mark.parametrize("name", ["discovered_test", "oracle_test", "every_concept"])
 def test_perfect_answers_of_subsets_and_reorders(datasets, name):
     data = datasets[name]
-    full = intervention_answers(data, "perfect")
+    full = load_intervention_answers(data, "perfect")
     order = list(reversed(data.concepts))
     assert np.array_equal(
-        intervention_answers(data, "perfect", concepts=order), full[:, ::-1]
+        load_intervention_answers(data, "perfect", concepts=order), full[:, ::-1]
     )
     concept = data.concepts[1]
     assert np.array_equal(
-        intervention_answers(data, "perfect", concepts=[concept])[:, 0], full[:, 1]
+        load_intervention_answers(data, "perfect", concepts=[concept])[:, 0], full[:, 1]
     )
 
 
@@ -158,25 +178,27 @@ def test_perfect_answers_of_subsets_and_reorders(datasets, name):
 @pytest.mark.parametrize("name", SUPPORTED)
 def test_expert_answers_are_binary_and_seeded(datasets, name):
     data = datasets[name]
-    answers = intervention_answers(data, "expert", seed=7)
+    answers = load_intervention_answers(data, "expert", seed=7)
     assert answers.shape == (data.n, len(data.concepts))
     assert _is_binary(answers)
-    assert np.array_equal(answers, intervention_answers(data, "expert", seed=7))
-    assert not np.array_equal(answers, intervention_answers(data, "expert", seed=8))
+    assert np.array_equal(answers, load_intervention_answers(data, "expert", seed=7))
+    assert not np.array_equal(
+        answers, load_intervention_answers(data, "expert", seed=8)
+    )
 
 
 def test_expert_is_right_at_the_given_rate(datasets, clean_concepts):
     data = datasets["every_concept"]
-    answers = intervention_answers(data, "expert", accuracy=0.8, seed=7)
-    perfect = intervention_answers(data, "perfect")
+    answers = load_intervention_answers(data, "expert", accuracy=0.8, seed=7)
+    perfect = load_intervention_answers(data, "perfect")
     assert abs((answers == perfect).mean() - 0.8) < 0.005
 
 
 @pytest.mark.parametrize("accuracy", [0.0, 1.0])
 def test_expert_at_the_extremes(datasets, accuracy):
     data = datasets["discovered_test"]
-    answers = intervention_answers(data, "expert", accuracy=accuracy, seed=7)
-    perfect = intervention_answers(data, "perfect")
+    answers = load_intervention_answers(data, "expert", accuracy=accuracy, seed=7)
+    perfect = load_intervention_answers(data, "perfect")
     expected = perfect if accuracy == 1.0 else 1 - perfect
     assert np.array_equal(answers, expected)
 
@@ -187,7 +209,7 @@ def test_one_expert_answer_per_robot_and_concept(datasets):
     for name in SUPPORTED:
         data = datasets[name]
         for order in (list(data.concepts), list(reversed(data.concepts))):
-            answers = intervention_answers(data, "expert", concepts=order, seed=7)
+            answers = load_intervention_answers(data, "expert", concepts=order, seed=7)
             for j, concept in enumerate(order):
                 column = seen.setdefault(concept, np.full(CATALOG_SIZE, -1))
                 rows = _rows(data)
@@ -223,7 +245,7 @@ LLM_CASES = [
 @pytest.mark.parametrize("name,questions", LLM_CASES)
 def test_llm_answers_come_from_the_dataset_question_list(datasets, name, questions):
     data = datasets[name]
-    answers = intervention_answers(data, "llm")
+    answers = load_intervention_answers(data, "llm")
     assert _is_binary(answers)
     assert np.array_equal(
         answers, _shipped_llm(questions, list(data.concepts), _rows(data))
@@ -233,13 +255,13 @@ def test_llm_answers_come_from_the_dataset_question_list(datasets, name, questio
 @pytest.mark.parametrize("name,questions", LLM_CASES)
 def test_llm_answers_of_subsets_and_reorders(datasets, name, questions):
     data = datasets[name]
-    full = intervention_answers(data, "llm")
+    full = load_intervention_answers(data, "llm")
     order = list(reversed(data.concepts))
     assert np.array_equal(
-        intervention_answers(data, "llm", concepts=order), full[:, ::-1]
+        load_intervention_answers(data, "llm", concepts=order), full[:, ::-1]
     )
     for j, concept in enumerate(data.concepts):
-        alone = intervention_answers(data, "llm", concepts=[concept])[:, 0]
+        alone = load_intervention_answers(data, "llm", concepts=[concept])[:, 0]
         assert np.array_equal(alone, full[:, j]), concept
 
 
@@ -247,23 +269,23 @@ def test_llm_answers_of_subsets_and_reorders(datasets, name, questions):
 @pytest.mark.parametrize("name", SUPPORTED)
 def test_llm_answers_on_automated_concepts(datasets, name, source):
     data = datasets[name]
-    _, names, _ = ai_concepts(data, source)
+    _, names, _ = load_ai_concepts(data, source)
     questions = {
         "machine_labeled": "human",
         "llm_written": "llm",
         "clip_words": "clip",
     }[source]
-    answers = intervention_answers(data, "llm", concepts=names)
+    answers = load_intervention_answers(data, "llm", concepts=names)
     assert np.array_equal(answers, _shipped_llm(questions, names, _rows(data)))
 
 
 def test_llm_answers_on_every_concept_dataset(datasets):
     data = datasets["every_concept"]
     oracle_names = _load("robot_llm_answers.npz")["true_concepts"].tolist()
-    answers = intervention_answers(data, "llm", concepts=oracle_names)
+    answers = load_intervention_answers(data, "llm", concepts=oracle_names)
     assert np.array_equal(answers, _shipped_llm("true", oracle_names, _rows(data)))
     with pytest.raises(ValueError):
-        intervention_answers(data, "llm")  # has_elbows, hand_shape: never asked
+        load_intervention_answers(data, "llm")  # has_elbows, hand_shape: never asked
 
 
 # ---------------------------------------------------------------- unsupported
@@ -283,10 +305,10 @@ def unsupported() -> dict:
 @pytest.mark.parametrize(
     "call",
     [
-        lambda d: ai_concepts(d, "llm_written"),
-        lambda d: intervention_answers(d, "perfect"),
-        lambda d: intervention_answers(d, "expert"),
-        lambda d: intervention_answers(d, "llm"),
+        lambda d: load_ai_concepts(d, "llm_written"),
+        lambda d: load_intervention_answers(d, "perfect"),
+        lambda d: load_intervention_answers(d, "expert"),
+        lambda d: load_intervention_answers(d, "llm"),
     ],
 )
 def test_other_datasets_are_rejected_clearly(unsupported, name, call):
@@ -300,15 +322,24 @@ def test_other_datasets_are_rejected_clearly(unsupported, name, call):
         {"source": "oracle"},
         {"source": "expert", "accuracy": 80},
         {"source": "expert", "accuracy": -0.1},
+        {"source": "expert", "seed": -1},
+        {"source": "expert", "seed": 1.5},
         {"source": "perfect", "concepts": ["Solid colored"]},
         {"source": "llm", "concepts": ["not_a_concept"]},
     ],
 )
 def test_bad_arguments_are_rejected_clearly(datasets, kwargs):
     with pytest.raises(ValueError):
-        intervention_answers(datasets["discovered_test"], **kwargs)
+        load_intervention_answers(datasets["discovered_test"], **kwargs)
+
+
+def test_partial_metadata_is_rejected_clearly(datasets):
+    data = copy.deepcopy(datasets["discovered_full"])
+    del data.meta["unfiltered_concepts"]
+    with pytest.raises(ValueError):
+        load_intervention_answers(data, "perfect")
 
 
 def test_unknown_ai_source_is_rejected(datasets):
     with pytest.raises(ValueError):
-        ai_concepts(datasets["discovered_test"], "human")
+        load_ai_concepts(datasets["discovered_test"], "human")
